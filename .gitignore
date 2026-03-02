@@ -35,7 +35,7 @@ site/
 # Virtual environments
 .venv
 
-# Claude Code local files (personal, not shared)
+# Claude Code (all files — keep out of version control)
+CLAUDE.md
 CLAUDE.local.md
-.claude/settings.local.json
-.claude/agent-memory-local/
+.claude/
