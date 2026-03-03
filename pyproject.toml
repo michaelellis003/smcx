@@ -1,6 +1,6 @@
 [project]
 name = "smcjax"
-version = "1.0.0"
+version = "1.0.1"
 description = "Sequential Monte Carlo and particle filtering in JAX"
 authors = [
     {name = "Michael Ellis", email = "michaelellis003@gmail.com"}
