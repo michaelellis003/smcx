@@ -18,8 +18,8 @@ directly with PyPI using OpenID Connect.
     - **Repository**: your repository name
     - **Workflow name**: `release.yml`
     - **Environment**: leave blank
-3. **Enable publishing** — manually uncomment the publish steps between the `PYPI-START` /
-   `PYPI-END` markers in `.github/workflows/release.yml`.
+3. **Enable publishing** — PyPI publishing is already configured in
+   `.github/workflows/release.yml`.
 
 Once configured, every merge to `main` that includes a `feat:` or
 `fix:` commit will automatically version-bump, build, and publish
@@ -81,7 +81,7 @@ the real package index.
 ### Installing from TestPyPI
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ your-package-name
+pip install --index-url https://test.pypi.org/simple/ smcjax
 ```
 
 ## conda-forge
@@ -101,7 +101,7 @@ package to [conda-forge](https://conda-forge.org/):
     - Set `version` to the version you published on PyPI.
     - Download the sdist tarball from PyPI and compute its SHA256:
       ```bash
-      curl -sL https://pypi.org/packages/source/y/your-package/your_package-0.1.0.tar.gz \
+      curl -sL https://pypi.org/packages/source/s/smcjax/smcjax-1.0.1.tar.gz \
           | shasum -a 256
       ```
     - Replace `REPLACE_WITH_SHA256` with the computed hash.
@@ -113,7 +113,7 @@ package to [conda-forge](https://conda-forge.org/):
 3. **Fork [conda-forge/staged-recipes](https://github.com/conda-forge/staged-recipes)**
    on GitHub.
 
-4. **Copy** your `recipe/meta.yaml` into `recipes/your-package/meta.yaml`
+4. **Copy** your `recipe/meta.yaml` into `recipes/smcjax/meta.yaml`
    in the fork.
 
 5. **Open a pull request** against `conda-forge/staged-recipes`. The
@@ -122,5 +122,5 @@ package to [conda-forge](https://conda-forge.org/):
 6. Once merged, conda-forge creates a dedicated feedstock repository
    and your package becomes available via:
    ```bash
-   conda install -c conda-forge your-package
+   conda install -c conda-forge smcjax
    ```

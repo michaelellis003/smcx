@@ -21,7 +21,7 @@ repos:
       - id: insert-license
         files: \.py$
         args:
-          - --license-filepath=LICENSE_HEADER
+          - --license-filepath=.github/LICENSE_HEADER
           - --comment-style=#
           - --detect-license-in-X-top-lines=5
   # Keep rev in sync with ruff version in pyproject.toml [dependency-groups].

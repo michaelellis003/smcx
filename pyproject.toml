@@ -29,7 +29,6 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "beartype>=0.22.9",
     "blackjax>=1.3",
     "ipython>=8.38.0",
     "jax>=0.4.20,<0.5",
@@ -61,6 +60,7 @@ docs = [
     "mkdocstrings[python]>=0.29",
 ]
 test = [
+    "beartype>=0.22.9",
     "dynamax>=0.1.3",
 ]
 notebooks = [
@@ -152,7 +152,6 @@ lines-between-types = 0
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "S101", "S603", "PLR2004", "ARG", "N802", "N806", "E501", "E402", "C408", "RUF012"]
-"scripts/*" = ["T20", "S310", "S603", "S607", "BLE001"]
 "__init__.py" = ["F401"]
 "__main__.py" = ["T20"]
 "notebooks/*" = ["D", "T201", "S101", "PLR2004", "ARG", "N806", "E501", "E402", "E731", "E741", "B905", "F401", "RUF059"]

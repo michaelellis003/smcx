@@ -1,8 +1,8 @@
 # smcjax
 
 [![CI](https://github.com/michaelellis003/smcjax/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelellis003/smcjax/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/Python-3.10|3.11|3.12|3.13-blue)](https://www.python.org)
-[![License](https://img.shields.io/github/license/michaelellis003/smcjax)](https://github.com/michaelellis003/smcjax/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10|3.11|3.12-blue)](https://www.python.org)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/michaelellis003/smcjax/blob/main/LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Pyright](https://img.shields.io/badge/Pyright-enabled-brightgreen)](https://github.com/microsoft/pyright)
 
@@ -121,7 +121,6 @@ All filters are tested against reference libraries:
 | Module | Reference | Validation |
 |--------|-----------|------------|
 | `bootstrap` | [Dynamax](https://github.com/probml/dynamax) Kalman filter | Log-ML within 5% of exact |
-| `bootstrap` | [particles](https://github.com/nchopin/particles) (Chopin) | Log-ML within 3 nats |
 | `auxiliary` | Dynamax Kalman filter | Log-ML within 5% of exact |
 | `auxiliary` | Bootstrap (flat auxiliary = bootstrap) | Log-ML within 3 nats |
 | `liu_west` | Auxiliary filter (fixed params) | Log-ML within 5 nats |
