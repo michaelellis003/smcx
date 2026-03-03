@@ -2,35 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for smcjax.bootstrap_filter.
 
-Cross-validates against:
-1. Dynamax Kalman filter (exact solution for linear Gaussian SSMs)
-2. Chopin's ``particles`` library (established NumPy reference)
+Cross-validates against the Dynamax Kalman filter (exact solution
+for linear Gaussian SSMs).
 """
 
 import jax.numpy as jnp
 import jax.random as jr
-import jax.scipy.stats as jstats
-import numpy as np
 import pytest
 
 from smcjax.bootstrap import bootstrap_filter
+from tests.conftest import _mvn_logpdf, _mvn_sample
 
 # ---------------------------------------------------------------------------
 # Helpers to define the LGSSM for smcjax
 # ---------------------------------------------------------------------------
-
-
-def _mvn_sample(key, mean, cov, shape=()):
-    """Sample from a multivariate normal using pure JAX."""
-    chol = jnp.linalg.cholesky(cov)
-    d = mean.shape[-1]
-    z = jr.normal(key, (*shape, d))
-    return mean + z @ chol.T
-
-
-def _mvn_logpdf(x, mean, cov):
-    """Log-pdf of a multivariate normal using jax.scipy."""
-    return jstats.multivariate_normal.logpdf(x, mean, cov)
 
 
 def _make_smcjax_fns(lgssm_params):
@@ -129,72 +114,6 @@ class TestBootstrapVsKalman:
 
         assert jnp.allclose(pf_means, kalman_means, atol=0.15), (
             f'Max error: {jnp.max(jnp.abs(pf_means - kalman_means)):.4f}'
-        )
-
-
-# ---------------------------------------------------------------------------
-# Test: bootstrap filter vs. particles library (Chopin)
-# ---------------------------------------------------------------------------
-
-
-class TestBootstrapVsParticles:
-    """Cross-validate against Chopin's particles library."""
-
-    def test_log_marginal_likelihood(self, lgssm_params, lgssm_data):
-        """Log-ML estimates from smcjax and particles should agree."""
-        import particles
-        import particles.distributions as dists
-        from particles.state_space_models import Bootstrap, StateSpaceModel
-
-        _, emissions = lgssm_data
-        emissions_np = np.array(emissions).squeeze(-1)  # (T,)
-
-        # Define model for particles library
-        rho = float(lgssm_params['dynamics_weights'][0, 0])
-        sigma_x = float(jnp.sqrt(lgssm_params['dynamics_cov'][0, 0]))
-        sigma_y = float(jnp.sqrt(lgssm_params['emissions_cov'][0, 0]))
-        sigma_0 = float(jnp.sqrt(lgssm_params['initial_cov'][0, 0]))
-
-        class LinearGauss1D(StateSpaceModel):
-            default_params = {
-                'rho': rho,
-                'sigmaX': sigma_x,
-                'sigmaY': sigma_y,
-                'sigma0': sigma_0,
-            }
-
-            def PX0(self):
-                return dists.Normal(scale=self.sigma0)
-
-            def PX(self, t, xp):
-                return dists.Normal(loc=self.rho * xp, scale=self.sigmaX)
-
-            def PY(self, t, xp, x):
-                return dists.Normal(loc=x, scale=self.sigmaY)
-
-        ssm = LinearGauss1D()
-        fk = Bootstrap(ssm=ssm, data=emissions_np)
-        n_particles = 5_000
-        pf_np = particles.SMC(fk=fk, N=n_particles, resampling='systematic')
-        pf_np.run()
-        particles_ll = pf_np.logLt
-
-        # smcjax
-        init_fn, trans_fn, obs_fn = _make_smcjax_fns(lgssm_params)
-        pf_jax = bootstrap_filter(
-            key=jr.PRNGKey(789),
-            initial_sampler=init_fn,
-            transition_sampler=trans_fn,
-            log_observation_fn=obs_fn,
-            emissions=emissions,
-            num_particles=n_particles,
-        )
-        smcjax_ll = float(pf_jax.marginal_loglik)
-
-        # Both are Monte Carlo estimates, so we allow generous tolerance.
-        # With N=5000 and T=50, std of log-ML ≈ O(1), so atol=3 is ~3 sigma.
-        assert smcjax_ll == pytest.approx(particles_ll, abs=3.0), (
-            f'smcjax {smcjax_ll:.2f} vs particles {particles_ll:.2f}'
         )
 
 

@@ -11,14 +11,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 from smcjax.simulate import simulate
-
-
-def _mvn_sample(key, mean, cov, shape=()):
-    """Sample from a multivariate normal using pure JAX."""
-    chol = jnp.linalg.cholesky(cov)
-    d = mean.shape[-1]
-    z = jr.normal(key, (*shape, d))
-    return mean + z @ chol.T
+from tests.conftest import _mvn_sample
 
 
 def _make_lgssm_samplers(lgssm_params):

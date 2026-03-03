@@ -7,13 +7,10 @@ Matches the conventions used by Dynamax (``dynamax.types``).
 
 from typing import Union
 
-from jaxtyping import Array, Float, Int, PRNGKeyArray
+from jaxtyping import Array, Float, PRNGKeyArray
 
 PRNGKeyT = PRNGKeyArray
 """JAX PRNG key (handles both old and new JAX key formats)."""
 
 Scalar = Union[float, Float[Array, '']]
 """Python float or scalar JAX array with float dtype."""
-
-IntScalar = Union[int, Int[Array, '']]
-"""Python int or scalar JAX array with int dtype."""

@@ -30,6 +30,7 @@ from blackjax.smc.resampling import systematic
 from jax import lax, vmap
 from jaxtyping import Array, Float
 
+from smcjax._utils import _conditional_resample, _prepend
 from smcjax.containers import LiuWestPosterior
 from smcjax.types import PRNGKeyT
 from smcjax.weights import log_normalize, normalize
@@ -118,6 +119,17 @@ def liu_west_filter(
             Controls the balance between the kernel smoothing
             exploration and prior concentration.  Higher values
             give tighter parameter posteriors.
+
+            .. warning::
+
+                The shrinkage parameter has no generative
+                interpretation: it introduces artificial dynamics
+                into the parameter evolution that do not correspond
+                to any probabilistic model.  Results can be
+                sensitive to this choice.  We recommend running the
+                filter under several values (e.g. 0.95, 0.975,
+                0.99) and reporting the range of posterior and
+                evidence estimates.
         resampling_fn: Resampling algorithm.  Defaults to systematic.
         resampling_threshold: ESS fraction triggering resampling.
 
@@ -172,20 +184,20 @@ def liu_west_filter(
         log_first_norm, log_first_sum = log_normalize(log_weights + log_aux)
 
         # 2. Conditionally resample
-        cur_ess = compute_ess(log_first_norm)
-        do_resample = cur_ess < resampling_threshold * num_particles
-        ancestors = lax.cond(
-            do_resample,
-            lambda: resampling_fn(
-                k1,
-                normalize(log_first_norm),
-                num_particles,
-            ),
-            lambda: identity_ancestors,
+        threshold = resampling_threshold * num_particles
+        do_resample, ancestors = _conditional_resample(
+            k1,
+            log_first_norm,
+            resampling_fn,
+            threshold,
+            num_particles,
+            identity_ancestors,
         )
 
         # 3. Propagate params via kernel smoothing + propagate states
         param_dim = params.shape[1]
+        # Jitter prevents NaN from cholesky on singular covariance
+        # (e.g. when all particles share the same parameter value).
         jitter = 1e-8 * jnp.eye(param_dim)
         chol = jnp.linalg.cholesky(h_sq * param_cov + jitter)
         eps = jr.normal(k2, (num_particles, param_dim))
@@ -242,12 +254,6 @@ def liu_west_filter(
     ) = lax.scan(_step, init_carry, (step_keys, emissions[1:]))
 
     # --- Combine t=0 with t=1..T-1 -----------------------------------------
-    def _prepend(first: Array, rest: Array) -> Array:
-        return jnp.concatenate(
-            [jnp.expand_dims(first, 0), rest],
-            axis=0,
-        )
-
     _, _, _, final_log_ml = final_carry
 
     return LiuWestPosterior(

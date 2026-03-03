@@ -10,10 +10,10 @@ and the effect of shrinkage on posterior spread.
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-import jax.scipy.stats as jstats
 import pytest
 
 from smcjax.liu_west import liu_west_filter
+from tests.conftest import _mvn_logpdf, _mvn_sample
 
 # ---------------------------------------------------------------------------
 # Test model: 1-D LGSSM with unknown observation noise variance
@@ -24,19 +24,6 @@ from smcjax.liu_west import liu_west_filter
 #
 # Parameter to estimate: sigma_y^2 (true value = 1.0)
 # ---------------------------------------------------------------------------
-
-
-def _mvn_sample(key, mean, cov, shape=()):
-    """Sample from a multivariate normal using pure JAX."""
-    chol = jnp.linalg.cholesky(cov)
-    d = mean.shape[-1]
-    z = jr.normal(key, (*shape, d))
-    return mean + z @ chol.T
-
-
-def _mvn_logpdf(x, mean, cov):
-    """Log-pdf of a multivariate normal using jax.scipy."""
-    return jstats.multivariate_normal.logpdf(x, mean, cov)
 
 
 def _make_liu_west_fns():

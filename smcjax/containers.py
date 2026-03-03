@@ -6,11 +6,42 @@ All containers are :class:`~typing.NamedTuple` subclasses so they are
 registered as JAX PyTrees by default.
 """
 
-from typing import NamedTuple
+from typing import NamedTuple, Protocol, runtime_checkable
 
 from jaxtyping import Array, Float, Int
 
 from smcjax.types import Scalar
+
+
+@runtime_checkable
+class ParticleFilterResult(Protocol):
+    r"""Structural type for any particle filter posterior.
+
+    Both :class:`ParticleFilterPosterior` and
+    :class:`LiuWestPosterior` satisfy this protocol, so diagnostic
+    functions can accept either without type errors.
+
+    Attributes:
+        marginal_loglik: Scalar estimate of
+            :math:`\log p(y_{1:T})`.
+        filtered_particles: Particle values at each time step,
+            shape ``(ntime, num_particles, state_dim)``.
+        filtered_log_weights: Normalised log weights at each step,
+            shape ``(ntime, num_particles)``.
+        ancestors: Resampled ancestor indices at each time step,
+            shape ``(ntime, num_particles)``.
+        ess: Effective sample size at each time step,
+            shape ``(ntime,)``.
+        log_evidence_increments: Per-step log marginal likelihood
+            increments, shape ``(ntime,)``.
+    """
+
+    marginal_loglik: Scalar
+    filtered_particles: Float[Array, 'ntime num_particles state_dim']
+    filtered_log_weights: Float[Array, 'ntime num_particles']
+    ancestors: Int[Array, 'ntime num_particles']
+    ess: Float[Array, ' ntime']
+    log_evidence_increments: Float[Array, ' ntime']
 
 
 class ParticleState(NamedTuple):

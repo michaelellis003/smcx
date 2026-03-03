@@ -32,9 +32,14 @@ from blackjax.smc.resampling import systematic
 from jax import lax, vmap
 from jaxtyping import Array, Float
 
+from smcjax._utils import (
+    _conditional_resample,
+    _init_standard,
+    _prepend,
+)
 from smcjax.containers import ParticleFilterPosterior, ParticleState
 from smcjax.types import PRNGKeyT
-from smcjax.weights import log_normalize, normalize
+from smcjax.weights import log_normalize
 
 
 def auxiliary_filter(
@@ -89,21 +94,20 @@ def auxiliary_filter(
     log_n = jnp.log(jnp.asarray(num_particles, dtype=jnp.float64))
 
     # --- Initialise at t=0 -------------------------------------------------
-    # Sample from prior and weight by first observation.
-    particles_0 = initial_sampler(init_key, num_particles)
-    log_obs_0 = vmap(lambda z: log_observation_fn(emissions[0], z))(
-        particles_0
-    )
-    # Evidence at t=0: (1/N) * sum_i p(y_0 | x_0^i)
-    log_w_0, log_sum_0 = log_normalize(log_obs_0)
-    log_ev_0 = log_sum_0 - log_n
-    ess_0 = compute_ess(log_w_0)
-    identity_ancestors = jnp.arange(num_particles, dtype=jnp.int32)
-
-    init_state = ParticleState(
-        particles=particles_0,
-        log_weights=log_w_0,
-        log_marginal_likelihood=log_ev_0,
+    (
+        particles_0,
+        log_w_0,
+        log_ev_0,
+        ess_0,
+        identity_ancestors,
+        init_state,
+    ) = _init_standard(
+        init_key,
+        initial_sampler,
+        log_observation_fn,
+        emissions[0],
+        num_particles,
+        log_n,
     )
 
     # --- Scan body for t = 1, ..., T-1 -------------------------------------
@@ -113,6 +117,7 @@ def auxiliary_filter(
     ) -> tuple[ParticleState, tuple[Array, Array, Array, Array, Array]]:
         state, (step_key, y_t) = carry, args
         k1, k2 = jr.split(step_key)
+        # Invariant: state.log_weights are normalized (logsumexp = 0).
 
         # 1. First-stage weights: combine current weights with
         #    look-ahead g(y_{t+1} | x_t)
@@ -123,15 +128,14 @@ def auxiliary_filter(
         log_first_norm, log_first_sum = log_normalize(log_first_stage)
 
         # 2. Conditionally resample using first-stage weights
-        cur_ess = compute_ess(log_first_norm)
         threshold = resampling_threshold * num_particles
-        w_norm = normalize(log_first_norm)
-
-        do_resample = cur_ess < threshold
-        ancestors = lax.cond(
-            do_resample,
-            lambda: resampling_fn(k1, w_norm, num_particles),
-            lambda: identity_ancestors,
+        do_resample, ancestors = _conditional_resample(
+            k1,
+            log_first_norm,
+            resampling_fn,
+            threshold,
+            num_particles,
+            identity_ancestors,
         )
         resampled_particles = state.particles[ancestors]
 
@@ -201,9 +205,6 @@ def auxiliary_filter(
     ) = lax.scan(_step, init_state, (step_keys, emissions[1:]))
 
     # --- Combine t=0 with t=1..T-1 -----------------------------------------
-    def _prepend(first: Array, rest: Array) -> Array:
-        return jnp.concatenate([jnp.expand_dims(first, 0), rest], axis=0)
-
     all_particles = _prepend(particles_0, particles_rest)
     all_log_w = _prepend(log_w_0, log_w_rest)
     all_ancestors = _prepend(identity_ancestors, ancestors_rest)

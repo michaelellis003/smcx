@@ -13,11 +13,11 @@ compiled into a single XLA program.
 
 from collections.abc import Callable
 
-import jax.numpy as jnp
 import jax.random as jr
 from jax import lax
 from jaxtyping import Array, Float
 
+from smcjax._utils import _prepend
 from smcjax.types import PRNGKeyT
 
 
@@ -73,9 +73,6 @@ def simulate(
     _, (states_rest, emissions_rest) = lax.scan(_step, z_0, step_keys)
 
     # --- Combine t=0 with t=1..T-1 ------------------------------------------
-    def _prepend(first: Array, rest: Array) -> Array:
-        return jnp.concatenate([jnp.expand_dims(first, 0), rest], axis=0)
-
     all_states = _prepend(z_0, states_rest)
     all_emissions = _prepend(y_0, emissions_rest)
 

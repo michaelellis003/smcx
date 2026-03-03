@@ -9,28 +9,15 @@ Cross-validates against:
 
 import jax.numpy as jnp
 import jax.random as jr
-import jax.scipy.stats as jstats
 import pytest
 
 from smcjax.auxiliary import auxiliary_filter
 from smcjax.bootstrap import bootstrap_filter
+from tests.conftest import _mvn_logpdf, _mvn_sample
 
 # ---------------------------------------------------------------------------
 # Helpers to define the LGSSM for smcjax APF
 # ---------------------------------------------------------------------------
-
-
-def _mvn_sample(key, mean, cov, shape=()):
-    """Sample from a multivariate normal using pure JAX."""
-    chol = jnp.linalg.cholesky(cov)
-    d = mean.shape[-1]
-    z = jr.normal(key, (*shape, d))
-    return mean + z @ chol.T
-
-
-def _mvn_logpdf(x, mean, cov):
-    """Log-pdf of a multivariate normal using jax.scipy."""
-    return jstats.multivariate_normal.logpdf(x, mean, cov)
 
 
 def _make_smcjax_fns(lgssm_params):
