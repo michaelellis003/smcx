@@ -8,7 +8,10 @@
 
 Sequential Monte Carlo and particle filtering in JAX.
 
-**smcjax** extends [Dynamax](https://github.com/probml/dynamax) and
+**smcjax** is a JAX implementation of the methods developed in my
+[master's thesis](https://github.com/michaelellis003/sequential-monte-carlo-hmm)
+on sequential inference for Hidden Markov Models (University of Arkansas, 2018).
+It extends [Dynamax](https://github.com/probml/dynamax) and
 [BlackJAX](https://github.com/blackjax-devs/blackjax) with particle
 filters and Bayesian workflow diagnostics that neither library provides.
 All filters are JIT-compiled via `jax.lax.scan` and GPU-ready.
