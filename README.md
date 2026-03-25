@@ -23,7 +23,7 @@ All filters are JIT-compiled via `jax.lax.scan` and GPU-ready.
 - **Liu-West filter** — joint state-parameter estimation via kernel
   density smoothing (Liu & West, 2001)
 - **Forward simulation** — generate trajectories from state-space models
-- **Diagnostics suite** — weighted mean/variance/quantiles, parameter
+- **Diagnostics** — weighted mean/variance/quantiles, parameter
   summaries, ESS traces, particle diversity, per-step log evidence
   increments, replicated log-ML, log Bayes factors, CRPS
 - **4 resampling schemes** (via BlackJAX): systematic, stratified,
@@ -132,7 +132,7 @@ All filters are tested against reference libraries:
 
 The `notebooks/` directory contains a thesis-style Bayesian workflow
 reproduction using a Hidden Markov Model with unknown parameters,
-demonstrating the full pipeline: simulation, Liu-West filtering, parameter
+demonstrating the pipeline: simulation, Liu-West filtering, parameter
 recovery, model comparison via log Bayes factors, and CRPS evaluation.
 
 ## Roadmap
