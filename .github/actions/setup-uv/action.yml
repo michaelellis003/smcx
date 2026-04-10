@@ -21,4 +21,4 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: uv sync ${{ inputs.locked == 'true' && '--locked' || '' }} --all-extras
+      run: uv sync ${{ inputs.locked == 'true' && '--locked' || '' }} --all-extras --all-groups

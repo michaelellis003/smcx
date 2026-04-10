@@ -196,7 +196,9 @@ class TestLiuWestShrinkage:
     """Shrinkage parameter should affect posterior spread."""
 
     def test_liu_west_shrinkage_affects_spread(self, lgssm_params, lgssm_data):
-        """Lower shrinkage → wider parameter posterior."""
+        """Lower shrinkage → wider parameter posterior on average."""
+        from smcjax.weights import normalize
+
         _, emissions = lgssm_data
         (
             init_fn,
@@ -206,10 +208,9 @@ class TestLiuWestShrinkage:
             param_init_fn,
         ) = _make_liu_west_fns()
 
-        spreads = []
-        for a in [0.80, 0.99]:
+        def _spread(seed, a):
             post = liu_west_filter(
-                key=jr.PRNGKey(7),
+                key=jr.PRNGKey(seed),
                 initial_sampler=init_fn,
                 transition_sampler=trans_fn,
                 log_observation_fn=obs_fn,
@@ -219,18 +220,20 @@ class TestLiuWestShrinkage:
                 num_particles=2_000,
                 shrinkage=a,
             )
-            # Compute weighted variance of final param posterior
-            from smcjax.weights import normalize
-
             w = normalize(post.filtered_log_weights[-1])
             p = post.filtered_params[-1, :, 0]
             mean = jnp.sum(w * p)
-            var = jnp.sum(w * (p - mean) ** 2)
-            spreads.append(float(var))
+            return float(jnp.sum(w * (p - mean) ** 2))
 
-        # Lower shrinkage (0.80) should give wider spread
-        assert spreads[0] > spreads[1], (
-            f"Spread with a=0.80: {spreads[0]:.4f}, a=0.99: {spreads[1]:.4f}"
+        # Average across several seeds: a single particle filter run is
+        # too noisy to compare two shrinkage settings reliably.
+        seeds = list(range(8))
+        spread_low = sum(_spread(s, 0.80) for s in seeds) / len(seeds)
+        spread_high = sum(_spread(s, 0.99) for s in seeds) / len(seeds)
+
+        assert spread_low > spread_high, (
+            f"Mean spread (a=0.80): {spread_low:.4f}, "
+            f"(a=0.99): {spread_high:.4f}"
         )
 
 
