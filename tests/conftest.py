@@ -1,18 +1,19 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
+
 """Shared test fixtures for smcjax."""
 
 # Configure JAX to use 64-bit floats for higher precision in tests.
 # Must happen before any JAX imports trigger initialization.
 import jax
 
-jax.config.update('jax_enable_x64', True)
+jax.config.update("jax_enable_x64", True)
 
 # Install the jaxtyping import hook BEFORE importing smcjax so that all
 # jaxtyped annotations are validated at runtime during tests.
 from jaxtyping import install_import_hook
 
-install_import_hook('smcjax', typechecker='beartype.beartype')
+install_import_hook("smcjax", typechecker="beartype.beartype")
 
 import jax.numpy as jnp
 import jax.random as jr

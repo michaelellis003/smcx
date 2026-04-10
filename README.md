@@ -1,18 +1,16 @@
 # smcjax
 
 [![CI](https://github.com/michaelellis003/smcjax/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelellis003/smcjax/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/Python-3.10|3.11|3.12-blue)](https://www.python.org)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/michaelellis003/smcjax/blob/main/LICENSE)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![Pyright](https://img.shields.io/badge/Pyright-enabled-brightgreen)](https://github.com/microsoft/pyright)
+[![PyPI](https://img.shields.io/pypi/v/smcjax)](https://pypi.org/project/smcjax/)
+[![License](https://img.shields.io/github/license/michaelellis003/smcjax)](LICENSE)
 
 Sequential Monte Carlo and particle filtering in JAX.
 
 **smcjax** is a JAX implementation of the methods developed in my
 [master's thesis](https://github.com/michaelellis003/sequential-monte-carlo-hmm)
-on sequential inference for Hidden Markov Models (University of Arkansas, 2018).
-It extends [Dynamax](https://github.com/probml/dynamax) and
-[BlackJAX](https://github.com/blackjax-devs/blackjax) with particle
+on sequential inference for Hidden Markov Models (University of
+Arkansas, 2018). It extends [Dynamax](https://github.com/probml/dynamax)
+and [BlackJAX](https://github.com/blackjax-devs/blackjax) with particle
 filters and Bayesian workflow diagnostics that neither library provides.
 All filters are JIT-compiled via `jax.lax.scan` and GPU-ready.
 
@@ -32,6 +30,11 @@ All filters are JIT-compiled via `jax.lax.scan` and GPU-ready.
 - All functions are `jit`- and `vmap`-compatible
 - Type annotations via [jaxtyping](https://github.com/google/jaxtyping)
 
+## Requirements
+
+- Python 3.10 or later
+- [uv](https://docs.astral.sh/uv/) installed
+
 ## Installation
 
 ```bash
@@ -46,7 +49,15 @@ cd smcjax
 uv sync
 ```
 
-## Quick Example
+Install the pre-commit hooks (one-time setup):
+
+```bash
+uv run pre-commit install
+uv run pre-commit install --hook-type commit-msg
+uv run pre-commit install --hook-type pre-push
+```
+
+## Quick example
 
 ```python
 import jax.numpy as jnp
@@ -63,16 +74,20 @@ H, R = jnp.array([[1.0]]), jnp.array([[1.0]])
 chol_P0 = jnp.linalg.cholesky(P0)
 chol_Q = jnp.linalg.cholesky(Q)
 
+
 def initial_sampler(key, n):
     return m0 + jr.normal(key, (n, 1)) @ chol_P0.T
+
 
 def transition_sampler(key, state):
     mean = (F @ state[:, None]).squeeze(-1)
     return mean + jr.normal(key, (1,)) @ chol_Q.T
 
+
 def log_observation_fn(emission, state):
     mean = (H @ state[:, None]).squeeze(-1)
     return jstats.multivariate_normal.logpdf(emission, mean, R)
+
 
 # Simulate some data
 key = jr.PRNGKey(0)
@@ -101,7 +116,7 @@ increments = log_ml_increments(posterior)
 ## Architecture
 
 ```
-smcjax/
+src/smcjax/
     __init__.py          # Public API (re-exports BlackJAX ESS & resampling)
     types.py             # PRNGKeyT, Scalar (matches Dynamax)
     containers.py        # ParticleState, ParticleFilterPosterior, LiuWestPosterior
@@ -117,7 +132,7 @@ ESS and resampling (systematic, stratified, multinomial, residual) are
 provided by [BlackJAX](https://github.com/blackjax-devs/blackjax) and
 re-exported from `smcjax` for convenience.
 
-## Cross-Validation
+## Cross-validation
 
 All filters are tested against reference libraries:
 
@@ -148,14 +163,29 @@ recovery, model comparison via log Bayes factors, and CRPS evaluation.
 
 ## Development
 
+A `Makefile` collects the common development tasks:
+
 ```bash
-uv sync                          # Install all deps
-uv run pre-commit install        # Set up pre-commit hooks
-uv run pytest -v --cov           # Run tests with coverage
-uv run ruff check . --fix        # Lint
-uv run pyright                   # Type check
+make test        # lint + pytest
+make lint        # ruff check, format check, license headers, ty
+make format      # add license headers, ruff format, ruff fix
+make license     # add missing license headers
+make docs        # build documentation
+make serve-docs  # serve documentation locally
+make install     # uv sync
+make clean       # git clean (preserves .venv)
 ```
+
+## How releases work
+
+Releases are fully automated. When a commit lands on `main` and CI
+passes, `python-semantic-release` inspects the commit history to
+determine whether a version bump is warranted:
+
+- `fix: ...` produces a patch release
+- `feat: ...` produces a minor release
+- A `BREAKING CHANGE` footer or `!` suffix produces a major release
 
 ## License
 
-Apache-2.0
+Apache-2.0. See [LICENSE](LICENSE) for the full text.

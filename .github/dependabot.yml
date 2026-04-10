@@ -1,19 +1,11 @@
 version: 2
 updates:
-  # Keep GitHub Actions up to date
-  - package-ecosystem: github-actions
-    directory: /
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: monthly
-    commit-message:
-      prefix: 'ci'
-      include: 'scope'
+      interval: "weekly"
 
-  # Keep Python dependencies up to date (updates pyproject.toml + uv.lock)
-  - package-ecosystem: uv
-    directory: /
+  - package-ecosystem: "pip"
+    directory: "/"
     schedule:
-      interval: monthly
-    commit-message:
-      prefix: 'chore'
-      include: 'scope'
+      interval: "weekly"

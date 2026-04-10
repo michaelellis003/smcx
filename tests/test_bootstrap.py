@@ -1,5 +1,6 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
+
 """Tests for smcjax.bootstrap_filter.
 
 Cross-validates against the Dynamax Kalman filter (exact solution
@@ -20,12 +21,12 @@ from tests.conftest import _mvn_logpdf, _mvn_sample
 
 def _make_smcjax_fns(lgssm_params):
     """Build (initial_sampler, transition_sampler, log_obs_fn) closures."""
-    m0 = lgssm_params['initial_mean']
-    P0 = lgssm_params['initial_cov']
-    F = lgssm_params['dynamics_weights']
-    Q = lgssm_params['dynamics_cov']
-    H = lgssm_params['emissions_weights']
-    R = lgssm_params['emissions_cov']
+    m0 = lgssm_params["initial_mean"]
+    P0 = lgssm_params["initial_cov"]
+    F = lgssm_params["dynamics_weights"]
+    Q = lgssm_params["dynamics_cov"]
+    H = lgssm_params["emissions_weights"]
+    R = lgssm_params["emissions_cov"]
 
     def initial_sampler(key, n):
         return _mvn_sample(key, m0, P0, shape=(n,))
@@ -47,7 +48,7 @@ def _make_smcjax_fns(lgssm_params):
 
 
 class TestBootstrapVsKalman:
-    """Bootstrap PF on a linear Gaussian SSM should approximate the Kalman filter."""
+    """Bootstrap PF on a linear Gaussian SSM matches the Kalman filter."""
 
     def test_log_marginal_likelihood(self, lgssm_params, lgssm_data):
         """PF log-ML should be close to the Kalman exact log-ML."""
@@ -76,7 +77,7 @@ class TestBootstrapVsKalman:
         pf_ll = float(pf_post.marginal_loglik)
 
         assert pf_ll == pytest.approx(exact_ll, rel=0.05), (
-            f'PF log-ML {pf_ll:.2f} vs Kalman {exact_ll:.2f}'
+            f"PF log-ML {pf_ll:.2f} vs Kalman {exact_ll:.2f}"
         )
 
     def test_filtered_means(self, lgssm_params, lgssm_data):
@@ -105,15 +106,15 @@ class TestBootstrapVsKalman:
         # Compute weighted mean of particles at each time step
         from smcjax.weights import normalize
 
-        weights = jnp.array(
-            [normalize(pf_post.filtered_log_weights[t]) for t in range(50)]
-        )  # (T, N)
+        weights = jnp.array([
+            normalize(pf_post.filtered_log_weights[t]) for t in range(50)
+        ])  # (T, N)
         pf_means = jnp.sum(
             weights[:, :, None] * pf_post.filtered_particles, axis=1
         )  # (T, 1)
 
         assert jnp.allclose(pf_means, kalman_means, atol=0.15), (
-            f'Max error: {jnp.max(jnp.abs(pf_means - kalman_means)):.4f}'
+            f"Max error: {jnp.max(jnp.abs(pf_means - kalman_means)):.4f}"
         )
 
 
@@ -150,7 +151,7 @@ class TestBootstrapConvergence:
             errors.append(abs(float(pf.marginal_loglik) - exact_ll))
 
         # Error should generally decrease with more particles
-        assert errors[-1] < errors[0], f'Error did not decrease: {errors}'
+        assert errors[-1] < errors[0], f"Error did not decrease: {errors}"
 
 
 class TestBootstrapESSTrace:

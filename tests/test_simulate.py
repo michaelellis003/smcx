@@ -1,5 +1,6 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
+
 """Tests for smcjax.simulate.
 
 Validates output shapes, statistical properties against analytical
@@ -16,12 +17,12 @@ from tests.conftest import _mvn_sample
 
 def _make_lgssm_samplers(lgssm_params):
     """Build (initial, transition, emission) sampler closures."""
-    m0 = lgssm_params['initial_mean']
-    P0 = lgssm_params['initial_cov']
-    F = lgssm_params['dynamics_weights']
-    Q = lgssm_params['dynamics_cov']
-    H = lgssm_params['emissions_weights']
-    R = lgssm_params['emissions_cov']
+    m0 = lgssm_params["initial_mean"]
+    P0 = lgssm_params["initial_cov"]
+    F = lgssm_params["dynamics_weights"]
+    Q = lgssm_params["dynamics_cov"]
+    H = lgssm_params["emissions_weights"]
+    R = lgssm_params["emissions_cov"]
 
     def initial_sampler(key):
         return _mvn_sample(key, m0, P0)

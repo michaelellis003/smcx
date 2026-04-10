@@ -1,5 +1,6 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
+
 """Tests for smcjax.auxiliary_filter.
 
 Cross-validates against:
@@ -22,12 +23,12 @@ from tests.conftest import _mvn_logpdf, _mvn_sample
 
 def _make_smcjax_fns(lgssm_params):
     """Build (initial, transition, log_obs, log_aux) closures."""
-    m0 = lgssm_params['initial_mean']
-    P0 = lgssm_params['initial_cov']
-    F = lgssm_params['dynamics_weights']
-    Q = lgssm_params['dynamics_cov']
-    H = lgssm_params['emissions_weights']
-    R = lgssm_params['emissions_cov']
+    m0 = lgssm_params["initial_mean"]
+    P0 = lgssm_params["initial_cov"]
+    F = lgssm_params["dynamics_weights"]
+    Q = lgssm_params["dynamics_cov"]
+    H = lgssm_params["emissions_weights"]
+    R = lgssm_params["emissions_cov"]
 
     def initial_sampler(key, n):
         return _mvn_sample(key, m0, P0, shape=(n,))
@@ -89,7 +90,7 @@ class TestAuxiliaryVsKalman:
         pf_ll = float(pf_post.marginal_loglik)
 
         assert pf_ll == pytest.approx(exact_ll, rel=0.05), (
-            f'APF log-ML {pf_ll:.2f} vs Kalman {exact_ll:.2f}'
+            f"APF log-ML {pf_ll:.2f} vs Kalman {exact_ll:.2f}"
         )
 
 
@@ -140,7 +141,7 @@ class TestAuxiliaryFlatMatchesBootstrap:
         # Both are Monte Carlo estimates; with N=5000 and T=50,
         # std of log-ML ≈ O(1), so atol=3 is ~3 sigma.
         assert apf_ll == pytest.approx(bpf_ll, abs=3.0), (
-            f'APF {apf_ll:.2f} vs bootstrap {bpf_ll:.2f}'
+            f"APF {apf_ll:.2f} vs bootstrap {bpf_ll:.2f}"
         )
 
 

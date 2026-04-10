@@ -1,5 +1,6 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
+
 """Tests for smcjax.diagnostics.
 
 Cross-validates against Dynamax Kalman filter and verifies
@@ -31,12 +32,12 @@ from tests.conftest import _mvn_logpdf, _mvn_sample
 
 def _make_smcjax_fns(lgssm_params):
     """Build (initial_sampler, transition_sampler, log_obs_fn)."""
-    m0 = lgssm_params['initial_mean']
-    P0 = lgssm_params['initial_cov']
-    F = lgssm_params['dynamics_weights']
-    Q = lgssm_params['dynamics_cov']
-    H = lgssm_params['emissions_weights']
-    R = lgssm_params['emissions_cov']
+    m0 = lgssm_params["initial_mean"]
+    P0 = lgssm_params["initial_cov"]
+    F = lgssm_params["dynamics_weights"]
+    Q = lgssm_params["dynamics_cov"]
+    H = lgssm_params["emissions_weights"]
+    R = lgssm_params["emissions_cov"]
 
     def initial_sampler(key, n):
         return _mvn_sample(key, m0, P0, shape=(n,))
@@ -85,8 +86,7 @@ class TestWeightedMean:
         pf_means = weighted_mean(pf_post)
 
         assert jnp.allclose(pf_means, kalman_means, atol=0.15), (
-            f'Max error: '
-            f'{float(jnp.max(jnp.abs(pf_means - kalman_means))):.4f}'
+            f"Max error: {float(jnp.max(jnp.abs(pf_means - kalman_means))):.4f}"
         )
 
 
@@ -99,9 +99,7 @@ class TestWeightedVariance:
 
         # Create uniform-weight posterior for comparison
         n = pf_post.filtered_particles.shape[1]
-        uniform_log_w = jnp.full_like(
-            pf_post.filtered_log_weights, -jnp.log(n)
-        )
+        uniform_log_w = jnp.full_like(pf_post.filtered_log_weights, -jnp.log(n))
         from smcjax.containers import ParticleFilterPosterior
 
         uniform_post = ParticleFilterPosterior(
@@ -123,9 +121,7 @@ class TestWeightedVariance:
 class TestWeightedQuantile:
     """Tests for weighted_quantile."""
 
-    def test_weighted_quantile_median_near_mean(
-        self, lgssm_params, lgssm_data
-    ):
+    def test_weighted_quantile_median_near_mean(self, lgssm_params, lgssm_data):
         """For roughly symmetric posterior, median ≈ mean."""
         pf_post = _run_bootstrap(lgssm_params, lgssm_data)
         means = weighted_mean(pf_post)
@@ -143,9 +139,9 @@ class TestWeightedQuantile:
         from smcjax.containers import ParticleFilterPosterior
 
         particles = jnp.array([[[1.0], [2.0], [3.0]]])  # (1, 3, 1)
-        log_w = jnp.array(
-            [[jnp.finfo(jnp.float64).min, jnp.log(0.5), jnp.log(0.5)]]
-        )
+        log_w = jnp.array([
+            [jnp.finfo(jnp.float64).min, jnp.log(0.5), jnp.log(0.5)]
+        ])
         posterior = ParticleFilterPosterior(
             marginal_loglik=jnp.float64(0.0),
             filtered_particles=particles,
@@ -177,7 +173,7 @@ class TestWeightedQuantile:
 
         # With T=50, expect ~95% coverage but allow Monte Carlo
         # variation: anything above 70% is acceptable
-        assert coverage > 0.70, f'Coverage {coverage:.2%} too low'
+        assert coverage > 0.70, f"Coverage {coverage:.2%} too low"
 
 
 class TestLogMLIncrements:
@@ -286,12 +282,12 @@ class TestParamWeightedMean:
         from smcjax.liu_west import liu_west_filter
 
         _, emissions = lgssm_data
-        m0 = lgssm_params['initial_mean']
-        P0 = lgssm_params['initial_cov']
-        F = lgssm_params['dynamics_weights']
-        Q = lgssm_params['dynamics_cov']
-        H = lgssm_params['emissions_weights']
-        R = lgssm_params['emissions_cov']
+        m0 = lgssm_params["initial_mean"]
+        P0 = lgssm_params["initial_cov"]
+        F = lgssm_params["dynamics_weights"]
+        Q = lgssm_params["dynamics_cov"]
+        H = lgssm_params["emissions_weights"]
+        R = lgssm_params["emissions_cov"]
 
         def init(key, n):
             return _mvn_sample(key, m0, P0, shape=(n,))
@@ -334,12 +330,12 @@ class TestParamWeightedMean:
         from smcjax.liu_west import liu_west_filter
 
         _, emissions = lgssm_data
-        m0 = lgssm_params['initial_mean']
-        P0 = lgssm_params['initial_cov']
-        F = lgssm_params['dynamics_weights']
-        Q = lgssm_params['dynamics_cov']
-        H = lgssm_params['emissions_weights']
-        R = lgssm_params['emissions_cov']
+        m0 = lgssm_params["initial_mean"]
+        P0 = lgssm_params["initial_cov"]
+        F = lgssm_params["dynamics_weights"]
+        Q = lgssm_params["dynamics_cov"]
+        H = lgssm_params["emissions_weights"]
+        R = lgssm_params["emissions_cov"]
 
         def init(key, n):
             return _mvn_sample(key, m0, P0, shape=(n,))
@@ -386,12 +382,12 @@ class TestParamWeightedQuantile:
         from smcjax.liu_west import liu_west_filter
 
         _, emissions = lgssm_data
-        m0 = lgssm_params['initial_mean']
-        P0 = lgssm_params['initial_cov']
-        F = lgssm_params['dynamics_weights']
-        Q = lgssm_params['dynamics_cov']
-        H = lgssm_params['emissions_weights']
-        R = lgssm_params['emissions_cov']
+        m0 = lgssm_params["initial_mean"]
+        P0 = lgssm_params["initial_cov"]
+        F = lgssm_params["dynamics_weights"]
+        Q = lgssm_params["dynamics_cov"]
+        H = lgssm_params["emissions_weights"]
+        R = lgssm_params["emissions_cov"]
 
         def init(key, n):
             return _mvn_sample(key, m0, P0, shape=(n,))
@@ -502,10 +498,10 @@ class TestPosteriorPredictiveSample:
     def test_shape(self, lgssm_params, lgssm_data):
         """Output shape is (ntime, num_samples, emission_dim)."""
         pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=500)
-        F = lgssm_params['dynamics_weights']
-        Q = lgssm_params['dynamics_cov']
-        H = lgssm_params['emissions_weights']
-        R = lgssm_params['emissions_cov']
+        F = lgssm_params["dynamics_weights"]
+        Q = lgssm_params["dynamics_cov"]
+        H = lgssm_params["emissions_weights"]
+        R = lgssm_params["emissions_cov"]
 
         def trans(key, state):
             mean = (F @ state[:, None]).squeeze(-1)
@@ -524,10 +520,10 @@ class TestPosteriorPredictiveSample:
     def test_finite(self, lgssm_params, lgssm_data):
         """All predictive samples should be finite."""
         pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=500)
-        F = lgssm_params['dynamics_weights']
-        Q = lgssm_params['dynamics_cov']
-        H = lgssm_params['emissions_weights']
-        R = lgssm_params['emissions_cov']
+        F = lgssm_params["dynamics_weights"]
+        Q = lgssm_params["dynamics_cov"]
+        H = lgssm_params["emissions_weights"]
+        R = lgssm_params["emissions_cov"]
 
         def trans(key, state):
             mean = (F @ state[:, None]).squeeze(-1)
@@ -546,10 +542,10 @@ class TestPosteriorPredictiveSample:
         """Default num_samples should equal num_particles."""
         n = 200
         pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=n)
-        F = lgssm_params['dynamics_weights']
-        Q = lgssm_params['dynamics_cov']
-        H = lgssm_params['emissions_weights']
-        R = lgssm_params['emissions_cov']
+        F = lgssm_params["dynamics_weights"]
+        Q = lgssm_params["dynamics_cov"]
+        H = lgssm_params["emissions_weights"]
+        R = lgssm_params["emissions_cov"]
 
         def trans(key, state):
             mean = (F @ state[:, None]).squeeze(-1)
@@ -632,8 +628,8 @@ class TestParetoKDiagnostic:
         )
 
         assert k_cauchy > k_t3 > k_gauss, (
-            f'Expected k_cauchy > k_t3 > k_gauss, '
-            f'got {k_cauchy:.3f}, {k_t3:.3f}, {k_gauss:.3f}'
+            f"Expected k_cauchy > k_t3 > k_gauss, "
+            f"got {k_cauchy:.3f}, {k_t3:.3f}, {k_gauss:.3f}"
         )
 
     def test_pareto_k_cauchy_above_unreliable(self):
@@ -652,7 +648,7 @@ class TestParetoKDiagnostic:
         log_w = jnp.log(jnp.abs(z / jnp.sqrt(v)))
 
         k_hat = float(_fit_pareto_k(log_w))
-        assert k_hat > 0.7, f'Expected k > 0.7 for Cauchy, got {k_hat}'
+        assert k_hat > 0.7, f"Expected k > 0.7 for Cauchy, got {k_hat}"
 
     def test_pareto_k_gaussian_below_unreliable(self):
         """Gaussian log-weights give k below the 0.7 threshold.
@@ -668,7 +664,7 @@ class TestParetoKDiagnostic:
         log_w = jr.normal(key, (n,), dtype=jnp.float64)
 
         k_hat = float(_fit_pareto_k(log_w))
-        assert k_hat < 0.7, f'Expected k < 0.7 for Gaussian, got {k_hat}'
+        assert k_hat < 0.7, f"Expected k < 0.7 for Gaussian, got {k_hat}"
 
 
 class TestTailESS:
@@ -763,14 +759,14 @@ class TestDiagnose:
     """Tests for diagnose."""
 
     def test_diagnose_returns_dict(self, lgssm_params, lgssm_data):
-        """diagnose returns a dict with expected keys."""
+        """Diagnose returns a dict with expected keys."""
         pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=1_000)
         result = diagnose(pf_post)
-        assert 'min_ess' in result
-        assert 'min_diversity' in result
-        assert 'max_pareto_k' in result
-        assert 'ess_below_threshold' in result
-        assert 'warnings' in result
+        assert "min_ess" in result
+        assert "min_diversity" in result
+        assert "max_pareto_k" in result
+        assert "ess_below_threshold" in result
+        assert "warnings" in result
 
     def test_diagnose_healthy_filter_no_warnings(
         self, lgssm_params, lgssm_data
@@ -779,7 +775,7 @@ class TestDiagnose:
         pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=5_000)
         result = diagnose(pf_post)
         # With 5000 particles on a simple LGSSM, ESS should be OK
-        assert result['min_ess'] > 1.0
+        assert result["min_ess"] > 1.0
 
     def test_diagnose_collapsed_ess_warns(self):
         """When ESS = 1, diagnose should warn."""
@@ -799,5 +795,5 @@ class TestDiagnose:
             log_evidence_increments=jnp.zeros(3),
         )
         result = diagnose(posterior)
-        assert len(result['warnings']) > 0
-        assert result['ess_below_threshold'] > 0
+        assert len(result["warnings"]) > 0
+        assert result["ess_below_threshold"] > 0

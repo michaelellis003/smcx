@@ -1,48 +1,47 @@
-default_install_hook_types: [pre-commit, commit-msg]
+fail_fast: true
 
 repos:
+  # 1. Standard pre-commit cleanup hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0  # Use the ref you want to point at
+    rev: v6.0.0
     hooks:
-      - id: check-added-large-files
-      - id: check-case-conflict
-      - id: check-merge-conflict
-      - id: check-json
-      - id: check-yaml
-        exclude: ^recipe/meta\.yaml$
-      - id: check-toml
-      - id: debug-statements
-      - id: detect-private-key
-      - id: end-of-file-fixer
       - id: trailing-whitespace
-  - repo: https://github.com/Lucas-C/pre-commit-hooks
-    rev: v1.5.5
-    hooks:
-      - id: insert-license
-        files: \.py$
-        args:
-          - --license-filepath=.github/LICENSE_HEADER
-          - --comment-style=#
-          - --detect-license-in-X-top-lines=5
-  # Keep rev in sync with ruff version in pyproject.toml [dependency-groups].
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.1
-    hooks:
-      - id: ruff
-        args: [ --fix ]
-      - id: ruff-format
-  # Keep rev in sync with pyright version in pyproject.toml [dependency-groups].
-  - repo: https://github.com/RobertCraigie/pyright-python
-    rev: v1.1.408
-    hooks:
-      - id: pyright
+      - id: end-of-file-fixer
+      - id: check-yaml
+
+  # 2. Conventional Commits
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.3.0
+    rev: v4.0.0
     hooks:
+
       - id: conventional-pre-commit
         stages: [commit-msg]
-        args: [feat, fix, test, refactor, docs, chore, perf, ci, style]
-  - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.7.12
+
+  # 3. License headers
+  - repo: local
     hooks:
-      - id: uv-lock
+      - id: license-headers
+        name: license header check
+        entry: uv run python scripts/update_headers.py --check
+        language: system
+        types: [python]
+        pass_filenames: false
+
+  # 4. Ruff (Linting & Formatting on Commit)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.9
+    hooks:
+      - id: ruff-check
+        args: [ --fix ]
+      - id: ruff-format
+
+  # 5. Ty (Type Checking on Push)
+  - repo: local
+    hooks:
+      - id: ty-check
+        name: ty type checker
+        entry: uv run ty check
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]

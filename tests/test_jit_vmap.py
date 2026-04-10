@@ -1,5 +1,6 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
+
 """Tests for JIT and vmap compatibility of all public functions."""
 
 import jax
@@ -49,12 +50,14 @@ class TestWeightsVmap:
         lw_batch = jnp.array([[1.0, 2.0, 3.0], [0.0, 0.0, 0.0]])
         vmapped = jax.vmap(log_normalize)
         log_norms, log_evs = vmapped(lw_batch)
-        assert log_norms.shape == (2, 3)
-        assert log_evs.shape == (2,)
+        # Cast through jnp.asarray since blackjax annotates the return as
+        # Scalar = int | float | Array, which confuses static checkers.
+        assert jnp.asarray(log_norms).shape == (2, 3)
+        assert jnp.asarray(log_evs).shape == (2,)
 
     def test_ess_vmap(self):
         lw_batch = jnp.array([[0.0, 0.0, 0.0], [0.0, -1e10, -1e10]])
-        result = jax.vmap(ess)(lw_batch)
+        result = jnp.asarray(jax.vmap(ess)(lw_batch))
         assert jnp.allclose(result[0], 3.0, atol=1e-4)
         assert jnp.allclose(result[1], 1.0, atol=1e-4)
 
@@ -63,7 +66,7 @@ class TestResamplingJIT:
     """Resampling functions compile under jit with static num_samples."""
 
     @pytest.mark.parametrize(
-        'resample_fn', [systematic, stratified, multinomial, residual]
+        "resample_fn", [systematic, stratified, multinomial, residual]
     )
     def test_jit_compiles(self, resample_fn):
         key = jr.PRNGKey(0)

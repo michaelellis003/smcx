@@ -1,8 +1,10 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,13 +13,6 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
-
-# Python version sync: keep env.PYTHON_VERSION, matrix.python-version,
-# and pyproject.toml requires-python + classifiers in sync.
-env:
-  # dm-tree 0.1.8 (via tensorflow-probability) has no Python 3.13
-  # wheel and fails to build from source, so cap at 3.12 for now.
-  PYTHON_VERSION: "3.12"
 
 jobs:
   ruff-lint:
@@ -29,8 +24,6 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Ruff lint
         run: uv run ruff check .
@@ -44,13 +37,11 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Ruff format check
         run: uv run ruff format --check .
 
-  pyright:
+  ty-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -59,11 +50,22 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Pyright type check
-        run: uv run pyright
+      - name: Ty type check
+        run: uv run ty check
+
+  license-headers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Setup uv
+        uses: ./.github/actions/setup-uv
+
+      - name: Check license headers
+        run: uv run python scripts/update_headers.py --check
 
   pytest:
     runs-on: ubuntu-latest
@@ -71,8 +73,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Keep in sync with requires-python in pyproject.toml.
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
@@ -80,14 +81,12 @@ jobs:
       - name: Setup uv
         uses: ./.github/actions/setup-uv
         with:
+          # This is the ONLY place we pass a version, so it iterates through the matrix
           python-version: ${{ matrix.python-version }}
 
       - name: Run tests
         run: uv run pytest -v --durations=0
 
-  # Dedicated coverage job — shows as its own PR status check.
-  # Enforces the minimum threshold from [tool.coverage.report] fail_under
-  # in pyproject.toml (currently 80%).
   coverage:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -97,20 +96,16 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Run tests with coverage
         run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
 
-      # continue-on-error so CI passes in forks without a CODECOV_TOKEN secret
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de  # v5
         continue-on-error: true
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  # Verify the lockfile is up to date with pyproject.toml.
   lock-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -120,14 +115,10 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Check lockfile is up to date
         run: uv lock --check
 
-  # Smoke tests on macOS and Windows to catch platform-specific issues.
-  # Skip slow integration tests (they require network access to GitHub API).
   pytest-macos:
     runs-on: macos-latest
     timeout-minutes: 15
@@ -137,8 +128,6 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Run tests
         run: uv run pytest -v --durations=0 -m 'not integration'
@@ -152,13 +141,10 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Run tests
         run: uv run pytest -v --durations=0 -m 'not integration'
 
-  # Build validation — ensures the package builds cleanly and installs correctly.
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -168,8 +154,6 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Build sdist and wheel
         run: uv build
@@ -193,10 +177,19 @@ jobs:
           VIRTUAL_ENV=/tmp/test-install uv pip install dist/*.whl
           /tmp/test-install/bin/python -c "import ${PACKAGE_NAME}; print(${PACKAGE_NAME}.__version__)"
 
-  # Gate job — single required check for branch protection.
   ci-pass:
     if: always()
-    needs: [ruff-lint, ruff-format, pyright, pytest, coverage, lock-check, pytest-macos, pytest-windows, build]
+    needs:
+      - ruff-lint
+      - ruff-format
+      - ty-check
+      - license-headers
+      - pytest
+      - coverage
+      - lock-check
+      - pytest-macos
+      - pytest-windows
+      - build
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:

@@ -1,5 +1,6 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
+
 """Tests for smcjax.liu_west_filter.
 
 Validates parameter recovery on a linear Gaussian SSM with unknown
@@ -104,7 +105,8 @@ class TestLiuWestRecoversParams:
 
         # log(sigma_y^2) should be near 0 (= log(1.0))
         assert posterior_mean == pytest.approx(0.0, abs=0.5), (
-            f'Posterior mean log(sigma_y^2) = {posterior_mean:.3f}, expected ~0.0'
+            f"Posterior mean log(sigma_y^2) = {posterior_mean:.3f},"
+            " expected ~0.0"
         )
 
 
@@ -117,12 +119,12 @@ class TestLiuWestFixedParamsMatchesAPF:
 
         _, emissions = lgssm_data
 
-        m0 = lgssm_params['initial_mean']
-        P0 = lgssm_params['initial_cov']
-        F = lgssm_params['dynamics_weights']
-        Q = lgssm_params['dynamics_cov']
-        H = lgssm_params['emissions_weights']
-        R = lgssm_params['emissions_cov']
+        m0 = lgssm_params["initial_mean"]
+        P0 = lgssm_params["initial_cov"]
+        F = lgssm_params["dynamics_weights"]
+        Q = lgssm_params["dynamics_cov"]
+        H = lgssm_params["emissions_weights"]
+        R = lgssm_params["emissions_cov"]
 
         # APF closures (no params)
         def apf_init(key, n):
@@ -186,7 +188,7 @@ class TestLiuWestFixedParamsMatchesAPF:
         lw_ll = float(lw_post.marginal_loglik)
 
         assert lw_ll == pytest.approx(apf_ll, abs=5.0), (
-            f'Liu-West {lw_ll:.2f} vs APF {apf_ll:.2f}'
+            f"Liu-West {lw_ll:.2f} vs APF {apf_ll:.2f}"
         )
 
 
@@ -228,7 +230,7 @@ class TestLiuWestShrinkage:
 
         # Lower shrinkage (0.80) should give wider spread
         assert spreads[0] > spreads[1], (
-            f'Spread with a=0.80: {spreads[0]:.4f}, a=0.99: {spreads[1]:.4f}'
+            f"Spread with a=0.80: {spreads[0]:.4f}, a=0.99: {spreads[1]:.4f}"
         )
 
 

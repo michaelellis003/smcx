@@ -1,5 +1,6 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
+
 """Tests for smcjax.weights — validated against hand-computed values."""
 
 import jax.numpy as jnp

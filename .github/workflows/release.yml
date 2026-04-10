@@ -1,15 +1,14 @@
 name: Release
+
 on:
   workflow_run:
     workflows: [CI]
-    branches: [main]
     types: [completed]
-  workflow_dispatch:
+    branches: [main]
 
 permissions:
   contents: write
   id-token: write
-  attestations: write
 
 concurrency:
   group: release
@@ -17,23 +16,7 @@ concurrency:
 
 jobs:
   release:
-    # Token priority:
-    #   1. RELEASE_TOKEN (PAT) — commits made by the release bot will
-    #      trigger downstream workflows (e.g. docs.yml).
-    #   2. github.token (default) — works out of the box but commits
-    #      made by github-actions[bot] do NOT trigger other workflows.
-    #
-    # To set up RELEASE_TOKEN:
-    #   1. Create a fine-grained PAT with Contents: read/write
-    #   2. Add it as a repository secret named RELEASE_TOKEN
-
-    # Only release when CI passes; skip semantic-release's own commits.
-    # head_commit can be null on workflow_dispatch or some fork triggers.
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      || (github.event.workflow_run.conclusion == 'success'
-        && (github.event.workflow_run.head_commit == null
-          || !contains(github.event.workflow_run.head_commit.message, 'chore(release):')))
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -41,60 +24,45 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
         with:
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
 
-      - name: Configure git
+      - name: Python Semantic Release
+        id: semver
+        uses: python-semantic-release/python-semantic-release@350c48fcb3ffcdfd2e0a235206bc2ecea6b69df0  # v10.5.3
+        with:
+          github_token: ${{ secrets.RELEASE_TOKEN }}
+          push: "false"
+          vcs_release: "false"
+
+      - name: Update lockfile and push release
+        if: steps.semver.outputs.released == 'true'
         run: |
+          VERSION="${{ steps.semver.outputs.version }}"
+          PACKAGE_NAME=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['name'])")
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          uv lock --upgrade-package "$PACKAGE_NAME"
+          git add uv.lock
+          git tag -d "v${VERSION}"
+          git commit --amend --no-edit
+          git tag "v${VERSION}"
+          git push origin main "v${VERSION}"
 
-      - name: Semantic Release Version
-        id: version
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
-        run: |
-          BEFORE=$(grep '^version = ' pyproject.toml | head -1 | cut -d'"' -f2)
-          uv run semantic-release version
-          AFTER=$(grep '^version = ' pyproject.toml | head -1 | cut -d'"' -f2)
-          if [[ "$BEFORE" != "$AFTER" ]]; then
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "version=$AFTER" >> "$GITHUB_OUTPUT"
-          else
-            echo "No version bump detected — skipping publish."
-            echo "released=false" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Build package
+        if: steps.semver.outputs.released == 'true'
+        run: uv build
 
-      - name: Semantic Release Publish
-        if: steps.version.outputs.released == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
-        run: uv run semantic-release publish
-
-      - name: Validate package metadata
-        if: steps.version.outputs.released == 'true'
-        run: uvx twine check dist/*
-
-      # To publish to PyPI using trusted publishing (OIDC):
-      #   1. Create a PyPI account at https://pypi.org/account/register/
-      #   2. Go to https://pypi.org/manage/account/publishing/
-      #   3. Add a trusted publisher:
-      #        Owner: <your-github-owner>
-      #        Repository: <your-repo-name>
-      #        Workflow name: release.yml
-      #        Environment: (leave blank)
-      #   4. Uncomment the steps below.
-      #
       - name: Publish to PyPI
-        if: steps.version.outputs.released == 'true'
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # release/v1
+        if: steps.semver.outputs.released == 'true'
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
         with:
-          packages-dir: dist/
           attestations: true
-      - name: Attest build provenance
-        if: steps.version.outputs.released == 'true'
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
-        with:
-          subject-path: dist/*
+
+      - name: Create GitHub Release
+        if: steps.semver.outputs.released == 'true'
+        run: gh release create "v${{ steps.semver.outputs.version }}" dist/* --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
