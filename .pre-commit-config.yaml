@@ -1,0 +1,56 @@
+fail_fast: true
+
+repos:
+  # 1. Standard pre-commit cleanup hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  # Keep uv.lock in sync with pyproject.toml
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.28
+    hooks:
+      - id: uv-lock
+
+  # 2. Conventional Commits
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.0.0
+    hooks:
+
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  # 3. License headers
+  - repo: local
+    hooks:
+      - id: license-headers
+        name: license header check
+        entry: uv run python scripts/update_headers.py --check
+        language: system
+        types: [python]
+        pass_filenames: false
+
+  # 4. Ruff (Linting & Formatting on Commit)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.9
+    hooks:
+      - id: ruff-check
+        args: [ --fix ]
+      - id: ruff-format
+
+  # 5. Ty (Type Checking on Push)
+  - repo: local
+    hooks:
+      - id: ty-check
+        name: ty type checker
+        entry: uv run ty check
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]

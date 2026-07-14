@@ -1,0 +1,25 @@
+# Auto-detect text files and normalise to LF on commit.
+* text=auto
+
+# Force LF line endings for scripts (prevents \r errors on Windows).
+*.sh text eol=lf
+
+# Force LF for other text files commonly parsed by tools.
+*.py text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.cfg text eol=lf
+*.txt text eol=lf
+
+# Binary files — do not normalise.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.gz binary
+*.zip binary
+*.whl binary
+*.tar binary

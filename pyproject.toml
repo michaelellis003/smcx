@@ -1,0 +1,126 @@
+[project]
+name = "smcx"
+version = "0.1.0"
+description = "Sequential Monte Carlo for Apple silicon, built on MLX"
+readme = "README.md"
+authors = [
+    { name = "Michael Ellis", email = "michaelellis003@gmail.com" }
+]
+license = "Apache-2.0"
+requires-python = ">=3.10"
+keywords = [
+    "mlx",
+    "apple-silicon",
+    "particle-filter",
+    "sequential-monte-carlo",
+    "bayesian-inference",
+    "state-space-models",
+    "hidden-markov-models",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Typing :: Typed",
+]
+dependencies = [
+    "mlx>=0.32.0",
+    "numpy>=2.2.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/michaelellis003/smcx"
+Repository = "https://github.com/michaelellis003/smcx"
+Issues = "https://github.com/michaelellis003/smcx/issues"
+Documentation = "https://michaelellis003.github.io/smcx/"
+Changelog = "https://github.com/michaelellis003/smcx/blob/main/CHANGELOG.md"
+
+[build-system]
+requires = ["uv_build>=0.9.5,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mkdocs-gen-files>=0.6.1",
+    "mkdocs-literate-nav>=0.6.3",
+    "mkdocs-material>=9.7.6",
+    "mkdocstrings[python]>=1.0.3",
+    "pre-commit>=4.5.1",
+    "properdocs>=1.6.7",
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.9",
+    "ty>=0.0.29",
+]
+
+[tool.ruff]
+# Target version enables modern syntax upgrades where possible
+target-version = "py310"
+preview = true
+line-length = 80
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "D", # Core errors, warnings, isort, and docstrings
+    "N",   # pep8-naming (Google style includes naming conventions)
+    "UP",  # pyupgrade (modernizes syntax)
+    "B",   # flake8-bugbear (catches design flaws/bugs)
+    "SIM", # flake8-simplify (cleans up messy logic)
+    "RUF", # Ruff's custom advanced rules
+]
+ignore = []
+
+[tool.ruff.lint.pydocstyle]
+# Enforce Google-style docstrings
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use class-based grouping; method docstrings are noisy.
+"tests/*" = ["D102", "D103", "D104"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["src/smcx/__init__.py:__version__"]
+commit_message = "chore(release): {version}"
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
+
+[tool.semantic_release.remote]
+type = "github"
+
+[tool.semantic_release.publish]
+upload_to_vcs_release = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+
+[tool.coverage.run]
+source = ["smcx"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+    "@overload",
+]
