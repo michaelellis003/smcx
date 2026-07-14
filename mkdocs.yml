@@ -59,3 +59,10 @@ markdown_extensions:
 nav:
   - Home: index.md
   - API Reference: api/
+  - Design:
+      - v0 Design: design/v0-design.md
+      - Decisions (ADRs): adr/index.md
+  - Research:
+      - Literature Review: research/literature-review.md
+      - Library Survey: research/library-survey.md
+      - MLX Audit: research/mlx-audit.md

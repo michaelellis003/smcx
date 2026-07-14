@@ -21,4 +21,13 @@
 - [ ] Tests pass locally (`uv run pytest -v --cov`)
 - [ ] Coverage meets minimum threshold (`fail_under` in `pyproject.toml`)
 - [ ] Linting passes (`uv run pre-commit run --all-files`)
-- [ ] Documentation updated (if applicable)
+
+## Documentation triggers
+
+<!-- Check each that applies; delete lines that don't. -->
+
+- [ ] Public API changed → docstrings + quickstart still accurate
+- [ ] Architecturally significant decision → ADR added (`docs/adr/`)
+- [ ] smcjax divergence → ADR + noted in reference docs
+- [ ] Roadmap item completed → struck through in `ROADMAP.md`
+- [ ] No dead docs left behind

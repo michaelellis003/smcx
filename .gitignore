@@ -181,3 +181,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# smcx: agent spec files (prompts, not documentation) and benchmark data
+specs/
+benchmarks/data/

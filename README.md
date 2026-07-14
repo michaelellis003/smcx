@@ -51,19 +51,30 @@ Mirror smcjax's core, MLX-native:
 Out of scope (deliberately): general PPL / effect handlers, NUTS,
 NumPyro feature parity.
 
-## Design notes vs smcjax
+## Design
 
-- smcjax uses `jax.lax.scan` for filter loops; MLX has no scan primitive —
-  filter loops are plain Python over `mx.compile`-able step functions
-- smcjax delegates resampling to BlackJAX; smcx implements resamplers natively
-- No float64 on Metal: log-weight arithmetic must be f32-safe
-  (log-sum-exp shifting, careful ESS computation)
+The v0 architecture — one internal Feynman-Kac core beneath a
+smcjax-parity flat API — is documented in
+[docs/design/v0-design.md](docs/design/v0-design.md). Individual
+decisions (why native inverse-CDF resamplers, the float32 numerics
+policy, explicit RNG keys) live as ADRs in [docs/adr/](docs/adr/).
+Priorities and non-goals: [ROADMAP.md](ROADMAP.md).
 
 ## Known MLX hazards
 
-- No `lgamma`/`digamma`/`erfinv` natively — Gamma/Beta/StudentT log-probs need
-  Lanczos-style approximations or custom Metal kernels
-- `vmap` coverage gaps, especially around `random.split`
+Verified against mlx 0.32
+([full audit](docs/research/mlx-audit.md)):
+
+- `mx.random.categorical(num_samples=…)` is O(N·M) memory — unusable
+  for resampling; smcx uses an inverse-CDF kernel with an in-library
+  binary-search `searchsorted` (declined upstream)
+- No `lgamma`/`digamma` (declined upstream) — smcx ships a Lanczos
+  `lgamma`; `mx.erf`/`mx.erfinv` do exist
+- float64 raises on GPU; the CPU stream supports f64 for diagnostics,
+  with device-pinning care
+- Keyless RNG inside `mx.compile` is silently frozen — explicit keys
+  everywhere
+- No scan primitive — filter loops are Python over `mx.compile`d steps
 
 ## Development
 
