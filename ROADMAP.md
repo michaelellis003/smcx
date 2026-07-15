@@ -10,7 +10,9 @@ The theme: prove the thesis before building breadth.
 
 - [x] ~~Ratify ADR-0002 and ADR-0008~~ — both accepted 2026-07-14;
       v0.1 coding is unblocked
-- [ ] `weights` module: log_normalize, normalize, ess, log_ess
+- [x] ~~`weights` module: log_normalize, normalize, ess, log_ess~~
+      (2026-07-14, with ADR-0007 typing infra: jaxtyping + beartype
+      hook + vendored mlx stubs)
 - [ ] `resampling` module: systematic (counting kernel), stratified,
       multinomial, residual — ADR-0004 contract, ADR-0009 kernels
       (Metal bsearch + take-chain fallback), bake-off pins defaults
