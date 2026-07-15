@@ -22,6 +22,7 @@ state leaks between cells. Run: ``python bench_smc2.py`` (driver) or
 
 import json
 import math
+import os
 import subprocess
 import sys
 import time
@@ -32,7 +33,9 @@ import numpy as np
 A_TRUE, Q, R, P0 = 0.9, 0.5, 0.3, 1.0
 CELLS = [(512, 512, 100), (1024, 1024, 100)]
 REPS = 5
-GATE_TOL = 0.5  # |log Zhat - exact log Z|; ~6 SE at these N, catches breakage
+# |log Zhat - exact log Z|; ~6 SE at these N, catches breakage.
+# Overridable so CI can tighten the gate.
+GATE_TOL = float(os.environ.get("SMC2_BENCH_GATE_TOL", "0.5"))
 
 
 def _data(t_len, seed=0):
@@ -177,6 +180,26 @@ def main():
             f"| gate {'PASS' if gate else 'FAIL'} "
             f"(logZ {cell['gpu']['logz']:.2f} vs exact "
             f"{cell['gpu']['exact_logz']:.2f})"
+        )
+
+    # The gate must be able to fail the run: a speed number from a
+    # numerically broken filter is worthless, so exit non-zero if any
+    # cell's log Zhat drifts from the exact Kalman-grid reference.
+    failed = [
+        (nth, nx, dev, cell[dev]["logz"], cell[dev]["exact_logz"])
+        for nth, nx, cell, _, gate in rows
+        if not gate
+        for dev in ("gpu", "cpu")
+        if not cell[dev]["gate_pass"]
+    ]
+    if failed:
+        raise SystemExit(
+            "correctness gate FAILED (|log Zhat - exact| >= "
+            f"{GATE_TOL}): "
+            + "; ".join(
+                f"N_theta={n} N_x={x} {d}: {lz:.2f} vs {ex:.2f}"
+                for n, x, d, lz, ex in failed
+            )
         )
     return rows
 
