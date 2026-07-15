@@ -96,8 +96,9 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 # Tests use class-based grouping; method docstrings are noisy.
 "tests/*" = ["D102", "D103", "D104"]
-# Protocol __call__ stubs: the class docstring documents the contract.
+# Protocol stubs: the class docstring documents the contract.
 "src/smcx/types.py" = ["D102"]
+"src/smcx/containers.py" = ["D102"]
 # Preserved research/verification scripts (see docs/research/*),
 # not library code — exempt from library-grade lint.
 "benchmarks/exploratory/*" = ["ALL"]

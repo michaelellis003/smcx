@@ -19,14 +19,33 @@ from jaxtyping import Float, Int32
 
 @runtime_checkable
 class ParticleFilterResult(Protocol):
-    """Structural type for filter outputs accepted by diagnostics."""
+    """Structural type for filter outputs accepted by diagnostics.
 
-    marginal_loglik: Float[mx.array, ""]
-    filtered_particles: Float[mx.array, "ntime num_particles state_dim"]
-    filtered_log_weights: Float[mx.array, "ntime num_particles"]
-    ancestors: Int32[mx.array, "ntime num_particles"]
-    ess: Float[mx.array, " ntime"]
-    log_evidence_increments: Float[mx.array, " ntime"]
+    Members are read-only properties so NamedTuple posteriors (whose
+    fields are immutable) satisfy the protocol structurally.
+    """
+
+    @property
+    def marginal_loglik(self) -> Float[mx.array, ""]: ...
+
+    @property
+    def filtered_particles(
+        self,
+    ) -> Float[mx.array, "ntime num_particles state_dim"]: ...
+
+    @property
+    def filtered_log_weights(
+        self,
+    ) -> Float[mx.array, "ntime num_particles"]: ...
+
+    @property
+    def ancestors(self) -> Int32[mx.array, "ntime num_particles"]: ...
+
+    @property
+    def ess(self) -> Float[mx.array, " ntime"]: ...
+
+    @property
+    def log_evidence_increments(self) -> Float[mx.array, " ntime"]: ...
 
 
 class ParticleState(NamedTuple):
@@ -38,6 +57,23 @@ class ParticleState(NamedTuple):
     particles: Float[mx.array, "num_particles state_dim"]
     log_weights: Float[mx.array, " num_particles"]
     log_marginal_likelihood: Float[mx.array, ""]
+
+
+class LiuWestPosterior(NamedTuple):
+    """Liu-West filter output: the Protocol fields + parameter cloud.
+
+    ``filtered_params`` carries the per-step parameter particles;
+    the state fields match :class:`ParticleFilterPosterior` exactly
+    (NamedTuples cannot subclass — the Protocol is the shared type).
+    """
+
+    marginal_loglik: Float[mx.array, ""]
+    filtered_particles: Float[mx.array, "ntime num_particles state_dim"]
+    filtered_log_weights: Float[mx.array, "ntime num_particles"]
+    ancestors: Int32[mx.array, "ntime num_particles"]
+    ess: Float[mx.array, " ntime"]
+    log_evidence_increments: Float[mx.array, " ntime"]
+    filtered_params: Float[mx.array, "ntime num_particles param_dim"]
 
 
 class TemperedPosterior(NamedTuple):
