@@ -133,3 +133,17 @@ matched, oracle-verified accuracy.
   particle matvecs on BOTH sides... note smcjax has the same form,
   so this is fair) and the Metal-kernel/counting resampler bake-off
   at 10⁷ are the levers. Tracked on the roadmap under Later.
+
+## Amendment — 2026-07-15 (post-run diagnosis)
+
+Profiling (docs/research/perf-analysis.md) found the TRACK/10⁶ cell
+(4.79 s, 1.1×) **not reproducible**: a fresh process measures 2.61 s
+(≈2.0×) with identical peak memory — cumulative process/system state
+late in the long in-process sweep. The verdict is unaffected (TRACK
+misses the 3× bar either way), but future runs use a fresh process
+per cell. The same diagnosis identified two implementation causes of
+the low speedups (always-on branchless resampling vs smcjax's
+lax.cond skip; MLX vmap not fusing matvecs to GEMM) with validated
+fixes projecting 4.1–7.9× across all workloads — tracked on the
+roadmap; the criterion will be re-applied only after a full protocol
+re-run with the fixes landed.

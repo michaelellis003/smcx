@@ -67,6 +67,15 @@ The theme: prove the thesis before building breadth.
 - [ ] GPU release gate: macos-arm64 runner MLX-GPU smoke job if
       feasible, else a mandatory local-M-series pre-merge suite run
       (CI is CPU-only; releases are automated — see AGENTS.md)
+- [ ] **Value-branch conditional resample** in `_fk.py` (branch on
+      the lag-k already-materialized ESS; keep branchless ≤~10⁴) —
+      fairness-restoring vs smcjax's `lax.cond`; measured: SV/10⁶
+      −65%, projected speedups 4.6–7.9× (perf-analysis.md #1)
+- [ ] **Batched-model fast path** (accept already-batched closures,
+      skip vmap) — needs an ADR; fixes MLX's vmap-matvec 5.1× gap;
+      TRACK 1.1×→6.0× (perf-analysis.md #2)
+- [ ] Kill-test re-run **fresh-process-per-cell** after both land —
+      projected verdict flips to HOLDS (all workloads 4.1–7.9×)
 
 ## Later — ideas, ordered by thesis-fit
 

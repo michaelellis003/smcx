@@ -120,6 +120,10 @@ Python version, date. Results are dated markdown in
   one throwaway compile before warm-up (first-process Metal JIT
   ≈ 68 ms) and capture one Xcode GPU trace per cell before accepting
   any "GPU ≈ CPU" verdict.
+- 2026-07-15 (post-diagnosis): future runs execute a **fresh
+  process per (workload, N) cell** — the in-process sweep was shown
+  to accumulate state that inflated one cell by 1.8x
+  (docs/research/perf-analysis.md).
 - 2026-07-15 (pre-re-run): the 2026-07-14 run was contaminated
   (concurrent CPU workload; verdict provisional) — this re-run on an
   idle machine supersedes it. Added a `store_history=False`
