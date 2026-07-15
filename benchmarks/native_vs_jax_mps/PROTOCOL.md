@@ -191,4 +191,11 @@ after a local M-series run.
 
 ## Amendments
 
-None.
+- 2026-07-15 (pre-code audit): MLX 0.32 has no scan primitive. SCAN therefore
+  uses the production-native control flow on each side: JAX compiles a
+  `lax.scan` over all T steps, while MLX runs a Python loop over one compiled
+  step with explicit final fencing. LGSSM-PF follows the same honest runtime
+  distinction. This favors JAX where whole-loop compilation matters and avoids
+  claiming an MLX primitive that does not exist. SYSTEMATIC uses the shipped
+  smcx fused Metal right-bisect and JAX `searchsorted` on identical CDFs and
+  queries; trace artifacts disclose the different implementations.
