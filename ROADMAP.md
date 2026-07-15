@@ -33,8 +33,10 @@ The theme: prove the thesis before building breadth.
 - [x] ~~`store_history=False` option~~ (2026-07-14, ADR-0011:
       O(T·N)→O(N) memory, bit-identical log-Z; kill-test re-run
       should sweep it on the SV/TRACK cells)
-- [ ] File MLX issue: `categorical(num_samples=)` O(N·M) memory
-      (unreported upstream; evidence in `docs/research/mlx-audit.md`)
+- [x] ~~File MLX issue: `categorical(num_samples=)` O(N·M) memory~~
+      (2026-07-15: filed as ml-explore/mlx#3847 with a minimal repro
+      and the inverse-CDF workaround; evidence in
+      `docs/research/mlx-audit.md`)
 - [x] ~~Open smcjax coordinated-change issues~~ — dissolved per
       ADR-0010 (smcjax frozen at e93d527 as benchmark baseline;
       smcx is the successor, single-repo governance)
