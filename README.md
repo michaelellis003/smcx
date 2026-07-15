@@ -142,3 +142,13 @@ dispatch-bound (0.9–1.7×), as the thesis always predicted. Full data
 and implementation disclosures (value-branch resampling; batched
 TRACK closures per ADR-0013):
 [benchmarks/results/2026-07-15-kill-test-optimized.md](benchmarks/results/2026-07-15-kill-test-optimized.md).
+
+**Second kill test — SMC² (2026-07-15): the GPU wins ~32–34×.** The
+nested SMC² sampler (ADR-0014) carries an (N_θ × N_x) parameter-times-
+state tensor, the densest batch-shaped workload in the literature.
+On identical smcx code, MLX-GPU vs the MLX-CPU backend runs **33.7×
+at 0.26M and 32.3× at 1.05M inner particles** — roughly 5× the
+plain-filtering advantage, exactly where the unified-memory thesis
+should pay off most. Correctness gated against an exact Kalman-grid
+reference on both devices:
+[benchmarks/results/2026-07-15-smc2-device-benchmark.md](benchmarks/results/2026-07-15-smc2-device-benchmark.md).

@@ -95,10 +95,13 @@ The theme: prove the thesis before building breadth.
   `smc2()` + `SMC2Posterior`, resident batched inner filters,
   data-tempering outer schedule, PMMH rejuvenation; 14 tests incl.
   exact Kalman-grid recovery, unbiased-evidence, bootstrap reduction;
-  two numerics-review passes clean. Deferred (ADR-0014): adaptive
-  N_x, the exchange step, guided inner engines. **Still open: the
-  second kill-test benchmark** (smcx-CPU + Chopin's `particles`) +
-  PROTOCOL amendment — the follow-up that produces the headline.
+  two numerics-review passes clean; `inner_step` compiled (the
+  rejuvenation bottleneck). **Second kill test DONE** (2026-07-15):
+  MLX-GPU vs MLX-CPU **~32–34×** at 0.26M–1.05M inner particles,
+  correctness-gated; `benchmarks/results/2026-07-15-smc2-device-
+  benchmark.md` + PROTOCOL amendment. Deferred (ADR-0014): adaptive
+  N_x, the exchange step, guided inner engines, and Chopin's
+  `particles` as an external-authority baseline.
 - Differentiable resampling: Ścibior-Wood stop-gradient first; OT/DET
   as opt-in
 - FFBSi smoothing (dense batched backward weights); fixed-lag comes
