@@ -34,6 +34,9 @@ classifiers = [
 dependencies = [
     "jaxtyping>=0.3.7",
     "mlx>=0.32.0",
+    # mlx ships the Linux backend (libmlx.so) in a separate wheel
+    # gated behind the [cpu] extra; without it, import fails on Linux.
+    "mlx[cpu]>=0.32.0; sys_platform == 'linux'",
     "numpy>=2.2.6",
 ]
 
