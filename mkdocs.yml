@@ -50,14 +50,22 @@ markdown_extensions:
   - admonition
   - pymdownx.details
   - pymdownx.superfences
+  - pymdownx.arithmatex:
+      generic: true
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
 
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
 # Page Navigation Hierarchy
 nav:
   - Home: index.md
+  - Guides:
+      - Quickstart: guides/quickstart.md
+      - Stochastic Volatility: guides/stochastic-volatility.md
   - API Reference: api/
   - Design:
       - v0 Design: design/v0-design.md
