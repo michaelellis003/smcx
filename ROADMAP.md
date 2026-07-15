@@ -57,8 +57,9 @@ The theme: prove the thesis before building breadth.
 - [x] ~~`distributions` module (~8 families) incl. Lanczos lgamma~~
       (2026-07-14, ADR-0012: 9 families, guarded chol_factor,
       MT gamma sampler)
-- [ ] Diagnostics port from smcjax (Pareto-k, tail-ESS, CRPS,
-      diagnose, …)
+- [x] ~~Diagnostics port from smcjax~~ (2026-07-15; 15 functions,
+      tail_ess reimplemented quantile-based, Pareto-k semantics
+      corrected, adaptive diagnose threshold)
 - [ ] `liu_west_filter` (labeled approximate)
 - [ ] GPU release gate: macos-arm64 runner MLX-GPU smoke job if
       feasible, else a mandatory local-M-series pre-merge suite run
