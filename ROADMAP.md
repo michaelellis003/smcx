@@ -13,9 +13,9 @@ The theme: prove the thesis before building breadth.
 - [x] ~~`weights` module: log_normalize, normalize, ess, log_ess~~
       (2026-07-14, with ADR-0007 typing infra: jaxtyping + beartype
       hook + vendored mlx stubs)
-- [ ] `resampling` module: systematic (counting kernel), stratified,
-      multinomial, residual — ADR-0004 contract, ADR-0009 kernels
-      (Metal bsearch + take-chain fallback), bake-off pins defaults
+- [x] ~~`resampling` module: systematic (counting kernel), stratified,
+      multinomial, residual~~ (2026-07-14; shipped kernels measured
+      2.2/1.0/0.9 ms at N=10⁶ GPU)
 - [ ] Full-step microbenchmark confirming the async+lag-k cadence
       and kernel defaults on the real step (research numbers:
       docs/research/mlx-performance.md; scripts in
