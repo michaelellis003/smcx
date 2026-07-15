@@ -39,7 +39,7 @@ import mlx.core as mx
 import numpy as np
 from jaxtyping import Float
 
-from smcx.containers import LiuWestPosterior, ParticleFilterResult
+from smcx.containers import ParamPosterior, ParticleFilterResult
 from smcx.resampling import _searchsorted_take, multinomial
 from smcx.types import KeyT, Scalar
 from smcx.weights import normalize
@@ -141,19 +141,27 @@ def weighted_quantile(
 
 
 def param_weighted_mean(
-    posterior: LiuWestPosterior,
+    posterior: ParamPosterior,
 ) -> Float[mx.array, "ntime param_dim"]:
-    """Weighted mean of the Liu-West parameter particles per step."""
+    """Weighted mean of the parameter particles per step.
+
+    Accepts any parameter-cloud posterior (LiuWestPosterior,
+    SMC2Posterior).
+    """
     return _weighted_mean_field(
         posterior.filtered_log_weights, posterior.filtered_params
     )
 
 
 def param_weighted_quantile(
-    posterior: LiuWestPosterior,
+    posterior: ParamPosterior,
     q: Float[mx.array, " num_quantiles"],
 ) -> Float[mx.array, "ntime num_quantiles param_dim"]:
-    """Weighted quantiles of the Liu-West parameter particles."""
+    """Weighted quantiles of the parameter particles.
+
+    Accepts any parameter-cloud posterior (LiuWestPosterior,
+    SMC2Posterior).
+    """
     return _weighted_quantile_field(
         posterior.filtered_log_weights, posterior.filtered_params, q
     )

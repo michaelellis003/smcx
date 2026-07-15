@@ -18,11 +18,18 @@ import numpy as np
 import pytest
 
 import smcx
+from tests._kalman import kalman_1d
 
 # LGSSM with unknown AR coefficient a: z_t = a z_{t-1} + q eps,
 # y_t = z_t + r eta. a is the learned parameter; q, r, P0 known.
 A_TRUE, Q, R, P0 = 0.9, 0.5, 0.3, 1.0
 T = 40
+
+
+def _np_lse(a):
+    a = np.asarray(a, dtype=np.float64)
+    m = a.max()
+    return float(m + math.log(np.exp(a - m).sum()))
 
 
 def _model():
@@ -61,6 +68,27 @@ def _data(seed=0):
 Y = _data()
 Y_MX = mx.array(Y.astype(np.float32))[:, None]
 PARAM_INIT, LOG_PRIOR, INNER_INIT, INNER_TRANS, INNER_LOGOBS = _model()
+
+
+def _exact_reference():
+    """Exact posterior mean of a and the marginal likelihood.
+
+    From the Kalman log-likelihood on a fine a-grid integrated
+    against the U(0.5, 1.3) prior — SMC²'s target is this integral.
+    """
+    y = Y.astype(np.float64)
+    grid = np.linspace(0.5, 1.3, 2001)
+    da = grid[1] - grid[0]
+    ll = np.array([kalman_1d(y, a, Q, R, 0.0, P0)[0] for a in grid])
+    log_prior = math.log(1.0 / 0.8)
+    w = np.exp(ll - ll.max())
+    w /= w.sum()
+    exact_mean = float((w * grid).sum())
+    exact_logz = _np_lse(ll + log_prior + math.log(da))
+    return exact_mean, exact_logz
+
+
+EXACT_MEAN, EXACT_LOGZ = _exact_reference()
 
 
 def _run(seed, n_theta=64, n_x=128, ess_threshold=0.0, **kw):
@@ -145,3 +173,55 @@ class TestRejuvenation:
         post = _run(0, n_theta=128, n_x=64, ess_threshold=0.5)
         total = np.array(post.log_evidence_increments, dtype=np.float64).sum()
         assert post.marginal_loglik.item() == pytest.approx(total, abs=5e-4)
+
+
+_RECOVERY_KEYS = 10
+
+
+@pytest.fixture(scope="module")
+def recovery_runs():
+    """R independent SMC² runs (shared across the recovery gates)."""
+    means, logzs = [], []
+    for s in range(_RECOVERY_KEYS):
+        post = _run(
+            s, n_theta=512, n_x=128, ess_threshold=0.5, num_pmmh_steps=3
+        )
+        means.append(float(np.array(smcx.param_weighted_mean(post))[-1, 0]))
+        logzs.append(post.marginal_loglik.item())
+    return np.array(means), np.array(logzs)
+
+
+class TestExactRecovery:
+    """SMC² against an exact Kalman-grid reference (spec test 1, 2).
+
+    The reference is the Kalman log-likelihood integrated against the
+    prior on a fine a-grid — SMC²'s parameter posterior and marginal
+    likelihood estimate this exactly. Gates are MC-error-honest over
+    R independent keys.
+    """
+
+    def test_param_posterior_mean_matches_exact(self, recovery_runs):
+        # Tier-2 moment gate: |bias| < 5 * SE of the R-key mean.
+        means, _ = recovery_runs
+        se = means.std(ddof=1) / math.sqrt(_RECOVERY_KEYS)
+        assert abs(means.mean() - EXACT_MEAN) < 5 * se, (
+            means.mean(),
+            EXACT_MEAN,
+        )
+
+    def test_marginal_likelihood_matches_exact(self, recovery_runs):
+        # log Zhat is downward-biased (Jensen); one-sided budget
+        # 0.5 * sd^2 on the low side, 3 * SE band (k=3, as tempering
+        # and liu_west).
+        _, logzs = recovery_runs
+        sd = logzs.std(ddof=1)
+        se = sd / math.sqrt(_RECOVERY_KEYS)
+        err = logzs.mean() - EXACT_LOGZ
+        assert -(3 * se + 0.5 * sd**2) <= err <= 3 * se, (err, se, sd)
+
+    def test_evidence_estimator_unbiased(self, recovery_runs):
+        # E[exp(log Zhat)] = Z (the pseudo-marginal contract): the
+        # log of the average of Zhat_s recovers the exact log Z.
+        _, logzs = recovery_runs
+        logz_hat = _np_lse(logzs) - math.log(_RECOVERY_KEYS)
+        assert abs(logz_hat - EXACT_LOGZ) < 0.1, (logz_hat, EXACT_LOGZ)

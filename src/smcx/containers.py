@@ -48,6 +48,28 @@ class ParticleFilterResult(Protocol):
     def log_evidence_increments(self) -> Float[mx.array, " ntime"]: ...
 
 
+@runtime_checkable
+class ParamPosterior(Protocol):
+    """Structural type for parameter-cloud summaries.
+
+    The contract ``param_weighted_mean`` / ``param_weighted_quantile``
+    need: a time-indexed parameter cloud with per-step normalized
+    log-weights. Satisfied by both ``LiuWestPosterior`` (the outer
+    weights are the particle weights) and ``SMC2Posterior`` (the outer
+    parameter weights).
+    """
+
+    @property
+    def filtered_params(
+        self,
+    ) -> Float[mx.array, "ntime num_particles param_dim"]: ...
+
+    @property
+    def filtered_log_weights(
+        self,
+    ) -> Float[mx.array, "ntime num_particles"]: ...
+
+
 class ParticleState(NamedTuple):
     """One-step filter carry.
 
