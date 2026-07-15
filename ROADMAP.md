@@ -29,10 +29,9 @@ The theme: prove the thesis before building breadth.
 - [x] ~~**Kill test**~~ (2026-07-14: **holds weakly**, 1/3 workloads
       ≥3×; all 15 gates pass; MLX-GPU faster in all 12 cells;
       `benchmarks/results/2026-07-14-kill-test.md`)
-- [ ] `store_history=False` / trace option — **promoted from Later**:
-      the kill test measured full-history materialization (12 GB at
-      SV/10⁶) as the limiter on the two non-counting workloads;
-      re-run SV/TRACK cells after it lands
+- [x] ~~`store_history=False` option~~ (2026-07-14, ADR-0011:
+      O(T·N)→O(N) memory, bit-identical log-Z; kill-test re-run
+      should sweep it on the SV/TRACK cells)
 - [ ] File MLX issue: `categorical(num_samples=)` O(N·M) memory
       (unreported upstream; evidence in `docs/research/mlx-audit.md`)
 - [x] ~~Open smcjax coordinated-change issues~~ — dissolved per
