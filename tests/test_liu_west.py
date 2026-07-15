@@ -6,8 +6,8 @@
 The Liu-West filter is a labeled-approximate method (non-vanishing
 bias, discount sensitivity — Kantas et al. 2015); tests target its
 contract, not exactness: parameter concentration around truth,
-point-mass reduction to the APF, shrinkage-spread response, and the
-container/degeneracy conventions.
+point-mass reduction to the APF, the variance-matched discount
+kernel, and the container/degeneracy conventions.
 """
 
 import math
@@ -103,21 +103,31 @@ class TestParameterLearning:
         width = qs[:, 1, 0] - qs[:, 0, 0]
         assert width[-1] < 0.5 * width[0]
 
-    def test_shrinkage_controls_spread(self):
-        # Stronger shrinkage (smaller a) collapses the parameter
-        # cloud harder (over-dispersion control is the discount's
-        # role; Liu & West 2001).
-        tight = _run(2, n=4000, shrinkage=0.85)
-        loose = _run(2, n=4000, shrinkage=0.995)
-        var_tight = np.array(
-            smcx.param_weighted_quantile(tight, mx.array([0.05, 0.95]))
-        )
-        var_loose = np.array(
-            smcx.param_weighted_quantile(loose, mx.array([0.05, 0.95]))
-        )
-        w_tight = (var_tight[:, 1, 0] - var_tight[:, 0, 0])[-10:].mean()
-        w_loose = (var_loose[:, 1, 0] - var_loose[:, 0, 0])[-10:].mean()
-        assert w_tight < w_loose
+    def test_shrinkage_preserves_marginal_spread(self):
+        # The discount kernel is variance-MATCHED by construction:
+        # shrink by a, jitter with h^2 = 1 - a^2 times the weighted
+        # covariance, so the marginal parameter spread is invariant
+        # to a (Liu & West 2001, the point of the discount). Assert
+        # that: final spreads at a=0.85 and a=0.995 agree within an
+        # MC band. A broken kernel fails loudly — shrinkage without
+        # jitter collapses the ratio toward 0; jitter without
+        # shrinkage inflates it. Measured per-seed ratio sd is ~0.12
+        # (both backends), so the 3-seed band [0.7, 1.4] sits >4 SE
+        # out. A single-seed strict ordering here is a coin flip —
+        # it flipped between local M-series and CI's paravirtual
+        # Metal device.
+        def mean_width(shrinkage: float) -> float:
+            widths = []
+            for seed in range(3):
+                post = _run(seed, n=4000, shrinkage=shrinkage)
+                qs = np.array(
+                    smcx.param_weighted_quantile(post, mx.array([0.05, 0.95]))
+                )
+                widths.append((qs[:, 1, 0] - qs[:, 0, 0])[-10:].mean())
+            return float(np.mean(widths))
+
+        ratio = mean_width(0.85) / mean_width(0.995)
+        assert 0.7 < ratio < 1.4
 
 
 class TestPointMassReduction:
