@@ -109,6 +109,46 @@ def test_mlx_cpu_worker_emits_valid_tiny_result():
     assert len(result["times_s"]) == 2
 
 
+@pytest.mark.parametrize(
+    ("workload", "size"),
+    [
+        ("gather_scatter", 16),
+        ("matmul", 8),
+        ("random", 1_000),
+        ("scan", 16),
+        ("systematic", 16),
+    ],
+)
+def test_mlx_cpu_worker_smokes_every_kernel_motif(workload, size):
+    root = Path(__file__).parents[1]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(root / "benchmarks/native_vs_jax_mps/mlx_worker.py"),
+            "--arm",
+            "mlx_cpu",
+            "--block",
+            "0",
+            "--repeats",
+            "1",
+            "--size",
+            str(size),
+            "--warmups",
+            "1",
+            "--workload",
+            workload,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    validate_result(result)
+    assert result["correctness"]["passed"]
+
+
 def test_jax_mps_command_pins_the_isolated_compatibility_stack():
     root = Path(__file__).parents[1]
     command = build_worker_command(
