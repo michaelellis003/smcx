@@ -258,6 +258,39 @@ class TestRejuvenation:
         total = np.array(post.log_evidence_increments, dtype=np.float64).sum()
         assert post.marginal_loglik.item() == pytest.approx(total, abs=5e-4)
 
+    def test_rejuvenation_fires_at_t0(self):
+        # ess_threshold must be honored at the initial observation:
+        # a T=1 run is the only case where t=0 is the sole chance to
+        # rejuvenate, and it would be skipped by a range(1, n_time)
+        # gate. With threshold=1.0 the non-uniform t=0 weights trigger
+        # the move, which resamples and moves the parameter cloud.
+        y1 = Y_MX[:1]
+
+        def one(seed, ess_threshold):
+            return smcx.smc2(
+                mx.random.key(seed),
+                PARAM_INIT,
+                LOG_PRIOR,
+                INNER_INIT,
+                INNER_TRANS,
+                INNER_LOGOBS,
+                y1,
+                128,
+                64,
+                ess_threshold=ess_threshold,
+                num_pmmh_steps=2,
+            )
+
+        rej = one(0, 1.0)
+        fwd = one(0, 0.0)
+        assert rej.filtered_params.shape == (1, 128, 1)
+        assert rej.acceptance_rates.shape == (1,)
+        # A move ran at t=0, so the cloud differs from the untouched
+        # forward-pass draw.
+        assert not np.array_equal(
+            np.array(rej.filtered_params), np.array(fwd.filtered_params)
+        )
+
 
 _RECOVERY_KEYS = 10
 

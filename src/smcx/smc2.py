@@ -238,20 +238,6 @@ def smc2(
         log_omega = mx.full((num_theta,), -log_n_theta)
         return th, log_omega, inner, inner_log_w, log_z, rate
 
-    # --- t = 0: init inner clouds, first reweight ---------------------
-    step_keys = mx.random.split(k_loop, max(n_time, 1))
-    inner, inner_log_w, log_ell = inner_init(step_keys[0], theta, emissions[0])
-    log_omega, inc0 = _normalize_rows((-log_n_theta + log_ell)[None, :])
-    log_omega = log_omega.squeeze(0)
-    m_tot, m_comp = inc0.squeeze(0), mx.zeros(())
-    lz_tot, lz_comp = log_ell, mx.zeros_like(log_ell)
-
-    params_hist = [theta]
-    omega_hist = [log_omega]
-    ess_hist = [compute_ess(log_omega)]
-    inc_hist = [m_tot]
-    accept_hist = [mx.array(0.0)]
-
     def _check(t: int, inc_val: mx.array) -> None:
         v = inc_val.item()
         if v == float("-inf") or v != v:
@@ -260,9 +246,38 @@ def smc2(
                 f"(log-evidence increment {v})"
             )
 
+    # --- t = 0: init inner clouds, first reweight ---------------------
+    # Split disjoint streams: inner_init splits k_init0 into num_theta
+    # keys, which must not collide with the rejuvenation key —
+    # split(step_keys[0], 3)[2] would share threefry counter positions
+    # with an init subkey.
+    step_keys = mx.random.split(k_loop, max(n_time, 1))
+    k_init0, k_rej0 = mx.random.split(step_keys[0], 2)
+    inner, inner_log_w, log_ell = inner_init(k_init0, theta, emissions[0])
+    log_omega, inc0 = _normalize_rows((-log_n_theta + log_ell)[None, :])
+    log_omega = log_omega.squeeze(0)
+    m_tot, m_comp = inc0.squeeze(0), mx.zeros(())
+    lz_tot, lz_comp = log_ell, mx.zeros_like(log_ell)
+
     mx.eval(inner, log_omega, m_tot, lz_tot)
     _check(0, m_tot)
     threshold = ess_threshold * num_theta
+
+    # Rejuvenate at t=0 too (a collapsed initial cloud must be
+    # refreshed before more data arrives, and is the only opportunity
+    # in a single-observation run).
+    rate0 = mx.array(0.0)
+    if threshold > 0.0 and compute_ess(log_omega).item() < threshold:
+        theta, log_omega, inner, inner_log_w, lz_res, rate0 = rejuvenate(
+            k_rej0, 0, theta, log_omega, inner, inner_log_w, lz_tot + lz_comp
+        )
+        lz_tot, lz_comp = lz_res, mx.zeros_like(lz_res)
+
+    params_hist = [theta]
+    omega_hist = [log_omega]
+    ess_hist = [compute_ess(log_omega)]
+    inc_hist = [m_tot]
+    accept_hist = [rate0]
 
     # --- t >= 1: advance every inner filter one datum -----------------
     for t in range(1, n_time):
