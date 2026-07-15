@@ -3,7 +3,13 @@
 
 """Tests for the native MLX versus jax-mps benchmark harness."""
 
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
+
 from benchmarks.native_vs_jax_mps.common import (
     balanced_orders,
     bootstrap_ratio_ci,
@@ -65,3 +71,35 @@ def test_validate_result_rejects_a_summary_without_raw_timings():
 
     with pytest.raises(ValueError, match="times_s"):
         validate_result(result)
+
+
+def test_mlx_cpu_worker_emits_valid_tiny_result():
+    root = Path(__file__).parents[1]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(root / "benchmarks/native_vs_jax_mps/mlx_worker.py"),
+            "--arm",
+            "mlx_cpu",
+            "--block",
+            "0",
+            "--repeats",
+            "2",
+            "--size",
+            "16",
+            "--warmups",
+            "1",
+            "--workload",
+            "eltwise_reduce",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    validate_result(result)
+    assert result["arm"] == "mlx_cpu"
+    assert result["correctness"]["passed"]
+    assert len(result["times_s"]) == 2
