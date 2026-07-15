@@ -90,9 +90,15 @@ The theme: prove the thesis before building breadth.
 - Metropolis resampler (ratio-only, f32-safe beyond N≈10⁶; bias
   documented as PMMH-incompatible)
 - Waste-free SMC (removes the MCMC-steps knob)
-- SMC² (the (N_θ × N_x) nesting is the best unified-memory fit in the
-  literature) — **scoped**: ADR-0014 (proposed), `specs/feat-14-smc2.md`;
-  the flagship post-v0.1 feature and second kill-test workload
+- [x] ~~SMC² (the (N_θ × N_x) nesting is the best unified-memory fit
+  in the literature)~~ — **v1 implemented** (2026-07-15, ADR-0014):
+  `smc2()` + `SMC2Posterior`, resident batched inner filters,
+  data-tempering outer schedule, PMMH rejuvenation; 14 tests incl.
+  exact Kalman-grid recovery, unbiased-evidence, bootstrap reduction;
+  two numerics-review passes clean. Deferred (ADR-0014): adaptive
+  N_x, the exchange step, guided inner engines. **Still open: the
+  second kill-test benchmark** (smcx-CPU + Chopin's `particles`) +
+  PROTOCOL amendment — the follow-up that produces the headline.
 - Differentiable resampling: Ścibior-Wood stop-gradient first; OT/DET
   as opt-in
 - FFBSi smoothing (dense batched backward weights); fixed-lag comes
