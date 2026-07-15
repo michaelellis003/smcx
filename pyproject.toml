@@ -108,6 +108,7 @@ convention = "google"
 # Kill-test harness: maintained, protocol-critical code — full lint
 # except docstrings on model closures/helpers.
 "benchmarks/killtest/*" = ["D101", "D102", "D103"]
+"benchmarks/smc2/*" = ["D101", "D102", "D103"]
 # conftest installs the jaxtyping import hook before importing smcx,
 # which forces module-level imports below code (smcjax convention).
 "tests/conftest.py" = ["E402"]

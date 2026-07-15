@@ -131,3 +131,16 @@ Python version, date. Results are dated markdown in
   comparison remains full-history on both sides (smcjax always
   materializes history), the lean arm documents the smcx-native
   path. Same datasets (hashes unchanged).
+- 2026-07-15 (SMC² device benchmark, ADR-0014): added a **second
+  kill test** for the nested SMC² sampler, whose (N_θ × N_x) tensor
+  is the strongest unified-memory fit. Because smcjax has no SMC²,
+  the baseline is **smcx on the MLX-CPU backend** (identical code,
+  device the only variable) — the cleanest apples-to-apples form,
+  with no second implementation to confound it. Cells: LGSSM (exact
+  Kalman-grid reference) at N_θ×N_x ∈ {512², 1024²}, T=100,
+  `ess_threshold=0.5`, `num_pmmh_steps=3`. Same fencing (warm-up
+  compile, median-of-5, `mx.synchronize`, fresh process per cell)
+  and a correctness gate (\|log Ẑ − exact\| < 0.5 on both devices).
+  Chopin's `particles` as an external-authority baseline is a
+  deferred follow-up. Result:
+  `benchmarks/results/2026-07-15-smc2-device-benchmark.md`.
