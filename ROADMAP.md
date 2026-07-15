@@ -1,6 +1,6 @@
 # Roadmap
 
-*Last updated: 2026-07. Directional, not a promise; solo-maintained.
+*Last updated: 2026-07-15. Directional, not a promise; solo-maintained.
 Themes here, tracking in GitHub issues/milestones. Design rationale:
 `docs/design/v0-design.md`; decisions: `docs/adr/`.*
 
@@ -16,10 +16,11 @@ The theme: prove the thesis before building breadth.
 - [x] ~~`resampling` module: systematic (counting kernel), stratified,
       multinomial, residual~~ (2026-07-14; shipped kernels measured
       2.2/1.0/0.9 ms at N=10⁶ GPU)
-- [ ] Full-step microbenchmark confirming the async+lag-k cadence
-      and kernel defaults on the real step (research numbers:
-      docs/research/mlx-performance.md; scripts in
-      benchmarks/exploratory/)
+- [x] ~~Full-step microbenchmark confirming the async+lag-k cadence
+      and kernel defaults on the real step~~ (subsumed by the
+      kill-test runs, which time the real compiled step at
+      10⁴–10⁶ particles across three workloads; cadence findings
+      in docs/research/perf-analysis.md)
 - [x] ~~FK core: FKModel protocol + generic loop~~ (2026-07-14)
 - [x] ~~`bootstrap_filter` + `simulate` + containers + Protocols~~
       (2026-07-14; T=100 filter at N=10⁶ runs 3.25 ms/step GPU)
@@ -41,10 +42,16 @@ The theme: prove the thesis before building breadth.
       confirmed clean — 1/3 count, all 15 gates pass, MLX-GPU leads
       11/12 cells; store_history arm cuts memory 8–38× at unchanged
       speed; supersedes the contaminated 2026-07-14 run)
-- [ ] Typing setup per ADR-0007 (jaxtyping + beartype hook + vendored
-      `typings/mlx/core.pyi`)
-- [ ] SPEC 8 release-workflow hardening (Trusted Publishing,
-      environment gate, attestations)
+- [x] ~~Typing setup per ADR-0007 (jaxtyping + beartype hook + vendored
+      `typings/mlx/core.pyi`)~~ (2026-07-14, landed with the weights
+      module)
+- [x] ~~SPEC 8 release-workflow hardening (Trusted Publishing,
+      environment gate, attestations)~~ (2026-07-15: PyPI pending
+      trusted publisher bound to release.yml + `release`
+      environment with required reviewer; attestations on;
+      public repo carries the infra skeleton with branch/tag
+      rulesets and contributor gating — code itself unreleased,
+      awaiting the explicit go)
 
 ## Next (v0.2) — the filter family and the flagship sampler
 

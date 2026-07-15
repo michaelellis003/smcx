@@ -23,8 +23,12 @@ committed source of truth for process.
 8. DOCS — apply the documentation triggers below.
 9. PUSH — `uv run pre-commit run --all-files` + full tests first.
    Before merging to main: run the full suite on a local M-series
-   GPU — CI is CPU-only and releases are automated, so this is the
-   only Metal gate a regression meets before PyPI.
+   GPU. CI's gpu-smoke job runs the suite on Metal when the runner
+   exposes a GPU (GitHub's macOS runners currently expose a
+   paravirtual device — observed 2026-07-15) but that is
+   best-effort, not guaranteed; the local run remains the
+   authoritative Metal gate, attested at release by the
+   environment approval.
 10. PR — self-review; target < 400 changed lines.
 11. MERGE — squash to main; semantic-release automates versioning.
 
