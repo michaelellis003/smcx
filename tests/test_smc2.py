@@ -137,6 +137,90 @@ class TestStructure:
             np.array(a.filtered_params), np.array(b.filtered_params)
         )
 
+    def test_store_history_false_matches_evidence(self):
+        # store_history only changes what is retained, not the
+        # computation: the marginal likelihood is bit-identical and
+        # the parameter cloud collapses to the final step (ADR-0011).
+        full = _run(0, n_theta=64, n_x=128, store_history=True)
+        final = _run(0, n_theta=64, n_x=128, store_history=False)
+        assert full.marginal_loglik.item() == final.marginal_loglik.item()
+        assert final.filtered_params.shape == (1, 64, 1)
+        assert np.array_equal(
+            np.array(final.filtered_params[0]),
+            np.array(full.filtered_params[-1]),
+        )
+
+    def test_degenerate_raises(self):
+        def impossible(y, state, theta):
+            return mx.array(-mx.inf)
+
+        with pytest.raises(smcx.DegenerateWeightsError):
+            smcx.smc2(
+                mx.random.key(0),
+                PARAM_INIT,
+                LOG_PRIOR,
+                INNER_INIT,
+                INNER_TRANS,
+                impossible,
+                Y_MX,
+                32,
+                32,
+            )
+
+
+class TestReduction:
+    """At a point-mass prior, SMC² reduces to a bootstrap filter."""
+
+    def test_logz_matches_bootstrap_at_point_mass(self):
+        # N_theta=1 with theta fixed at A_TRUE: the single inner
+        # filter IS a bootstrap filter, so SMC²'s log-evidence must
+        # match a standalone bootstrap_filter's. RNG consumption
+        # differs, so this is a tier-2 statistical gate (design §9b).
+        sq, sp = math.sqrt(Q), math.sqrt(P0)
+
+        def point_mass(key, n_theta):
+            return mx.full((n_theta, 1), A_TRUE)
+
+        def flat_prior(theta):
+            return mx.array(0.0)
+
+        def b_init(key, n):
+            return sp * mx.random.normal((n, 1), key=key)
+
+        def b_trans(key, s):
+            return A_TRUE * s + sq * mx.random.normal(s.shape, key=key)
+
+        def b_logobs(y, s):
+            return -0.5 * (math.log(2 * math.pi * R) + (y[0] - s[0]) ** 2 / R)
+
+        r_keys = 12
+        smc2_lz = np.array([
+            smcx.smc2(
+                mx.random.key(s),
+                point_mass,
+                flat_prior,
+                INNER_INIT,
+                INNER_TRANS,
+                INNER_LOGOBS,
+                Y_MX,
+                1,
+                2000,
+            ).marginal_loglik.item()
+            for s in range(r_keys)
+        ])
+        boot_lz = np.array([
+            smcx.bootstrap_filter(
+                mx.random.key(s), b_init, b_trans, b_logobs, Y_MX, 2000
+            ).marginal_loglik.item()
+            for s in range(r_keys)
+        ])
+        diff = smc2_lz.mean() - boot_lz.mean()
+        bound = 3 * math.sqrt(
+            smc2_lz.std(ddof=1) ** 2 / r_keys
+            + boot_lz.std(ddof=1) ** 2 / r_keys
+        )
+        assert abs(diff) <= bound, (diff, bound)
+
 
 class TestRejuvenation:
     """The PMMH move: the documented rejuvenation API must act."""
