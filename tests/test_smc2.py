@@ -297,10 +297,15 @@ class TestBatchedStep:
 
     Spec test 6 (ADR-0013): one batched inner step advancing N_theta
     filters must behave as N_theta *independent* single-filter steps.
-    Two facets of independence are tested separately: computational
-    (one filter's data never leaks into another's output) and
-    stochastic (the per-filter RNG streams are uncorrelated), plus a
-    tier-2 correctness check against the single-filter distribution.
+    Independence is established from the mechanism smcx owns — the key
+    threading — rather than from a statistical no-correlation check (a
+    finite sample cannot prove RNG independence; that is MLX's
+    guarantee that distinct keys yield independent streams). Both of
+    the step's randomness sources are covered: the per-particle
+    transition keys (all distinct) and the per-filter resample offsets
+    (one distinct draw each). Plus: no cross-filter data leak
+    (perturbation) and a tier-2 correctness check against the
+    single-filter distribution.
     """
 
     def test_batched_step_no_cross_filter_data_leak(self):
@@ -380,6 +385,25 @@ class TestBatchedStep:
         )
         keys = np.array(out).reshape(n_theta * n_x, 4)
         assert np.unique(keys, axis=0).shape[0] == n_theta * n_x
+
+    def test_batched_step_threads_a_distinct_resample_offset_per_filter(
+        self,
+    ):
+        # The step's second RNG source is the per-filter systematic
+        # resample offset. It must be one iid draw per filter, never a
+        # shared constant — otherwise the resample randomness would
+        # couple across filters. Systematic resampling is too coarse to
+        # recover the continuous offset from integer indices, so we test
+        # the offset generator smc2 actually uses: shape (n_theta, 1)
+        # (one per filter) and all rows distinct (not a broadcast
+        # constant). MLX's uniform makes the rows iid, so distinct rows
+        # mean independent offsets.
+        from smcx.smc2 import _resample_offsets
+
+        n_theta = 128
+        off = np.array(_resample_offsets(mx.random.key(12), n_theta))
+        assert off.shape == (n_theta, 1)
+        assert len(np.unique(off)) == n_theta
 
     def test_batched_filter_increment_matches_single_filter(self):
         # Correctness (not independence): a filter advanced by the

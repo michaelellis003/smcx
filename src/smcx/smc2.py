@@ -97,9 +97,20 @@ def _batched_inner_resample(
     cdf = mx.cumsum(weights_2d, axis=1)
     cdf = cdf / mx.maximum(cdf[:, -1:], _TINY)
     n_theta = weights_2d.shape[0]
-    u0 = mx.random.uniform(shape=(n_theta, 1), key=key)
+    u0 = _resample_offsets(key, n_theta)
     positions = (mx.arange(n_x) + u0) / n_x
     return mx.vmap(_searchsorted_take)(cdf, positions)
+
+
+def _resample_offsets(key: KeyT, n_theta: int) -> mx.array:
+    """Per-filter systematic-resample offsets: n_theta iid U(0,1).
+
+    Exposed so the per-filter RNG threading is testable: the shape is
+    ``(n_theta, 1)`` (one offset per filter, never a shared constant),
+    and MLX's ``uniform`` makes the rows iid — so distinct rows mean
+    independent resample randomness across filters.
+    """
+    return mx.random.uniform(shape=(n_theta, 1), key=key)
 
 
 # --- Batched inner-filter kernels (module-level so they are testable
