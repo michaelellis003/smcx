@@ -29,6 +29,15 @@ WORKLOAD_GRIDS = {
     "systematic": (10_000, 100_000, 1_000_000),
 }
 
+LGSSM = {
+    "a": 0.9,
+    "m0": 0.0,
+    "p0": 1.0,
+    "q": 0.5,
+    "r": 0.3,
+    "timesteps": 100,
+}
+
 REQUIRED_RESULT_FIELDS = {
     "arm",
     "backend",
@@ -45,6 +54,36 @@ REQUIRED_RESULT_FIELDS = {
     "versions",
     "workload",
 }
+
+
+def lgssm_data() -> tuple[np.ndarray, float]:
+    """Generate the committed-seed LGSSM data and exact f64 log evidence."""
+    rng = np.random.default_rng(20260714)
+    state = np.empty(LGSSM["timesteps"], dtype=np.float64)
+    state[0] = rng.normal(LGSSM["m0"], np.sqrt(LGSSM["p0"]))
+    for index in range(1, state.size):
+        state[index] = LGSSM["a"] * state[index - 1] + rng.normal(
+            0.0, np.sqrt(LGSSM["q"])
+        )
+    observations = state + rng.normal(0.0, np.sqrt(LGSSM["r"]), state.size)
+
+    mean = LGSSM["m0"]
+    variance = LGSSM["p0"]
+    log_evidence = 0.0
+    for index, observation in enumerate(observations):
+        if index:
+            mean = LGSSM["a"] * mean
+            variance = LGSSM["a"] ** 2 * variance + LGSSM["q"]
+        innovation_variance = variance + LGSSM["r"]
+        innovation = observation - mean
+        log_evidence -= 0.5 * (
+            np.log(2.0 * np.pi * innovation_variance)
+            + innovation**2 / innovation_variance
+        )
+        gain = variance / innovation_variance
+        mean += gain * innovation
+        variance *= 1.0 - gain
+    return observations.astype(np.float32), float(log_evidence)
 
 
 def summarize(times: Sequence[float]) -> dict[str, float]:

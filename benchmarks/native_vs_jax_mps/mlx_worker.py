@@ -11,14 +11,18 @@ from importlib.metadata import version
 
 import mlx.core as mx
 import numpy as np
-from common import SCHEMA_VERSION, summarize
+from common import LGSSM, SCHEMA_VERSION, lgssm_data, summarize
 
+import smcx
 from smcx.resampling import _normalized_cdf, _searchsorted
 
 
-def _fence(value: mx.array) -> None:
+def _fence(value) -> None:
     """Evaluate one result and wait for the device."""
-    mx.eval(value)
+    if isinstance(value, tuple):
+        mx.eval(*value)
+    else:
+        mx.eval(value)
     mx.synchronize()
 
 
@@ -73,6 +77,50 @@ def _matmul(size: int):
     )
     inputs = (mx.array(left_np), mx.array(right_np))
     return inputs, mx.compile(operation), expected
+
+
+def _lgssm_pf(size: int):
+    """Build the shipped full-history smcx bootstrap filter."""
+    observations_np, oracle = lgssm_data()
+    observations = mx.array(observations_np)[:, None]
+    normalizer = float(np.log(2.0 * np.pi * LGSSM["r"]))
+    initial_scale = float(np.sqrt(LGSSM["p0"]))
+    transition_scale = float(np.sqrt(LGSSM["q"]))
+
+    def initial(key, num_particles):
+        noise = mx.random.normal((num_particles, 1), key=key)
+        return LGSSM["m0"] + initial_scale * noise
+
+    def transition(key, particles):
+        noise = mx.random.normal(particles.shape, key=key)
+        return LGSSM["a"] * particles + transition_scale * noise
+
+    def log_observation(observation, particles):
+        residual = observation[0] - particles[:, 0]
+        return -0.5 * (normalizer + residual**2 / LGSSM["r"])
+
+    def operation(key):
+        posterior = smcx.bootstrap_filter(
+            key,
+            initial,
+            transition,
+            log_observation,
+            observations,
+            size,
+            resampling_threshold=0.5,
+            store_history=True,
+            batched=True,
+        )
+        return (
+            posterior.marginal_loglik,
+            posterior.filtered_particles,
+            posterior.filtered_log_weights,
+            posterior.ancestors,
+            posterior.ess,
+            posterior.log_evidence_increments,
+        )
+
+    return (mx.random.key(20260715),), operation, np.asarray(oracle)
 
 
 def _random(size: int):
@@ -143,6 +191,8 @@ def _build_workload(name: str, size: int):
         return (value,), operation, np.asarray(expected)
     if name == "gather_scatter":
         return _gather_scatter(size)
+    if name == "lgssm_pf":
+        return _lgssm_pf(size)
     if name == "matmul":
         return _matmul(size)
     if name == "random":
@@ -166,6 +216,7 @@ def _parse_args() -> argparse.Namespace:
         choices=(
             "eltwise_reduce",
             "gather_scatter",
+            "lgssm_pf",
             "matmul",
             "random",
             "scan",
@@ -189,8 +240,14 @@ def main() -> None:
     _fence(output)
     cold_s = time.perf_counter() - started
 
-    actual_array = np.asarray(output)
-    if args.workload == "random":
+    if args.workload == "lgssm_pf":
+        actual = float(output[0].item())
+        passed = bool(np.isfinite(actual))
+        expected_json = float(expected)
+        atol = None
+        rtol = None
+    elif args.workload == "random":
+        actual_array = np.asarray(output)
         mean, variance = (float(value) for value in actual_array)
         mean_limit = 5.0 / np.sqrt(args.size)
         variance_limit = 5.0 * np.sqrt(2.0 / (args.size - 1))
@@ -202,6 +259,7 @@ def main() -> None:
         atol = {"mean": mean_limit, "variance": variance_limit}
         rtol = 0.0
     else:
+        actual_array = np.asarray(output)
         passed = bool(np.allclose(actual_array, expected, rtol=5e-5, atol=5e-6))
         actual = float(np.sum(actual_array, dtype=np.float64))
         expected_json = float(np.sum(expected, dtype=np.float64))

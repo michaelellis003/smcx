@@ -11,7 +11,7 @@ import time
 from importlib.metadata import PackageNotFoundError, version
 
 import numpy as np
-from common import SCHEMA_VERSION, summarize
+from common import LGSSM, SCHEMA_VERSION, lgssm_data, summarize
 
 
 def _parse_args() -> argparse.Namespace:
@@ -30,6 +30,7 @@ def _parse_args() -> argparse.Namespace:
         choices=(
             "eltwise_reduce",
             "gather_scatter",
+            "lgssm_pf",
             "matmul",
             "random",
             "scan",
@@ -109,6 +110,117 @@ def _matmul(size, jax, jnp):
     return (left_np, right_np), jax.jit(operation), expected
 
 
+def _lgssm_pf(size, jax, jnp):
+    """Build an adversarial whole-filter JAX bootstrap filter."""
+    observations_np, oracle = lgssm_data()
+    normalizer = float(np.log(2.0 * np.pi * LGSSM["r"]))
+    initial_scale = float(np.sqrt(LGSSM["p0"]))
+    transition_scale = float(np.sqrt(LGSSM["q"]))
+    log_size = float(np.log(size))
+
+    def logsumexp(values):
+        maximum = jnp.max(values)
+        return maximum + jnp.log(jnp.sum(jnp.exp(values - maximum)))
+
+    def operation(key, observations):
+        key, initial_key = jax.random.split(key)
+        particles = LGSSM["m0"] + initial_scale * jax.random.normal(
+            initial_key, shape=(size, 1), dtype=jnp.float32
+        )
+        residual = observations[0] - particles[:, 0]
+        unnormalized = -0.5 * (normalizer + residual**2 / LGSSM["r"])
+        log_sum = logsumexp(unnormalized)
+        log_weights = unnormalized - log_sum
+        marginal = log_sum - log_size
+        ess = 1.0 / jnp.sum(jnp.exp(2.0 * log_weights))
+        identity = jnp.arange(size, dtype=jnp.int32)
+        step_keys = jax.random.split(key, observations.shape[0] - 1)
+
+        def step(carry, inputs):
+            current_particles, current_log_weights, current_marginal = carry
+            step_key, observation = inputs
+            resampling_key, transition_key = jax.random.split(step_key)
+            previous_ess = 1.0 / jnp.sum(jnp.exp(2.0 * current_log_weights))
+            should_resample = previous_ess < 0.5 * size
+
+            def resample(_):
+                cdf = jnp.cumsum(jnp.exp(current_log_weights))
+                cdf = cdf / cdf[-1]
+                offset = jax.random.uniform(resampling_key)
+                queries = (offset + jnp.arange(size)) / size
+                indices = jnp.searchsorted(cdf, queries, side="right")
+                indices = jnp.clip(indices, 0, size - 1)
+                return jnp.take(current_particles, indices, axis=0), indices
+
+            def skip(_):
+                return current_particles, identity
+
+            parents, ancestors = jax.lax.cond(
+                should_resample, resample, skip, operand=None
+            )
+            noise = jax.random.normal(
+                transition_key, shape=parents.shape, dtype=jnp.float32
+            )
+            next_particles = LGSSM["a"] * parents + transition_scale * noise
+            residual = observation - next_particles[:, 0]
+            log_observation = -0.5 * (normalizer + residual**2 / LGSSM["r"])
+            unnormalized = jnp.where(
+                should_resample,
+                log_observation,
+                current_log_weights + log_observation,
+            )
+            next_log_sum = logsumexp(unnormalized)
+            next_log_weights = unnormalized - next_log_sum
+            increment = jnp.where(
+                should_resample, next_log_sum - log_size, next_log_sum
+            )
+            next_ess = 1.0 / jnp.sum(jnp.exp(2.0 * next_log_weights))
+            next_carry = (
+                next_particles,
+                next_log_weights,
+                current_marginal + increment,
+            )
+            outputs = (
+                next_particles,
+                next_log_weights,
+                ancestors,
+                next_ess,
+                increment,
+            )
+            return next_carry, outputs
+
+        carry, history = jax.lax.scan(
+            step,
+            (particles, log_weights, marginal),
+            (step_keys, observations[1:]),
+        )
+        _, _, marginal = carry
+        particle_history = jnp.concatenate(
+            (particles[None, ...], history[0]), axis=0
+        )
+        weight_history = jnp.concatenate(
+            (log_weights[None, ...], history[1]), axis=0
+        )
+        ancestor_history = jnp.concatenate(
+            (identity[None, ...], history[2]), axis=0
+        )
+        ess_history = jnp.concatenate((ess[None], history[3]), axis=0)
+        increments = jnp.concatenate(
+            ((log_sum - log_size)[None], history[4]), axis=0
+        )
+        return (
+            marginal,
+            particle_history,
+            weight_history,
+            ancestor_history,
+            ess_history,
+            increments,
+        )
+
+    inputs = (jax.random.key(20260715), observations_np)
+    return inputs, jax.jit(operation), np.asarray(oracle)
+
+
 def _random(size, jax, jnp):
     """Build a fixed-key normal draw with moment output."""
 
@@ -164,6 +276,7 @@ def _build_workload(name, size, jax, jnp):
     builders = {
         "eltwise_reduce": _eltwise_reduce,
         "gather_scatter": _gather_scatter,
+        "lgssm_pf": _lgssm_pf,
         "matmul": _matmul,
         "random": _random,
         "scan": _scan,
@@ -196,11 +309,17 @@ def main() -> None:
 
     started = time.perf_counter()
     output = compiled(*inputs)
-    output.block_until_ready()
+    jax.block_until_ready(output)
     cold_s = time.perf_counter() - started
 
-    actual_array = np.asarray(output)
-    if args.workload == "random":
+    if args.workload == "lgssm_pf":
+        actual = float(output[0])
+        passed = bool(np.isfinite(actual))
+        expected_json = float(expected)
+        atol = None
+        rtol = None
+    elif args.workload == "random":
+        actual_array = np.asarray(output)
         mean, variance = (float(value) for value in actual_array)
         mean_limit = 5.0 / np.sqrt(args.size)
         variance_limit = 5.0 * np.sqrt(2.0 / (args.size - 1))
@@ -212,6 +331,7 @@ def main() -> None:
         atol = {"mean": mean_limit, "variance": variance_limit}
         rtol = 0.0
     else:
+        actual_array = np.asarray(output)
         passed = bool(np.allclose(actual_array, expected, rtol=5e-5, atol=5e-6))
         actual = float(np.sum(actual_array, dtype=np.float64))
         expected_json = float(np.sum(expected, dtype=np.float64))
@@ -219,12 +339,12 @@ def main() -> None:
         rtol = 5e-5
 
     for _ in range(args.warmups):
-        compiled(*inputs).block_until_ready()
+        jax.block_until_ready(compiled(*inputs))
 
     times = []
     for _ in range(args.repeats):
         started = time.perf_counter()
-        compiled(*inputs).block_until_ready()
+        jax.block_until_ready(compiled(*inputs))
         times.append(time.perf_counter() - started)
 
     dispatch_mode = "cpu"
