@@ -175,14 +175,19 @@ def smc2(
         )
         return moved.reshape(num_theta, num_x, -1)
 
-    def inner_init(k0, th, y0):
+    # One compiled step per algorithm (mlx-constraints): the batched
+    # inner advance is the hot kernel — the forward loop calls it T
+    # times and every PMMH re-run calls it once per prefix datum, so
+    # rejuvenation dominates. All randomness is explicitly keyed
+    # (kr/kt/k0 are arguments), so compile does not freeze it.
+    def _inner_init(k0, th, y0):
         k_init = mx.random.split(k0, num_theta)
         inner = mx.vmap(lambda k, p: initial_sampler(k, num_x, p))(k_init, th)
         log_g = batched_logobs(y0, inner, th)
         inner_log_w, _ = _normalize_rows(log_g)
         return inner, inner_log_w, _lse_rows(log_g) - log_n_x
 
-    def inner_step(kr, kt, inner, inner_log_w, th, y_t):
+    def _inner_step(kr, kt, inner, inner_log_w, th, y_t):
         idx = _batched_inner_resample(kr, mx.exp(inner_log_w), num_x)
         parents = mx.take_along_axis(inner, idx[:, :, None], axis=1)
         keys_flat = mx.random.split(kt, num_theta * num_x)
@@ -190,6 +195,9 @@ def smc2(
         log_g = batched_logobs(y_t, inner, th)
         inner_log_w, _ = _normalize_rows(log_g)
         return inner, inner_log_w, _lse_rows(log_g) - log_n_x
+
+    inner_init = mx.compile(_inner_init)
+    inner_step = mx.compile(_inner_step)
 
     def inner_forward(fwd_key, th, upto):
         """Fresh inner filter over emissions[0:upto]; returns resolved logZ."""
