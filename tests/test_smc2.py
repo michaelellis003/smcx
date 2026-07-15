@@ -297,16 +297,17 @@ class TestBatchedStep:
 
     Spec test 6 (ADR-0013): one batched inner step advancing N_theta
     filters must behave as N_theta *independent* single-filter steps.
-    Independence is established by perturbation (exact); the
-    correctness of a batched filter against the single-filter
-    distribution is a separate tier-2 check.
+    Two facets of independence are tested separately: computational
+    (one filter's data never leaks into another's output) and
+    stochastic (the per-filter RNG streams are uncorrelated), plus a
+    tier-2 correctness check against the single-filter distribution.
     """
 
-    def test_batched_step_filters_are_independent(self):
-        # The defining property: perturbing one filter's input leaves
-        # every OTHER filter's output bit-identical (same keys). A
-        # coupled implementation would leak the change across the
-        # theta axis. Exact, not statistical.
+    def test_batched_step_no_cross_filter_data_leak(self):
+        # Computational independence: perturbing one filter's input
+        # leaves every OTHER filter's output bit-identical (same keys).
+        # A coupled graph would leak the change across the theta axis.
+        # Exact, not statistical.
         from smcx.smc2 import _batched_inner_step
 
         n_theta, n_x = 5, 64
@@ -337,6 +338,39 @@ class TestBatchedStep:
             else:  # every other filter untouched, bit-for-bit
                 assert ell0[m] == ell1[m], m
                 assert np.array_equal(in0[m], in1[m]), m
+
+    def test_batched_step_per_filter_randomness_is_independent(self):
+        # Stochastic independence: two identical-setup filters differ
+        # only in their RNG. Across many root keys their increments
+        # must be uncorrelated — shared keys would give correlation ~1,
+        # a correlated key split a nonzero correlation. (The data-leak
+        # test above uses fixed keys and cannot see this.)
+        from smcx.smc2 import _batched_inner_step
+
+        n_theta, n_x = 2, 128
+        log_n_x = math.log(n_x)
+        cloud = mx.random.normal((n_x, 1), key=mx.random.key(7))
+        inner = mx.broadcast_to(cloud, (n_theta, n_x, 1))
+        ilw = mx.full((n_theta, n_x), -log_n_x)
+        theta = mx.broadcast_to(mx.array([[A_TRUE]]), (n_theta, 1))
+        tail = (INNER_TRANS, INNER_LOGOBS, n_theta, n_x, log_n_x)
+
+        reps = 400
+        e0 = np.empty(reps)
+        e1 = np.empty(reps)
+        for i in range(reps):
+            kr, kt = mx.random.split(mx.random.key(5000 + i))
+            _, _, ell = _batched_inner_step(
+                kr, kt, inner, ilw, theta, Y_MX[1], *tail
+            )
+            ell = np.array(ell)
+            e0[i], e1[i] = ell[0], ell[1]
+
+        # Both filters actually use randomness (non-degenerate).
+        assert e0.std() > 0 and e1.std() > 0
+        # Under independence the sample correlation ~ N(0, 1/sqrt(R)).
+        corr = float(np.corrcoef(e0, e1)[0, 1])
+        assert abs(corr) < 4 / math.sqrt(reps), corr
 
     def test_batched_filter_increment_matches_single_filter(self):
         # Correctness (not independence): a filter advanced by the
