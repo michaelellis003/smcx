@@ -339,38 +339,47 @@ class TestBatchedStep:
                 assert ell0[m] == ell1[m], m
                 assert np.array_equal(in0[m], in1[m]), m
 
-    def test_batched_step_per_filter_randomness_is_independent(self):
-        # Stochastic independence: two identical-setup filters differ
-        # only in their RNG. Across many root keys their increments
-        # must be uncorrelated — shared keys would give correlation ~1,
-        # a correlated key split a nonzero correlation. (The data-leak
-        # test above uses fixed keys and cannot see this.)
+    def test_batched_step_threads_a_distinct_key_per_particle(self):
+        # RNG independence rests on the threading: smc2 must hand each
+        # filter its own, non-shared keys (MLX guarantees distinct keys
+        # yield independent streams — that part is MLX's contract, not
+        # ours). A transition that returns the key it received — encoded
+        # as two exact 16-bit halves per component, so no float32
+        # precision loss — lets us read off every particle's key and
+        # confirm all N_theta*N_x are distinct: no two filters (or
+        # particles) ever share randomness. Exact, not statistical.
         from smcx.smc2 import _batched_inner_step
 
-        n_theta, n_x = 2, 128
+        n_theta, n_x = 6, 32
         log_n_x = math.log(n_x)
-        cloud = mx.random.normal((n_x, 1), key=mx.random.key(7))
-        inner = mx.broadcast_to(cloud, (n_theta, n_x, 1))
+
+        def key_returning_trans(key, state, params):
+            k = key.astype(mx.uint32)
+            halves = mx.concatenate([k >> 16, k & 0xFFFF])
+            return halves.astype(mx.float32)  # (4,) exact key encoding
+
+        def zero_obs(y, state, params):
+            return mx.array(0.0)
+
+        inner = mx.zeros((n_theta, n_x, 4))
         ilw = mx.full((n_theta, n_x), -log_n_x)
-        theta = mx.broadcast_to(mx.array([[A_TRUE]]), (n_theta, 1))
-        tail = (INNER_TRANS, INNER_LOGOBS, n_theta, n_x, log_n_x)
-
-        reps = 400
-        e0 = np.empty(reps)
-        e1 = np.empty(reps)
-        for i in range(reps):
-            kr, kt = mx.random.split(mx.random.key(5000 + i))
-            _, _, ell = _batched_inner_step(
-                kr, kt, inner, ilw, theta, Y_MX[1], *tail
-            )
-            ell = np.array(ell)
-            e0[i], e1[i] = ell[0], ell[1]
-
-        # Both filters actually use randomness (non-degenerate).
-        assert e0.std() > 0 and e1.std() > 0
-        # Under independence the sample correlation ~ N(0, 1/sqrt(R)).
-        corr = float(np.corrcoef(e0, e1)[0, 1])
-        assert abs(corr) < 4 / math.sqrt(reps), corr
+        theta = mx.zeros((n_theta, 1))
+        kr, kt = mx.random.split(mx.random.key(12))
+        out, _, _ = _batched_inner_step(
+            kr,
+            kt,
+            inner,
+            ilw,
+            theta,
+            mx.array([0.0]),
+            key_returning_trans,
+            zero_obs,
+            n_theta,
+            n_x,
+            log_n_x,
+        )
+        keys = np.array(out).reshape(n_theta * n_x, 4)
+        assert np.unique(keys, axis=0).shape[0] == n_theta * n_x
 
     def test_batched_filter_increment_matches_single_filter(self):
         # Correctness (not independence): a filter advanced by the
