@@ -6,19 +6,33 @@
 Sequential Monte Carlo for Apple silicon, built on MLX
 """
 
+from smcx.bootstrap import bootstrap_filter
+from smcx.containers import (
+    ParticleFilterPosterior,
+    ParticleFilterResult,
+    ParticleState,
+)
+from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import multinomial, residual, stratified, systematic
+from smcx.simulate import simulate
 from smcx.weights import ess, log_ess, log_normalize, normalize
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "DegenerateWeightsError",
+    "ParticleFilterPosterior",
+    "ParticleFilterResult",
+    "ParticleState",
     "__version__",
+    "bootstrap_filter",
     "ess",
     "log_ess",
     "log_normalize",
     "multinomial",
     "normalize",
     "residual",
+    "simulate",
     "stratified",
     "systematic",
 ]
