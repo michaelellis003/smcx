@@ -124,4 +124,18 @@ art). See `CITATION.cff` for formal references and
 
 ## Status
 
-Pre-alpha. Nothing works yet.
+Alpha. The core works: weights, four native resamplers, the
+Feynman-Kac loop, `bootstrap_filter` (with inputs channel and
+missing-data support), and `simulate` — 85 tests against exact
+Kalman oracles.
+
+**Kill-test verdict (2026-07-14, pre-registered): the thesis holds
+weakly.** At matched, oracle-gated accuracy, MLX-GPU beat JAX-CPU in
+all 12 grid cells (1.1–4.8×), clearing the pre-registered ≥3× bar on
+the resampling-bound LGSSM workload (4.0×/4.8× at 10⁵/10⁶ particles)
+but not yet on the compute-heavier SV and tracking workloads —
+where full-history materialization (up to 12 GB at 10⁶×T=500) is the
+measured limiter, not compute. Full data:
+[benchmarks/results/2026-07-14-kill-test.md](benchmarks/results/2026-07-14-kill-test.md).
+Claim accordingly: a real but workload-dependent GPU advantage today,
+with the O(1)-memory history option as the known next lever.

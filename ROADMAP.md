@@ -26,9 +26,13 @@ The theme: prove the thesis before building breadth.
 - [x] ~~Kalman oracle + LGSSM correctness suite~~ (2026-07-14;
       MC-calibrated gates incl. missing-obs and inputs-channel)
 - [x] ~~`__all__` lock test~~ (2026-07-14)
-- [ ] **Kill test**: smcx (MLX GPU/CPU) vs smcjax (JAX CPU) at
-      10⁴–10⁶ particles; verdict recorded in `benchmarks/results/`
-      and README Status
+- [x] ~~**Kill test**~~ (2026-07-14: **holds weakly**, 1/3 workloads
+      ≥3×; all 15 gates pass; MLX-GPU faster in all 12 cells;
+      `benchmarks/results/2026-07-14-kill-test.md`)
+- [ ] `store_history=False` / trace option — **promoted from Later**:
+      the kill test measured full-history materialization (12 GB at
+      SV/10⁶) as the limiter on the two non-counting workloads;
+      re-run SV/TRACK cells after it lands
 - [ ] File MLX issue: `categorical(num_samples=)` O(N·M) memory
       (unreported upstream; evidence in `docs/research/mlx-audit.md`)
 - [ ] Open smcjax coordinated-change issues (ADR-0008 priority:
