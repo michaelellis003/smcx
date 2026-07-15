@@ -230,3 +230,29 @@ def test_isolated_jax_cpu_worker_smokes_every_kernel_motif(workload, size):
     validate_result(result)
     assert result["backend"] == "cpu"
     assert result["correctness"]["passed"]
+
+
+@pytest.mark.parametrize("arm", ["mlx_cpu", "jax_cpu"])
+def test_cpu_workers_smoke_the_matched_lgssm_filter(arm):
+    root = Path(__file__).parents[1]
+    command = build_worker_command(
+        root=root,
+        arm=arm,
+        block=0,
+        repeats=1,
+        size=256,
+        warmups=1,
+        workload="lgssm_pf",
+    )
+    completed = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        env=worker_environment(arm),
+        text=True,
+        timeout=60,
+    )
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    validate_result(result)
+    assert result["correctness"]["passed"]
