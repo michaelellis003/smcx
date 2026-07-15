@@ -194,3 +194,39 @@ def test_jax_worker_cli_is_inspectable_without_jax_installed():
 
     assert "--arm" in completed.stdout
     assert "--workload" in completed.stdout
+
+
+@pytest.mark.parametrize(
+    ("workload", "size"),
+    [
+        ("gather_scatter", 16),
+        ("matmul", 8),
+        ("random", 1_000),
+        ("scan", 16),
+        ("systematic", 16),
+    ],
+)
+def test_isolated_jax_cpu_worker_smokes_every_kernel_motif(workload, size):
+    root = Path(__file__).parents[1]
+    command = build_worker_command(
+        root=root,
+        arm="jax_cpu",
+        block=0,
+        repeats=1,
+        size=size,
+        warmups=1,
+        workload=workload,
+    )
+    completed = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        env=worker_environment("jax_cpu"),
+        text=True,
+        timeout=60,
+    )
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    validate_result(result)
+    assert result["backend"] == "cpu"
+    assert result["correctness"]["passed"]
