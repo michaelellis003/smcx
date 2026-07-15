@@ -40,6 +40,7 @@ def bootstrap_filter(
     resampling_threshold: float = 0.5,
     *,
     inputs: mx.array | None = None,
+    store_history: bool = True,
 ) -> ParticleFilterPosterior:
     r"""Run a bootstrap (SIR) particle filter.
 
@@ -68,6 +69,13 @@ def bootstrap_filter(
             aligned with emissions; ``inputs[t]`` feeds the
             transition *into* t and the observation *at* t
             (ADR-0008).
+        store_history: When False (ADR-0011), particle/weight/
+            ancestor arrays cover only the final step (time axis
+            length 1) and memory drops from O(T*N) to O(N);
+            ``ess`` and ``log_evidence_increments`` stay full and
+            ``marginal_loglik`` is bit-identical at the same key.
+            Use for log-ML-only workloads (model comparison, PMMH
+            inner loops); genealogy/smoothing needs the default.
 
     Returns:
         :class:`~smcx.containers.ParticleFilterPosterior`.
@@ -126,5 +134,11 @@ def bootstrap_filter(
 
     fk = FKModel(m0=initial_sampler, m=mutate, log_g=log_g)
     return run_filter(
-        key, fk, data, num_particles, resampling_fn, resampling_threshold
+        key,
+        fk,
+        data,
+        num_particles,
+        resampling_fn,
+        resampling_threshold,
+        store_history=store_history,
     )

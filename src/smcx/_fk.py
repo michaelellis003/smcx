@@ -74,6 +74,7 @@ def run_filter(
     num_particles: int,
     resampling_fn: Callable,
     resampling_threshold: float,
+    store_history: bool = True,
 ) -> ParticleFilterPosterior:
     """Run the generic SMC loop over ``T`` steps of per-step data.
 
@@ -86,6 +87,11 @@ def run_filter(
         num_particles: N.
         resampling_fn: ADR-0004 contract resampler.
         resampling_threshold: Resample when ESS < threshold * N.
+        store_history: When False (ADR-0011), the per-step particle,
+            weight, and ancestor histories are not retained — the
+            returned arrays cover only the final step (time axis
+            length 1) while ``ess``/``log_evidence_increments`` stay
+            full — dropping memory from O(T*N) to O(N).
 
     Returns:
         ParticleFilterPosterior (smcjax field parity).
@@ -158,9 +164,10 @@ def run_filter(
     for t in range(1, num_timesteps):
         data_t = tuple(d[t] for d in data)
         state, ancestors, ess_t, inc = step(state, step_keys[t - 1], *data_t)
-        all_particles.append(state.particles)
-        all_log_w.append(state.log_weights)
-        all_ancestors.append(ancestors)
+        if store_history:
+            all_particles.append(state.particles)
+            all_log_w.append(state.log_weights)
+            all_ancestors.append(ancestors)
         all_ess.append(ess_t)
         all_inc.append(inc)
         mx.async_eval(state.particles, state.log_weights, ancestors)
@@ -169,6 +176,12 @@ def run_filter(
             _check(*pending.popleft())
     while pending:
         _check(*pending.popleft())
+    if not store_history:
+        # Final step only (time axis length 1); histories were never
+        # retained, so their buffers freed as the pipeline advanced.
+        all_particles = [state.particles]
+        all_log_w = [state.log_weights]
+        all_ancestors = [ancestors] if num_timesteps > 1 else all_ancestors
 
     # Neumaier-compensated total (ADR-0003); increments returned so
     # users can re-sum in f64.
