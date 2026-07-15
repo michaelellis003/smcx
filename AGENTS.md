@@ -22,15 +22,21 @@ committed source of truth for process.
 7. Repeat 3–6 until acceptance criteria are met.
 8. DOCS — apply the documentation triggers below.
 9. PUSH — `uv run pre-commit run --all-files` + full tests first.
+   Before merging to main: run the full suite on a local M-series
+   GPU — CI is CPU-only and releases are automated, so this is the
+   only Metal gate a regression meets before PyPI.
 10. PR — self-review; target < 400 changed lines.
 11. MERGE — squash to main; semantic-release automates versioning.
 
 For multi-session features (a new module, a port): write
 `specs/<branch-name>.md` first — files and interfaces involved, what
 is out of scope, an end-to-end verification command. `specs/` is
-gitignored: specs are prompts, not documentation. Anything durable in
-a spec graduates to an ADR (decisions) or docs (behavior) before
-merge. For one-sentence diffs: no spec, no plan, just TDD.
+gitignored (specs are prompts, not documentation) but must not be
+lost or unreviewable: **paste the spec into the GitHub issue or PR
+description** when opening it — that is the durable, reviewable copy.
+Anything durable in a spec graduates to an ADR (decisions) or docs
+(behavior) before merge. For one-sentence diffs: no spec, no plan,
+just TDD.
 
 ## Documentation system
 
@@ -108,9 +114,13 @@ Evidence and license table: `docs/research/licensing.md`.
   included). MIT sources: preserve the copyright + permission notice
   beside the ported code. Apache-2.0 sources (smcjax, BlackJAX,
   ArviZ): Apache §4 — provenance header on the ported file ("Ported
-  to MLX from X (URL), Apache-2.0. Modified: …") + a line in
-  `NOTICE`. NOTICE carries legally required attributions ONLY; design
-  credits go in README/`CITATION.cff`, never NOTICE.
+  to MLX from X (URL), Apache-2.0. Modified: …") always; a NOTICE
+  line is *legally required* only when the upstream ships a NOTICE
+  file whose contents must be carried (none of the current sources
+  do). We additionally sanction voluntary NOTICE lines for
+  ported-code provenance (the existing smcjax line is one). Design
+  credits — no code ported — go in README/`CITATION.cff`, never
+  NOTICE.
 - **Algorithm docstrings cite** the paper(s) and, where relevant, the
   reference implementation lineage (e.g. lgamma: Lanczos 1964 +
   Godfrey 2001 coefficient set as used in GSL; Pareto-k: Zhang &

@@ -8,12 +8,20 @@ Themes here, tracking in GitHub issues/milestones. Design rationale:
 
 The theme: prove the thesis before building breadth.
 
+- [ ] Ratify ADR-0002 and ADR-0008 (FK core; API divergences incl.
+      the inputs channel) — v0.1 coding is contingent on both
 - [ ] `weights` module: log_normalize, normalize, ess, log_ess
 - [ ] `resampling` module: systematic, stratified, multinomial,
       residual over the shared inverse-CDF kernel (ADR-0004)
-- [ ] FK core: FKModel protocol + generic loop (ADR-0002)
-- [ ] `bootstrap_filter` + `simulate` + containers
+- [ ] Full-step microbenchmark + eval-cadence measurement (per-step
+      vs every-k vs async_eval) — settles the design's open cadence
+      question before the loop shell is written
+- [ ] FK core: FKModel protocol + generic loop (ADR-0002, contingent)
+- [ ] `bootstrap_filter` + `simulate` + containers (+ `types.py`
+      Protocols incl. guided/inputs forms per ADR-0008)
 - [ ] Kalman oracle in tests (numpy f64) + LGSSM correctness suite
+      (incl. missing-observations and (T,) emissions cases)
+- [ ] `__all__` lock test (subset + ADR-cited additions rule)
 - [ ] **Kill test**: smcx (MLX GPU/CPU) vs smcjax (JAX CPU) at
       10⁴–10⁶ particles; verdict recorded in `benchmarks/results/`
       and README Status
@@ -36,7 +44,9 @@ The theme: prove the thesis before building breadth.
 - [ ] Diagnostics port from smcjax (Pareto-k, tail-ESS, CRPS,
       diagnose, …)
 - [ ] `liu_west_filter` (labeled approximate)
-- [ ] `__all__` parity lock test against smcjax's export list
+- [ ] GPU release gate: macos-arm64 runner MLX-GPU smoke job if
+      feasible, else a mandatory local-M-series pre-merge suite run
+      (CI is CPU-only; releases are automated — see AGENTS.md)
 
 ## Later — ideas, ordered by thesis-fit
 
@@ -54,14 +64,19 @@ The theme: prove the thesis before building breadth.
 - Island-mode resampling for N beyond a single population
 - Benchmark suite tracking MLX releases (re-run audit + kill test)
 
+*Sequencing note: the literature review's "v0 must-have" menu is
+aspirational input; this file is the authoritative sequencing.*
+
 ## Non-goals
 
 Standing scope guard — do not implement these; link here when closing
 requests:
 
 - General PPL, effect handlers, NUTS, or NumPyro feature parity
-- PMMH / particle Gibbs as built-ins (we guarantee unbiased log-Z so
-  smcx can be an inner engine)
+- PMMH / particle Gibbs as built-ins (we guarantee an unbiased
+  evidence estimate Ẑ — E[exp(marginal_loglik)] = Z, the PMMH
+  contract; log Ẑ itself is downward-biased — so smcx can be an
+  inner engine)
 - float64 on GPU, or emulating it
 - OT/DET resampling as a default (O(N²), biased likelihood)
 - SSP / Hilbert-ordered resampling (sequential-scan-shaped)

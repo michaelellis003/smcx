@@ -22,8 +22,10 @@ SMC is the opposite case:
 - **Throughput-shaped**: particle propagation, weighting, and resampling are
   embarrassingly parallel and vmap-friendly.
 - **float32-tolerant**: no symplectic integration of ill-conditioned dynamics.
-- **Unified-memory-hungry**: particle counts (10⁵–10⁶+) that don't fit
-  comfortably in discrete-GPU workflows run flat-out on a laptop.
+- **Unified-memory-friendly**: no PCIe staging, zero-copy host-side
+  checks and diagnostics mid-filter, and full particle histories in
+  one address space — the classic GPU-particle-filter pain points
+  disappear on a laptop.
 - **Unserved**: no MLX-native SMC exists. jax-metal is unmaintained; the only
   MLX sampler package (samplex) has no SMC and no PPL layer.
 
@@ -32,18 +34,21 @@ change character when CPU and GPU share memory with zero transfer cost?*
 
 ## Kill test (do this first)
 
-Before building anything else: run the same particle-filter workload in smcx
-(MLX, M-series) and smcjax (JAX-CPU) at 10⁵–10⁶ particles. Same algorithms,
-same API — a true apples-to-apples benchmark. If unified memory doesn't show
-a clear win, the thesis dies quietly and cheaply.
+Before building anything else: run the same particle-filter workloads in smcx
+(MLX, M-series) and smcjax (JAX-CPU) at 10⁴–10⁶ particles. Same algorithms,
+same API — a true apples-to-apples benchmark, under the pre-registered
+success criterion in [benchmarks/PROTOCOL.md](benchmarks/PROTOCOL.md).
+If the GPU doesn't show a clear win, the thesis dies quietly and cheaply.
 
 ## v0 scope
 
 Mirror smcjax's core, MLX-native:
 
-- Bootstrap (SIR) particle filter, with auxiliary and Liu-West to follow
-- Resamplers: multinomial, systematic, stratified — plus differentiable resampling
-- Adaptive tempering for static-model SMC
+- Bootstrap (SIR) particle filter, with guided, auxiliary and Liu-West
+  to follow
+- Resamplers: multinomial, systematic, stratified, residual
+  (differentiable resampling comes later — see ROADMAP)
+- Adaptive tempering for static-model SMC (v0.2)
 - A small set of distributions (~8, not 40) sufficient for state-space models
   and tempered targets
 - Diagnostics/ArviZ export via numpy (port smcjax's diagnostics module)
