@@ -134,6 +134,37 @@ jobs:
       - name: Run tests
         run: uv run pytest -v --durations=0 -m 'not integration'
 
+  # GPU release gate (roadmap; AGENTS.md step 9): the library's
+  # design target is the Metal GPU path, which device-dispatching
+  # code (Metal searchsorted, counting-kernel scatter) only exercises
+  # when a GPU is present. Releases are automated, so a GPU-only
+  # regression must be caught HERE when the runner exposes Metal —
+  # or attested via the manual release-environment approval when it
+  # does not (virtualized runners may not expose the GPU).
+  gpu-smoke:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Setup uv
+        uses: ./.github/actions/setup-uv
+
+      - name: Probe Metal availability
+        id: metal
+        run: |
+          if uv run python -c "import mlx.core as mx; mx.set_default_device(mx.Device(mx.gpu)); mx.eval(mx.zeros(8) + 1); print('Metal GPU:', mx.device_info())"; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=No Metal GPU on runner::GPU code paths were NOT exercised in CI. Per AGENTS.md step 9, the release-environment approval attests a full-suite run on a local M-series GPU."
+          fi
+
+      - name: Run full suite on Metal GPU
+        if: steps.metal.outputs.available == 'true'
+        run: uv run pytest -v --durations=0
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -177,6 +208,7 @@ jobs:
       - coverage
       - lock-check
       - pytest-macos
+      - gpu-smoke
       - build
     runs-on: ubuntu-latest
     timeout-minutes: 1

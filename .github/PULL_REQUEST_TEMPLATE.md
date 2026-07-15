@@ -19,6 +19,8 @@
 <!-- How was this tested? -->
 
 - [ ] Tests pass locally (`uv run pytest -v --cov`)
+- [ ] Full suite passed on a local M-series GPU (CI is CPU-only
+      unless the gpu-smoke job reports Metal available)
 - [ ] Coverage meets minimum threshold (`fail_under` in `pyproject.toml`)
 - [ ] Linting passes (`uv run pre-commit run --all-files`)
 

@@ -64,9 +64,13 @@ The theme: prove the thesis before building breadth.
 - [x] ~~`liu_west_filter` (labeled approximate)~~ (2026-07-15; port
       complete — all 32 smcjax names present, full `__all__` lock
       direction active)
-- [ ] GPU release gate: macos-arm64 runner MLX-GPU smoke job if
-      feasible, else a mandatory local-M-series pre-merge suite run
-      (CI is CPU-only; releases are automated — see AGENTS.md)
+- [x] ~~GPU release gate~~ (2026-07-15: `gpu-smoke` CI job probes
+      Metal and runs the full suite on GPU when available (warns
+      loudly when not); release job gated on the `release`
+      environment (created on the repo — required-reviewer rule
+      activates when the repo goes public; Free-plan limitation on
+      private repos); PR template gains the local-GPU checkbox.
+      Metal-on-runner feasibility confirmed at first real CI run)
 - [x] ~~Value-branch conditional resample~~ (2026-07-15;
       bit-identical, fairness-restoring)
 - [x] ~~Batched-model fast path~~ (2026-07-15, ADR-0013)
