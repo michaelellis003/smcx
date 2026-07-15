@@ -173,3 +173,42 @@ class PerParticleLogDensity(Protocol):
     """Per-particle log-density: ``(state) -> scalar`` (vmapped)."""
 
     def __call__(self, state: mx.array, /) -> mx.array: ...
+
+
+@runtime_checkable
+class SingleInitialSampler(Protocol):
+    """Single-trajectory initial draw: ``(key) -> state`` (simulate)."""
+
+    def __call__(self, key: mx.array, /) -> mx.array: ...
+
+
+# --- Parameter-conditioned callbacks (Liu-West, SMC²) ----------------
+# The static parameter theta rides alongside the state, so every
+# per-particle callback takes it as a trailing argument.
+
+
+@runtime_checkable
+class ParamInitialSampler(Protocol):
+    """Inner initial cloud given theta: ``(key, n, params) -> (n, d)``."""
+
+    def __call__(
+        self, key: mx.array, num_particles: int, params: mx.array, /
+    ) -> mx.array: ...
+
+
+@runtime_checkable
+class ParamTransitionSampler(Protocol):
+    """Transition given theta: ``(key, state, params) -> state``."""
+
+    def __call__(
+        self, key: mx.array, state: mx.array, params: mx.array, /
+    ) -> mx.array: ...
+
+
+@runtime_checkable
+class ParamLogObservationFn(Protocol):
+    """Obs log-density given theta: ``(emission, state, params) -> logp``."""
+
+    def __call__(
+        self, emission: mx.array, state: mx.array, params: mx.array, /
+    ) -> mx.array: ...

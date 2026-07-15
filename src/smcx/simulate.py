@@ -16,7 +16,15 @@ from typing import Any
 import mlx.core as mx
 
 from smcx import _utils
-from smcx.types import KeyT
+from smcx.types import (
+    EmissionSampler,
+    EmissionSamplerWithInput,
+    InitialSampler,
+    KeyT,
+    SingleInitialSampler,
+    TransitionSampler,
+    TransitionSamplerWithInput,
+)
 
 
 def _draw_initial(key: KeyT, initial_sampler) -> mx.array:
@@ -28,9 +36,9 @@ def _draw_initial(key: KeyT, initial_sampler) -> mx.array:
 
 def simulate(
     key: KeyT,
-    initial_sampler: Any,
-    transition_sampler: Any,
-    emission_sampler: Any,
+    initial_sampler: InitialSampler | SingleInitialSampler,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    emission_sampler: EmissionSampler | EmissionSamplerWithInput,
     num_timesteps: int,
     *,
     inputs: mx.array | None = None,
@@ -60,22 +68,24 @@ def simulate(
     _utils.check_callback_arity(
         emission_sampler, "emission_sampler", 2, has_inputs
     )
+    # ty: the arity is dispatched on `inputs` at runtime, which ty
+    # cannot narrow across the union (same pattern as the filters).
+    trans_any: Any = transition_sampler
+    emit_any: Any = emission_sampler
     keys = mx.random.split(key, 2 * num_timesteps)
     state = _draw_initial(keys[0], initial_sampler)
     states = [state]
     if inputs is not None:
         inputs_arr = _utils.canonicalize_inputs(inputs, num_timesteps)
-        emissions = [emission_sampler(keys[1], state, inputs_arr[0])]
+        emissions = [emit_any(keys[1], state, inputs_arr[0])]
         for t in range(1, num_timesteps):
-            state = transition_sampler(keys[2 * t], state, inputs_arr[t])
+            state = trans_any(keys[2 * t], state, inputs_arr[t])
             states.append(state)
-            emissions.append(
-                emission_sampler(keys[2 * t + 1], state, inputs_arr[t])
-            )
+            emissions.append(emit_any(keys[2 * t + 1], state, inputs_arr[t]))
     else:
-        emissions = [emission_sampler(keys[1], state)]
+        emissions = [emit_any(keys[1], state)]
         for t in range(1, num_timesteps):
-            state = transition_sampler(keys[2 * t], state)
+            state = trans_any(keys[2 * t], state)
             states.append(state)
-            emissions.append(emission_sampler(keys[2 * t + 1], state))
+            emissions.append(emit_any(keys[2 * t + 1], state))
     return mx.stack(states), mx.stack(emissions)

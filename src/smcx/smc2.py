@@ -21,7 +21,6 @@ rejuvenation kernel, not a user-facing PMMH sampler (ADR-0014).
 """
 
 import math
-from typing import Any
 
 import mlx.core as mx
 import numpy as np
@@ -31,7 +30,15 @@ from smcx.containers import SMC2Posterior
 from smcx.distributions import chol_factor
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import _searchsorted_take, systematic
-from smcx.types import KeyT
+from smcx.types import (
+    InitialSampler,
+    KeyT,
+    ParamInitialSampler,
+    ParamLogObservationFn,
+    ParamTransitionSampler,
+    PerParticleLogDensity,
+    ResamplingFn,
+)
 from smcx.weights import ess as compute_ess
 
 # f32 min-normal is 1.175e-38; a floor below it is flushed to zero
@@ -95,13 +102,78 @@ def _batched_inner_resample(
     return mx.vmap(_searchsorted_take)(cdf, positions)
 
 
+# --- Batched inner-filter kernels (module-level so they are testable
+# apart from the smc2 driver; ADR-0013). Densities use flatten +
+# single vmap over the theta*N_x axis to avoid the nested-vmap-over-
+# take hazard; each of the N_theta filters is advanced independently.
+
+
+def _batched_logobs(y_t, particles, theta, log_observation_fn, n_theta, n_x):
+    flat = particles.reshape(-1, particles.shape[-1])
+    lg = mx.vmap(lambda s, p: log_observation_fn(y_t, s, p))(
+        flat, mx.repeat(theta, n_x, axis=0)
+    )
+    return lg.reshape(n_theta, n_x)
+
+
+def _batched_trans(
+    keys_flat, particles, theta, transition_sampler, n_theta, n_x
+):
+    flat = particles.reshape(-1, particles.shape[-1])
+    moved = mx.vmap(lambda k, s, p: transition_sampler(k, s, p))(
+        keys_flat, flat, mx.repeat(theta, n_x, axis=0)
+    )
+    return moved.reshape(n_theta, n_x, -1)
+
+
+def _batched_inner_init(
+    k0, theta, y0, initial_sampler, log_observation_fn, n_theta, n_x, log_n_x
+):
+    """Init N_theta inner clouds and first reweight (one datum)."""
+    k_init = mx.random.split(k0, n_theta)
+    inner = mx.vmap(lambda k, p: initial_sampler(k, n_x, p))(k_init, theta)
+    log_g = _batched_logobs(y0, inner, theta, log_observation_fn, n_theta, n_x)
+    inner_log_w, _ = _normalize_rows(log_g)
+    return inner, inner_log_w, _lse_rows(log_g) - log_n_x
+
+
+def _batched_inner_step(
+    kr,
+    kt,
+    inner,
+    inner_log_w,
+    theta,
+    y_t,
+    transition_sampler,
+    log_observation_fn,
+    n_theta,
+    n_x,
+    log_n_x,
+):
+    """Advance N_theta inner filters one datum.
+
+    Resample, propagate, reweight. Each filter is independent — the
+    theta axis never couples (validated batched-vs-independent,
+    tier-2).
+    """
+    idx = _batched_inner_resample(kr, mx.exp(inner_log_w), n_x)
+    parents = mx.take_along_axis(inner, idx[:, :, None], axis=1)
+    keys_flat = mx.random.split(kt, n_theta * n_x)
+    inner = _batched_trans(
+        keys_flat, parents, theta, transition_sampler, n_theta, n_x
+    )
+    log_g = _batched_logobs(y_t, inner, theta, log_observation_fn, n_theta, n_x)
+    inner_log_w, _ = _normalize_rows(log_g)
+    return inner, inner_log_w, _lse_rows(log_g) - log_n_x
+
+
 def smc2(
     key: KeyT,
-    param_initial_sampler: Any,
-    log_prior_fn: Any,
-    initial_sampler: Any,
-    transition_sampler: Any,
-    log_observation_fn: Any,
+    param_initial_sampler: InitialSampler,
+    log_prior_fn: PerParticleLogDensity,
+    initial_sampler: ParamInitialSampler,
+    transition_sampler: ParamTransitionSampler,
+    log_observation_fn: ParamLogObservationFn,
     emissions: Float[mx.array, "ntime emission_dim"]
     | Float[mx.array, " ntime"],
     num_theta: int,
@@ -109,7 +181,7 @@ def smc2(
     *,
     ess_threshold: float = 0.5,
     num_pmmh_steps: int = 1,
-    resampling_fn: Any = systematic,
+    resampling_fn: ResamplingFn = systematic,
     store_history: bool = True,
 ) -> SMC2Posterior:
     r"""Run SMC² for joint state-and-parameter inference (ADR-0014).
@@ -158,43 +230,39 @@ def smc2(
     scale2 = _RWM_SCALE**2 / d_theta
 
     # --- batched inner-density helpers (flatten -> single vmap) -------
-    def _tile_theta(th: mx.array) -> mx.array:
-        return mx.repeat(th, num_x, axis=0)  # each theta repeated N_x
-
-    def batched_logobs(y_t, particles_2d, th):
-        flat = particles_2d.reshape(-1, particles_2d.shape[-1])
-        lg = mx.vmap(lambda s, p: log_observation_fn(y_t, s, p))(
-            flat, _tile_theta(th)
-        )
-        return lg.reshape(num_theta, num_x)
-
-    def batched_trans(keys_flat, particles_2d, th):
-        flat = particles_2d.reshape(-1, particles_2d.shape[-1])
-        moved = mx.vmap(lambda k, s, p: transition_sampler(k, s, p))(
-            keys_flat, flat, _tile_theta(th)
-        )
-        return moved.reshape(num_theta, num_x, -1)
-
     # One compiled step per algorithm (mlx-constraints): the batched
     # inner advance is the hot kernel — the forward loop calls it T
     # times and every PMMH re-run calls it once per prefix datum, so
     # rejuvenation dominates. All randomness is explicitly keyed
-    # (kr/kt/k0 are arguments), so compile does not freeze it.
+    # (kr/kt/k0 are arguments), so compile does not freeze it. The
+    # kernels live at module scope (testable apart from the driver);
+    # these thin closures bind the model and dimensions.
     def _inner_init(k0, th, y0):
-        k_init = mx.random.split(k0, num_theta)
-        inner = mx.vmap(lambda k, p: initial_sampler(k, num_x, p))(k_init, th)
-        log_g = batched_logobs(y0, inner, th)
-        inner_log_w, _ = _normalize_rows(log_g)
-        return inner, inner_log_w, _lse_rows(log_g) - log_n_x
+        return _batched_inner_init(
+            k0,
+            th,
+            y0,
+            initial_sampler,
+            log_observation_fn,
+            num_theta,
+            num_x,
+            log_n_x,
+        )
 
     def _inner_step(kr, kt, inner, inner_log_w, th, y_t):
-        idx = _batched_inner_resample(kr, mx.exp(inner_log_w), num_x)
-        parents = mx.take_along_axis(inner, idx[:, :, None], axis=1)
-        keys_flat = mx.random.split(kt, num_theta * num_x)
-        inner = batched_trans(keys_flat, parents, th)
-        log_g = batched_logobs(y_t, inner, th)
-        inner_log_w, _ = _normalize_rows(log_g)
-        return inner, inner_log_w, _lse_rows(log_g) - log_n_x
+        return _batched_inner_step(
+            kr,
+            kt,
+            inner,
+            inner_log_w,
+            th,
+            y_t,
+            transition_sampler,
+            log_observation_fn,
+            num_theta,
+            num_x,
+            log_n_x,
+        )
 
     inner_init = mx.compile(_inner_init)
     inner_step = mx.compile(_inner_step)

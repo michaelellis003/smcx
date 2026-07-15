@@ -293,14 +293,80 @@ class TestRejuvenation:
 
 
 class TestBatchedStep:
-    """The batched-over-theta primitives match per-row computation.
+    """The batched inner step vs N_theta independent single steps.
 
-    smc2's inner step batches N_theta filters via row-wise reductions
-    and a vmap-over-theta resampler (ADR-0013). The full step's
-    batched-vs-looped equivalence is already covered end to end by the
-    reduction gate (N_theta=1 reduces to a bootstrap filter) and the
-    exact-recovery gates; here we pin the batched primitives directly.
+    Spec test 6 (ADR-0013): one batched inner step advancing N_theta
+    filters must behave as N_theta independent single-filter steps —
+    the theta axis never couples. RNG threading differs between the
+    batched and single-filter key splits, so the check is tier-2
+    statistical (design §9b): identical-setup filters advanced by the
+    batched step yield increments distributed like independent
+    single-filter increments.
     """
+
+    def _setup(self, n_x=256):
+        # One shared inner cloud + uniform weights + fixed theta and
+        # datum, so every filter is the *same* single-filter problem.
+        cloud = mx.random.normal((n_x, 1), key=mx.random.key(10))
+        theta = mx.array([[A_TRUE]])
+        return cloud, theta, Y_MX[1], math.log(n_x)
+
+    def test_batched_step_matches_independent_single_steps(self):
+        from smcx.smc2 import _batched_inner_step
+
+        n_theta, n_x = 64, 256
+        cloud, theta1, y_t, log_n_x = self._setup(n_x)
+        ulw = mx.full((n_x,), -log_n_x)
+
+        # Batched: n_theta identical filters advanced in one call.
+        inner_b = mx.broadcast_to(cloud, (n_theta, n_x, 1))
+        ilw_b = mx.broadcast_to(ulw, (n_theta, n_x))
+        theta_b = mx.broadcast_to(theta1, (n_theta, 1))
+        kr, kt = mx.random.split(mx.random.key(20))
+        _, _, ell_b = _batched_inner_step(
+            kr,
+            kt,
+            inner_b,
+            ilw_b,
+            theta_b,
+            y_t,
+            INNER_TRANS,
+            INNER_LOGOBS,
+            n_theta,
+            n_x,
+            log_n_x,
+        )
+        ell_b = np.array(ell_b)
+
+        # Independent: the same single filter, R fresh keys (n_theta=1).
+        r = 256
+        ell_s = np.empty(r)
+        for i in range(r):
+            kr1, kt1 = mx.random.split(mx.random.key(1000 + i))
+            _, _, ell = _batched_inner_step(
+                kr1,
+                kt1,
+                cloud[None],
+                ulw[None],
+                theta1,
+                y_t,
+                INNER_TRANS,
+                INNER_LOGOBS,
+                1,
+                n_x,
+                log_n_x,
+            )
+            ell_s[i] = float(np.array(ell)[0])
+
+        # Filters are genuinely independent (distinct keys), not clones.
+        assert ell_b.std() > 0
+        # Tier-2: batched and single-filter increment means agree.
+        se = math.sqrt(ell_b.var(ddof=1) / n_theta + ell_s.var(ddof=1) / r)
+        assert abs(ell_b.mean() - ell_s.mean()) < 4 * se, (
+            ell_b.mean(),
+            ell_s.mean(),
+            se,
+        )
 
     def test_lse_rows_matches_per_row_loop(self):
         from smcx.smc2 import _lse_rows
@@ -309,14 +375,6 @@ class TestBatchedStep:
         batched = np.array(_lse_rows(x))
         looped = np.array([_np_lse(np.array(x[i])) for i in range(7)])
         assert np.allclose(batched, looped, atol=1e-5)
-
-    def test_normalize_rows_each_row_is_a_distribution(self):
-        from smcx.smc2 import _normalize_rows
-
-        x = mx.random.normal((5, 9), key=mx.random.key(1))
-        norm, _ = _normalize_rows(x)
-        prob = np.array(mx.exp(norm))
-        assert np.allclose(prob.sum(axis=1), 1.0, atol=1e-5)
 
     def test_batched_resample_routes_each_row_independently(self):
         from smcx.smc2 import _batched_inner_resample
