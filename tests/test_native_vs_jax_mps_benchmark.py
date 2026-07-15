@@ -9,6 +9,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from benchmarks.native_vs_jax_mps.run import (
+    build_worker_command,
+    worker_environment,
+)
 
 from benchmarks.native_vs_jax_mps.common import (
     balanced_orders,
@@ -103,3 +107,32 @@ def test_mlx_cpu_worker_emits_valid_tiny_result():
     assert result["arm"] == "mlx_cpu"
     assert result["correctness"]["passed"]
     assert len(result["times_s"]) == 2
+
+
+def test_jax_mps_command_pins_the_isolated_compatibility_stack():
+    root = Path(__file__).parents[1]
+    command = build_worker_command(
+        root=root,
+        arm="jax_mps_sync",
+        block=2,
+        repeats=7,
+        size=10_000,
+        warmups=1,
+        workload="eltwise_reduce",
+    )
+
+    assert command[:5] == ["uv", "run", "--no-project", "--python", "3.13"]
+    assert "jax==0.10.2" in command
+    assert "jaxlib==0.10.2" in command
+    assert "jax-mps==0.10.9" in command
+    assert command[-2:] == ["--workload", "eltwise_reduce"]
+
+
+def test_worker_environment_exposes_safe_and_async_mps_separately():
+    safe = worker_environment("jax_mps_sync", base={"PATH": "/bin"})
+    asynchronous = worker_environment("jax_mps_async", base={"PATH": "/bin"})
+
+    assert safe["JAX_PLATFORMS"] == "mps"
+    assert "JAX_MPS_ASYNC_DISPATCH" not in safe
+    assert asynchronous["JAX_PLATFORMS"] == "mps"
+    assert asynchronous["JAX_MPS_ASYNC_DISPATCH"] == "1"
