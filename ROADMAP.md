@@ -91,7 +91,8 @@ The theme: prove the thesis before building breadth.
   documented as PMMH-incompatible)
 - Waste-free SMC (removes the MCMC-steps knob)
 - SMC² (the (N_θ × N_x) nesting is the best unified-memory fit in the
-  literature)
+  literature) — **scoped**: ADR-0014 (proposed), `specs/feat-14-smc2.md`;
+  the flagship post-v0.1 feature and second kill-test workload
 - Differentiable resampling: Ścibior-Wood stop-gradient first; OT/DET
   as opt-in
 - FFBSi smoothing (dense batched backward weights); fixed-lag comes
