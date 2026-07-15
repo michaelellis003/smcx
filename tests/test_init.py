@@ -54,6 +54,8 @@ ADDITIONS = {
     "guided_filter": "ADR-0008",
     "TemperedPosterior": "ADR-0008",
     "temper": "ADR-0008",
+    "smc2": "ADR-0014",
+    "SMC2Posterior": "ADR-0014",
 }
 
 V01_IMPLEMENTED = {

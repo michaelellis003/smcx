@@ -108,3 +108,28 @@ class ParticleFilterPosterior(NamedTuple):
     ancestors: Int32[mx.array, "ntime num_particles"]
     ess: Float[mx.array, " ntime"]
     log_evidence_increments: Float[mx.array, " ntime"]
+
+
+class SMC2Posterior(NamedTuple):
+    """SMC² output (ADR-0014): a posterior over static parameters.
+
+    The outer layer is an SMC sampler over ``num_theta`` parameter
+    particles; each carries an ``num_x``-particle inner filter whose
+    unbiased likelihood estimate drives the outer weights.
+    ``filtered_params`` is the parameter cloud and ``filtered_log_weights``
+    its normalized outer log-weights at each step (final step only when
+    ``store_history=False``, ADR-0011) — the field name matches
+    ``LiuWestPosterior`` so ``param_weighted_mean`` and
+    ``param_weighted_quantile`` apply directly.
+    ``marginal_loglik`` is the Neumaier-compensated SMC² log-evidence;
+    E[exp(marginal_loglik)] = Z (log Zhat itself is Jensen-biased).
+    ``acceptance_rates`` is the PMMH move acceptance at each step (0
+    where the outer ESS stayed above threshold and no move fired).
+    """
+
+    marginal_loglik: Float[mx.array, ""]
+    filtered_params: Float[mx.array, "ntime num_theta param_dim"]
+    filtered_log_weights: Float[mx.array, "ntime num_theta"]
+    ess: Float[mx.array, " ntime"]
+    log_evidence_increments: Float[mx.array, " ntime"]
+    acceptance_rates: Float[mx.array, " ntime"]
