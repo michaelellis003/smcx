@@ -20,6 +20,8 @@ proposal is the accuracy axis the ecosystem treats as first-class
 (docs/research/library-survey.md).
 """
 
+from typing import Any
+
 import mlx.core as mx
 from jaxtyping import Float
 
@@ -56,6 +58,7 @@ def guided_filter(
     *,
     inputs: mx.array | None = None,
     store_history: bool = True,
+    batched: bool = False,
 ) -> ParticleFilterPosterior:
     r"""Run a guided particle filter.
 
@@ -80,6 +83,8 @@ def guided_filter(
         resampling_threshold: Resample when ESS < threshold * N.
         inputs: Optional per-step inputs (ADR-0008 alignment).
         store_history: ADR-0011 memory option.
+        batched: ADR-0013 fast path — callbacks receive the whole
+            cloud with one key; same arities.
 
     Returns:
         :class:`~smcx.containers.ParticleFilterPosterior`.
@@ -103,8 +108,45 @@ def guided_filter(
     ):
         _utils.check_callback_arity(fn, name, base, has_inputs)
 
+    prop_any: Any = proposal_sampler  # ty: union not narrowable by flags
+    logprop_any: Any = log_proposal_fn  # ty: union not narrowable by flags
+    logtrans_any: Any = log_transition_fn  # ty: union not narrowable by flags
+    obs_any: Any = log_observation_fn  # ty: union not narrowable by flags
+
     if has_inputs:
         inputs_arr = _utils.canonicalize_inputs(inputs, num_timesteps)
+
+        if batched:
+
+            def mutate(key, particles, data):
+                y_t, input_t = data
+                return prop_any(key, particles, y_t, input_t)
+
+            def log_g(prev, particles, data):
+                y_t, input_t = data
+                return (
+                    obs_any(y_t, particles, input_t)
+                    + logtrans_any(particles, prev, input_t)
+                    - logprop_any(y_t, particles, prev, input_t)
+                )
+
+            def log_g0(particles, data):
+                y_0, input_0 = data
+                return obs_any(y_0, particles, input_0)
+
+            data = (emissions, inputs_arr)
+            fk = FKModel(
+                m0=initial_sampler, m=mutate, log_g=log_g, log_g0=log_g0
+            )
+            return run_filter(
+                key,
+                fk,
+                data,
+                num_particles,
+                resampling_fn,
+                resampling_threshold,
+                store_history=store_history,
+            )
 
         def mutate(key, particles, data):
             y_t, input_t = data
@@ -134,6 +176,37 @@ def guided_filter(
 
         data = (emissions, inputs_arr)
     else:
+        if batched:
+
+            def mutate(key, particles, data):
+                (y_t,) = data
+                return prop_any(key, particles, y_t)
+
+            def log_g(prev, particles, data):
+                (y_t,) = data
+                return (
+                    obs_any(y_t, particles)
+                    + logtrans_any(particles, prev)
+                    - logprop_any(y_t, particles, prev)
+                )
+
+            def log_g0(particles, data):
+                (y_0,) = data
+                return obs_any(y_0, particles)
+
+            data = (emissions,)
+            fk = FKModel(
+                m0=initial_sampler, m=mutate, log_g=log_g, log_g0=log_g0
+            )
+            return run_filter(
+                key,
+                fk,
+                data,
+                num_particles,
+                resampling_fn,
+                resampling_threshold,
+                store_history=store_history,
+            )
 
         def mutate(key, particles, data):
             (y_t,) = data

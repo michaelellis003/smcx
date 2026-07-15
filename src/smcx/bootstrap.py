@@ -11,6 +11,8 @@ loop is Python over one ``mx.compile``d step (MLX has no scan;
 async + lagged-eval cadence per mlx-performance.md).
 """
 
+from typing import Any
+
 import mlx.core as mx
 from jaxtyping import Float
 
@@ -41,6 +43,7 @@ def bootstrap_filter(
     *,
     inputs: mx.array | None = None,
     store_history: bool = True,
+    batched: bool = False,
 ) -> ParticleFilterPosterior:
     r"""Run a bootstrap (SIR) particle filter.
 
@@ -69,6 +72,14 @@ def bootstrap_filter(
             aligned with emissions; ``inputs[t]`` feeds the
             transition *into* t and the observation *at* t
             (ADR-0008).
+        batched: When True (ADR-0013), callbacks receive the whole
+            cloud with ONE key — ``trans_any(key,
+            particles[, input_t])`` and ``log_observation_fn(
+            emission, particles[, input_t]) -> (N,)`` — skipping the
+            internal vmap/per-particle key split. Use for
+            matrix-valued models (MLX's vmap does not fuse matvecs
+            to GEMM; measured 5.1x). Same arities as the default
+            convention.
         store_history: When False (ADR-0011), particle/weight/
             ancestor arrays cover only the final step (time axis
             length 1) and memory drops from O(T*N) to O(N);
@@ -98,37 +109,65 @@ def bootstrap_filter(
         log_observation_fn, "log_observation_fn", 2, has_inputs
     )
 
+    trans_any: Any = transition_sampler  # ty: union not narrowable by flags
+    obs_any: Any = log_observation_fn  # ty: union not narrowable by flags
+
     if has_inputs:
         inputs_arr = _utils.canonicalize_inputs(inputs, num_timesteps)
 
-        def mutate(key, particles, data):
-            _, input_t = data
-            keys = mx.random.split(key, particles.shape[0])
-            return mx.vmap(transition_sampler, in_axes=(0, 0, None))(
-                keys, particles, input_t
-            )
+        if batched:
 
-        def log_g(prev, particles, data):
-            y_t, input_t = data
-            del prev
-            return mx.vmap(log_observation_fn, in_axes=(None, 0, None))(
-                y_t, particles, input_t
-            )
+            def mutate(key, particles, data):
+                _, input_t = data
+                return trans_any(key, particles, input_t)
+
+            def log_g(prev, particles, data):
+                y_t, input_t = data
+                del prev
+                return obs_any(y_t, particles, input_t)
+
+        else:
+
+            def mutate(key, particles, data):
+                _, input_t = data
+                keys = mx.random.split(key, particles.shape[0])
+                return mx.vmap(transition_sampler, in_axes=(0, 0, None))(
+                    keys, particles, input_t
+                )
+
+            def log_g(prev, particles, data):
+                y_t, input_t = data
+                del prev
+                return mx.vmap(log_observation_fn, in_axes=(None, 0, None))(
+                    y_t, particles, input_t
+                )
 
         data = (emissions, inputs_arr)
     else:
+        if batched:
 
-        def mutate(key, particles, data):
-            del data
-            keys = mx.random.split(key, particles.shape[0])
-            return mx.vmap(transition_sampler)(keys, particles)
+            def mutate(key, particles, data):
+                del data
+                return trans_any(key, particles)
 
-        def log_g(prev, particles, data):
-            (y_t,) = data
-            del prev
-            return mx.vmap(log_observation_fn, in_axes=(None, 0))(
-                y_t, particles
-            )
+            def log_g(prev, particles, data):
+                (y_t,) = data
+                del prev
+                return obs_any(y_t, particles)
+
+        else:
+
+            def mutate(key, particles, data):
+                del data
+                keys = mx.random.split(key, particles.shape[0])
+                return mx.vmap(transition_sampler)(keys, particles)
+
+            def log_g(prev, particles, data):
+                (y_t,) = data
+                del prev
+                return mx.vmap(log_observation_fn, in_axes=(None, 0))(
+                    y_t, particles
+                )
 
         data = (emissions,)
 

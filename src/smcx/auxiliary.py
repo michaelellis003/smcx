@@ -19,6 +19,8 @@ uniformly better than bootstrap (Johansen & Doucet 2008); it pays off
 when the look-ahead is informative.
 """
 
+from typing import Any
+
 import mlx.core as mx
 from jaxtyping import Float
 
@@ -50,6 +52,7 @@ def auxiliary_filter(
     *,
     inputs: mx.array | None = None,
     store_history: bool = True,
+    batched: bool = False,
 ) -> ParticleFilterPosterior:
     r"""Run an auxiliary particle filter.
 
@@ -72,6 +75,8 @@ def auxiliary_filter(
             *first-stage* weights drops below ``threshold * N``.
         inputs: Optional per-step inputs (ADR-0008 alignment).
         store_history: ADR-0011 memory option.
+        batched: ADR-0013 fast path — callbacks receive the whole
+            cloud with one key; same arities.
 
     Returns:
         :class:`~smcx.containers.ParticleFilterPosterior`.
@@ -94,47 +99,85 @@ def auxiliary_filter(
     ):
         _utils.check_callback_arity(fn, name, 2, has_inputs)
 
+    trans_any: Any = transition_sampler  # ty: union not narrowable by flags
+    obs_any: Any = log_observation_fn  # ty: union not narrowable by flags
+    aux_any: Any = log_auxiliary_fn  # ty: union not narrowable by flags
+
     if has_inputs:
         inputs_arr = _utils.canonicalize_inputs(inputs, num_timesteps)
+        if batched:
 
-        def mutate(key, particles, data):
-            _, input_t = data
-            keys = mx.random.split(key, particles.shape[0])
-            return mx.vmap(transition_sampler, in_axes=(0, 0, None))(
-                keys, particles, input_t
-            )
+            def mutate(key, particles, data):
+                _, input_t = data
+                return trans_any(key, particles, input_t)
 
-        def log_g(prev, particles, data):
-            y_t, input_t = data
-            del prev
-            return mx.vmap(log_observation_fn, in_axes=(None, 0, None))(
-                y_t, particles, input_t
-            )
+            def log_g(prev, particles, data):
+                y_t, input_t = data
+                del prev
+                return obs_any(y_t, particles, input_t)
 
-        def log_eta(particles, data):
-            y_t, input_t = data
-            return mx.vmap(log_auxiliary_fn, in_axes=(None, 0, None))(
-                y_t, particles, input_t
-            )
+            def log_eta(particles, data):
+                y_t, input_t = data
+                return aux_any(y_t, particles, input_t)
+
+        else:
+
+            def mutate(key, particles, data):
+                _, input_t = data
+                keys = mx.random.split(key, particles.shape[0])
+                return mx.vmap(transition_sampler, in_axes=(0, 0, None))(
+                    keys, particles, input_t
+                )
+
+            def log_g(prev, particles, data):
+                y_t, input_t = data
+                del prev
+                return mx.vmap(log_observation_fn, in_axes=(None, 0, None))(
+                    y_t, particles, input_t
+                )
+
+            def log_eta(particles, data):
+                y_t, input_t = data
+                return mx.vmap(log_auxiliary_fn, in_axes=(None, 0, None))(
+                    y_t, particles, input_t
+                )
 
         data = (emissions, inputs_arr)
     else:
+        if batched:
 
-        def mutate(key, particles, data):
-            del data
-            keys = mx.random.split(key, particles.shape[0])
-            return mx.vmap(transition_sampler)(keys, particles)
+            def mutate(key, particles, data):
+                del data
+                return trans_any(key, particles)
 
-        def log_g(prev, particles, data):
-            (y_t,) = data
-            del prev
-            return mx.vmap(log_observation_fn, in_axes=(None, 0))(
-                y_t, particles
-            )
+            def log_g(prev, particles, data):
+                (y_t,) = data
+                del prev
+                return obs_any(y_t, particles)
 
-        def log_eta(particles, data):
-            (y_t,) = data
-            return mx.vmap(log_auxiliary_fn, in_axes=(None, 0))(y_t, particles)
+            def log_eta(particles, data):
+                (y_t,) = data
+                return aux_any(y_t, particles)
+
+        else:
+
+            def mutate(key, particles, data):
+                del data
+                keys = mx.random.split(key, particles.shape[0])
+                return mx.vmap(transition_sampler)(keys, particles)
+
+            def log_g(prev, particles, data):
+                (y_t,) = data
+                del prev
+                return mx.vmap(log_observation_fn, in_axes=(None, 0))(
+                    y_t, particles
+                )
+
+            def log_eta(particles, data):
+                (y_t,) = data
+                return mx.vmap(log_auxiliary_fn, in_axes=(None, 0))(
+                    y_t, particles
+                )
 
         data = (emissions,)
 
