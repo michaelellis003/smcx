@@ -20,12 +20,12 @@ The theme: prove the thesis before building breadth.
       and kernel defaults on the real step (research numbers:
       docs/research/mlx-performance.md; scripts in
       benchmarks/exploratory/)
-- [ ] FK core: FKModel protocol + generic loop (ADR-0002, contingent)
-- [ ] `bootstrap_filter` + `simulate` + containers (+ `types.py`
-      Protocols incl. guided/inputs forms per ADR-0008)
-- [ ] Kalman oracle in tests (numpy f64) + LGSSM correctness suite
-      (incl. missing-observations and (T,) emissions cases)
-- [ ] `__all__` lock test (subset + ADR-cited additions rule)
+- [x] ~~FK core: FKModel protocol + generic loop~~ (2026-07-14)
+- [x] ~~`bootstrap_filter` + `simulate` + containers + Protocols~~
+      (2026-07-14; T=100 filter at N=10⁶ runs 3.25 ms/step GPU)
+- [x] ~~Kalman oracle + LGSSM correctness suite~~ (2026-07-14;
+      MC-calibrated gates incl. missing-obs and inputs-channel)
+- [x] ~~`__all__` lock test~~ (2026-07-14)
 - [ ] **Kill test**: smcx (MLX GPU/CPU) vs smcjax (JAX CPU) at
       10⁴–10⁶ particles; verdict recorded in `benchmarks/results/`
       and README Status
