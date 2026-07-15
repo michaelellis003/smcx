@@ -51,7 +51,9 @@ The theme: prove the thesis before building breadth.
 - [ ] `auxiliary_filter` via twisted potentials
 - [ ] Tempered SMC sampler with adaptive ESS-bisection schedule and
       particle-tuned RWM moves
-- [ ] `distributions` module (~8 families) incl. Lanczos lgamma
+- [x] ~~`distributions` module (~8 families) incl. Lanczos lgamma~~
+      (2026-07-14, ADR-0012: 9 families, guarded chol_factor,
+      MT gamma sampler)
 - [ ] Diagnostics port from smcjax (Pareto-k, tail-ESS, CRPS,
       diagnose, …)
 - [ ] `liu_west_filter` (labeled approximate)
