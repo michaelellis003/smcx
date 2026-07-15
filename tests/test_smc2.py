@@ -292,6 +292,49 @@ class TestRejuvenation:
         )
 
 
+class TestBatchedStep:
+    """The batched-over-theta primitives match per-row computation.
+
+    smc2's inner step batches N_theta filters via row-wise reductions
+    and a vmap-over-theta resampler (ADR-0013). The full step's
+    batched-vs-looped equivalence is already covered end to end by the
+    reduction gate (N_theta=1 reduces to a bootstrap filter) and the
+    exact-recovery gates; here we pin the batched primitives directly.
+    """
+
+    def test_lse_rows_matches_per_row_loop(self):
+        from smcx.smc2 import _lse_rows
+
+        x = mx.random.normal((7, 13), key=mx.random.key(0))
+        batched = np.array(_lse_rows(x))
+        looped = np.array([_np_lse(np.array(x[i])) for i in range(7)])
+        assert np.allclose(batched, looped, atol=1e-5)
+
+    def test_normalize_rows_each_row_is_a_distribution(self):
+        from smcx.smc2 import _normalize_rows
+
+        x = mx.random.normal((5, 9), key=mx.random.key(1))
+        norm, _ = _normalize_rows(x)
+        prob = np.array(mx.exp(norm))
+        assert np.allclose(prob.sum(axis=1), 1.0, atol=1e-5)
+
+    def test_batched_resample_routes_each_row_independently(self):
+        from smcx.smc2 import _batched_inner_resample
+
+        # One-hot weight per row: systematic resampling must pick that
+        # row's peak for every draw, and each row is independent.
+        n_x = 16
+        peaks = [2, 7, 15]
+        w = np.zeros((3, n_x), dtype=np.float32)
+        for i, j in enumerate(peaks):
+            w[i, j] = 1.0
+        idx = np.array(
+            _batched_inner_resample(mx.random.key(0), mx.array(w), n_x)
+        )
+        for i, j in enumerate(peaks):
+            assert np.all(idx[i] == j), (i, j, idx[i])
+
+
 _RECOVERY_KEYS = 10
 
 
