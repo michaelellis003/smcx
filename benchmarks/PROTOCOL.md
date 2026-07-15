@@ -24,8 +24,10 @@ script + hashes).
    non-Gaussian), T=500. Exercises per-particle density cost, where
    XLA CPU fusion is strong — the honest adversarial workload.
 3. **TRACK-4**: d=4 linear-Gaussian tracking, diagonal emission
-   covariance, T=200; plus one full-covariance variant to expose the
-   CPU-pinned `mx.linalg` cost.
+   covariance, T=200; plus one full-covariance variant, **report-only
+   (not in the verdict)** — it exercises the full-covariance
+   multivariate density path (precomputed `L⁻¹` matmul per design §7,
+   no per-step CPU linalg).
 
 Grid: N ∈ {10⁴, 10⁵, 10⁶} × the three workloads. The N=10⁴ row is
 reported first — that is the regime typical filtering users occupy
@@ -33,20 +35,40 @@ and where dispatch overhead bites hardest.
 
 ## Success criterion (pre-registered)
 
-The thesis **holds** if MLX-GPU achieves ≥3× median wall-clock over
-the JAX-CPU baseline at N ≥ 10⁵ on at least two of the three
-workloads, with both sides passing the correctness gate. It holds
-**weakly** (proceed, but reframe README claims) if ≥3× only at 10⁶ or
-only on LGSSM-1D. It **fails** (thesis dies, per README) if JAX-CPU
-is within 1.5× everywhere, or MLX-GPU ≈ MLX-CPU everywhere after the
-profiling check below.
+A workload **counts** if MLX-GPU achieves ≥3× median wall-clock over
+the JAX-CPU baseline at **both** N=10⁵ and N=10⁶, with both sides
+passing that workload's correctness gate (a workload without a
+passing gate on both sides can never count).
 
-## Correctness gate (runs before any timing)
+The thesis **holds** if at least two of the three workloads count.
+It holds **weakly** (proceed, but reframe README claims) if exactly
+one counts, or if any outcome matches none of the mapped cases —
+every unmapped outcome is recorded as weak, never upgraded. It
+**fails** (thesis dies, per README) if JAX-CPU is within 1.5×
+everywhere, or MLX-GPU < 1.2× MLX-CPU everywhere after the profiling
+check below.
 
-|mean(log Ẑ) − log Z_Kalman| ≤ k·SD/√R + SD²/2 over R ≥ 20 keys
-(SD from `replicated_log_ml`; the SD²/2 term budgets the Jensen bias
-of E[log Ẑ]; k and derivation in the harness source). Applied to
-both libraries. A fast wrong answer is a failure, not a win.
+## Correctness gates (run before any timing, at every gated (workload, N) cell, both libraries)
+
+- **Kalman-oracle gate** (LGSSM-1D, TRACK-4):
+  −(k·SD/√R + SD²/2) ≤ mean(log Ẑ) − log Z_Kalman ≤ k·SD/√R
+  over R ≥ 20 independent keys (actual R recorded). One-sided Jensen
+  budget: the SD²/2 downward allowance reflects E[log Ẑ] ≈
+  log Z − Var/2; an *upward* deviation of that size is evidence of a
+  bug and is not excused. **k = 3, fixed here** (normal approximation
+  with SD estimated from the same R replicates; the harness derives
+  the formula in comments but may not choose k). SD is computed over
+  the R runs by the harness loop (`replicated_log_ml` where
+  available — it is a v0.2 deliverable, so the harness carries its
+  own loop for the kill test).
+- **Cross-library gate** (SV-1, which has no Kalman oracle):
+  |mean(log Ẑ_smcx) − mean(log Ẑ_smcjax)| ≤ 3·√(SD_x²/R + SD_j²/R)
+  at matched N and algorithm over the same R ≥ 20 keys per side
+  (Jensen biases cancel to first order at matched algorithm and N),
+  plus structural invariants on both sides (increments sum to total;
+  ESS ∈ [1, N]).
+
+A fast wrong answer is a failure, not a win.
 
 ## Fairness rules
 
@@ -83,3 +105,10 @@ Python version, date. Results are dated markdown in
 - The audit's 19× resample-kernel figure is a comparison against
   MLX's own CPU backend, not against XLA-CPU — never quote it as
   evidence for the thesis.
+
+## Amendments
+
+- 2026-07-14 (panel round 2, pre-code): pinned k=3; defined the SV-1
+  cross-library gate; made the Jensen budget one-sided; quantified
+  the verdict mapping (both-N rule, full-covariance report-only,
+  ≈ defined as <1.2×, unmapped outcomes → weak).

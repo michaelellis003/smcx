@@ -77,8 +77,9 @@ Evidence and sources: `docs/research/engineering-practices.md`.
 - **Validation**: structural checks (shapes, dtypes, sizes) at
   public-function entry in plain Python (MLX shape inference is
   eager). Data-dependent checks (degenerate weights, NaN) live in the
-  loop shell at the per-step `mx.eval` boundary — they cannot raise
-  inside a compiled step. One custom exception
+  loop shell at eval boundaries (detection latency up to k−1 steps
+  under eval-every-k; one step lagged under async_eval; immediate at
+  k=1) — they cannot raise inside a compiled step. One custom exception
   (`DegenerateWeightsError`), one warning category
   (`SMCNumericsWarning`), always with `stacklevel`.
 - **Stochastic tests, three tiers**: (1) exact seeded tests only for

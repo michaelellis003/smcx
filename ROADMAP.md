@@ -27,8 +27,9 @@ The theme: prove the thesis before building breadth.
       and README Status
 - [ ] File MLX issue: `categorical(num_samples=)` O(N·M) memory
       (unreported upstream; evidence in `docs/research/mlx-audit.md`)
-- [ ] Open smcjax coordinated-change issues (simulate fix,
-      `resampling_criterion`, guided filter first)
+- [ ] Open smcjax coordinated-change issues (ADR-0008 priority:
+      inputs channel first, then simulate fix, `resampling_criterion`,
+      guided filter)
 - [ ] Typing setup per ADR-0007 (jaxtyping + beartype hook + vendored
       `typings/mlx/core.pyi`)
 - [ ] SPEC 8 release-workflow hardening (Trusted Publishing,
