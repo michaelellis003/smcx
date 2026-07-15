@@ -44,16 +44,17 @@ the exact log-evidence.
 
 | N_θ = N_x | smcx-GPU | smcx-CPU | particles-CPU | log Ẑ (exact −143.53) |
 |----:|----:|----:|----:|----:|
-| 512  | 0.57 s | 19.30 s | 67.7 s  | smcx −143.4, particles −143.50 |
-| 1024 | 2.85 s | 92.01 s | 175.1 s | smcx −143.5, particles −143.56 |
+| 512  | 0.57 s | 19.30 s | 67.6 s  | smcx −143.4, particles −143.56 |
+| 1024 | 2.85 s | 92.01 s | 170.3 s | smcx −143.5, particles −143.55 |
 
 All three land on the exact log Z within Monte-Carlo error — smcx is
 correct, confirmed by an implementation that shares no code with it.
-All times are medians (smcx of 5, `particles` of 3 — each `particles`
-run is 70–175 s); a first single-run pass read the 512 cell 41 %
-high, which is why the external timings are medianed too.
+All times are **medians of 5** (AGENTS.md), on both sides — each
+`particles` run is 70–170 s. A first single-run pass read the 512
+cell 41 % high (95.8 s vs the 67.6 s median), which is why the
+external timings are medianed like everything else.
 
-On speed, smcx-GPU runs **~61–119× faster** than `particles` and
+On speed, smcx-GPU runs **~60–119× faster** than `particles` and
 smcx-CPU **~1.9–3.5× faster on the same hardware**. Read these as a
 ballpark, not a controlled implementation contest: `particles`'
 SMC² default is **waste-free with a length-10 move chain**, heavier
@@ -64,7 +65,7 @@ fully-controlled number is the smcx-GPU-vs-smcx-CPU 32–34× above
 
 Reproduce (isolated env — `particles` pins numpy<2, conflicting with
 smcx): `uv run --no-project --with 'particles>=0.4' python
-benchmarks/smc2/particles_side.py 512 512 100 3` (last arg = reps).
+benchmarks/smc2/particles_side.py 512 512 100 5` (last arg = reps).
 
 ## Reading the result
 

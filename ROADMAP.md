@@ -101,7 +101,7 @@ The theme: prove the thesis before building breadth.
   correctness-gated; `benchmarks/results/2026-07-15-smc2-device-
   benchmark.md` + PROTOCOL amendment. Chopin's `particles` added as
   an external-authority baseline (independent implementation agrees
-  on log Z; smcx-GPU ~61–119× faster, median-of-3, config caveat
+  on log Z; smcx-GPU ~60–119× faster, median-of-5, config caveat
   noted). Deferred
   (ADR-0014): adaptive N_x, the exchange step, guided inner engines.
 - Differentiable resampling: Ścibior-Wood stop-gradient first; OT/DET

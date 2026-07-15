@@ -53,7 +53,7 @@ class LGSSM(ssm.StateSpaceModel):
         return dists.Normal(loc=x, scale=math.sqrt(R))
 
 
-def run_cell(n_theta, n_x, t_len, reps=3):
+def run_cell(n_theta, n_x, t_len, reps=5):
     y = _data(t_len)
     prior = dists.StructDist({"a": dists.Uniform(0.5, 1.3)})
     times, logz = [], None
@@ -77,5 +77,5 @@ def run_cell(n_theta, n_x, t_len, reps=3):
 
 if __name__ == "__main__":
     nth, nx, t = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
-    reps = int(sys.argv[4]) if len(sys.argv) > 4 else 3
+    reps = int(sys.argv[4]) if len(sys.argv) > 4 else 5
     print(json.dumps(run_cell(nth, nx, t, reps)))
