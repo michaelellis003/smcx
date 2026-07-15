@@ -1,0 +1,267 @@
+# Copyright Contributors to the smcx project.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Native resampling schemes (ADR-0004 contract, ADR-0009 kernels).
+
+Every scheme has the BlackJAX-compatible signature
+``(key, weights, num_samples) -> int32 ancestors`` with
+probability-space weights, so smcjax call sites port unchanged.
+Ancestor indices from ``systematic``, ``stratified``, and
+``multinomial`` are nondecreasing — a design invariant (sorted
+gathers run ~4.9x faster than random on M-series; design §5).
+``residual`` returns its deterministic block first, then iid
+residual draws.
+
+Kernels:
+
+- ``systematic`` uses the offspring-counting formulation of
+  Murray, Lee & Jacob (2016, JCGS 25(3)) in pure MLX — O(N), no
+  dependent-dispatch chain, vmap-clean.
+- ``stratified``/``multinomial`` locate strata edges / sorted
+  uniforms in the CDF by binary search: a fused
+  ``mx.fast.metal_kernel`` on the GPU (no vmap/vjp — ADR-0009), with
+  a pure-MLX take-chain fallback elsewhere.
+- ``multinomial`` draws already-sorted uniforms in O(N) via
+  exponential spacings (Devroye 1986, Ch. V.3.1) using
+  ``-log1p(-u)`` — ``mx.random.uniform`` can return exactly 0.
+
+Guards (mlx-audit hazards 1-2): CDFs are normalized by their final
+element and all indices are clipped to ``[0, N-1]`` — a raw f32
+bisect provably reaches N at N=1e6.
+"""
+
+import math
+
+import mlx.core as mx
+from jaxtyping import Float, Int32
+
+from smcx.types import KeyT
+
+# Avoids 0/0 on all-zero CDFs (outputs are masked wherever this can
+# engage; f32 min normal is ~1.18e-38, see ADR-0003 FTZ note).
+_TINY = 1e-30
+
+_METAL_SEARCHSORTED_SRC = """
+    uint i = thread_position_in_grid.x;
+    if (i >= (uint)u_shape[0]) return;
+    T x = u[i];
+    uint lo = 0;
+    uint hi = (uint)cdf_shape[0];
+    while (lo < hi) {
+        uint mid = (lo + hi) >> 1;
+        if (cdf[mid] <= x) { lo = mid + 1; } else { hi = mid; }
+    }
+    uint n = (uint)cdf_shape[0];
+    out[i] = (int)min(lo, n - 1);
+"""
+
+_metal_kernel_cache: list = []
+
+
+def _normalized_cdf(
+    weights: Float[mx.array, " num_particles"],
+) -> Float[mx.array, " num_particles"]:
+    """Cumulative distribution normalized so the final entry is 1."""
+    cdf = mx.cumsum(weights)
+    return cdf / mx.maximum(cdf[-1], _TINY)
+
+
+def _searchsorted_metal(cdf: mx.array, u: mx.array) -> mx.array:
+    """Fused right-bisect on GPU (one dispatch; ADR-0009)."""
+    if not _metal_kernel_cache:
+        _metal_kernel_cache.append(
+            mx.fast.metal_kernel(
+                name="smcx_searchsorted",
+                input_names=["cdf", "u"],
+                output_names=["out"],
+                source=_METAL_SEARCHSORTED_SRC,
+                ensure_row_contiguous=True,
+            )
+        )
+    (out,) = _metal_kernel_cache[0](
+        inputs=[cdf, u],
+        template=[("T", cdf.dtype)],
+        grid=(u.shape[0], 1, 1),
+        threadgroup=(min(256, max(u.shape[0], 1)), 1, 1),
+        output_shapes=[u.shape],
+        output_dtypes=[mx.int32],
+    )
+    return out
+
+
+def _searchsorted_take(cdf: mx.array, u: mx.array) -> mx.array:
+    """Portable right-bisect: ceil(log2 N)+1 rounds of mx.take."""
+    n = cdf.shape[0]
+    lo = mx.zeros(u.shape, dtype=mx.int32)
+    hi = mx.full(u.shape, n, dtype=mx.int32)
+    for _ in range(math.ceil(math.log2(max(n, 2))) + 1):
+        mid = (lo + hi) // 2
+        go_right = mx.take(cdf, mx.clip(mid, 0, n - 1)) <= u
+        lo = mx.where(go_right, mid + 1, lo)
+        hi = mx.where(go_right, hi, mid)
+    return mx.clip(lo, 0, n - 1)
+
+
+def _searchsorted(cdf: mx.array, u: mx.array) -> mx.array:
+    """Dispatch: Metal kernel on GPU, take-chain elsewhere."""
+    if mx.default_device() == mx.Device(mx.gpu):
+        return _searchsorted_metal(cdf, u)
+    return _searchsorted_take(cdf, u)
+
+
+def _sorted_uniforms(key: KeyT, num_samples: int) -> mx.array:
+    """Sorted U(0,1) order statistics in O(N), no sort.
+
+    Devroye (1986, Ch. V.3.1): normalized running sums of iid Exp(1)
+    spacings. ``-log1p(-u)`` never sees log(0) (uniform can return
+    exactly 0). f32 blocked cumsum can produce sub-slot local
+    non-monotonicity (<= ~2e-7) — harmless for binary search.
+    """
+    e = -mx.log1p(-mx.random.uniform(shape=(num_samples + 1,), key=key))
+    s = mx.cumsum(e)
+    return s[:-1] / mx.maximum(s[-1], _TINY)
+
+
+def _fill_forward_ancestors(
+    starts: mx.array, counts: mx.array, num_samples: int
+) -> mx.array:
+    """Offspring counts -> monotone ancestors via scatter-max/cummax.
+
+    Scatters each positive-count particle's index at its output start
+    position into a -1-filled array, then forward-fills with cummax:
+    among particles sharing a start (zero-count collisions), the one
+    with offspring carries the largest index, so scatter-max resolves
+    ties correctly (Murray-Lee-Jacob 2016 formulation).
+    """
+    n = counts.shape[0]
+    out = mx.full((num_samples,), -1, dtype=mx.int32)
+    vals = mx.where(
+        counts > 0, mx.arange(n, dtype=mx.int32), mx.array(-1, dtype=mx.int32)
+    )
+    out = out.at[mx.clip(starts, 0, num_samples - 1)].maximum(vals)
+    return mx.cummax(out)
+
+
+def systematic(
+    key: KeyT,
+    weights: Float[mx.array, " num_particles"],
+    num_samples: int,
+) -> Int32[mx.array, " num_samples"]:
+    """Systematic resampling via offspring counting (ADR-0009).
+
+    One shared uniform places an evenly spaced grid on the CDF;
+    offspring counts follow in closed form, with no binary search
+    and no dependent-dispatch chain. Offspring deviate by less than
+    one from ``num_samples * weights`` (Kitagawa 1996). Note
+    systematic resampling does not dominate stratified in variance
+    for all test functions (Douc & Cappe 2005).
+
+    Args:
+        key: PRNG key.
+        weights: Normalized probability-space weights.
+        num_samples: Number of ancestors to draw.
+
+    Returns:
+        Nondecreasing int32 ancestor indices.
+    """
+    n = weights.shape[0]
+    m = num_samples
+    u0 = mx.random.uniform(key=key)
+    # s_i = number of grid points (u0 + j)/m, j = 0..m-1, at or below
+    # cdf_i. ceil(m*cdf - u0) in f32 has ulp ~m*2^-24 (the slot-scale
+    # wall shared by every scheme; design §5).
+    s = mx.clip(mx.ceil(m * _normalized_cdf(weights) - u0), 0, m).astype(
+        mx.int32
+    )
+    # Blocked f32 cumsum can dip sub-slot: enforce monotone counts,
+    # and pin the total to exactly m.
+    s = mx.cummax(s)
+    s = mx.where(mx.arange(n) == n - 1, mx.array(m, dtype=mx.int32), s)
+    starts = mx.concatenate([mx.zeros((1,), dtype=mx.int32), s[:-1]])
+    return _fill_forward_ancestors(starts, s - starts, m)
+
+
+def stratified(
+    key: KeyT,
+    weights: Float[mx.array, " num_particles"],
+    num_samples: int,
+) -> Int32[mx.array, " num_samples"]:
+    """Stratified resampling: one uniform per stratum.
+
+    Count variance is dominated by multinomial's for every test
+    function (Douc & Cappe 2005).
+
+    Args:
+        key: PRNG key.
+        weights: Normalized probability-space weights.
+        num_samples: Number of ancestors to draw.
+
+    Returns:
+        Nondecreasing int32 ancestor indices.
+    """
+    m = num_samples
+    v = mx.random.uniform(shape=(m,), key=key)
+    u = (mx.arange(m) + v) / m
+    return _searchsorted(_normalized_cdf(weights), u)
+
+
+def multinomial(
+    key: KeyT,
+    weights: Float[mx.array, " num_particles"],
+    num_samples: int,
+) -> Int32[mx.array, " num_samples"]:
+    """Multinomial (iid) resampling via sorted uniforms.
+
+    Never uses ``mx.random.categorical(num_samples=...)``, whose
+    O(N*M) memory is unusable at resampling scale (mlx-audit hazard
+    1). Sorted queries also keep the ancestor gather monotone.
+
+    Args:
+        key: PRNG key.
+        weights: Normalized probability-space weights.
+        num_samples: Number of ancestors to draw.
+
+    Returns:
+        Nondecreasing int32 ancestor indices.
+    """
+    u = _sorted_uniforms(key, num_samples)
+    return _searchsorted(_normalized_cdf(weights), u)
+
+
+def residual(
+    key: KeyT,
+    weights: Float[mx.array, " num_particles"],
+    num_samples: int,
+) -> Int32[mx.array, " num_samples"]:
+    """Residual resampling: guaranteed floor counts + iid remainder.
+
+    Each particle receives ``floor(num_samples * w_i)`` offspring
+    deterministically; the remaining draws are iid from the residual
+    distribution (Liu & Chen 1998). Count variance is dominated by
+    multinomial's. Output is the deterministic block (nondecreasing)
+    followed by the residual draws — not globally monotone.
+
+    Args:
+        key: PRNG key.
+        weights: Normalized probability-space weights.
+        num_samples: Number of ancestors to draw.
+
+    Returns:
+        int32 ancestor indices.
+    """
+    m = num_samples
+    w = weights / mx.maximum(mx.sum(weights), _TINY)
+    scaled = m * w
+    floor_counts = mx.floor(scaled).astype(mx.int32)
+    cum = mx.cumsum(floor_counts)
+    num_deterministic = cum[-1]
+    det = _fill_forward_ancestors(cum - floor_counts, floor_counts, m)
+    # Fixed-shape residual block: draw m iid uniforms and mask; only
+    # positions >= num_deterministic are consumed, so the surplus
+    # draws are discarded, keeping shapes static under mx.compile.
+    resid = mx.maximum(scaled - floor_counts, 0.0)
+    cdf_r = mx.cumsum(resid)
+    cdf_r = cdf_r / mx.maximum(cdf_r[-1], _TINY)
+    u = mx.random.uniform(shape=(m,), key=mx.random.split(key)[1])
+    res_idx = _searchsorted(cdf_r, u)
+    return mx.where(mx.arange(m) < num_deterministic, det, res_idx)

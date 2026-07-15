@@ -6,6 +6,7 @@
 Sequential Monte Carlo for Apple silicon, built on MLX
 """
 
+from smcx.resampling import multinomial, residual, stratified, systematic
 from smcx.weights import ess, log_ess, log_normalize, normalize
 
 __version__ = "0.1.0"
@@ -15,5 +16,9 @@ __all__ = [
     "ess",
     "log_ess",
     "log_normalize",
+    "multinomial",
     "normalize",
+    "residual",
+    "stratified",
+    "systematic",
 ]
