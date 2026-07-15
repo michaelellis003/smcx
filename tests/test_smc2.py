@@ -395,19 +395,39 @@ class TestBatchedStep:
         observed = np.array(out).reshape(n_theta * n_x, 4)
         assert np.array_equal(observed, expected)
 
-    def test_batched_step_threads_a_resample_offset_per_filter(self):
+    def test_resample_drives_each_filter_by_its_own_offset(self):
         # The step's other RNG source is the systematic resample
-        # offset. It must be one draw PER FILTER (shape (n_theta, 1)),
-        # not a single constant broadcast to all filters. Distinctness
-        # is NOT required — independent uniforms may collide — so we
-        # check the shape and that the offsets are not one repeated
-        # value; MLX's `uniform` makes the per-filter rows iid.
-        from smcx.smc2 import _resample_offsets
+        # offset. The operational meaning of "one offset per filter" is
+        # that filter m's resample is driven by offset[m] — verified by
+        # matching the batched resampler to an explicit per-filter loop
+        # over the same offset vector. Ramp weights make the output
+        # depend on the offset, so a bug that shared one filter's offset
+        # across all filters would diverge from this loop (the offsets
+        # themselves are MLX's per-axis uniform draw; their statistical
+        # independence is MLX's contract, not a testable claim here).
+        from smcx.resampling import _searchsorted_take
+        from smcx.smc2 import (
+            _TINY,
+            _batched_inner_resample,
+            _resample_offsets,
+        )
 
-        n_theta = 128
-        off = np.array(_resample_offsets(mx.random.key(12), n_theta))
-        assert off.shape == (n_theta, 1)
-        assert off.std() > 0  # not a shared broadcast constant
+        n_theta, n_x = 8, 16
+        w = mx.arange(1, n_x + 1, dtype=mx.float32)
+        w = w / mx.sum(w)  # ramp: the resample output depends on u0
+        w2d = mx.broadcast_to(w, (n_theta, n_x))
+        key = mx.random.key(9)
+
+        batched = np.array(_batched_inner_resample(key, w2d, n_x))
+        offsets = _resample_offsets(key, n_theta)
+        assert offsets.shape == (n_theta, 1)  # one offset per filter
+        ref = []
+        for m in range(n_theta):
+            cdf = mx.cumsum(w2d[m])
+            cdf = cdf / mx.maximum(cdf[-1], _TINY)
+            positions = (mx.arange(n_x) + offsets[m]) / n_x
+            ref.append(_searchsorted_take(cdf, positions))
+        assert np.array_equal(batched, np.array(mx.stack(ref)))
 
     def test_batched_filter_increment_matches_single_filter(self):
         # Correctness (not independence): a filter advanced by the
