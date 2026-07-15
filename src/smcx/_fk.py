@@ -38,6 +38,17 @@ from smcx.weights import log_normalize
 
 _EVAL_LAG = 4
 
+# Value-branch conditional resampling (perf-analysis.md #1): above
+# this N, log_eta-free filters branch host-side on the previous
+# step's already-materialized ESS and skip the resample pipeline
+# entirely on skip steps (43-45% of a 1e6 step; smcjax's lax.cond
+# does the same, so this is fairness-restoring). Below it, the
+# branchless where-select wins (the sync tax dominates the skipped
+# work). Results are bit-identical either way (explicit keys: the
+# unconsumed resample key shifts nothing). APF keeps branchless:
+# its trigger (first-stage W*eta ESS) only exists inside the step.
+_VALUE_BRANCH_MIN_N = 50_000
+
 
 class FKModel(NamedTuple):
     """Data-sliced Feynman-Kac model (internal).
@@ -188,6 +199,38 @@ def run_filter(
 
     step = mx.compile(_step)
 
+    # --- Value-branch step variants (log_eta-free path only) ----------
+    def _step_resample(state: ParticleState, step_key, *data_t):
+        k1, k2 = mx.random.split(step_key)
+        idx = resampling_fn(k1, mx.exp(state.log_weights), n)
+        parents = mx.take(state.particles, idx, axis=0)
+        propagated = fk.m(k2, parents, data_t)
+        log_g = fk.log_g(parents, propagated, data_t)
+        log_w_norm, log_sum = log_normalize(log_g)
+        log_ev_inc = log_sum - log_n
+        new_state = ParticleState(
+            propagated,
+            log_w_norm,
+            state.log_marginal_likelihood + log_ev_inc,
+        )
+        return new_state, idx, compute_ess(log_w_norm), log_ev_inc
+
+    def _step_skip(state: ParticleState, step_key, *data_t):
+        _, k2 = mx.random.split(step_key)  # same key discipline
+        propagated = fk.m(k2, state.particles, data_t)
+        log_g = fk.log_g(state.particles, propagated, data_t)
+        log_w_norm, log_sum = log_normalize(state.log_weights + log_g)
+        new_state = ParticleState(
+            propagated,
+            log_w_norm,
+            state.log_marginal_likelihood + log_sum,
+        )
+        return new_state, identity_ancestors, compute_ess(log_w_norm), log_sum
+
+    step_resample = mx.compile(_step_resample)
+    step_skip = mx.compile(_step_skip)
+    use_value_branch = fk.log_eta is None and n >= _VALUE_BRANCH_MIN_N
+
     # --- Loop shell: async + lag-k eval, degeneracy at the boundary ---
     step_keys = mx.random.split(key, max(num_timesteps - 1, 1))
     all_particles = [particles]
@@ -210,7 +253,24 @@ def run_filter(
 
     for t in range(1, num_timesteps):
         data_t = tuple(d[t] for d in data)
-        state, ancestors, ess_t, inc = step(state, step_keys[t - 1], *data_t)
+        if use_value_branch:
+            # Host branch on the previous step's ESS — the same
+            # array the branchless where-select compares in-graph,
+            # so the decision (and the results) are identical.
+            # NaN ESS compares False => skip, matching where().
+            e = ess_t.item()
+            if e < threshold:
+                state, ancestors, ess_t, inc = step_resample(
+                    state, step_keys[t - 1], *data_t
+                )
+            else:
+                state, ancestors, ess_t, inc = step_skip(
+                    state, step_keys[t - 1], *data_t
+                )
+        else:
+            state, ancestors, ess_t, inc = step(
+                state, step_keys[t - 1], *data_t
+            )
         if store_history:
             all_particles.append(state.particles)
             all_log_w.append(state.log_weights)
