@@ -62,6 +62,12 @@ class FKModel(NamedTuple):
     m: Callable
     log_g: Callable
     log_eta: Callable | None = None
+    # t=0 potential override ``(particles, data) -> (N,)``: the
+    # general guided potential g*f/q is undefined at t=0 (no
+    # transition into the initial cloud), so guided supplies the
+    # observation-only weighting here. Default: log_g with
+    # prev = particles (bootstrap/APF semantics).
+    log_g0: Callable | None = None
 
 
 def _neumaier_add(
@@ -118,7 +124,10 @@ def run_filter(
     # --- t = 0: init-as-if-resampled (design §2) ----------------------
     data_0 = tuple(d[0] for d in data)
     particles = fk.m0(init_key, n)
-    log_g0 = fk.log_g(particles, particles, data_0)
+    if fk.log_g0 is not None:
+        log_g0 = fk.log_g0(particles, data_0)
+    else:
+        log_g0 = fk.log_g(particles, particles, data_0)
     log_w, log_sum = log_normalize(log_g0)
     increment = log_sum - log_n
     ess_t = compute_ess(log_w)

@@ -68,6 +68,78 @@ class LogObservationFnWithInput(Protocol):
 
 
 @runtime_checkable
+class ProposalSampler(Protocol):
+    """Guided proposal draw: ``(key, state, emission) -> state``."""
+
+    def __call__(
+        self, key: mx.array, state: mx.array, emission: mx.array, /
+    ) -> mx.array: ...
+
+
+@runtime_checkable
+class ProposalSamplerWithInput(Protocol):
+    """Input-driven guided proposal draw."""
+
+    def __call__(
+        self,
+        key: mx.array,
+        state: mx.array,
+        emission: mx.array,
+        input_t: mx.array,
+        /,
+    ) -> mx.array: ...
+
+
+@runtime_checkable
+class LogProposalFn(Protocol):
+    """Proposal log-density: ``(emission, new_state, old_state)``."""
+
+    def __call__(
+        self,
+        emission: mx.array,
+        new_state: mx.array,
+        old_state: mx.array,
+        /,
+    ) -> mx.array: ...
+
+
+@runtime_checkable
+class LogProposalFnWithInput(Protocol):
+    """Input-driven proposal log-density."""
+
+    def __call__(
+        self,
+        emission: mx.array,
+        new_state: mx.array,
+        old_state: mx.array,
+        input_t: mx.array,
+        /,
+    ) -> mx.array: ...
+
+
+@runtime_checkable
+class LogTransitionFn(Protocol):
+    """Transition log-density: ``(new_state, old_state)``."""
+
+    def __call__(
+        self, new_state: mx.array, old_state: mx.array, /
+    ) -> mx.array: ...
+
+
+@runtime_checkable
+class LogTransitionFnWithInput(Protocol):
+    """Input-driven transition log-density."""
+
+    def __call__(
+        self,
+        new_state: mx.array,
+        old_state: mx.array,
+        input_t: mx.array,
+        /,
+    ) -> mx.array: ...
+
+
+@runtime_checkable
 class EmissionSampler(Protocol):
     """Per-particle emission draw: ``(key, state) -> emission``."""
 

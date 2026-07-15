@@ -14,6 +14,7 @@ from smcx.containers import (
     ParticleState,
 )
 from smcx.exceptions import DegenerateWeightsError
+from smcx.guided import guided_filter
 from smcx.resampling import multinomial, residual, stratified, systematic
 from smcx.simulate import simulate
 from smcx.weights import ess, log_ess, log_normalize, normalize
@@ -29,6 +30,7 @@ __all__ = [
     "auxiliary_filter",
     "bootstrap_filter",
     "ess",
+    "guided_filter",
     "log_ess",
     "log_normalize",
     "multinomial",

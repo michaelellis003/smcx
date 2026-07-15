@@ -50,6 +50,7 @@ SMCJAX_ALL = {
 # Every addition beyond smcjax's export list cites its ratifying ADR.
 ADDITIONS = {
     "DegenerateWeightsError": "ADR-0003",
+    "guided_filter": "ADR-0008",
 }
 
 V01_IMPLEMENTED = {
@@ -61,6 +62,7 @@ V01_IMPLEMENTED = {
     "__version__",
     "bootstrap_filter",
     "ess",
+    "guided_filter",
     "log_ess",
     "log_normalize",
     "multinomial",
