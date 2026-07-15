@@ -13,6 +13,7 @@ import pytest
 from benchmarks.native_vs_jax_mps.common import (
     balanced_orders,
     bootstrap_ratio_ci,
+    kalman_gate,
     summarize,
     validate_result,
 )
@@ -54,6 +55,18 @@ def test_bootstrap_ratio_ci_is_exact_for_constant_process_medians():
     )
 
     assert estimate == {"estimate": 2.0, "high": 2.0, "low": 2.0}
+
+
+def test_kalman_gate_uses_the_preregistered_one_sided_jensen_budget():
+    gate = kalman_gate(
+        log_evidence=[-10.2, -10.0, -9.8, -10.0],
+        oracle=-10.0,
+    )
+
+    assert gate["passed"]
+    assert gate["replicates"] == 4
+    assert gate["lower_error_bound"] < 0.0
+    assert gate["upper_error_bound"] > 0.0
 
 
 def test_validate_result_rejects_a_summary_without_raw_timings():
