@@ -67,8 +67,9 @@ Verified against mlx 0.32
 
 - `mx.random.categorical(num_samples=…)` is O(N·M) memory — unusable
   for resampling; smcx uses an inverse-CDF kernel with an in-library
-  binary-search `searchsorted` (declined upstream)
-- No `lgamma`/`digamma` (declined upstream) — smcx ships a Lanczos
+  binary-search `searchsorted` (upstream: open invitation in
+  mlx#1255, no implementation yet)
+- No `lgamma`/`digamma` (PR declined upstream) — smcx ships a Lanczos
   `lgamma`; `mx.erf`/`mx.erfinv` do exist
 - float64 raises on GPU; the CPU stream supports f64 for diagnostics,
   with device-pinning care
@@ -100,6 +101,21 @@ make docs        # build docs
 
 Releases are automated: `python-semantic-release` reads conventional
 commits on merge to main, bumps the version, tags, and publishes.
+
+## Acknowledgments
+
+smcx's design draws on the SMC ecosystem: [smcjax](https://github.com/michaelellis003/smcjax)
+(the sibling library and parity contract),
+[particles](https://github.com/nchopin/particles) and Chopin &
+Papaspiliopoulos's *An Introduction to Sequential Monte Carlo* (the
+Feynman-Kac architecture), [BlackJAX](https://github.com/blackjax-devs/blackjax)
+(the resampling contract), [Dynamax](https://github.com/probml/dynamax)
+(container conventions), TensorFlow Probability (criterion/trace
+hooks), and design lessons from PyMC, FilterPy, pfilter, pyfilter,
+Stone Soup, pomp, nimbleSMC, ArviZ, and
+[samplex](https://github.com/tedwards2412/samplex) (the MLX prior
+art). See `CITATION.cff` for formal references and
+`docs/research/licensing.md` for the full provenance record.
 
 ## Status
 

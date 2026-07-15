@@ -17,6 +17,14 @@ The theme: prove the thesis before building breadth.
 - [ ] **Kill test**: smcx (MLX GPU/CPU) vs smcjax (JAX CPU) at
       10⁴–10⁶ particles; verdict recorded in `benchmarks/results/`
       and README Status
+- [ ] File MLX issue: `categorical(num_samples=)` O(N·M) memory
+      (unreported upstream; evidence in `docs/research/mlx-audit.md`)
+- [ ] Open smcjax coordinated-change issues (simulate fix,
+      `resampling_criterion`, guided filter first)
+- [ ] Typing setup per ADR-0007 (jaxtyping + beartype hook + vendored
+      `typings/mlx/core.pyi`)
+- [ ] SPEC 8 release-workflow hardening (Trusted Publishing,
+      environment gate, attestations)
 
 ## Next (v0.2) — the filter family and the flagship sampler
 

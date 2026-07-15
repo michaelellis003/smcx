@@ -94,6 +94,8 @@ docstring-code-format = true
 version_toml = ["pyproject.toml:project.version"]
 version_variables = ["src/smcx/__init__.py:__version__"]
 commit_message = "chore(release): {version}"
+# Stay 0.x on BREAKING CHANGE commits until stability is declared.
+major_on_zero = false
 
 [tool.semantic_release.changelog.default_templates]
 changelog_file = "CHANGELOG.md"

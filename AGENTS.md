@@ -59,6 +59,69 @@ implement anything listed there. Prefer the smallest change that
 satisfies the acceptance criteria. API parity with smcjax is the
 default; divergence is an ADR-level event.
 
+## Engineering standards
+
+Evidence and sources: `docs/research/engineering-practices.md`.
+
+- **Typing** (ADR-0007): jaxtyping shape annotations on all array
+  params; beartype import hook in conftest enforces them in tests;
+  never `from __future__ import annotations`; user closures typed as
+  callback Protocols in `types.py`, not bare `Callable`; vendored
+  `typings/mlx/core.pyi` regenerated on every mlx floor bump.
+- **Validation**: structural checks (shapes, dtypes, sizes) at
+  public-function entry in plain Python (MLX shape inference is
+  eager). Data-dependent checks (degenerate weights, NaN) live in the
+  loop shell at the per-step `mx.eval` boundary — they cannot raise
+  inside a compiled step. One custom exception
+  (`DegenerateWeightsError`), one warning category
+  (`SMCNumericsWarning`), always with `stacklevel`.
+- **Stochastic tests, three tiers**: (1) exact seeded tests only for
+  determinism contracts and frozen parity fixtures; (2) moment tests
+  with tolerance = 5× the derived estimator SE, derivation in a
+  comment (MC-error-honest, extending f32-honest); (3) distributional
+  tests at a committed seed with documented α — a failure at the
+  committed seed is information, never re-rolled. Hypothesis via
+  numpy strategies converted at the boundary; `deadline=None`,
+  `derandomize=True` in CI.
+- **Functional core**: step is pure scan-shaped
+  `(carry, inputs_t, key_t) -> (carry, outputs_t)`; value-dependent
+  control flow in the shell; NamedTuples everywhere; per-step keys
+  pre-split in the shell. Unit-test the step uncompiled + one
+  compiled-equivalence test per algorithm.
+- **Benchmarks**: GPU numbers are local-only on M-series hardware; CI
+  never asserts timings. Results are dated markdown in
+  `benchmarks/results/` with a metadata header (hardware, macOS, mlx
+  version, N, T, warm-up, median-of-≥5, peak memory). Every public
+  performance claim cites a committed results file.
+- Pre-1.0 changes land at minor bumps without deprecation shims,
+  **except** `FutureWarning` for anything that silently changes
+  numerical output at a fixed key. Post-1.0: NEP 23.
+
+## Licensing and attribution
+
+Evidence and license table: `docs/research/licensing.md`.
+
+- **Red lines — never port/translate code from**: pomp (GPL-3),
+  avehtari/PSIS (GPL-3), Numerical Recipes (proprietary), any GPL
+  code. Design *ideas* from them are fine; cite them in docs.
+- **Porting code is creating a derivative work** (translation
+  included). MIT sources: preserve the copyright + permission notice
+  beside the ported code. Apache-2.0 sources (smcjax, BlackJAX,
+  ArviZ): Apache §4 — provenance header on the ported file ("Ported
+  to MLX from X (URL), Apache-2.0. Modified: …") + a line in
+  `NOTICE`. NOTICE carries legally required attributions ONLY; design
+  credits go in README/`CITATION.cff`, never NOTICE.
+- **Algorithm docstrings cite** the paper(s) and, where relevant, the
+  reference implementation lineage (e.g. lgamma: Lanczos 1964 +
+  Godfrey 2001 coefficient set as used in GSL; Pareto-k: Zhang &
+  Stephens 2009 + Vehtari et al. 2024).
+- **Upstream policy** (ADR-0006): vendor critical-path gaps with a
+  tracking issue linking upstream; re-check tracking issues +
+  regenerate MLX stubs + re-run the mlx audit on every mlx floor
+  bump; delete vendored code the release after upstream ships it.
+  File evidence-backed issues for upstream defects; PR only where a
+  maintainer invited it and we don't block on the merge.
+
 ## Project constraints (pointers, not prose)
 
 - Numerics and MLX rules: ADR-0003/0004/0005 and
