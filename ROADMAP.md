@@ -48,7 +48,8 @@ The theme: prove the thesis before building breadth.
 ## Next (v0.2) — the filter family and the flagship sampler
 
 - [ ] `guided_filter` (new vs smcjax — coordinated backport candidate)
-- [ ] `auxiliary_filter` via twisted potentials
+- [x] ~~`auxiliary_filter` via twisted potentials~~ (2026-07-14;
+      ADR-0002 mechanics, bit-exact skip-branch equivalence tested)
 - [ ] Tempered SMC sampler with adaptive ESS-bisection schedule and
       particle-tuned RWM moves
 - [x] ~~`distributions` module (~8 families) incl. Lanczos lgamma~~
