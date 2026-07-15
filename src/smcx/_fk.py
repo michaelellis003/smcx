@@ -49,11 +49,19 @@ class FKModel(NamedTuple):
         log_g: ``(prev_particles, particles, data) -> (N,)`` log
             potential; ``prev_particles`` are the post-resample
             parents (ignored by bootstrap/APF; needed by guided).
+        log_eta: optional APF twist ``(particles, data) -> (N,)``
+            (the look-ahead, batched). Enters ONLY at the resample
+            stage — first-stage weights W*eta drive the trigger and
+            draw — and is divided out at the ancestor in the
+            resampled branch only; when resampling is skipped, eta
+            is not applied anywhere (ADR-0002; smcjax
+            ``auxiliary.py`` semantics).
     """
 
     m0: Callable
     m: Callable
     log_g: Callable
+    log_eta: Callable | None = None
 
 
 def _neumaier_add(
@@ -118,19 +126,49 @@ def run_filter(
 
     def _step(state: ParticleState, step_key: mx.array, *data_t: mx.array):
         k1, k2 = mx.random.split(step_key)
-        ess_prev = compute_ess(state.log_weights)
+        # APF twist (trace-time branch; fk is a compile capture):
+        # first-stage weights W*eta drive the trigger AND the draw.
+        if fk.log_eta is not None:
+            log_aux = fk.log_eta(state.particles, data_t)
+            log_first_norm, log_first_sum = log_normalize(
+                state.log_weights + log_aux
+            )
+        else:
+            log_aux = None
+            log_first_norm = state.log_weights
+            log_first_sum = mx.array(0.0)
+        ess_prev = compute_ess(log_first_norm)
         do_resample = ess_prev < threshold
         # Branchless conditional resample (playbook: correct at all N;
         # the value-branch optimization for large N is a bake-off item).
-        idx = resampling_fn(k1, mx.exp(state.log_weights), n)
+        idx = resampling_fn(k1, mx.exp(log_first_norm), n)
         ancestors = mx.where(do_resample, idx, identity_ancestors)
         parents = mx.take(state.particles, ancestors, axis=0)
         propagated = fk.m(k2, parents, data_t)
         log_g = fk.log_g(parents, propagated, data_t)
-        # where-rule: carried weights fold in only when NOT resampled.
-        log_w_unnorm = mx.where(do_resample, log_g, state.log_weights + log_g)
-        log_w_norm, log_sum = log_normalize(log_w_unnorm)
-        log_ev_inc = mx.where(do_resample, log_sum - log_n, log_sum)
+        if log_aux is not None:
+            # Resampled branch: divide eta out at the ancestor
+            # (second-stage correction). Skip branch: plain W*g —
+            # eta appears NOWHERE (the bias the nontrivial-eta
+            # threshold=0 test catches; design §2).
+            log_second = log_g - mx.take(log_aux, ancestors)
+            log_w_unnorm = mx.where(
+                do_resample, log_second, state.log_weights + log_g
+            )
+            log_w_norm, log_sum = log_normalize(log_w_unnorm)
+            # Two-factor increment when resampled:
+            # log(sum W*eta) + LSE(second stage) - log N.
+            log_ev_inc = mx.where(
+                do_resample, log_first_sum + log_sum - log_n, log_sum
+            )
+        else:
+            # where-rule: carried weights fold in only when NOT
+            # resampled.
+            log_w_unnorm = mx.where(
+                do_resample, log_g, state.log_weights + log_g
+            )
+            log_w_norm, log_sum = log_normalize(log_w_unnorm)
+            log_ev_inc = mx.where(do_resample, log_sum - log_n, log_sum)
         new_state = ParticleState(
             propagated,
             log_w_norm,

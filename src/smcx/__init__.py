@@ -6,6 +6,7 @@
 Sequential Monte Carlo for Apple silicon, built on MLX
 """
 
+from smcx.auxiliary import auxiliary_filter
 from smcx.bootstrap import bootstrap_filter
 from smcx.containers import (
     ParticleFilterPosterior,
@@ -25,6 +26,7 @@ __all__ = [
     "ParticleFilterResult",
     "ParticleState",
     "__version__",
+    "auxiliary_filter",
     "bootstrap_filter",
     "ess",
     "log_ess",

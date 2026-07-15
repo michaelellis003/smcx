@@ -54,6 +54,7 @@ ADDITIONS = {
 
 V01_IMPLEMENTED = {
     "DegenerateWeightsError",
+    "auxiliary_filter",
     "ParticleFilterPosterior",
     "ParticleFilterResult",
     "ParticleState",
