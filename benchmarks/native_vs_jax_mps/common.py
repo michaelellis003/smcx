@@ -171,6 +171,35 @@ def bootstrap_ratio_ci(
     }
 
 
+def kalman_gate(
+    *,
+    log_evidence: Sequence[float],
+    oracle: float,
+) -> dict[str, Any]:
+    """Apply the pre-registered one-sided Monte Carlo correctness gate."""
+    values = np.asarray(log_evidence, dtype=np.float64)
+    if values.ndim != 1 or values.size < 2:
+        raise ValueError("log_evidence must contain at least two replicates")
+    if not np.all(np.isfinite(values)) or not np.isfinite(oracle):
+        raise ValueError("log evidence and oracle must be finite")
+
+    standard_deviation = float(np.std(values, ddof=1))
+    error = float(np.mean(values) - oracle)
+    upper = 3.0 * standard_deviation / np.sqrt(values.size)
+    lower = -(upper + 0.5 * standard_deviation**2)
+    return {
+        "error": error,
+        "log_evidence": values.tolist(),
+        "lower_error_bound": float(lower),
+        "mean": float(np.mean(values)),
+        "oracle": float(oracle),
+        "passed": bool(lower <= error <= upper),
+        "replicates": int(values.size),
+        "standard_deviation": standard_deviation,
+        "upper_error_bound": float(upper),
+    }
+
+
 def validate_result(result: dict[str, Any]) -> None:
     """Validate the stable worker-result envelope."""
     missing = REQUIRED_RESULT_FIELDS - result.keys()
