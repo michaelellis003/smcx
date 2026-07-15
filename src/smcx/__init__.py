@@ -34,6 +34,7 @@ from smcx.diagnostics import (
 )
 from smcx.exceptions import DegenerateWeightsError
 from smcx.guided import guided_filter
+from smcx.liu_west import liu_west_filter
 from smcx.resampling import multinomial, residual, stratified, systematic
 from smcx.simulate import simulate
 from smcx.tempering import temper
@@ -56,6 +57,7 @@ __all__ = [
     "diagnose",
     "ess",
     "guided_filter",
+    "liu_west_filter",
     "log_bayes_factor",
     "log_ess",
     "log_ml_increments",

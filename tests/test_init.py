@@ -71,6 +71,7 @@ V01_IMPLEMENTED = {
     "diagnose",
     "ess",
     "guided_filter",
+    "liu_west_filter",
     "log_bayes_factor",
     "log_ess",
     "log_ml_increments",
@@ -99,6 +100,14 @@ def test_all_is_subset_of_smcjax_plus_cited_additions():
     extras = set(smcx.__all__) - SMCJAX_ALL
     uncited = extras - set(ADDITIONS)
     assert not uncited, f"exports without a ratifying ADR: {uncited}"
+
+
+def test_full_direction_port_complete():
+    # ADR-0008 item 5 phase-in: with liu_west_filter landed the port
+    # is complete, so the full direction activates — every one of
+    # smcjax's 32 names must be present from now on.
+    missing = SMCJAX_ALL - set(smcx.__all__)
+    assert not missing, f"port regression, smcjax names missing: {missing}"
 
 
 def test_v01_names_are_present_and_sorted():
