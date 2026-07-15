@@ -86,6 +86,9 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 # Tests use class-based grouping; method docstrings are noisy.
 "tests/*" = ["D102", "D103", "D104"]
+# Preserved research/verification scripts (see docs/research/*),
+# not library code — exempt from library-grade lint.
+"benchmarks/exploratory/*" = ["ALL"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -105,6 +108,11 @@ type = "github"
 
 [tool.semantic_release.publish]
 upload_to_vcs_release = true
+
+[tool.ty.src]
+# Research scripts are lint/type-exempt artifacts (they import
+# mlx.core, which lacks stubs until ADR-0007's vendored typings land).
+exclude = ["benchmarks/exploratory/**"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

@@ -76,9 +76,10 @@ A fast wrong answer is a failure, not a win.
   that activate under x64 — record the smcjax commit), the entire
   filter jitted as one program, XLA CPU thread count recorded.
 - MLX eval cadence is a harness parameter: per-step `mx.eval`,
-  eval-every-k (k ∈ {1, 5, 25}), and `mx.async_eval` with lagged
-  degeneracy check. Report the best cadence per cell and the cadence
-  sweep itself (it answers the design's open cadence question).
+  `mx.async_eval` + lagged blocking eval (lag k ∈ {2, 4, 8}), and
+  pure `mx.async_eval` (reported with its peak memory, which
+  research shows inflates ~3× at 10⁶). Report the best cadence per
+  cell and the sweep itself.
 - Warm-up: one full run per configuration before timing
   (`mx.compile` trace / XLA jit trace).
 - Fencing: `mx.eval` + `mx.synchronize` / `block_until_ready` before
@@ -112,3 +113,10 @@ Python version, date. Results are dated markdown in
   cross-library gate; made the Jensen budget one-sided; quantified
   the verdict mapping (both-N rule, full-covariance report-only,
   ≈ defined as <1.2×, unmapped outcomes → weak).
+- 2026-07-14 (performance research, pre-code): replaced the
+  eval-every-k cadence arms (measured strictly dominated —
+  `docs/research/mlx-performance.md`) with async+lag-k ∈ {2, 4, 8};
+  pure-async arm retained but must report peak memory. Also: burn
+  one throwaway compile before warm-up (first-process Metal JIT
+  ≈ 68 ms) and capture one Xcode GPU trace per cell before accepting
+  any "GPU ≈ CPU" verdict.

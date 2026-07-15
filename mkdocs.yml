@@ -68,3 +68,5 @@ nav:
       - MLX Audit: research/mlx-audit.md
       - Engineering Practices: research/engineering-practices.md
       - Licensing & Upstream: research/licensing.md
+      - MLX Performance: research/mlx-performance.md
+      - Numerical Methods: research/numerical-methods.md

@@ -11,11 +11,13 @@ The theme: prove the thesis before building breadth.
 - [ ] Ratify ADR-0002 and ADR-0008 (FK core; API divergences incl.
       the inputs channel) — v0.1 coding is contingent on both
 - [ ] `weights` module: log_normalize, normalize, ess, log_ess
-- [ ] `resampling` module: systematic, stratified, multinomial,
-      residual over the shared inverse-CDF kernel (ADR-0004)
-- [ ] Full-step microbenchmark + eval-cadence measurement (per-step
-      vs every-k vs async_eval) — settles the design's open cadence
-      question before the loop shell is written
+- [ ] `resampling` module: systematic (counting kernel), stratified,
+      multinomial, residual — ADR-0004 contract, ADR-0009 kernels
+      (Metal bsearch + take-chain fallback), bake-off pins defaults
+- [ ] Full-step microbenchmark confirming the async+lag-k cadence
+      and kernel defaults on the real step (research numbers:
+      docs/research/mlx-performance.md; scripts in
+      benchmarks/exploratory/)
 - [ ] FK core: FKModel protocol + generic loop (ADR-0002, contingent)
 - [ ] `bootstrap_filter` + `simulate` + containers (+ `types.py`
       Protocols incl. guided/inputs forms per ADR-0008)
