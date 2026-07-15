@@ -9,16 +9,16 @@ import sys
 from pathlib import Path
 
 import pytest
-from benchmarks.native_vs_jax_mps.run import (
-    build_worker_command,
-    worker_environment,
-)
 
 from benchmarks.native_vs_jax_mps.common import (
     balanced_orders,
     bootstrap_ratio_ci,
     summarize,
     validate_result,
+)
+from benchmarks.native_vs_jax_mps.run import (
+    build_worker_command,
+    worker_environment,
 )
 
 
@@ -136,3 +136,21 @@ def test_worker_environment_exposes_safe_and_async_mps_separately():
     assert "JAX_MPS_ASYNC_DISPATCH" not in safe
     assert asynchronous["JAX_PLATFORMS"] == "mps"
     assert asynchronous["JAX_MPS_ASYNC_DISPATCH"] == "1"
+
+
+def test_jax_worker_cli_is_inspectable_without_jax_installed():
+    root = Path(__file__).parents[1]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(root / "benchmarks/native_vs_jax_mps/jax_worker.py"),
+            "--help",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert "--arm" in completed.stdout
+    assert "--workload" in completed.stdout
