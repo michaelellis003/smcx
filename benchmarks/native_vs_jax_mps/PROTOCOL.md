@@ -199,3 +199,14 @@ after a local M-series run.
   claiming an MLX primitive that does not exist. SYSTEMATIC uses the shipped
   smcx fused Metal right-bisect and JAX `searchsorted` on identical CDFs and
   queries; trace artifacts disclose the different implementations.
+- 2026-07-15 (pre-LGSSM implementation): The native LGSSM arm uses the shipped
+  `smcx.bootstrap_filter`, batched model closures, its default systematic
+  resampler, threshold 0.5, and full history. The adversarial JAX arm is a
+  small, benchmark-local implementation of the same bootstrap-filter
+  equations, threshold, and full-history outputs, with the whole filter jitted
+  through `lax.scan`/`lax.cond` and canonical searchsorted systematic
+  resampling. This avoids making the result depend on smcjax's obsolete JAX
+  pin and gives jax-mps the whole-program compilation opportunity. Backend RNG
+  streams need not match; the R=20 Kalman gate establishes distributional
+  correctness. The source is retained with the results, so contributors can
+  challenge or improve the JAX arm.
