@@ -11,6 +11,8 @@ cloud-level form). Model closures are therefore reusable between
 ``simulate`` and the filters — including input-driven models.
 """
 
+from typing import Any
+
 import mlx.core as mx
 
 from smcx import _utils
@@ -26,9 +28,9 @@ def _draw_initial(key: KeyT, initial_sampler) -> mx.array:
 
 def simulate(
     key: KeyT,
-    initial_sampler,
-    transition_sampler,
-    emission_sampler,
+    initial_sampler: Any,
+    transition_sampler: Any,
+    emission_sampler: Any,
     num_timesteps: int,
     *,
     inputs: mx.array | None = None,

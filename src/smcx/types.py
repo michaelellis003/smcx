@@ -10,7 +10,7 @@ that consume them land.
 from typing import Protocol, runtime_checkable
 
 import mlx.core as mx
-from jaxtyping import Float, UInt32
+from jaxtyping import Float, Int32, UInt32
 
 # Splittable RNG key produced by ``mx.random.key`` / ``mx.random.split``
 # (ADR-0005: every stochastic function takes one explicitly).
@@ -153,3 +153,23 @@ class EmissionSamplerWithInput(Protocol):
     def __call__(
         self, key: mx.array, state: mx.array, input_t: mx.array, /
     ) -> mx.array: ...
+
+
+@runtime_checkable
+class ResamplingFn(Protocol):
+    """Resampler (ADR-0004): ``(key, weights, num_samples) -> ancestors``."""
+
+    def __call__(
+        self,
+        key: mx.array,
+        weights: Float[mx.array, " num_particles"],
+        num_samples: int,
+        /,
+    ) -> Int32[mx.array, " num_samples"]: ...
+
+
+@runtime_checkable
+class PerParticleLogDensity(Protocol):
+    """Per-particle log-density: ``(state) -> scalar`` (vmapped)."""
+
+    def __call__(self, state: mx.array, /) -> mx.array: ...

@@ -142,7 +142,7 @@ class CholFactors(NamedTuple):
     half_log_det: Float[mx.array, ""]
 
 
-def chol_factor(cov) -> CholFactors:
+def chol_factor(cov: mx.array | np.ndarray) -> CholFactors:
     """Factor a covariance once, with the silent-failure guard.
 
     Factorizes in numpy float64 (which raises on non-PD input —

@@ -33,7 +33,12 @@ from smcx.containers import TemperedPosterior
 from smcx.distributions import chol_factor
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import systematic
-from smcx.types import InitialSampler, KeyT
+from smcx.types import (
+    InitialSampler,
+    KeyT,
+    PerParticleLogDensity,
+    ResamplingFn,
+)
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
 
@@ -60,12 +65,12 @@ def _weighted_cov_f64(particles: mx.array, weights: mx.array) -> np.ndarray:
 def temper(
     key: KeyT,
     initial_sampler: InitialSampler,
-    log_prior_fn,
-    log_likelihood_fn,
+    log_prior_fn: PerParticleLogDensity,
+    log_likelihood_fn: PerParticleLogDensity,
     num_particles: int,
     num_mcmc_steps: int = 5,
     target_ess: float = 0.5,
-    resampling_fn=systematic,
+    resampling_fn: ResamplingFn = systematic,
     *,
     max_stages: int = 1000,
 ) -> TemperedPosterior:

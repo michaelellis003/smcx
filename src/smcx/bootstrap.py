@@ -25,6 +25,7 @@ from smcx.types import (
     KeyT,
     LogObservationFn,
     LogObservationFnWithInput,
+    ResamplingFn,
     TransitionSampler,
     TransitionSamplerWithInput,
 )
@@ -38,7 +39,7 @@ def bootstrap_filter(
     emissions: Float[mx.array, "ntime emission_dim"]
     | Float[mx.array, " ntime"],
     num_particles: int,
-    resampling_fn=systematic,
+    resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float = 0.5,
     *,
     inputs: mx.array | None = None,

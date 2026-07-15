@@ -35,6 +35,7 @@ channel is not yet wired for Liu-West.
 """
 
 import math
+from typing import Any
 
 import mlx.core as mx
 import numpy as np
@@ -45,7 +46,7 @@ from smcx.containers import LiuWestPosterior
 from smcx.distributions import chol_factor
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import systematic
-from smcx.types import InitialSampler, KeyT
+from smcx.types import InitialSampler, KeyT, ResamplingFn
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize, normalize
 
@@ -53,15 +54,15 @@ from smcx.weights import log_normalize, normalize
 def liu_west_filter(
     key: KeyT,
     initial_sampler: InitialSampler,
-    transition_sampler,
-    log_observation_fn,
-    log_auxiliary_fn,
+    transition_sampler: Any,
+    log_observation_fn: Any,
+    log_auxiliary_fn: Any,
     param_initial_sampler: InitialSampler,
     emissions: Float[mx.array, "ntime emission_dim"]
     | Float[mx.array, " ntime"],
     num_particles: int,
     shrinkage: float = 0.95,
-    resampling_fn=systematic,
+    resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float = 0.5,
     *,
     store_history: bool = True,
