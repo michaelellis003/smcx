@@ -94,7 +94,7 @@ def _model():
 def run_cell(device, n_theta, n_x, t_len):
     import smcx
 
-    mx.set_default_device(mx.gpu if device == "gpu" else mx.cpu)
+    mx.set_default_device(mx.Device(mx.gpu if device == "gpu" else mx.cpu))
     y = _data(t_len)
     em = mx.array(y)[:, None]
     pinit, lprior, iinit, itrans, ilogobs = _model()

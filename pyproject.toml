@@ -108,7 +108,11 @@ convention = "google"
 # Kill-test harness: maintained, protocol-critical code — full lint
 # except docstrings on model closures/helpers.
 "benchmarks/killtest/*" = ["D101", "D102", "D103"]
-"benchmarks/smc2/*" = ["D101", "D102", "D103"]
+"benchmarks/smc2/bench_smc2.py" = ["D101", "D102", "D103"]
+# particles_side follows the `particles` API: uppercase model
+# methods (PX0/PX/PY) and a mutable default_params dict are required
+# by StateSpaceModel, not smcx style.
+"benchmarks/smc2/particles_side.py" = ["D101", "D102", "D103", "N802", "RUF012"]
 # conftest installs the jaxtyping import hook before importing smcx,
 # which forces module-level imports below code (smcjax convention).
 "tests/conftest.py" = ["E402"]
@@ -135,11 +139,13 @@ upload_to_vcs_release = true
 [tool.ty.src]
 # Research scripts are lint/type-exempt artifacts; typings/ holds
 # generated stubs (checked as a search path, not as source);
-# killtest harness spans two venvs (jax_side imports jax/smcjax,
-# unresolvable here by construction).
+# killtest and the SMC² particles baseline span separate venvs
+# (jax_side / particles_side import packages unresolvable here by
+# construction).
 exclude = [
     "benchmarks/exploratory/**",
     "benchmarks/killtest/**",
+    "benchmarks/smc2/particles_side.py",
     "typings/**",
 ]
 

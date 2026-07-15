@@ -23,7 +23,7 @@ The comparison isolates the hardware: identical smcx code, only the
 MLX default device changes. This is the cleanest apples-to-apples
 form of the thesis test — no second implementation to confound it.
 
-## Results
+## Results — the hardware isolation (primary)
 
 | N_θ | N_x | inner particles | GPU | CPU | speedup | gate |
 |----:|----:|----:|----:|----:|----:|:--:|
@@ -33,6 +33,35 @@ form of the thesis test — no second implementation to confound it.
 Correctness (log Ẑ vs exact log Z = −143.53): GPU −143.41 / −143.47,
 CPU within the same band — the fast GPU runs are numerically sound,
 not fast-but-wrong.
+
+## External-authority baseline: Chopin's `particles` (ADR-0014)
+
+`particles` (nchopin/particles) is the reference SMC² implementation
+from Chopin & Papaspiliopoulos (2020). It runs the same LGSSM and the
+same data on CPU. Its primary value here is an **independent
+correctness cross-check**: three separate implementations converge on
+the exact log-evidence.
+
+| N_θ = N_x | smcx-GPU | smcx-CPU | particles-CPU | log Ẑ (exact −143.53) |
+|----:|----:|----:|----:|----:|
+| 512  | 0.57 s | 19.30 s | 95.8 s  | smcx −143.4, particles −143.52 |
+| 1024 | 2.85 s | 92.01 s | 173.5 s | smcx −143.5, particles −143.49 |
+
+All three land on the exact log Z within Monte-Carlo error — smcx is
+correct, confirmed by an implementation that shares no code with it.
+
+On speed, smcx-GPU runs **60–170× faster** than `particles` and
+smcx-CPU **2–5× faster on the same hardware**. Read these as a
+ballpark, not a controlled implementation contest: `particles`'
+SMC² default is **waste-free with a length-10 move chain**, heavier
+per rejuvenation than smcx's 3 PMMH steps, so some of the gap is
+algorithm configuration, not implementation or hardware. The clean,
+fully-controlled number is the smcx-GPU-vs-smcx-CPU 32–34× above
+(identical code and algorithm, device the only variable).
+
+Reproduce (isolated env — `particles` pins numpy<2, conflicting with
+smcx): `uv run --no-project --with 'particles>=0.4' python
+benchmarks/smc2/particles_side.py 512 512 100`.
 
 ## Reading the result
 
@@ -48,12 +77,11 @@ is data-dependent, like the tempering schedule).
 
 ## Still open (ADR-0014 follow-ups)
 
-- **External baseline**: Chopin's `particles` (CPU) as an
-  independent-implementation reference. The smcx-CPU number already
-  controls for the algorithm; `particles` would add external
-  authority. Deferred (new dependency + model port).
 - Adaptive N_x and the exchange step; guided inner engines.
 - Outer-loop async/lag-k cadence (the forward pass is not the
   bottleneck, so this is low-priority).
+- A config-matched `particles` run (non-waste-free, 3-step move) for
+  a tighter implementation comparison — the current baseline uses
+  the `particles` default, which the table notes.
 
 Reproduce: `uv run python benchmarks/smc2/bench_smc2.py`.

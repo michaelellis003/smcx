@@ -99,9 +99,10 @@ The theme: prove the thesis before building breadth.
   rejuvenation bottleneck). **Second kill test DONE** (2026-07-15):
   MLX-GPU vs MLX-CPU **~32–34×** at 0.26M–1.05M inner particles,
   correctness-gated; `benchmarks/results/2026-07-15-smc2-device-
-  benchmark.md` + PROTOCOL amendment. Deferred (ADR-0014): adaptive
-  N_x, the exchange step, guided inner engines, and Chopin's
-  `particles` as an external-authority baseline.
+  benchmark.md` + PROTOCOL amendment. Chopin's `particles` added as
+  an external-authority baseline (independent implementation agrees
+  on log Z; smcx-GPU 60–170× faster, config caveat noted). Deferred
+  (ADR-0014): adaptive N_x, the exchange step, guided inner engines.
 - Differentiable resampling: Ścibior-Wood stop-gradient first; OT/DET
   as opt-in
 - FFBSi smoothing (dense batched backward weights); fixed-lag comes

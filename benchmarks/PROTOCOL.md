@@ -141,6 +141,9 @@ Python version, date. Results are dated markdown in
   `ess_threshold=0.5`, `num_pmmh_steps=3`. Same fencing (warm-up
   compile, median-of-5, `mx.synchronize`, fresh process per cell)
   and a correctness gate (\|log Ẑ − exact\| < 0.5 on both devices).
-  Chopin's `particles` as an external-authority baseline is a
-  deferred follow-up. Result:
+  Chopin's `particles` runs as an external-authority baseline in an
+  isolated env (`particles_side.py`, `uv run --no-project --with
+  particles` — it pins numpy<2); it independently confirms the
+  log-evidence, with a config caveat (its default is waste-free,
+  len_chain=10). Result:
   `benchmarks/results/2026-07-15-smc2-device-benchmark.md`.
