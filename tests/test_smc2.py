@@ -296,49 +296,77 @@ class TestBatchedStep:
     """The batched inner step vs N_theta independent single steps.
 
     Spec test 6 (ADR-0013): one batched inner step advancing N_theta
-    filters must behave as N_theta independent single-filter steps —
-    the theta axis never couples. RNG threading differs between the
-    batched and single-filter key splits, so the check is tier-2
-    statistical (design §9b): identical-setup filters advanced by the
-    batched step yield increments distributed like independent
-    single-filter increments.
+    filters must behave as N_theta *independent* single-filter steps.
+    Independence is established by perturbation (exact); the
+    correctness of a batched filter against the single-filter
+    distribution is a separate tier-2 check.
     """
 
-    def _setup(self, n_x=256):
-        # One shared inner cloud + uniform weights + fixed theta and
-        # datum, so every filter is the *same* single-filter problem.
-        cloud = mx.random.normal((n_x, 1), key=mx.random.key(10))
-        theta = mx.array([[A_TRUE]])
-        return cloud, theta, Y_MX[1], math.log(n_x)
+    def test_batched_step_filters_are_independent(self):
+        # The defining property: perturbing one filter's input leaves
+        # every OTHER filter's output bit-identical (same keys). A
+        # coupled implementation would leak the change across the
+        # theta axis. Exact, not statistical.
+        from smcx.smc2 import _batched_inner_step
 
-    def test_batched_step_matches_independent_single_steps(self):
+        n_theta, n_x = 5, 64
+        log_n_x = math.log(n_x)
+        clouds = mx.random.normal((n_theta, n_x, 1), key=mx.random.key(3))
+        thetas = mx.array([[0.6], [0.7], [0.8], [0.9], [1.0]])
+        ilw = mx.full((n_theta, n_x), -log_n_x)
+        kr, kt = mx.random.split(mx.random.key(4))
+        tail = (INNER_TRANS, INNER_LOGOBS, n_theta, n_x, log_n_x)
+
+        inner0, _, ell0 = _batched_inner_step(
+            kr, kt, clouds, ilw, thetas, Y_MX[1], *tail
+        )
+        # Perturb only filter j's inner cloud.
+        j = 2
+        pert = np.array(clouds)
+        pert[j] += 3.0
+        inner1, _, ell1 = _batched_inner_step(
+            kr, kt, mx.array(pert), ilw, thetas, Y_MX[1], *tail
+        )
+
+        ell0, ell1 = np.array(ell0), np.array(ell1)
+        in0, in1 = np.array(inner0), np.array(inner1)
+        for m in range(n_theta):
+            if m == j:
+                assert ell0[m] != ell1[m]
+                assert not np.array_equal(in0[m], in1[m])
+            else:  # every other filter untouched, bit-for-bit
+                assert ell0[m] == ell1[m], m
+                assert np.array_equal(in0[m], in1[m]), m
+
+    def test_batched_filter_increment_matches_single_filter(self):
+        # Correctness (not independence): a filter advanced by the
+        # batched step has the same increment distribution as an
+        # independent single-filter step of the same problem. RNG
+        # threading differs, so this is tier-2 (design §9b).
         from smcx.smc2 import _batched_inner_step
 
         n_theta, n_x = 64, 256
-        cloud, theta1, y_t, log_n_x = self._setup(n_x)
+        log_n_x = math.log(n_x)
+        cloud = mx.random.normal((n_x, 1), key=mx.random.key(10))
+        theta1 = mx.array([[A_TRUE]])
         ulw = mx.full((n_x,), -log_n_x)
+        model = (INNER_TRANS, INNER_LOGOBS)
 
-        # Batched: n_theta identical filters advanced in one call.
-        inner_b = mx.broadcast_to(cloud, (n_theta, n_x, 1))
-        ilw_b = mx.broadcast_to(ulw, (n_theta, n_x))
-        theta_b = mx.broadcast_to(theta1, (n_theta, 1))
         kr, kt = mx.random.split(mx.random.key(20))
         _, _, ell_b = _batched_inner_step(
             kr,
             kt,
-            inner_b,
-            ilw_b,
-            theta_b,
-            y_t,
-            INNER_TRANS,
-            INNER_LOGOBS,
+            mx.broadcast_to(cloud, (n_theta, n_x, 1)),
+            mx.broadcast_to(ulw, (n_theta, n_x)),
+            mx.broadcast_to(theta1, (n_theta, 1)),
+            Y_MX[1],
+            *model,
             n_theta,
             n_x,
             log_n_x,
         )
         ell_b = np.array(ell_b)
 
-        # Independent: the same single filter, R fresh keys (n_theta=1).
         r = 256
         ell_s = np.empty(r)
         for i in range(r):
@@ -349,18 +377,14 @@ class TestBatchedStep:
                 cloud[None],
                 ulw[None],
                 theta1,
-                y_t,
-                INNER_TRANS,
-                INNER_LOGOBS,
+                Y_MX[1],
+                *model,
                 1,
                 n_x,
                 log_n_x,
             )
             ell_s[i] = float(np.array(ell)[0])
 
-        # Filters are genuinely independent (distinct keys), not clones.
-        assert ell_b.std() > 0
-        # Tier-2: batched and single-filter increment means agree.
         se = math.sqrt(ell_b.var(ddof=1) / n_theta + ell_s.var(ddof=1) / r)
         assert abs(ell_b.mean() - ell_s.mean()) < 4 * se, (
             ell_b.mean(),
