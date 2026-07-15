@@ -71,6 +71,12 @@ inherited surface and smcjax is a frozen reference (ADR-0010):
 public API changes still require an ADR, but no cross-repo
 coordination exists anymore.
 
+Choose the simplest design that fully and reliably meets the current
+requirements and fits the existing architecture. Do not add premature
+abstractions, extra layers, speculative configurability, or handling
+for hypothetical edge cases. Add complexity only when a demonstrated
+requirement calls for it; iterate later when needed.
+
 ## Engineering standards
 
 Evidence and sources: `docs/research/engineering-practices.md`.
