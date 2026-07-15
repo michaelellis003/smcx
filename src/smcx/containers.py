@@ -40,6 +40,25 @@ class ParticleState(NamedTuple):
     log_marginal_likelihood: Float[mx.array, ""]
 
 
+class TemperedPosterior(NamedTuple):
+    """Tempered-SMC output (ADR-0008 item 6).
+
+    ``particles`` are equal-weight draws from the target (final
+    resample + pi-invariant moves), so ``log_weights`` is uniform —
+    kept for interface symmetry and Rao-Blackwell reminders: compute
+    summaries from weighted clouds when you have them.
+    ``marginal_loglik`` is the Neumaier-compensated log-evidence;
+    E[exp(marginal_loglik)] = Z (log Zhat itself is Jensen-biased).
+    """
+
+    particles: Float[mx.array, "num_particles dim"]
+    log_weights: Float[mx.array, " num_particles"]
+    marginal_loglik: Float[mx.array, ""]
+    temperatures: Float[mx.array, " num_stages"]
+    ess: Float[mx.array, " num_stages"]
+    acceptance_rates: Float[mx.array, " num_stages"]
+
+
 class ParticleFilterPosterior(NamedTuple):
     """Filtered posterior (Dynamax ``PosteriorGSSMFiltered`` convention).
 

@@ -12,11 +12,13 @@ from smcx.containers import (
     ParticleFilterPosterior,
     ParticleFilterResult,
     ParticleState,
+    TemperedPosterior,
 )
 from smcx.exceptions import DegenerateWeightsError
 from smcx.guided import guided_filter
 from smcx.resampling import multinomial, residual, stratified, systematic
 from smcx.simulate import simulate
+from smcx.tempering import temper
 from smcx.weights import ess, log_ess, log_normalize, normalize
 
 __version__ = "0.1.0"
@@ -26,6 +28,7 @@ __all__ = [
     "ParticleFilterPosterior",
     "ParticleFilterResult",
     "ParticleState",
+    "TemperedPosterior",
     "__version__",
     "auxiliary_filter",
     "bootstrap_filter",
@@ -39,4 +42,5 @@ __all__ = [
     "simulate",
     "stratified",
     "systematic",
+    "temper",
 ]

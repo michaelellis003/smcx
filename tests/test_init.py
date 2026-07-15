@@ -17,6 +17,7 @@ SMCJAX_ALL = {
     "ParticleFilterPosterior",
     "ParticleFilterResult",
     "ParticleState",
+    "TemperedPosterior",
     "__version__",
     "auxiliary_filter",
     "bootstrap_filter",
@@ -51,6 +52,8 @@ SMCJAX_ALL = {
 ADDITIONS = {
     "DegenerateWeightsError": "ADR-0003",
     "guided_filter": "ADR-0008",
+    "TemperedPosterior": "ADR-0008",
+    "temper": "ADR-0008",
 }
 
 V01_IMPLEMENTED = {
@@ -59,6 +62,7 @@ V01_IMPLEMENTED = {
     "ParticleFilterPosterior",
     "ParticleFilterResult",
     "ParticleState",
+    "TemperedPosterior",
     "__version__",
     "bootstrap_filter",
     "ess",
@@ -71,6 +75,7 @@ V01_IMPLEMENTED = {
     "simulate",
     "stratified",
     "systematic",
+    "temper",
 }
 
 
