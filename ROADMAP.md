@@ -60,7 +60,9 @@ The theme: prove the thesis before building breadth.
 - [x] ~~Diagnostics port from smcjax~~ (2026-07-15; 15 functions,
       tail_ess reimplemented quantile-based, Pareto-k semantics
       corrected, adaptive diagnose threshold)
-- [ ] `liu_west_filter` (labeled approximate)
+- [x] ~~`liu_west_filter` (labeled approximate)~~ (2026-07-15; port
+      complete — all 32 smcjax names present, full `__all__` lock
+      direction active)
 - [ ] GPU release gate: macos-arm64 runner MLX-GPU smoke job if
       feasible, else a mandatory local-M-series pre-merge suite run
       (CI is CPU-only; releases are automated — see AGENTS.md)
