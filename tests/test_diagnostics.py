@@ -141,6 +141,36 @@ class TestFaithfulness:
             np.array(smcx.particle_diversity(collapsed)), 1.0 / 8
         )
 
+    def test_gpd_fitter_recovers_known_shape(self):
+        # Calibration against exact GPD samples via inverse CDF:
+        # x = ((1-u)^(-k) - 1)/k (k=0: exponential). The estimator
+        # is the Zhang-Stephens profile-Bayes fit with the
+        # weakly-informative prior toward 0.5, so the expected
+        # value at tail size m=300 is k*m/(m+10) + 0.5*10/(m+10).
+        # Empirical per-fit sd is ~0.05, so the mean of 20
+        # replicates has SE ~0.011; ZS report |bias| < ~0.03 at
+        # this m. Band: 0.08 ~ bias + 5*SE. The pre-fix defect
+        # (sample size in place of the candidate count in the
+        # theta grid) inflated k by +0.5-0.7 and sits far outside.
+        from smcx.diagnostics import _fit_generalized_pareto
+
+        rng = np.random.default_rng(1)
+        m, reps = 300, 20
+        for k_true in [0.0, 0.5, 1.0]:
+            fits = []
+            for _ in range(reps):
+                u = rng.uniform(size=m)
+                if abs(k_true) < 1e-9:
+                    x = -np.log1p(-u)  # exponential (k -> 0 limit)
+                else:
+                    x = ((1.0 - u) ** (-k_true) - 1.0) / k_true
+                fits.append(_fit_generalized_pareto(np.sort(x)))
+            expected = (k_true * m + 0.5 * 10) / (m + 10)
+            assert abs(np.mean(fits) - expected) < 0.08, (
+                k_true,
+                np.mean(fits),
+            )
+
     def test_pareto_k_ordering(self):
         n = 2000
         rng = np.random.default_rng(1)

@@ -294,7 +294,12 @@ def _fit_generalized_pareto(x: np.ndarray) -> float:
     x_star = x[-1]
     x_q25 = x[max(0, m // 4 - 1)]
     i = np.arange(1, num_candidates + 1, dtype=np.float64) - 0.5
-    b_grid = 1.0 / x_star + (1.0 - np.sqrt(m / i)) / (prior * x_q25)
+    # Zhang & Stephens grid: sqrt of the CANDIDATE COUNT over the
+    # half-offset index, not the sample size — using m here inflated
+    # every fitted k by ~+0.5 (caught by the calibration test).
+    b_grid = 1.0 / x_star + (1.0 - np.sqrt(num_candidates / i)) / (
+        prior * x_q25
+    )
     with np.errstate(all="ignore"):
         k_grid = np.mean(np.log1p(-b_grid[:, None] * x[None, :]), axis=1)
         log_lik = m * (np.log(-b_grid / k_grid) - k_grid - 1.0)
