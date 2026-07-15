@@ -51,8 +51,9 @@ The theme: prove the thesis before building breadth.
       proposal variance reduction verified vs bootstrap)
 - [x] ~~`auxiliary_filter` via twisted potentials~~ (2026-07-14;
       ADR-0002 mechanics, bit-exact skip-branch equivalence tested)
-- [ ] Tempered SMC sampler with adaptive ESS-bisection schedule and
-      particle-tuned RWM moves
+- [x] ~~Tempered SMC sampler with adaptive ESS-bisection schedule and
+      particle-tuned RWM moves~~ (2026-07-15; exact conjugate
+      evidence gate, compiled branchless sweeps)
 - [x] ~~`distributions` module (~8 families) incl. Lanczos lgamma~~
       (2026-07-14, ADR-0012: 9 families, guarded chol_factor,
       MT gamma sampler)
