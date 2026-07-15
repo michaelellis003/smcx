@@ -53,24 +53,29 @@ class LGSSM(ssm.StateSpaceModel):
         return dists.Normal(loc=x, scale=math.sqrt(R))
 
 
-def run_cell(n_theta, n_x, t_len):
+def run_cell(n_theta, n_x, t_len, reps=3):
     y = _data(t_len)
     prior = dists.StructDist({"a": dists.Uniform(0.5, 1.3)})
-    fk = ssp.SMC2(ssm_cls=LGSSM, data=y, prior=prior, init_Nx=n_x)
-    alg = particles.SMC(fk=fk, N=n_theta)
-    t0 = time.time()
-    alg.run()
-    elapsed = time.time() - t0
+    times, logz = [], None
+    for _ in range(reps):
+        fk = ssp.SMC2(ssm_cls=LGSSM, data=y, prior=prior, init_Nx=n_x)
+        alg = particles.SMC(fk=fk, N=n_theta)
+        t0 = time.time()
+        alg.run()
+        times.append(time.time() - t0)
+        logz = float(alg.summaries.logLts[-1])
     return {
         "impl": "particles",
         "n_theta": n_theta,
         "n_x": n_x,
         "t_len": t_len,
-        "median_s": elapsed,  # single run (particles is not cheap to repeat)
-        "logz": float(alg.summaries.logLts[-1]),
+        "reps": reps,
+        "median_s": float(np.median(times)),
+        "logz": logz,  # last run's estimate (all agree within MC error)
     }
 
 
 if __name__ == "__main__":
     nth, nx, t = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
-    print(json.dumps(run_cell(nth, nx, t)))
+    reps = int(sys.argv[4]) if len(sys.argv) > 4 else 3
+    print(json.dumps(run_cell(nth, nx, t, reps)))
