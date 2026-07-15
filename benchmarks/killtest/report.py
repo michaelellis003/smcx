@@ -56,21 +56,26 @@ def main():
     for w in ("lgssm", "sv", "track", "track_full"):
         print(f"### {w}\n")
         print(
-            "| N | JAX-CPU | MLX-GPU (lag4) | MLX-CPU | speedup | GPU peak MB |"
+            "| N | JAX-CPU | MLX-GPU (lag4) | GPU nohist | MLX-CPU "
+            "| speedup | nohist speedup | GPU peak MB | nohist MB |"
         )
-        print("|---|---|---|---|---|---|")
+        print("|---|---|---|---|---|---|---|---|---|")
         for n in GRID:
             j = jax_r["cells"][f"{w}/{n}"]["times_s"]
             cell = mlx_r["cells"][f"{w}/{n}"]
             g = cell["gpu_lag4"]["times_s"]
             c = cell["cpu_lag4"]["times_s"]
+            nh = cell.get("gpu_lag4_nohist")
             sp = _med(j) / _med(g)
             speedups[w, n] = (sp, _med(g), _med(c))
+            nh_t = f"{_med(nh['times_s']):.3f}" if nh else "-"
+            nh_sp = f"{_med(j) / _med(nh['times_s']):.1f}x" if nh else "-"
+            nh_pk = f"{max(nh['peak_mb']):.0f}" if nh else "-"
             print(
                 f"| {n:,} | {_med(j):.3f} [{min(j):.3f}, {_iqr(j):.3f}] "
                 f"| {_med(g):.3f} [{min(g):.3f}, {_iqr(g):.3f}] "
-                f"| {_med(c):.3f} | **{sp:.1f}x** "
-                f"| {max(cell['gpu_lag4']['peak_mb']):.0f} |"
+                f"| {nh_t} | {_med(c):.3f} | **{sp:.1f}x** | {nh_sp} "
+                f"| {max(cell['gpu_lag4']['peak_mb']):.0f} | {nh_pk} |"
             )
         print()
 

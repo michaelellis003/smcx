@@ -120,3 +120,10 @@ Python version, date. Results are dated markdown in
   one throwaway compile before warm-up (first-process Metal JIT
   ≈ 68 ms) and capture one Xcode GPU trace per cell before accepting
   any "GPU ≈ CPU" verdict.
+- 2026-07-15 (pre-re-run): the 2026-07-14 run was contaminated
+  (concurrent CPU workload; verdict provisional) — this re-run on an
+  idle machine supersedes it. Added a `store_history=False`
+  (ADR-0011) MLX arm, **report-only**: the verdict's primary
+  comparison remains full-history on both sides (smcjax always
+  materializes history), the lean arm documents the smcx-native
+  path. Same datasets (hashes unchanged).

@@ -129,14 +129,17 @@ Feynman-Kac loop, `bootstrap_filter` (with inputs channel and
 missing-data support), and `simulate` — 85 tests against exact
 Kalman oracles.
 
-**Kill-test verdict (2026-07-14, pre-registered): the thesis holds
-weakly — PROVISIONAL: a concurrent CPU workload contaminated the
-JAX-CPU baseline (biasing speedups upward); clean re-run pending.** At matched, oracle-gated accuracy, MLX-GPU beat JAX-CPU in
-all 12 grid cells (1.1–4.8×), clearing the pre-registered ≥3× bar on
-the resampling-bound LGSSM workload (4.0×/4.8× at 10⁵/10⁶ particles)
-but not yet on the compute-heavier SV and tracking workloads —
-where full-history materialization (up to 12 GB at 10⁶×T=500) is the
-measured limiter, not compute. Full data:
-[benchmarks/results/2026-07-14-kill-test.md](benchmarks/results/2026-07-14-kill-test.md).
-Claim accordingly: a real but workload-dependent GPU advantage today,
-with the O(1)-memory history option as the known next lever.
+**Kill-test verdict (clean re-run 2026-07-15, pre-registered): the
+thesis holds weakly.** At matched, oracle-gated accuracy on an idle
+machine, MLX-GPU leads JAX-CPU in 11 of 12 grid cells (1.1–4.2×;
+JAX wins the one small-N dispatch-bound cell the protocol
+predicted), clearing the pre-registered ≥3× bar on the
+resampling-bound LGSSM workload (3.3×/4.2× at 10⁵/10⁶ particles) but
+not on the compute-heavier SV (2.3×/2.8×) and tracking (2.1×/1.1×)
+workloads. `store_history=False` cuts peak memory 8–38× (SV at 10⁶:
+12.1 GB → 0.3 GB) at unchanged speed, making 10⁷-particle runs
+feasible. Full data:
+[benchmarks/results/2026-07-15-kill-test-rerun.md](benchmarks/results/2026-07-15-kill-test-rerun.md).
+Claim accordingly: a real but workload-dependent GPU advantage —
+strongest exactly where resampling dominates, which is the workload
+class this library exists for.

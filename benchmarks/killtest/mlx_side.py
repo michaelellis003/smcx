@@ -96,18 +96,34 @@ def make_track(full_cov=False):
     return init, trans, logobs, y
 
 
-def bench(make, n, reps, lag):
+def bench(make, n, reps, lag, store_history=True):
     fk._EVAL_LAG = lag
     init, trans, logobs, y = make()
     # warm-up (also traces the compiled step for this N)
-    out = smcx.bootstrap_filter(mx.random.key(999), init, trans, logobs, y, n)
+    out = smcx.bootstrap_filter(
+        mx.random.key(999),
+        init,
+        trans,
+        logobs,
+        y,
+        n,
+        store_history=store_history,
+    )
     mx.eval(out.marginal_loglik)
     mx.synchronize()
     logzs, times, peaks = [], [], []
     for s in range(reps):
         mx.reset_peak_memory()
         t0 = time.perf_counter()
-        out = smcx.bootstrap_filter(mx.random.key(s), init, trans, logobs, y, n)
+        out = smcx.bootstrap_filter(
+            mx.random.key(s),
+            init,
+            trans,
+            logobs,
+            y,
+            n,
+            store_history=store_history,
+        )
         mx.eval(out.marginal_loglik)
         mx.synchronize()
         times.append(time.perf_counter() - t0)
@@ -138,6 +154,11 @@ def main():
                 if lag == 4:
                     continue
                 cell[f"gpu_{arm}"] = bench(make, n, SWEEP_REPS, lag)
+            # store_history=False arm (ADR-0011; report-only per the
+            # 2026-07-15 protocol amendment)
+            cell["gpu_lag4_nohist"] = bench(
+                make, n, SWEEP_REPS, 4, store_history=False
+            )
             # MLX-CPU on the primary cadence
             mx.set_default_device(mx.Device(mx.cpu))
             try:
