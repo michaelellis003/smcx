@@ -108,7 +108,25 @@ def bench(make, n):
     return {"logz": logzs, "times_s": times}
 
 
+def run_workloads():
+    return {
+        "lgssm": make_lgssm,
+        "sv": make_sv,
+        "track": make_track,
+        "track_full": lambda: make_track(full_cov=True),
+    }
+
+
 def main():
+    if len(sys.argv) > 2:  # fresh-process-per-cell (protocol 07-15)
+        wname, n = sys.argv[1], int(sys.argv[2])
+        cell = bench(run_workloads()[wname], n)
+        out = DATA / "cells"
+        out.mkdir(exist_ok=True)
+        (out / f"jax_{wname}_{n}.json").write_text(json.dumps(cell))
+        print("done", wname, n)
+        return
+
     results = {
         "jax": jax.__version__,
         "backend": jax.default_backend(),

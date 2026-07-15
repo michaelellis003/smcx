@@ -129,17 +129,16 @@ Feynman-Kac loop, `bootstrap_filter` (with inputs channel and
 missing-data support), and `simulate` — 85 tests against exact
 Kalman oracles.
 
-**Kill-test verdict (clean re-run 2026-07-15, pre-registered): the
-thesis holds weakly.** At matched, oracle-gated accuracy on an idle
-machine, MLX-GPU leads JAX-CPU in 11 of 12 grid cells (1.1–4.2×;
-JAX wins the one small-N dispatch-bound cell the protocol
-predicted), clearing the pre-registered ≥3× bar on the
-resampling-bound LGSSM workload (3.3×/4.2× at 10⁵/10⁶ particles) but
-not on the compute-heavier SV (2.3×/2.8×) and tracking (2.1×/1.1×)
-workloads. `store_history=False` cuts peak memory 8–38× (SV at 10⁶:
-12.1 GB → 0.3 GB) at unchanged speed, making 10⁷-particle runs
-feasible. Full data:
-[benchmarks/results/2026-07-15-kill-test-rerun.md](benchmarks/results/2026-07-15-kill-test-rerun.md).
-Claim accordingly: a real but workload-dependent GPU advantage —
-strongest exactly where resampling dominates, which is the workload
-class this library exists for.
+**Kill-test verdict (2026-07-15, pre-registered criterion): the
+thesis HOLDS — 3 of 3 workloads count.** At matched, oracle-gated
+accuracy on an idle machine, smcx on the M3 Pro GPU runs **3.4–7.8×
+faster than a strong 12-core JAX-CPU baseline at 10⁵–10⁶ particles**
+across resampling-bound (LGSSM 3.4×/6.2×), compute-bound (stochastic
+volatility 3.7×/7.8×), and multivariate tracking (4.2×/5.6×)
+workloads — all 15 correctness gates passing on both libraries.
+`store_history=False` cuts peak memory up to 125× (SV at 10⁶:
+12.1 GB → 96 MB) at no speed cost. Small-N (10⁴) filtering remains
+dispatch-bound (0.9–1.7×), as the thesis always predicted. Full data
+and implementation disclosures (value-branch resampling; batched
+TRACK closures per ADR-0013):
+[benchmarks/results/2026-07-15-kill-test-optimized.md](benchmarks/results/2026-07-15-kill-test-optimized.md).

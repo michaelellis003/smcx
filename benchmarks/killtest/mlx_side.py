@@ -68,6 +68,41 @@ def make_sv():
     return init, trans, logobs, y
 
 
+def make_track_batched(full_cov=False):
+    """ADR-0013 batched closures: transition as one GEMM.
+
+    Disclosed in the results file; XLA's vmap already fuses, MLX's
+    does not.
+    """
+    f_mat, q_mat, _h_mat, r_diag, r_full = track_matrices()
+    fj = mx.array(f_mat.astype(np.float32))
+    lq = mx.array(np.linalg.cholesky(q_mat).astype(np.float32))
+    lp0 = mx.array(
+        np.linalg.cholesky(np.diag([1.0, 1.0, 0.25, 0.25])).astype(np.float32)
+    )
+    r_mat = r_full if full_cov else r_diag
+    r_inv = mx.array(np.linalg.inv(r_mat).astype(np.float32))
+    _, logdet = np.linalg.slogdet(2 * np.pi * r_mat)
+    const = float(-0.5 * logdet)
+
+    def init(key, n):
+        return mx.random.normal((n, 4), key=key) @ lp0.T
+
+    def trans(key, particles):
+        return (
+            particles @ fj.T + mx.random.normal(particles.shape, key=key) @ lq.T
+        )
+
+    def logobs(y, particles):
+        v = y[None, :] - particles[:, :2]
+        z = v @ r_inv
+        return const - 0.5 * mx.sum(z * v, axis=1)
+
+    name = "track_y_full.npy" if full_cov else "track_y.npy"
+    y = mx.array(np.load(DATA / name).astype(np.float32))
+    return init, trans, logobs, y
+
+
 def make_track(full_cov=False):
     f_mat, q_mat, _h_mat, r_diag, r_full = track_matrices()
     fj = mx.array(f_mat.astype(np.float32))
@@ -96,7 +131,7 @@ def make_track(full_cov=False):
     return init, trans, logobs, y
 
 
-def bench(make, n, reps, lag, store_history=True):
+def bench(make, n, reps, lag, store_history=True, batched=False):
     fk._EVAL_LAG = lag
     init, trans, logobs, y = make()
     # warm-up (also traces the compiled step for this N)
@@ -108,6 +143,7 @@ def bench(make, n, reps, lag, store_history=True):
         y,
         n,
         store_history=store_history,
+        batched=batched,
     )
     mx.eval(out.marginal_loglik)
     mx.synchronize()
@@ -123,6 +159,7 @@ def bench(make, n, reps, lag, store_history=True):
             y,
             n,
             store_history=store_history,
+            batched=batched,
         )
         mx.eval(out.marginal_loglik)
         mx.synchronize()
@@ -132,17 +169,46 @@ def bench(make, n, reps, lag, store_history=True):
     return {"logz": logzs, "times_s": times, "peak_mb": peaks}
 
 
+def run_cell(wname, n, workloads):
+    make = workloads[wname]
+    batched = wname.startswith("track")  # ADR-0013, disclosed
+    cell = {}
+    cell["gpu_lag4"] = bench(make, n, R_KEYS, 4, batched=batched)
+    for arm, lag in LAGS.items():
+        if lag == 4:
+            continue
+        cell[f"gpu_{arm}"] = bench(make, n, SWEEP_REPS, lag, batched=batched)
+    cell["gpu_lag4_nohist"] = bench(
+        make, n, SWEEP_REPS, 4, store_history=False, batched=batched
+    )
+    mx.set_default_device(mx.Device(mx.cpu))
+    try:
+        cell["cpu_lag4"] = bench(make, n, SWEEP_REPS, 4, batched=batched)
+    finally:
+        mx.set_default_device(mx.Device(mx.gpu))
+    return cell
+
+
 def main():
     # Burn first-in-process Metal JIT (~68 ms) before any timing.
     mx.eval(mx.compile(lambda a: a + 1)(mx.zeros(8)))
 
-    results = {"mlx": mx.__version__, "cells": {}}
     workloads = {
         "lgssm": make_lgssm,
         "sv": make_sv,
-        "track": make_track,
-        "track_full": lambda: make_track(full_cov=True),
+        "track": lambda: make_track_batched(),
+        "track_full": lambda: make_track_batched(full_cov=True),
     }
+    if len(sys.argv) > 2:  # fresh-process-per-cell (protocol 07-15)
+        wname, n = sys.argv[1], int(sys.argv[2])
+        cell = run_cell(wname, n, workloads)
+        out = DATA / "cells"
+        out.mkdir(exist_ok=True)
+        (out / f"mlx_{wname}_{n}.json").write_text(json.dumps(cell))
+        print("done", wname, n)
+        return
+
+    results = {"mlx": mx.__version__, "cells": {}}
     for wname, make in workloads.items():
         for n in GRID:
             print(f"mlx {wname} N={n}", flush=True)

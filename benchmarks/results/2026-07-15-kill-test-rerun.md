@@ -147,3 +147,8 @@ lax.cond skip; MLX vmap not fusing matvecs to GEMM) with validated
 fixes projecting 4.1–7.9× across all workloads — tracked on the
 roadmap; the criterion will be re-applied only after a full protocol
 re-run with the fixes landed.
+
+## Superseded
+
+Superseded by the optimized-implementation run:
+[2026-07-15-kill-test-optimized.md](2026-07-15-kill-test-optimized.md).
