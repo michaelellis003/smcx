@@ -129,8 +129,14 @@ upload_to_vcs_release = true
 
 [tool.ty.src]
 # Research scripts are lint/type-exempt artifacts; typings/ holds
-# generated stubs (checked as a search path, not as source).
-exclude = ["benchmarks/exploratory/**", "typings/**"]
+# generated stubs (checked as a search path, not as source);
+# killtest harness spans two venvs (jax_side imports jax/smcjax,
+# unresolvable here by construction).
+exclude = [
+    "benchmarks/exploratory/**",
+    "benchmarks/killtest/**",
+    "typings/**",
+]
 
 [tool.ty.environment]
 # Vendored mlx.core stubs (ADR-0007): upstream ships py.typed but no
