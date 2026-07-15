@@ -62,8 +62,10 @@ Documentation triggers (step 8, mirrored in the PR template):
 
 Check `ROADMAP.md` Non-goals before proposing features; do not
 implement anything listed there. Prefer the smallest change that
-satisfies the acceptance criteria. API parity with smcjax is the
-default; divergence is an ADR-level event.
+satisfies the acceptance criteria. The smcjax-derived API is the
+inherited surface and smcjax is a frozen reference (ADR-0010):
+public API changes still require an ADR, but no cross-repo
+coordination exists anymore.
 
 ## Engineering standards
 

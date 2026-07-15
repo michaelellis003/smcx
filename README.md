@@ -130,7 +130,8 @@ missing-data support), and `simulate` — 85 tests against exact
 Kalman oracles.
 
 **Kill-test verdict (2026-07-14, pre-registered): the thesis holds
-weakly.** At matched, oracle-gated accuracy, MLX-GPU beat JAX-CPU in
+weakly — PROVISIONAL: a concurrent CPU workload contaminated the
+JAX-CPU baseline (biasing speedups upward); clean re-run pending.** At matched, oracle-gated accuracy, MLX-GPU beat JAX-CPU in
 all 12 grid cells (1.1–4.8×), clearing the pre-registered ≥3× bar on
 the resampling-bound LGSSM workload (4.0×/4.8× at 10⁵/10⁶ particles)
 but not yet on the compute-heavier SV and tracking workloads —

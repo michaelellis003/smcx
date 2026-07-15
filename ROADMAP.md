@@ -35,9 +35,12 @@ The theme: prove the thesis before building breadth.
       re-run SV/TRACK cells after it lands
 - [ ] File MLX issue: `categorical(num_samples=)` O(N·M) memory
       (unreported upstream; evidence in `docs/research/mlx-audit.md`)
-- [ ] Open smcjax coordinated-change issues (ADR-0008 priority:
-      inputs channel first, then simulate fix, `resampling_criterion`,
-      guided filter)
+- [x] ~~Open smcjax coordinated-change issues~~ — dissolved per
+      ADR-0010 (smcjax frozen at e93d527 as benchmark baseline;
+      smcx is the successor, single-repo governance)
+- [ ] **Clean kill-test re-run** on an idle machine (2026-07-14 run
+      contaminated by a concurrent CPU workload — verdict flagged
+      provisional) — after `store_history` lands
 - [ ] Typing setup per ADR-0007 (jaxtyping + beartype hook + vendored
       `typings/mlx/core.pyi`)
 - [ ] SPEC 8 release-workflow hardening (Trusted Publishing,
