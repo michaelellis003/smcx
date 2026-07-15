@@ -32,6 +32,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "jaxtyping>=0.3.7",
     "mlx>=0.32.0",
     "numpy>=2.2.6",
 ]
@@ -49,10 +50,13 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "beartype>=0.22.9",
+    "hypothesis>=6.156.6",
     "mkdocs-gen-files>=0.6.1",
     "mkdocs-literate-nav>=0.6.3",
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.3",
+    "nanobind>=2.13.0",
     "pre-commit>=4.5.1",
     "properdocs>=1.6.7",
     "pytest>=9.0.3",
@@ -67,6 +71,8 @@ target-version = "py310"
 preview = true
 line-length = 80
 indent-width = 4
+# Generated mlx stubs (ADR-0007) are vendored artifacts, not code.
+extend-exclude = ["typings"]
 
 [tool.ruff.lint]
 select = [
@@ -77,7 +83,11 @@ select = [
     "SIM", # flake8-simplify (cleans up messy logic)
     "RUF", # Ruff's custom advanced rules
 ]
-ignore = []
+ignore = [
+    # jaxtyping uses string-shape annotations (e.g. Float[mx.array, " n"])
+    # which ruff parses as forward references and rejects (ADR-0007).
+    "F722",
+]
 
 [tool.ruff.lint.pydocstyle]
 # Enforce Google-style docstrings
@@ -89,6 +99,9 @@ convention = "google"
 # Preserved research/verification scripts (see docs/research/*),
 # not library code — exempt from library-grade lint.
 "benchmarks/exploratory/*" = ["ALL"]
+# conftest installs the jaxtyping import hook before importing smcx,
+# which forces module-level imports below code (smcjax convention).
+"tests/conftest.py" = ["E402"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -110,9 +123,15 @@ type = "github"
 upload_to_vcs_release = true
 
 [tool.ty.src]
-# Research scripts are lint/type-exempt artifacts (they import
-# mlx.core, which lacks stubs until ADR-0007's vendored typings land).
-exclude = ["benchmarks/exploratory/**"]
+# Research scripts are lint/type-exempt artifacts; typings/ holds
+# generated stubs (checked as a search path, not as source).
+exclude = ["benchmarks/exploratory/**", "typings/**"]
+
+[tool.ty.environment]
+# Vendored mlx.core stubs (ADR-0007): upstream ships py.typed but no
+# .pyi for the compiled extension. Regenerate on every mlx floor bump:
+#   uv run python -m nanobind.stubgen -m mlx.core -O typings/mlx
+extra-paths = ["typings"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
