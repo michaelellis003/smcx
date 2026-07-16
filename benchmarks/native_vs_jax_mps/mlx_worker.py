@@ -11,7 +11,7 @@ from importlib.metadata import version
 
 import mlx.core as mx
 import numpy as np
-from common import LGSSM, SCHEMA_VERSION, lgssm_data, summarize
+from common import LGSSM, SCHEMA_VERSION, kalman_gate, lgssm_data, summarize
 
 import smcx
 from smcx.resampling import _normalized_cdf, _searchsorted
@@ -208,6 +208,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--arm", choices=("mlx_cpu", "mlx_gpu"), required=True)
     parser.add_argument("--block", required=True, type=int)
+    parser.add_argument("--correctness-replicates", default=0, type=int)
     parser.add_argument("--repeats", required=True, type=int)
     parser.add_argument("--size", required=True, type=int)
     parser.add_argument("--warmups", required=True, type=int)
@@ -266,6 +267,24 @@ def main() -> None:
         atol = 5e-6
         rtol = 5e-5
 
+    correctness = {
+        "actual": actual,
+        "atol": atol,
+        "expected": expected_json,
+        "passed": passed,
+        "rtol": rtol,
+    }
+    if args.workload == "lgssm_pf" and args.correctness_replicates:
+        log_evidence = []
+        for seed in range(args.correctness_replicates):
+            replicate = operation(mx.random.key(seed), *inputs[1:])
+            _fence(replicate)
+            log_evidence.append(float(replicate[0].item()))
+        correctness = kalman_gate(
+            log_evidence=log_evidence,
+            oracle=float(expected),
+        )
+
     for _ in range(args.warmups):
         _fence(operation(*inputs))
 
@@ -280,13 +299,7 @@ def main() -> None:
         "backend": "mlx",
         "block": args.block,
         "cold_s": cold_s,
-        "correctness": {
-            "actual": actual,
-            "atol": atol,
-            "expected": expected_json,
-            "passed": passed,
-            "rtol": rtol,
-        },
+        "correctness": correctness,
         "dispatch_mode": "native",
         "failure": None,
         "parameters": {"size": args.size},

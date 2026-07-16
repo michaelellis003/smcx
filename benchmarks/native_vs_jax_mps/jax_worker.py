@@ -11,7 +11,7 @@ import time
 from importlib.metadata import PackageNotFoundError, version
 
 import numpy as np
-from common import LGSSM, SCHEMA_VERSION, lgssm_data, summarize
+from common import LGSSM, SCHEMA_VERSION, kalman_gate, lgssm_data, summarize
 
 
 def _parse_args() -> argparse.Namespace:
@@ -22,6 +22,7 @@ def _parse_args() -> argparse.Namespace:
         required=True,
     )
     parser.add_argument("--block", required=True, type=int)
+    parser.add_argument("--correctness-replicates", default=0, type=int)
     parser.add_argument("--repeats", required=True, type=int)
     parser.add_argument("--size", required=True, type=int)
     parser.add_argument("--warmups", required=True, type=int)
@@ -338,6 +339,25 @@ def main() -> None:
         atol = 5e-6
         rtol = 5e-5
 
+    correctness = {
+        "actual": actual,
+        "atol": atol,
+        "expected": expected_json,
+        "passed": passed,
+        "rtol": rtol,
+    }
+    if args.workload == "lgssm_pf" and args.correctness_replicates:
+        log_evidence = []
+        for seed in range(args.correctness_replicates):
+            replicate_inputs = (jax.random.key(seed), *inputs[1:])
+            replicate = compiled(*replicate_inputs)
+            jax.block_until_ready(replicate)
+            log_evidence.append(float(replicate[0]))
+        correctness = kalman_gate(
+            log_evidence=log_evidence,
+            oracle=float(expected),
+        )
+
     for _ in range(args.warmups):
         jax.block_until_ready(compiled(*inputs))
 
@@ -359,13 +379,7 @@ def main() -> None:
         "backend": actual_backend,
         "block": args.block,
         "cold_s": cold_s,
-        "correctness": {
-            "actual": actual,
-            "atol": atol,
-            "expected": expected_json,
-            "passed": passed,
-            "rtol": rtol,
-        },
+        "correctness": correctness,
         "dispatch_mode": dispatch_mode,
         "failure": None,
         "parameters": {"size": args.size},

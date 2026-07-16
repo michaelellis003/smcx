@@ -18,6 +18,7 @@ def build_worker_command(
     root: Path,
     arm: str,
     block: int,
+    correctness_replicates: int = 0,
     repeats: int,
     size: int,
     warmups: int,
@@ -65,6 +66,11 @@ def build_worker_command(
         "--workload",
         workload,
     ])
+    if correctness_replicates:
+        command.extend([
+            "--correctness-replicates",
+            str(correctness_replicates),
+        ])
     return command
 
 

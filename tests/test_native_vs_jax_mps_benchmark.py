@@ -252,7 +252,7 @@ def test_cpu_workers_smoke_the_matched_lgssm_filter(arm):
         root=root,
         arm=arm,
         block=0,
-        correctness_replicates=3,
+        correctness_replicates=20,
         repeats=1,
         size=256,
         warmups=1,
@@ -270,4 +270,4 @@ def test_cpu_workers_smoke_the_matched_lgssm_filter(arm):
 
     validate_result(result)
     assert result["correctness"]["passed"]
-    assert result["correctness"]["replicates"] == 3
+    assert result["correctness"]["replicates"] == 20
