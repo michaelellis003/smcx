@@ -13,6 +13,7 @@ from smcx.containers import (
     ParticleFilterPosterior,
     ParticleFilterResult,
     ParticleState,
+    SMC2Posterior,
     TemperedPosterior,
 )
 from smcx.diagnostics import (
@@ -42,6 +43,7 @@ from smcx.resampling import (
     systematic,
 )
 from smcx.simulate import simulate
+from smcx.smc2 import smc2
 from smcx.tempering import temper
 from smcx.weights import ess, log_ess, log_normalize, normalize
 
@@ -56,6 +58,7 @@ __all__ = [
     "ParticleFilterPosterior",
     "ParticleFilterResult",
     "ParticleState",
+    "SMC2Posterior",
     "TemperedPosterior",
     "__version__",
     "auxiliary_filter",
@@ -80,6 +83,7 @@ __all__ = [
     "replicated_log_ml",
     "residual",
     "simulate",
+    "smc2",
     "stratified",
     "systematic",
     "tail_ess",

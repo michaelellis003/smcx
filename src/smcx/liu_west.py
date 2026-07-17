@@ -37,7 +37,7 @@ from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize, normalize
 
 # Carry type: (particles, params, log_weights, log_marginal_likelihood)
-_Carry = tuple[Array, Array, Array, Array]
+_Carry = tuple[Array, Array, Array, Array, Array]
 
 
 def _init_liu_west(
@@ -90,6 +90,8 @@ def liu_west_filter(
     shrinkage: float = 0.95,
     resampling_fn: Callable = systematic,
     resampling_threshold: float = 0.5,
+    *,
+    store_history: bool = True,
 ) -> LiuWestPosterior:
     r"""Run a Liu-West particle filter (Liu & West, 2001).
 
@@ -133,6 +135,10 @@ def liu_west_filter(
                 evidence estimates.
         resampling_fn: Resampling algorithm.  Defaults to systematic.
         resampling_threshold: ESS fraction triggering resampling.
+        store_history: When False (ADR-0011), only the final step's
+            particle/param/weight/ancestor arrays are returned (time
+            axis length 1); ``ess``/``log_evidence_increments`` stay
+            full.
 
     Returns:
         :class:`~smcx.containers.LiuWestPosterior` containing
@@ -164,8 +170,8 @@ def liu_west_filter(
     def _step(
         carry: _Carry,
         args: tuple[PRNGKeyT, Array],
-    ) -> tuple[_Carry, tuple[Array, Array, Array, Array, Array, Array]]:
-        particles, params, log_weights, log_ml = carry
+    ):
+        particles, params, log_weights, log_ml, _prev_anc = carry
         step_key, y_t = args
         k1, k2, k3 = jr.split(step_key, 3)
 
@@ -228,45 +234,69 @@ def liu_west_filter(
             log_sum,
         )
 
-        new_carry = (propagated, new_params, log_w_norm, log_ml + log_ev_inc)
-        ess_t = jnp.asarray(compute_ess(log_w_norm))
-        return new_carry, (
+        new_carry = (
             propagated,
             new_params,
             log_w_norm,
+            log_ml + log_ev_inc,
             ancestors,
-            ess_t,
-            log_ev_inc,
         )
+        ess_t = jnp.asarray(compute_ess(log_w_norm))
+        if store_history:
+            return new_carry, (
+                propagated,
+                new_params,
+                log_w_norm,
+                ancestors,
+                ess_t,
+                log_ev_inc,
+            )
+        # Final-only mode (ADR-0011): the lean scan stacks only the
+        # scalar traces; final arrays come from the carry.
+        return new_carry, (ess_t, log_ev_inc)
 
-    init_carry: _Carry = (particles_0, params_0, log_w_0, log_ev_0)
+    init_carry = (particles_0, params_0, log_w_0, log_ev_0, identity_ancestors)
     step_keys = jr.split(key, emissions.shape[0] - 1)
 
-    (
-        final_carry,
+    if store_history:
         (
-            particles_rest,
-            params_rest,
-            log_w_rest,
-            ancestors_rest,
-            ess_rest,
-            log_ev_inc_rest,
-        ),
-    ) = lax.scan(_step, init_carry, (step_keys, emissions[1:]))
+            final_carry,
+            (
+                particles_rest,
+                params_rest,
+                log_w_rest,
+                ancestors_rest,
+                ess_rest,
+                log_ev_inc_rest,
+            ),
+        ) = lax.scan(_step, init_carry, (step_keys, emissions[1:]))
+        all_particles = _prepend(particles_0, particles_rest)
+        all_params = _prepend(params_0, params_rest)
+        all_log_w = _prepend(log_w_0, log_w_rest)
+        all_ancestors = _prepend(identity_ancestors, ancestors_rest)
+    else:
+        (
+            final_carry,
+            (ess_rest, log_ev_inc_rest),
+        ) = lax.scan(_step, init_carry, (step_keys, emissions[1:]))
+        fp, fpar, flw, _, fanc = final_carry
+        all_particles = fp[None]
+        all_params = fpar[None]
+        all_log_w = flw[None]
+        all_ancestors = fanc[None]
 
-    # --- Combine t=0 with t=1..T-1 -----------------------------------------
-    _, _, _, final_log_ml = final_carry
+    final_log_ml = final_carry[3]
 
     _raise_if_degenerate(final_log_ml)
 
     return LiuWestPosterior(
         marginal_loglik=final_log_ml,
-        filtered_particles=_prepend(particles_0, particles_rest),
-        filtered_log_weights=_prepend(log_w_0, log_w_rest),
-        ancestors=_prepend(identity_ancestors, ancestors_rest),
+        filtered_particles=all_particles,
+        filtered_log_weights=all_log_w,
+        ancestors=all_ancestors,
         ess=_prepend(jnp.asarray(ess_0), ess_rest),
         log_evidence_increments=_prepend(
             jnp.asarray(log_ev_0), log_ev_inc_rest
         ),
-        filtered_params=_prepend(params_0, params_rest),
+        filtered_params=all_params,
     )

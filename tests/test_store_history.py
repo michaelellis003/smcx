@@ -129,3 +129,48 @@ def test_guided_and_auxiliary_final_only():
     )
     assert a.filtered_particles.shape == (1, 500, 1)
     assert a.ess.shape == (T,)
+
+
+def test_liu_west_final_only_matches_marginal():
+    # Reuse the liu_west test model inline: LGSSM with unknown obs
+    # noise parameter (log-variance).
+    import smcx as _smcx
+
+    def initial_sampler(key, n):
+        return jr.normal(key, (n, 1))
+
+    def param_initial_sampler(key, n):
+        return jnp.log(0.3) + 0.1 * jr.normal(key, (n, 1))
+
+    def trans(key, z, params):
+        return A * z + math.sqrt(Q) * jr.normal(key, z.shape)
+
+    def obs(y, z, params):
+        var = jnp.exp(params[0])
+        return -0.5 * (jnp.log(2 * math.pi * var) + (y[0] - z[0]) ** 2 / var)
+
+    def aux(y, z, params):
+        var = jnp.exp(params[0]) + Q
+        return -0.5 * (
+            jnp.log(2 * math.pi * var) + (y[0] - A * z[0]) ** 2 / var
+        )
+
+    common = (
+        initial_sampler,
+        trans,
+        obs,
+        aux,
+        param_initial_sampler,
+        Y,
+        400,
+    )
+    a = _smcx.liu_west_filter(jr.key(3), *common)
+    b = _smcx.liu_west_filter(jr.key(3), *common, store_history=False)
+    assert np.array_equal(
+        np.array(a.marginal_loglik), np.array(b.marginal_loglik)
+    )
+    assert b.filtered_particles.shape[0] == 1
+    assert b.filtered_params.shape[0] == 1
+    assert np.array_equal(
+        np.array(a.filtered_params[-1]), np.array(b.filtered_params[0])
+    )
