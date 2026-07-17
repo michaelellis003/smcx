@@ -149,12 +149,12 @@ def systematic(
     weights: Float[mx.array, " num_particles"],
     num_samples: int,
 ) -> Int32[mx.array, " num_samples"]:
-    """Systematic resampling via offspring counting (ADR-0009).
+    """Systematic resampling via the fused right-bisect (ADR-0017).
 
-    One shared uniform places an evenly spaced grid on the CDF;
-    offspring counts follow in closed form, with no binary search
-    and no dependent-dispatch chain. Offspring deviate by less than
-    one from ``num_samples * weights`` (Kitagawa 1996). Note
+    One shared uniform places an evenly spaced grid on the CDF; each
+    grid point's ancestor is its exact right-bisect count. Offspring
+    deviate by less than one from ``num_samples * weights``
+    (Kitagawa 1996). Note
     systematic resampling does not dominate stratified in variance
     for all test functions (Douc & Cappe 2005).
 
@@ -166,21 +166,19 @@ def systematic(
     Returns:
         Nondecreasing int32 ancestor indices.
     """
-    n = weights.shape[0]
     m = num_samples
     u0 = mx.random.uniform(key=key)
-    # s_i = number of grid points (u0 + j)/m, j = 0..m-1, at or below
-    # cdf_i. ceil(m*cdf - u0) in f32 has ulp ~m*2^-24 (the slot-scale
-    # wall shared by every scheme; design §5).
-    s = mx.clip(mx.ceil(m * _normalized_cdf(weights) - u0), 0, m).astype(
-        mx.int32
-    )
-    # Blocked f32 cumsum can dip sub-slot: enforce monotone counts,
-    # and pin the total to exactly m.
-    s = mx.cummax(s)
-    s = mx.where(mx.arange(n) == n - 1, mx.array(m, dtype=mx.int32), s)
-    starts = mx.concatenate([mx.zeros((1,), dtype=mx.int32), s[:-1]])
-    return _fill_forward_ancestors(starts, s - starts, m)
+    # ADR-0017 (supersedes the ADR-0009 counting choice here): the
+    # offset grid bisected by the shared right-bisect kernel measured
+    # 1.7-2.6x over the ceil/cummax/scatter counting chain at
+    # N=1e4..1e6 compiled (tg=1024), and the sorted queries keep the
+    # per-thread search warp-coherent. Ancestors are exact
+    # #{cdf_i <= q_j} counts (clipped), nondecreasing by construction
+    # (sorted queries on a sorted CDF), preserving the
+    # monotone-gather invariant. Under vmap use the take-chain
+    # fallback explicitly (the fused kernel has no vmap; ADR-0009).
+    q = (u0 + mx.arange(m)) / m
+    return _searchsorted(_normalized_cdf(weights), q)
 
 
 def stratified(
