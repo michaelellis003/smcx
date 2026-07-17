@@ -34,13 +34,15 @@ $$
 
 ```python
 import math
-import mlx.core as mx
+import jax.numpy as jnp
+import jax.random as jr
 import numpy as np
 import smcx
 
 MU_TRUE, PHI, SIGMA = -0.5, 0.95, 0.25
 LOG2PI = math.log(2 * math.pi)
 T = 400
+
 
 def simulate_sv(seed):
     rng = np.random.default_rng(seed)
@@ -51,8 +53,9 @@ def simulate_sv(seed):
     y = np.exp(x / 2) * rng.normal(size=T)
     return x, y
 
+
 x_true, y = simulate_sv(0)
-emissions = mx.array(y.astype(np.float32))[:, None]
+emissions = jnp.asarray(y)[:, None]
 ```
 
 We simulate with NumPy rather than `smcx.simulate` only to keep the
@@ -71,25 +74,29 @@ before they move.
 ```python
 def initial_sampler(key, n):
     sd = SIGMA / math.sqrt(1 - PHI**2)
-    return MU_TRUE + sd * mx.random.normal((n, 1), key=key)
+    return MU_TRUE + sd * jr.normal(key, (n, 1))
+
 
 def transition_sampler(key, state, params):
     mu = params[0]
     mean = mu + PHI * (state[0] - mu)
-    return mean + SIGMA * mx.random.normal(state.shape, key=key)
+    return mean + SIGMA * jr.normal(key, state.shape)
+
 
 def log_observation_fn(y, state, params):
     x = state[0]
-    return -0.5 * (LOG2PI + x + y[0] * y[0] * mx.exp(-x))
+    return -0.5 * (LOG2PI + x + y[0] * y[0] * jnp.exp(-x))
+
 
 def log_auxiliary_fn(y, state, params):
     mu = params[0]
     x_pred = mu + PHI * (state[0] - mu)
-    return -0.5 * (LOG2PI + x_pred + y[0] * y[0] * mx.exp(-x_pred))
+    return -0.5 * (LOG2PI + x_pred + y[0] * y[0] * jnp.exp(-x_pred))
+
 
 def param_initial_sampler(key, n):
     # Diffuse prior over the mean log-variance: Uniform(-3, 1).
-    return -3.0 + 4.0 * mx.random.uniform(shape=(n, 1), key=key)
+    return jr.uniform(key, (n, 1), minval=-3.0, maxval=1.0)
 ```
 
 The prior on $\mu$ is deliberately vague — a uniform band four units
@@ -100,7 +107,7 @@ not the prior.
 
 ```python
 post = smcx.liu_west_filter(
-    mx.random.key(1),
+    jr.key(1),
     initial_sampler,
     transition_sampler,
     log_observation_fn,
@@ -129,7 +136,7 @@ parameter cloud at every step, so we can watch the posterior form.
 
 ```python
 mu_mean = np.array(smcx.param_weighted_mean(post))[:, 0]
-mu_q = np.array(smcx.param_weighted_quantile(post, mx.array([0.05, 0.95])))
+mu_q = np.array(smcx.param_weighted_quantile(post, jnp.array([0.05, 0.95])))
 
 print("true mu:", MU_TRUE)
 print("posterior mean, first 3 steps:", mu_mean[:3].round(2))
@@ -172,7 +179,9 @@ locating $\mu$ at the same time, in one forward pass.
 - Liu-West is labeled approximate for a reason (the shrinkage bias
   above). When the parameter posterior matters more than online
   operation, an offline SMC sampler over the parameter — smcx's
-  [`temper`](../api/) — trades the single pass for lower bias.
+  [`temper`](../api/) — trades the single pass for lower bias, and
+  [`smc2`](../api/) nests a full particle filter inside it for exact
+  pseudo-marginal parameter inference.
 - The parameter here is unconstrained, which suits the Gaussian
   jitter. For a bounded parameter such as $\phi \in (-1, 1)$, learn
   it on an unconstrained scale (for instance $\operatorname{arctanh}
