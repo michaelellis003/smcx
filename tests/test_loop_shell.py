@@ -234,8 +234,12 @@ def test_natural_route_matches_branchless_reference(
     _assert_posteriors_identical(reference, natural)
 
 
+@pytest.mark.parametrize("threshold", [0.0, 0.5, 1.0])
 @pytest.mark.parametrize("min_n", [1, 10**12])
-def test_degenerate_raises_on_every_route(monkeypatch, min_n):
+def test_degenerate_raises_on_every_route(monkeypatch, min_n, threshold):
+    # The threshold routes to never_resample / value_branch-or-
+    # branchless / always_resample respectively; crossed with min_n
+    # this covers every route's degeneracy path (reviewer finding).
     monkeypatch.setattr(_fk, "_VALUE_BRANCH_MIN_N", min_n)
     init, trans, _ = _bootstrap_model()
 
@@ -250,5 +254,5 @@ def test_degenerate_raises_on_every_route(monkeypatch, min_n):
             impossible,
             Y,
             200,
-            resampling_threshold=1.0,
+            resampling_threshold=threshold,
         )

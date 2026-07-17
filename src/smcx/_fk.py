@@ -163,7 +163,12 @@ def run_filter(
     key, init_key = mx.random.split(key)
     log_n = mx.log(mx.array(float(n)))
     identity_ancestors = mx.arange(n, dtype=mx.int32)
-    threshold = resampling_threshold * n
+    # f32-round the trigger once so the value-branch host compare and
+    # the in-graph compare (where MLX weak promotion rounds the
+    # captured scalar) see the same value: a non-dyadic threshold at
+    # large N differs from its f32 rounding, and an ESS landing on
+    # that grid point would otherwise route-flip the decision.
+    threshold = float(mx.array(resampling_threshold * n).item())
 
     # --- t = 0: init-as-if-resampled (design §2) ----------------------
     data_0 = tuple(d[0] for d in data)
