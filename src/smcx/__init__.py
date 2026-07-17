@@ -50,7 +50,7 @@ from smcx.weights import ess, log_ess, log_normalize, normalize
 try:
     __version__ = _version("smcx")
 except _PackageNotFoundError:
-    __version__ = "1.0.0"
+    __version__ = "0.0.0"
 
 __all__ = [
     "DegenerateWeightsError",

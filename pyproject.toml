@@ -130,8 +130,11 @@ convention = "google"
 docstring-code-format = true
 
 [tool.semantic_release]
+# Single-source: only pyproject carries the version. __init__.py
+# reads installed metadata; its except-branch fallback is a literal
+# "0.0.0" that semantic-release must never rewrite (it did once,
+# breaking test_version_fallback_when_package_not_found on CI).
 version_toml = ["pyproject.toml:project.version"]
-version_variables = ["src/smcx/__init__.py:__version__"]
 commit_message = "chore(release): {version}"
 # Stay 0.x on BREAKING CHANGE commits until stability is declared.
 major_on_zero = false
