@@ -35,6 +35,7 @@ from smcx._utils import (
     _conditional_resample,
     _init_standard,
     _prepend,
+    _raise_if_degenerate,
 )
 from smcx.containers import ParticleFilterPosterior, ParticleState
 from smcx.resampling import systematic
@@ -212,6 +213,8 @@ def auxiliary_filter(
     ess_0_arr: Array = jnp.asarray(ess_0)
     all_ess = _prepend(ess_0_arr, ess_rest)
     all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
+
+    _raise_if_degenerate(final_state.log_marginal_likelihood)
 
     return ParticleFilterPosterior(
         marginal_loglik=final_state.log_marginal_likelihood,

@@ -148,3 +148,24 @@ def _conditional_resample(
         lambda: identity,
     )
     return do_resample, ancestors
+
+
+def _raise_if_degenerate(marginal_loglik) -> None:
+    """Raise :class:`DegenerateWeightsError` on a collapsed filter.
+
+    Host-side check: fires only in eager execution. Under a user
+    ``jax.jit`` the value is a tracer and the check is skipped — the
+    ``-inf``/NaN marginal propagates instead (see the exception's
+    docstring).
+    """
+    from jax.core import Tracer
+
+    from smcx.exceptions import DegenerateWeightsError
+
+    if isinstance(marginal_loglik, Tracer):
+        return
+    value = float(marginal_loglik)
+    if value != value or value == float("-inf"):
+        raise DegenerateWeightsError(
+            f"all particle weights collapsed (marginal log-likelihood {value})"
+        )

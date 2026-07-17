@@ -31,6 +31,8 @@ from smcx.diagnostics import (
     weighted_quantile,
     weighted_variance,
 )
+from smcx.exceptions import DegenerateWeightsError
+from smcx.guided import guided_filter
 from smcx.liu_west import liu_west_filter
 from smcx.resampling import (
     multinomial,
@@ -47,6 +49,7 @@ except _PackageNotFoundError:
     __version__ = "0.0.0"
 
 __all__ = [
+    "DegenerateWeightsError",
     "LiuWestPosterior",
     "ParticleFilterPosterior",
     "ParticleFilterResult",
@@ -58,6 +61,7 @@ __all__ = [
     "cumulative_log_score",
     "diagnose",
     "ess",
+    "guided_filter",
     "liu_west_filter",
     "log_bayes_factor",
     "log_ess",

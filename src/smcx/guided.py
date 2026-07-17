@@ -1,18 +1,19 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-r"""Bootstrap (SIR) particle filter.
+r"""Guided (proposal-based) particle filter.
 
-The bootstrap filter [Gordon *et al.*, 1993] is the simplest Sequential
-Monte Carlo algorithm.  At each time step it:
-
-1. **Resamples** (conditionally on ESS) to focus particles on
-   high-likelihood regions.
-2. **Propagates** particles through the transition prior.
-3. **Weights** particles by the observation likelihood.
-
-The implementation uses :func:`jax.lax.scan` so the full time-loop is
-compiled into a single XLA program.
+The guided filter propagates through a user proposal
+:math:`q(z_t \mid z_{t-1}, y_t)` — which, unlike the bootstrap
+transition prior, can see the current observation — and corrects with
+the general importance weight
+:math:`w \propto g(y_t \mid z_t)\, f(z_t \mid z_{t-1}) /
+q(z_t \mid z_{t-1}, y_t)` [Doucet, Godsill & Andrieu, 2000].
+Approximate proposals (EKF/UKF/Laplace) MUST use this general
+formula — the predictive-likelihood shortcut is exact only for the
+locally optimal proposal. With ``q = f`` the filter reduces to
+bootstrap (same key stream, agreement to floating-point tolerance —
+the ``f/q`` cancellation is mathematical, not bitwise; tested).
 """
 
 from collections.abc import Callable
@@ -35,50 +36,52 @@ from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
 
 
-def bootstrap_filter(
+def guided_filter(
     key: PRNGKeyT,
     initial_sampler: Callable,
-    transition_sampler: Callable,
+    proposal_sampler: Callable,
+    log_proposal_fn: Callable,
+    log_transition_fn: Callable,
     log_observation_fn: Callable,
     emissions: Float[Array, "ntime emission_dim"],
     num_particles: int,
     resampling_fn: Callable = systematic,
     resampling_threshold: float = 0.5,
 ) -> ParticleFilterPosterior:
-    r"""Run a bootstrap (SIR) particle filter.
+    r"""Run a guided particle filter.
 
     Args:
         key: JAX PRNG key.
-        initial_sampler: Function ``(key, num_particles) -> particles``
-            that draws from the initial state distribution
-            :math:`p(z_1)`.
-        transition_sampler: Function ``(key, state) -> state`` that draws
-            from the transition distribution
-            :math:`p(z_t \mid z_{t-1})`.  Will be ``vmap``-ped over the
-            particle dimension internally.
-        log_observation_fn: Function
-            ``(emission, state) -> log_prob`` that evaluates the
-            observation log-density :math:`\log p(y_t \mid z_t)`.
-            Will be ``vmap``-ped over the particle dimension (second
-            argument) internally.
-        emissions: Observed emissions, shape ``(T, D)``.
+        initial_sampler: ``(key, num_particles) -> particles`` drawing
+            from :math:`p(z_1)` (t=0 is weighted by the observation
+            only, as in the bootstrap filter).
+        proposal_sampler: Per-particle ``(key, z_prev, y_t) -> z_t``
+            drawing from the proposal
+            :math:`q(z_t \mid z_{t-1}, y_t)`.
+        log_proposal_fn: Per-particle ``(y_t, z_t, z_prev) -> scalar``
+            log proposal density.
+        log_transition_fn: Per-particle ``(z_t, z_prev) -> scalar``
+            log transition density :math:`\log f`.
+        log_observation_fn: Per-particle ``(y_t, z_t) -> scalar`` log
+            observation density :math:`\log g`.
+        emissions: Observations with leading time dimension.
         num_particles: Number of particles :math:`N`.
-        resampling_fn: Resampling algorithm matching the Blackjax
-            signature ``(key, weights, num_samples) -> indices``.
-            Defaults to :func:`~smcx.resampling.systematic`.
-        resampling_threshold: Fraction of ``num_particles`` below which
-            resampling is triggered (e.g. 0.5 means resample when
-            ``ESS < 0.5 * N``).
+        resampling_fn: ADR-0004 contract resampler
+            ``(key, weights, num_samples) -> indices``.
+        resampling_threshold: Resample when
+            ``ESS < resampling_threshold * N``.
 
     Returns:
-        :class:`~smcx.containers.ParticleFilterPosterior` containing
-        filtered particles, log weights, ancestor indices, the
-        marginal log-likelihood estimate, and ESS trace.
+        :class:`~smcx.containers.ParticleFilterPosterior`.
+
+    Raises:
+        DegenerateWeightsError: All weights collapsed (eager execution
+            only; under ``jax.jit`` the ``-inf`` marginal propagates).
     """
     key, init_key = jr.split(key)
     log_n = jnp.log(jnp.asarray(num_particles, dtype=jnp.float64))
 
-    # --- Initialise at t=0 -------------------------------------------------
+    # --- t = 0: observation-only weighting ---------------------------------
     (
         particles_0,
         log_w_0,
@@ -102,9 +105,8 @@ def bootstrap_filter(
     ) -> tuple[ParticleState, tuple[Array, Array, Array, Array, Array]]:
         state, (step_key, y_t) = carry, args
         k1, k2 = jr.split(step_key)
-        # Invariant: state.log_weights are normalized (logsumexp = 0).
 
-        # 1. Conditionally resample
+        # 1. Conditionally resample on the carried weights.
         threshold = resampling_threshold * num_particles
         do_resample, ancestors = _conditional_resample(
             k1,
@@ -114,31 +116,29 @@ def bootstrap_filter(
             num_particles,
             identity_ancestors,
         )
-        resampled_particles = state.particles[ancestors]
+        parents = state.particles[ancestors]
 
-        # 2. Propagate through transition
+        # 2. Propagate through the proposal (sees y_t).
         keys = jr.split(k2, num_particles)
-        propagated = vmap(transition_sampler)(keys, resampled_particles)
+        propagated = vmap(lambda k, z: proposal_sampler(k, z, y_t))(
+            keys, parents
+        )
 
-        # 3. Weight by observation likelihood
-        log_obs = vmap(lambda z: log_observation_fn(y_t, z))(propagated)
+        # 3. General guided weight: log g + log f - log q.
+        log_g = vmap(lambda z: log_observation_fn(y_t, z))(propagated)
+        log_f = vmap(log_transition_fn)(propagated, parents)
+        log_q = vmap(lambda z_new, z_old: log_proposal_fn(y_t, z_new, z_old))(
+            propagated, parents
+        )
+        log_w_step = log_g + log_f - log_q
 
-        # Compute evidence increment and normalize.
-        # If resampled: weights were reset to uniform (1/N), so
-        #   increment = logsumexp(log_obs) - log(N)
-        # If not resampled: old normalized weights W_i sum to 1, so
-        #   increment = logsumexp(log_W + log_obs)
         log_w_unnorm = jnp.where(
             do_resample,
-            log_obs,
-            state.log_weights + log_obs,
+            log_w_step,
+            state.log_weights + log_w_step,
         )
         log_w_norm, log_sum = log_normalize(log_w_unnorm)
-        log_ev_inc = jnp.where(
-            do_resample,
-            log_sum - log_n,
-            log_sum,
-        )
+        log_ev_inc = jnp.where(do_resample, log_sum - log_n, log_sum)
 
         new_state = ParticleState(
             particles=propagated,
@@ -156,7 +156,6 @@ def bootstrap_filter(
             log_ev_inc,
         )
 
-    # Run the scan over t = 1 ... T-1
     step_keys = jr.split(key, emissions.shape[0] - 1)
     (
         final_state,
@@ -169,16 +168,13 @@ def bootstrap_filter(
         ),
     ) = lax.scan(_step, init_state, (step_keys, emissions[1:]))
 
-    # --- Combine t=0 with t=1..T-1 -----------------------------------------
     all_particles = _prepend(particles_0, particles_rest)
     all_log_w = _prepend(log_w_0, log_w_rest)
     all_ancestors = _prepend(identity_ancestors, ancestors_rest)
-    ess_0_arr: Array = jnp.asarray(ess_0)
-    all_ess = _prepend(ess_0_arr, ess_rest)
+    all_ess = _prepend(jnp.asarray(ess_0), ess_rest)
     all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
 
     _raise_if_degenerate(final_state.log_marginal_likelihood)
-
     return ParticleFilterPosterior(
         marginal_loglik=final_state.log_marginal_likelihood,
         filtered_particles=all_particles,

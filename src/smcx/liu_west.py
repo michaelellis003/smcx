@@ -29,7 +29,7 @@ import jax.random as jr
 from jax import lax, vmap
 from jaxtyping import Array, Float
 
-from smcx._utils import _conditional_resample, _prepend
+from smcx._utils import _conditional_resample, _prepend, _raise_if_degenerate
 from smcx.containers import LiuWestPosterior
 from smcx.resampling import systematic
 from smcx.types import PRNGKeyT
@@ -256,6 +256,8 @@ def liu_west_filter(
 
     # --- Combine t=0 with t=1..T-1 -----------------------------------------
     _, _, _, final_log_ml = final_carry
+
+    _raise_if_degenerate(final_log_ml)
 
     return LiuWestPosterior(
         marginal_loglik=final_log_ml,
