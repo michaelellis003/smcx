@@ -117,6 +117,7 @@ def test_compare_cell_picks_faster_correct_jax_arm():
     comparison = compare_cell(native, safe, fast, expected_blocks=5)
 
     assert comparison.compat_arm == "jax_mps_async"
+    assert comparison.ratio is not None
     assert comparison.ratio["estimate"] == pytest.approx(3.0)
 
 

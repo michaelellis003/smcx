@@ -141,10 +141,13 @@ upload_to_vcs_release = true
 # generated stubs (checked as a search path, not as source);
 # killtest and the SMC² particles baseline span separate venvs
 # (jax_side / particles_side import packages unresolvable here by
-# construction).
+# construction). The native-vs-jax-mps JAX worker is the same case: it
+# runs only inside the pinned `uv run --no-project` env, so jax and the
+# jax_plugins.mps backend are unresolvable in the project environment.
 exclude = [
     "benchmarks/exploratory/**",
     "benchmarks/killtest/**",
+    "benchmarks/native_vs_jax_mps/jax_worker.py",
     "benchmarks/smc2/particles_side.py",
     "typings/**",
 ]
