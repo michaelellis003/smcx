@@ -144,7 +144,12 @@ def run_filter(
     ess_t = compute_ess(log_w)
     state = ParticleState(particles, log_w, increment)
 
-    def _step(state: ParticleState, step_key: mx.array, *data_t: mx.array):
+    def _step(
+        state: ParticleState,
+        prev_ess: mx.array,
+        step_key: mx.array,
+        *data_t: mx.array,
+    ):
         k1, k2 = mx.random.split(step_key)
         # APF twist (trace-time branch; fk is a compile capture):
         # first-stage weights W*eta drive the trigger AND the draw.
@@ -153,11 +158,17 @@ def run_filter(
             log_first_norm, log_first_sum = log_normalize(
                 state.log_weights + log_aux
             )
+            # The first-stage ESS is a different quantity (W*eta), not
+            # a recompute of the carried value.
+            ess_prev = compute_ess(log_first_norm)
         else:
             log_aux = None
             log_first_norm = state.log_weights
             log_first_sum = mx.array(0.0)
-        ess_prev = compute_ess(log_first_norm)
+            # ADR-0016: the carry already holds this step's trigger —
+            # compute_ess(state.log_weights) is bit-identical to the
+            # ess_t the previous step computed from the same array.
+            ess_prev = prev_ess
         do_resample = ess_prev < threshold
         # Branchless conditional resample (playbook: correct at all N;
         # the value-branch optimization for large N is a bake-off item).
@@ -269,7 +280,7 @@ def run_filter(
                 )
         else:
             state, ancestors, ess_t, inc = step(
-                state, step_keys[t - 1], *data_t
+                state, ess_t, step_keys[t - 1], *data_t
             )
         if store_history:
             all_particles.append(state.particles)
