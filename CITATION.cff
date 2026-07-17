@@ -16,10 +16,37 @@ keywords:
   - bayesian-inference
 references:
   - type: software
-    title: "MLX: An array framework for Apple silicon"
+    title: "JAX: composable transformations of Python+NumPy programs"
     authors:
-      - name: "Apple Inc."
-    repository-code: "https://github.com/ml-explore/mlx"
+      - family-names: Bradbury
+        given-names: James
+      - family-names: Frostig
+        given-names: Roy
+      - family-names: Hawkins
+        given-names: Peter
+      - family-names: Johnson
+        given-names: Matthew James
+      - family-names: Leary
+        given-names: Chris
+      - family-names: Maclaurin
+        given-names: Dougal
+      - family-names: Necula
+        given-names: George
+      - family-names: Paszke
+        given-names: Adam
+      - family-names: VanderPlas
+        given-names: Jake
+      - family-names: Wanderman-Milne
+        given-names: Skye
+      - family-names: Zhang
+        given-names: Qiao
+    repository-code: "https://github.com/jax-ml/jax"
+  - type: software
+    title: "jax-mps: a Metal (Apple GPU) PJRT backend for JAX"
+    authors:
+      - family-names: Hoffmann
+        given-names: Till
+    repository-code: "https://github.com/tillahoffmann/jax-mps"
   - type: software
     title: "BlackJAX: Composable Bayesian inference in JAX"
     authors:
@@ -64,21 +91,3 @@ references:
         given-names: Jonah
     journal: "Journal of Machine Learning Research"
     year: 2024
-  - type: article
-    title: "A precision approximation of the gamma function"
-    authors:
-      - family-names: Lanczos
-        given-names: Cornelius
-    journal: "SIAM Journal on Numerical Analysis, Series B"
-    year: 1964
-  - type: article
-    title: "Parallel resampling in the particle filter"
-    authors:
-      - family-names: Murray
-        given-names: Lawrence M.
-      - family-names: Lee
-        given-names: Anthony
-      - family-names: Jacob
-        given-names: Pierre E.
-    journal: "Journal of Computational and Graphical Statistics"
-    year: 2016
