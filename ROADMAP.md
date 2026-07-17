@@ -1,6 +1,6 @@
 # Roadmap
 
-*Last updated: 2026-07-15. Directional, not a promise; solo-maintained.
+*Last updated: 2026-07-16. Directional, not a promise; solo-maintained.
 Themes here, tracking in GitHub issues/milestones. Design rationale:
 `docs/design/v0-design.md`; decisions: `docs/adr/`.*
 
@@ -114,6 +114,23 @@ The theme: prove the thesis before building breadth.
 - CESS tempering; MALA/HMC moves once model grads are wired
 - Island-mode resampling for N beyond a single population
 - Benchmark suite tracking MLX releases (re-run audit + kill test)
+- **Performance leadership (standing goal, 2026-07-16)**: keep native
+  smcx the fastest SMC engine on Apple silicon at every N, under
+  either frontend. Loop shell v2 (ADR-0016) made native fastest below
+  10⁶; the measured 10⁶ residual vs a tuned jax-mps is substrate, not
+  shell: the `mx.fast.metal_kernel` Python wrapper (~0.5 ms/call vs
+  0.36 ms for the same kernel invoked from C++ — upstream-MLX issue
+  candidate) and `mx.random.normal` vs a fused Philox (~2× at 10⁶;
+  supersedes the perf-analysis "chasing RNG throughput" non-item,
+  which predates this comparison). Evidence:
+  `docs/research/2026-07-16-jax-mps-internals.md`.
+- **jax-mps tracking (standing goal, 2026-07-16)**: re-run
+  `benchmarks/native_vs_jax_mps` when jax-mps ships relevant fixes
+  (filed: #215 T² scan history, #216 threefry registration; queued:
+  the searchsorted kernel via their #203 mechanism decision) and
+  contribute optimizations upstream when the gap is theirs to close.
+  The comparison keeps both stacks honest; smcx's positioning does
+  not depend on jax-mps staying slow.
 
 *Sequencing note: the literature review's "v0 must-have" menu is
 aspirational input; this file is the authoritative sequencing.*
