@@ -66,6 +66,18 @@ def log_observation(y, z):
     return -0.5 * (jnp.log(2 * jnp.pi * R) + (y[0] - z[0]) ** 2 / R)
 
 
+def emission(key, z):
+    return z + jnp.sqrt(R) * jr.normal(key, z.shape)
+
+
+_, emissions = smcx.simulate(
+    jr.key(1),
+    lambda key: init(key, 1)[0],
+    transition,
+    emission,
+    num_timesteps=100,
+)
+
 post = smcx.bootstrap_filter(
     jr.key(0),
     init,
