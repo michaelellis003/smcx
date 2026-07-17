@@ -216,3 +216,31 @@ class TestSortedUniforms:
         # SE of the sample median of U(0,1) at m=2e5 is ~1/(2*sqrt(m))
         # ~ 1.1e-3; 5*SE bound.
         assert abs(med - 0.5) < 5.6e-3
+
+
+class TestSystematicBisectSemantics:
+    """ADR-0017: systematic follows exact right-bisect semantics.
+
+    The ancestor of grid point q_j = (u0 + j)/m is the count of cdf
+    entries <= q_j (clipped to N-1) — checked against a NumPy oracle
+    run on the same f32 CDF and the same u0, so equality is exact.
+    """
+
+    @pytest.mark.parametrize("seed", [0, 7])
+    @pytest.mark.parametrize("peaked", [False, True])
+    def test_matches_numpy_right_bisect_oracle(self, seed, peaked):
+        n = 5_000
+        key = mx.random.key(seed)
+        w_key = mx.random.key(seed + 100)
+        raw = mx.random.uniform(shape=(n,), key=w_key) + 1e-3
+        if peaked:
+            raw = raw * raw * raw * raw  # concentrate mass
+        w = raw / mx.sum(raw)
+        ancestors = np.array(resampling.systematic(key, w, n))
+
+        u0 = np.float32(mx.random.uniform(key=key).item())
+        cdf = np.array(resampling._normalized_cdf(w))
+        # Match the kernel's f32 op order exactly: (u0 + j) then / n.
+        q = (u0 + np.arange(n, dtype=np.float32)) / np.float32(n)
+        expected = np.clip(np.searchsorted(cdf, q, side="right"), 0, n - 1)
+        assert np.array_equal(ancestors, expected)
