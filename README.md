@@ -1,7 +1,7 @@
 # smcx
 
 [![CI](https://github.com/michaelellis003/smcx/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelellis003/smcx/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/smcx)](https://pypi.org/project/smcx/)
+[![PyPI](https://img.shields.io/pypi/v/smcx?cacheSeconds=3600)](https://pypi.org/project/smcx/)
 [![License](https://img.shields.io/github/license/michaelellis003/smcx)](LICENSE)
 
 Sequential Monte Carlo in [JAX](https://github.com/jax-ml/jax): particle
