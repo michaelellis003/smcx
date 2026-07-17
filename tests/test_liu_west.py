@@ -1,226 +1,368 @@
-# Copyright Contributors to the smcx project.
+# Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Liu-West filter tests (spec: feat-10-liu-west).
+"""Tests for smcx.liu_west_filter.
 
-The Liu-West filter is a labeled-approximate method (non-vanishing
-bias, discount sensitivity — Kantas et al. 2015); tests target its
-contract, not exactness: parameter concentration around truth,
-point-mass reduction to the APF, the variance-matched discount
-kernel, and the container/degeneracy conventions.
+Validates parameter recovery on a linear Gaussian SSM with unknown
+observation noise variance, degeneracy to APF with fixed parameters,
+and the effect of shrinkage on posterior spread.
 """
 
-import math
-
-import mlx.core as mx
-import numpy as np
+import jax
+import jax.numpy as jnp
+import jax.random as jr
 import pytest
 
-import smcx
-from tests._kalman import kalman_1d
+from smcx.liu_west import liu_west_filter
+from tests.conftest import _mvn_logpdf, _mvn_sample
 
-A_TRUE, Q, R = 0.9, 0.5, 0.3
-M0, P0 = 0.0, 1.0
-T = 60
-
-
-def _model():
-    sq, sp = math.sqrt(Q), math.sqrt(P0)
-
-    def init(key, n):
-        return M0 + sp * mx.random.normal((n, 1), key=key)
-
-    def trans(key, s, params):
-        return params[0] * s + sq * mx.random.normal(s.shape, key=key)
-
-    def logobs(y, s, params):
-        return -0.5 * (math.log(2 * math.pi * R) + (y[0] - s[0]) ** 2 / R)
-
-    def logaux(y, s, params):
-        v = Q + R
-        return -0.5 * (
-            math.log(2 * math.pi * v) + (y[0] - params[0] * s[0]) ** 2 / v
-        )
-
-    def param_init(key, n):
-        # U(0.5, 1.3) prior over the AR coefficient.
-        return 0.5 + 0.8 * mx.random.uniform(shape=(n, 1), key=key)
-
-    def param_point_mass(key, n):
-        return mx.full((n, 1), A_TRUE)
-
-    return init, trans, logobs, logaux, param_init, param_point_mass
+# ---------------------------------------------------------------------------
+# Test model: 1-D LGSSM with unknown observation noise variance
+#
+#   z_0  ~ N(0, 1)
+#   z_t  = 0.9 * z_{t-1} + eps,  eps ~ N(0, 0.25)
+#   y_t  = z_t + eta,            eta ~ N(0, sigma_y^2)
+#
+# Parameter to estimate: sigma_y^2 (true value = 1.0)
+# ---------------------------------------------------------------------------
 
 
-def _data(seed=0):
-    rng = np.random.default_rng(seed)
-    x = np.empty(T)
-    x[0] = rng.normal(M0, math.sqrt(P0))
-    for t in range(1, T):
-        x[t] = A_TRUE * x[t - 1] + rng.normal(0, math.sqrt(Q))
-    return x + rng.normal(0, math.sqrt(R), T)
+def _make_liu_west_fns():
+    """Build closures for Liu-West filter on LGSSM with unknown obs noise."""
+    m0 = jnp.array([0.0])
+    P0 = jnp.array([[1.0]])
+    F = jnp.array([[0.9]])
+    Q = jnp.array([[0.25]])
+    H = jnp.array([[1.0]])
 
+    def initial_sampler(key, n):
+        return _mvn_sample(key, m0, P0, shape=(n,))
 
-Y = _data()
-LOGZ_TRUE, _, _ = kalman_1d(Y, A_TRUE, Q, R, M0, P0)
-Y_MX = mx.array(Y.astype(np.float32))[:, None]
+    def transition_sampler(key, state, params):
+        mean = (F @ state[:, None]).squeeze(-1)
+        return _mvn_sample(key, mean, Q)
 
-INIT, TRANS, LOGOBS, LOGAUX, PARAM_INIT, PARAM_POINT = _model()
+    def log_observation_fn(emission, state, params):
+        sigma_y_sq = jnp.exp(params[0])
+        R = jnp.array([[sigma_y_sq]], dtype=jnp.float64)
+        mean = (H @ state[:, None]).squeeze(-1)
+        return _mvn_logpdf(emission, mean, R)
 
+    def log_auxiliary_fn(emission, state, params):
+        sigma_y_sq = jnp.exp(params[0])
+        R = jnp.array([[sigma_y_sq]], dtype=jnp.float64)
+        predicted_mean = (H @ F @ state[:, None]).squeeze(-1)
+        return _mvn_logpdf(emission, predicted_mean, R)
 
-def _run(seed, n=4000, param_init=PARAM_INIT, **kw):
-    return smcx.liu_west_filter(
-        mx.random.key(seed),
-        INIT,
-        TRANS,
-        LOGOBS,
-        LOGAUX,
-        param_init,
-        Y_MX,
-        n,
-        **kw,
+    def param_initial_sampler(key, n):
+        # Prior on log(sigma_y^2) ~ N(0, 0.5^2)
+        return jnp.float64(0.5) * jr.normal(key, (n, 1))
+
+    return (
+        initial_sampler,
+        transition_sampler,
+        log_observation_fn,
+        log_auxiliary_fn,
+        param_initial_sampler,
     )
 
 
-class TestParameterLearning:
-    """The filter's reason to exist."""
+class TestLiuWestRecoversParams:
+    """Liu-West filter should recover known parameters."""
 
-    def test_param_posterior_concentrates_near_truth(self):
-        post = _run(0, n=8000)
-        means = np.array(smcx.param_weighted_mean(post))[:, 0]
-        # Final-step posterior mean near the true AR coefficient.
-        # Liu-West carries method bias; +-0.08 is the honest band
-        # for T=60 observations (posterior sd itself ~0.03-0.05).
-        assert abs(means[-1] - A_TRUE) < 0.08
-        # And it should have LEARNED: closer than the prior mean.
-        assert abs(means[-1] - A_TRUE) < abs(0.9 - means[0]) + 0.05
+    def test_liu_west_recovers_known_params(self, lgssm_params, lgssm_data):
+        """Posterior param mean should be near true value."""
+        _, emissions = lgssm_data
+        (
+            init_fn,
+            trans_fn,
+            obs_fn,
+            aux_fn,
+            param_init_fn,
+        ) = _make_liu_west_fns()
 
-    def test_param_spread_shrinks_over_time(self):
-        post = _run(1, n=8000)
-        qs = np.array(
-            smcx.param_weighted_quantile(post, mx.array([0.05, 0.95]))
-        )
-        width = qs[:, 1, 0] - qs[:, 0, 0]
-        assert width[-1] < 0.5 * width[0]
-
-    def test_shrinkage_preserves_marginal_spread(self):
-        # The discount kernel is variance-MATCHED by construction:
-        # shrink by a, jitter with h^2 = 1 - a^2 times the weighted
-        # covariance, so the marginal parameter spread is invariant
-        # to a (Liu & West 2001, the point of the discount). Assert
-        # that: final spreads at a=0.85 and a=0.995 agree within an
-        # MC band. A broken kernel fails loudly — shrinkage without
-        # jitter collapses the ratio toward 0; jitter without
-        # shrinkage inflates it. Measured per-seed ratio sd is ~0.12
-        # (both backends), so the 3-seed band [0.7, 1.4] sits >4 SE
-        # out. A single-seed strict ordering here is a coin flip —
-        # it flipped between local M-series and CI's paravirtual
-        # Metal device.
-        def mean_width(shrinkage: float) -> float:
-            widths = []
-            for seed in range(3):
-                post = _run(seed, n=4000, shrinkage=shrinkage)
-                qs = np.array(
-                    smcx.param_weighted_quantile(post, mx.array([0.05, 0.95]))
-                )
-                widths.append((qs[:, 1, 0] - qs[:, 0, 0])[-10:].mean())
-            return float(np.mean(widths))
-
-        ratio = mean_width(0.85) / mean_width(0.995)
-        assert 0.7 < ratio < 1.4
-
-
-class TestPointMassReduction:
-    """Point-mass params: Liu-West ~ APF at known parameters."""
-
-    def test_logz_matches_apf_statistically(self):
-        # Same algorithm structure, different RNG consumption: the
-        # comparison is tier-2 statistical (design §9b), both vs the
-        # same fixture: |mean diff| <= 3*sqrt(sd_a^2/R + sd_b^2/R).
-        r_keys = 10
-        lw_vals = np.array([
-            _run(s, n=4000, param_init=PARAM_POINT).marginal_loglik.item()
-            for s in range(r_keys)
-        ])
-
-        def logaux2(y, s):
-            v = Q + R
-            return -0.5 * (
-                math.log(2 * math.pi * v) + (y[0] - A_TRUE * s[0]) ** 2 / v
-            )
-
-        def trans2(key, s):
-            return A_TRUE * s + math.sqrt(Q) * mx.random.normal(
-                s.shape, key=key
-            )
-
-        def logobs2(y, s):
-            return -0.5 * (math.log(2 * math.pi * R) + (y[0] - s[0]) ** 2 / R)
-
-        apf_vals = np.array([
-            smcx.auxiliary_filter(
-                mx.random.key(s), INIT, trans2, logobs2, logaux2, Y_MX, 4000
-            ).marginal_loglik.item()
-            for s in range(r_keys)
-        ])
-        diff = lw_vals.mean() - apf_vals.mean()
-        bound = 3 * math.sqrt(
-            lw_vals.std(ddof=1) ** 2 / r_keys
-            + apf_vals.std(ddof=1) ** 2 / r_keys
-        )
-        assert abs(diff) <= bound, (diff, bound)
-
-    def test_logz_gate_vs_kalman_at_true_params(self):
-        r_keys = 10
-        vals = np.array([
-            _run(s, n=4000, param_init=PARAM_POINT).marginal_loglik.item()
-            for s in range(r_keys)
-        ])
-        sd = vals.std(ddof=1)
-        err = vals.mean() - LOGZ_TRUE
-        upper = 3 * sd / math.sqrt(r_keys)
-        assert -(upper + 0.5 * sd**2) <= err <= upper, (err, sd)
-
-
-class TestStructure:
-    """Container, degeneracy, store_history."""
-
-    def test_container_shapes_and_invariants(self):
-        post = _run(3, n=500)
-        assert isinstance(post, smcx.ParticleFilterResult)
-        assert post.filtered_params.shape == (T, 500, 1)
-        assert post.filtered_particles.shape == (T, 500, 1)
-        total = np.array(post.log_evidence_increments, dtype=np.float64).sum()
-        assert post.marginal_loglik.item() == pytest.approx(total, abs=5e-4)
-        e = np.array(post.ess)
-        assert np.all(e >= 1 - 1e-4) and np.all(e <= 500 * (1 + 1e-4))
-
-    def test_deterministic_per_key(self):
-        a = _run(4, n=500)
-        b = _run(4, n=500)
-        assert a.marginal_loglik.item() == b.marginal_loglik.item()
-        assert np.array_equal(
-            np.array(a.filtered_params), np.array(b.filtered_params)
+        post = liu_west_filter(
+            key=jr.PRNGKey(42),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            log_auxiliary_fn=aux_fn,
+            param_initial_sampler=param_init_fn,
+            emissions=emissions,
+            num_particles=5_000,
+            shrinkage=0.95,
         )
 
-    def test_degenerate_raises(self):
-        def impossible(y, s, params):
-            return mx.array(-mx.inf)
+        # True log(sigma_y^2) = log(1.0) = 0.0
+        # Get final time step parameter posterior mean
+        from smcx.weights import normalize
 
-        with pytest.raises(smcx.DegenerateWeightsError):
-            smcx.liu_west_filter(
-                mx.random.key(5),
-                INIT,
-                TRANS,
-                impossible,
-                LOGAUX,
-                PARAM_INIT,
-                Y_MX,
-                200,
+        final_weights = normalize(post.filtered_log_weights[-1])
+        final_params = post.filtered_params[-1]  # (N, 1)
+        posterior_mean = float(
+            jnp.sum(final_weights[:, None] * final_params, axis=0)[0]
+        )
+
+        # log(sigma_y^2) should be near 0 (= log(1.0))
+        assert posterior_mean == pytest.approx(0.0, abs=0.5), (
+            f"Posterior mean log(sigma_y^2) = {posterior_mean:.3f},"
+            " expected ~0.0"
+        )
+
+
+class TestLiuWestFixedParamsMatchesAPF:
+    """With delta prior (fixed params), Liu-West should match APF."""
+
+    def test_liu_west_fixed_params_matches_apf(self, lgssm_params, lgssm_data):
+        """Log-ML with delta prior on true params ≈ APF log-ML."""
+        from smcx.auxiliary import auxiliary_filter
+
+        _, emissions = lgssm_data
+
+        m0 = lgssm_params["initial_mean"]
+        P0 = lgssm_params["initial_cov"]
+        F = lgssm_params["dynamics_weights"]
+        Q = lgssm_params["dynamics_cov"]
+        H = lgssm_params["emissions_weights"]
+        R = lgssm_params["emissions_cov"]
+
+        # APF closures (no params)
+        def apf_init(key, n):
+            return _mvn_sample(key, m0, P0, shape=(n,))
+
+        def apf_trans(key, state):
+            mean = (F @ state[:, None]).squeeze(-1)
+            return _mvn_sample(key, mean, Q)
+
+        def apf_obs(emission, state):
+            mean = (H @ state[:, None]).squeeze(-1)
+            return _mvn_logpdf(emission, mean, R)
+
+        def apf_aux(emission, state):
+            pred = (H @ F @ state[:, None]).squeeze(-1)
+            return _mvn_logpdf(emission, pred, R)
+
+        # Liu-West closures (params ignored since fixed)
+        def lw_init(key, n):
+            return apf_init(key, n)
+
+        def lw_trans(key, state, params):
+            return apf_trans(key, state)
+
+        def lw_obs(emission, state, params):
+            return apf_obs(emission, state)
+
+        def lw_aux(emission, state, params):
+            return apf_aux(emission, state)
+
+        def lw_param_init(key, n):
+            # Delta prior: all particles get same param (log(1.0) = 0.0)
+            return jnp.zeros((n, 1))
+
+        key = jr.PRNGKey(99)
+        n = 5_000
+
+        apf_post = auxiliary_filter(
+            key=key,
+            initial_sampler=apf_init,
+            transition_sampler=apf_trans,
+            log_observation_fn=apf_obs,
+            log_auxiliary_fn=apf_aux,
+            emissions=emissions,
+            num_particles=n,
+        )
+
+        lw_post = liu_west_filter(
+            key=key,
+            initial_sampler=lw_init,
+            transition_sampler=lw_trans,
+            log_observation_fn=lw_obs,
+            log_auxiliary_fn=lw_aux,
+            param_initial_sampler=lw_param_init,
+            emissions=emissions,
+            num_particles=n,
+            shrinkage=0.99,  # minimal smoothing
+        )
+
+        apf_ll = float(apf_post.marginal_loglik)
+        lw_ll = float(lw_post.marginal_loglik)
+
+        assert lw_ll == pytest.approx(apf_ll, abs=5.0), (
+            f"Liu-West {lw_ll:.2f} vs APF {apf_ll:.2f}"
+        )
+
+
+class TestLiuWestShrinkage:
+    """Shrinkage parameter should affect posterior spread."""
+
+    def test_liu_west_shrinkage_affects_spread(self, lgssm_params, lgssm_data):
+        """Lower shrinkage → wider parameter posterior on average."""
+        from smcx.weights import normalize
+
+        _, emissions = lgssm_data
+        (
+            init_fn,
+            trans_fn,
+            obs_fn,
+            aux_fn,
+            param_init_fn,
+        ) = _make_liu_west_fns()
+
+        def _spread(seed, a):
+            post = liu_west_filter(
+                key=jr.PRNGKey(seed),
+                initial_sampler=init_fn,
+                transition_sampler=trans_fn,
+                log_observation_fn=obs_fn,
+                log_auxiliary_fn=aux_fn,
+                param_initial_sampler=param_init_fn,
+                emissions=emissions,
+                num_particles=2_000,
+                shrinkage=a,
+            )
+            w = normalize(post.filtered_log_weights[-1])
+            p = post.filtered_params[-1, :, 0]
+            mean = jnp.sum(w * p)
+            return float(jnp.sum(w * (p - mean) ** 2))
+
+        # Average across several seeds: a single particle filter run is
+        # too noisy to compare two shrinkage settings reliably.
+        seeds = list(range(8))
+        spread_low = sum(_spread(s, 0.80) for s in seeds) / len(seeds)
+        spread_high = sum(_spread(s, 0.99) for s in seeds) / len(seeds)
+
+        assert spread_low > spread_high, (
+            f"Mean spread (a=0.80): {spread_low:.4f}, "
+            f"(a=0.99): {spread_high:.4f}"
+        )
+
+
+class TestLiuWestJIT:
+    """Liu-West filter should be JIT-compilable."""
+
+    def test_liu_west_jit_compiles(self):
+        m0 = jnp.array([0.0])
+        P0 = jnp.array([[1.0]])
+        F = jnp.array([[0.9]])
+        Q = jnp.array([[0.25]])
+        H = jnp.array([[1.0]])
+
+        def init(key, n):
+            return _mvn_sample(key, m0, P0, shape=(n,))
+
+        def trans(key, state, params):
+            mean = (F @ state[:, None]).squeeze(-1)
+            return _mvn_sample(key, mean, Q)
+
+        def obs(emission, state, params):
+            R = jnp.array([[jnp.exp(params[0])]])
+            mean = (H @ state[:, None]).squeeze(-1)
+            return _mvn_logpdf(emission, mean, R)
+
+        def aux(emission, state, params):
+            R = jnp.array([[jnp.exp(params[0])]])
+            pred = (H @ F @ state[:, None]).squeeze(-1)
+            return _mvn_logpdf(emission, pred, R)
+
+        def param_init(key, n):
+            return jnp.zeros((n, 1))
+
+        emissions = jnp.ones((10, 1))
+
+        @jax.jit
+        def run(key):
+            return liu_west_filter(
+                key=key,
+                initial_sampler=init,
+                transition_sampler=trans,
+                log_observation_fn=obs,
+                log_auxiliary_fn=aux,
+                param_initial_sampler=param_init,
+                emissions=emissions,
+                num_particles=50,
+                shrinkage=0.95,
             )
 
-    def test_store_history_final_only(self):
-        post = _run(6, n=500, store_history=False)
-        assert post.filtered_particles.shape == (1, 500, 1)
-        assert post.filtered_params.shape == (1, 500, 1)
-        assert post.ess.shape == (T,)
+        result = run(jr.PRNGKey(0))
+        assert result.filtered_particles.shape == (10, 50, 1)
+        assert result.filtered_params.shape == (10, 50, 1)
+        assert jnp.isfinite(result.marginal_loglik)
+
+
+class TestLiuWestLogEvidenceIncrements:
+    """log_evidence_increments field should be consistent."""
+
+    def test_log_evidence_increments_shape(self, lgssm_params, lgssm_data):
+        """Shape should be (ntime,)."""
+        _, emissions = lgssm_data
+        (
+            init_fn,
+            trans_fn,
+            obs_fn,
+            aux_fn,
+            param_init_fn,
+        ) = _make_liu_west_fns()
+
+        post = liu_west_filter(
+            key=jr.PRNGKey(0),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            log_auxiliary_fn=aux_fn,
+            param_initial_sampler=param_init_fn,
+            emissions=emissions,
+            num_particles=500,
+            shrinkage=0.95,
+        )
+        assert post.log_evidence_increments.shape == (emissions.shape[0],)
+
+    def test_log_evidence_increments_sum_to_marginal(
+        self, lgssm_params, lgssm_data
+    ):
+        """Increments should sum to marginal_loglik."""
+        _, emissions = lgssm_data
+        (
+            init_fn,
+            trans_fn,
+            obs_fn,
+            aux_fn,
+            param_init_fn,
+        ) = _make_liu_west_fns()
+
+        post = liu_west_filter(
+            key=jr.PRNGKey(0),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            log_auxiliary_fn=aux_fn,
+            param_initial_sampler=param_init_fn,
+            emissions=emissions,
+            num_particles=500,
+            shrinkage=0.95,
+        )
+        total = float(jnp.sum(post.log_evidence_increments))
+        assert total == pytest.approx(float(post.marginal_loglik), abs=1e-6)
+
+    def test_log_evidence_increments_finite(self, lgssm_params, lgssm_data):
+        """All increments should be finite."""
+        _, emissions = lgssm_data
+        (
+            init_fn,
+            trans_fn,
+            obs_fn,
+            aux_fn,
+            param_init_fn,
+        ) = _make_liu_west_fns()
+
+        post = liu_west_filter(
+            key=jr.PRNGKey(0),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            log_auxiliary_fn=aux_fn,
+            param_initial_sampler=param_init_fn,
+            emissions=emissions,
+            num_particles=500,
+            shrinkage=0.95,
+        )
+        assert jnp.all(jnp.isfinite(post.log_evidence_increments))

@@ -1,295 +1,223 @@
-# Copyright Contributors to the smcx project.
+# Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Bootstrap filter tests (spec: feat-3-bootstrap).
+"""Tests for smcx.bootstrap_filter.
 
-Correctness gates are MC-error-calibrated per design §9 and
-benchmarks/PROTOCOL.md: over R keys,
--(3*SD/sqrt(R) + SD**2/2) <= mean(logZ) - logZ_kalman <= 3*SD/sqrt(R)
-— the Jensen budget (E[log Zhat] ~ log Z - Var/2) is one-sided; an
-upward deviation of that size indicates a bug and is not excused.
+Cross-validates against the Dynamax Kalman filter (exact solution
+for linear Gaussian SSMs).
 """
 
-import math
-
-import mlx.core as mx
-import numpy as np
+import jax.numpy as jnp
+import jax.random as jr
 import pytest
 
-import smcx
-from tests._kalman import kalman_1d
+from smcx.bootstrap import bootstrap_filter
+from tests.conftest import _mvn_logpdf, _mvn_sample
 
-# 1-D LGSSM fixture: x_t = A x_{t-1} + N(0, Q); y_t = x_t + N(0, R).
-A, Q, R_NOISE = 0.9, 0.5, 0.3
-M0, P0 = 0.0, 1.0
-T = 50
+# ---------------------------------------------------------------------------
+# Helpers to define the LGSSM for smcx
+# ---------------------------------------------------------------------------
 
 
-def _make_model():
-    sq, sp = math.sqrt(Q), math.sqrt(P0)
+def _make_smcx_fns(lgssm_params):
+    """Build (initial_sampler, transition_sampler, log_obs_fn) closures."""
+    m0 = lgssm_params["initial_mean"]
+    P0 = lgssm_params["initial_cov"]
+    F = lgssm_params["dynamics_weights"]
+    Q = lgssm_params["dynamics_cov"]
+    H = lgssm_params["emissions_weights"]
+    R = lgssm_params["emissions_cov"]
 
     def initial_sampler(key, n):
-        return M0 + sp * mx.random.normal((n, 1), key=key)
+        return _mvn_sample(key, m0, P0, shape=(n,))
 
     def transition_sampler(key, state):
-        return A * state + sq * mx.random.normal(state.shape, key=key)
+        mean = (F @ state[:, None]).squeeze(-1)
+        return _mvn_sample(key, mean, Q)
 
-    def log_observation_fn(y, state):
-        return -0.5 * (
-            math.log(2 * math.pi * R_NOISE) + (y[0] - state[0]) ** 2 / R_NOISE
-        )
+    def log_observation_fn(emission, state):
+        mean = (H @ state[:, None]).squeeze(-1)
+        return _mvn_logpdf(emission, mean, R)
 
     return initial_sampler, transition_sampler, log_observation_fn
 
 
-def _simulate_data(seed=0):
-    rng = np.random.default_rng(seed)
-    x = np.empty(T)
-    x[0] = rng.normal(M0, math.sqrt(P0))
-    for t in range(1, T):
-        x[t] = A * x[t - 1] + rng.normal(0, math.sqrt(Q))
-    y = x + rng.normal(0, math.sqrt(R_NOISE), size=T)
-    return y
+# ---------------------------------------------------------------------------
+# Test: bootstrap filter vs. Kalman filter (exact)
+# ---------------------------------------------------------------------------
 
 
-Y = _simulate_data()
-LOGZ_TRUE, KMEANS, KVARS = kalman_1d(Y, A, Q, R_NOISE, M0, P0)
-Y_MX = mx.array(Y.astype(np.float32))[:, None]
+class TestBootstrapVsKalman:
+    """Bootstrap PF on a linear Gaussian SSM matches the Kalman filter."""
 
-
-def _run(key_seed, n=10_000, emissions=Y_MX, **kw):
-    init, trans, logobs = _make_model()
-    return smcx.bootstrap_filter(
-        mx.random.key(key_seed), init, trans, logobs, emissions, n, **kw
-    )
-
-
-class TestKalmanGate:
-    """PROTOCOL-semantics correctness gate against the exact oracle."""
-
-    def test_log_ml_gate_r20(self):
-        r_keys = 20
-        vals = np.array([_run(s).marginal_loglik.item() for s in range(r_keys)])
-        sd = vals.std(ddof=1)
-        err = vals.mean() - LOGZ_TRUE
-        upper = 3 * sd / math.sqrt(r_keys)
-        lower = -(upper + 0.5 * sd**2)
-        assert lower <= err <= upper, (err, sd)
-
-    def test_estimator_spread_shrinks_with_n(self):
-        # Var(log Zhat) ~ 1/N, so SD at N=100 vs N=10^4 differ ~10x —
-        # decisive at R=10 keys, unlike mean-error comparisons which
-        # are MC-noise-vs-MC-noise at this R (both biases are ~SD^2/2
-        # and tiny on this easy fixture).
-        r_keys = 10
-        sds = []
-        for n in (100, 10_000):
-            vals = np.array([
-                _run(s, n=n).marginal_loglik.item() for s in range(r_keys)
-            ])
-            sds.append(vals.std(ddof=1))
-        assert sds[1] < sds[0] / 2
-
-    def test_filtered_means_track_kalman(self):
-        post = _run(0)
-        w = np.exp(np.array(post.filtered_log_weights, dtype=np.float64))
-        means = (w * np.array(post.filtered_particles)[:, :, 0]).sum(axis=1)
-        # MC error of the weighted mean ~ sqrt(Var_filt/ESS); with
-        # ESS >~ 2000 and Var <= P0 this is < 0.03; atol 0.15 = ~5x.
-        assert np.allclose(means, KMEANS, atol=0.15)
-
-
-class TestStructure:
-    """Container invariants and loop conventions."""
-
-    def test_shapes_and_t0_identity_ancestors(self):
-        post = _run(1, n=256)
-        assert post.filtered_particles.shape == (T, 256, 1)
-        assert post.filtered_log_weights.shape == (T, 256)
-        assert post.ancestors.shape == (T, 256)
-        assert np.array_equal(np.array(post.ancestors[0]), np.arange(256))
-
-    def test_increments_sum_to_marginal(self):
-        post = _run(2, n=1000)
-        total = np.array(post.log_evidence_increments, dtype=np.float64).sum()
-        assert post.marginal_loglik.item() == pytest.approx(
-            total, abs=5e-4
-        )  # Neumaier vs f64 re-sum at T=50: ulp-scale slack
-
-    def test_weights_normalized_every_step(self):
-        post = _run(3, n=1000)
-        lse = np.array([
-            mx.logsumexp(post.filtered_log_weights[t]).item() for t in range(T)
-        ])
-        assert np.allclose(lse, 0.0, atol=1e-5)
-
-    def test_ess_bounds(self):
-        post = _run(4, n=1000)
-        e = np.array(post.ess)
-        assert np.all(e >= 1.0 - 1e-4) and np.all(e <= 1000 * (1 + 1e-4))
-
-    def test_deterministic_per_key(self):
-        a = _run(5, n=500)
-        b = _run(5, n=500)
-        assert np.array_equal(
-            np.array(a.filtered_particles), np.array(b.filtered_particles)
+    def test_log_marginal_likelihood(self, lgssm_params, lgssm_data):
+        """PF log-ML should be close to the Kalman exact log-ML."""
+        from dynamax.linear_gaussian_ssm.inference import (
+            lgssm_filter,
+            make_lgssm_params,
         )
-        assert a.marginal_loglik.item() == b.marginal_loglik.item()
 
-    def test_result_satisfies_protocol(self):
-        assert isinstance(_run(6, n=64), smcx.ParticleFilterResult)
+        _, emissions = lgssm_data
+        params = make_lgssm_params(**lgssm_params)
 
+        # Exact Kalman
+        kalman_post = lgssm_filter(params, emissions)
+        exact_ll = float(kalman_post.marginal_loglik)
 
-class TestEdgeCases:
-    """Degeneracy, missing data, univariate emissions, inputs."""
-
-    def test_degenerate_weights_raise(self):
-        init, trans, _ = _make_model()
-
-        def impossible(y, state):
-            return mx.array(-mx.inf)
-
-        with pytest.raises(smcx.DegenerateWeightsError, match="step"):
-            smcx.bootstrap_filter(
-                mx.random.key(0), init, trans, impossible, Y_MX, 100
-            )
-
-    def test_univariate_emissions_canonicalized(self):
-        y_flat = mx.array(Y.astype(np.float32))
-        a = _run(7, n=500, emissions=y_flat)
-        b = _run(7, n=500, emissions=Y_MX)
-        assert a.marginal_loglik.item() == b.marginal_loglik.item()
-
-    def test_missing_observations_match_gapped_kalman(self):
-        # 20% missing: mask in log_observation_fn (design §4 recipe);
-        # the Kalman oracle skips those updates exactly.
-        rng = np.random.default_rng(42)
-        y_gap = Y.copy()
-        y_gap[rng.choice(T, size=T // 5, replace=False)] = np.nan
-        logz_gap, _, _ = kalman_1d(y_gap, A, Q, R_NOISE, M0, P0)
-        init, trans, _ = _make_model()
-
-        def masked_logobs(y, state):
-            dens = -0.5 * (
-                math.log(2 * math.pi * R_NOISE)
-                + (y[0] - state[0]) ** 2 / R_NOISE
-            )
-            return mx.where(mx.isnan(y[0]), mx.array(0.0), dens)
-
-        y_mx = mx.array(y_gap.astype(np.float32))[:, None]
-        r_keys = 10
-        vals = np.array([
-            smcx.bootstrap_filter(
-                mx.random.key(s), init, trans, masked_logobs, y_mx, 10_000
-            ).marginal_loglik.item()
-            for s in range(r_keys)
-        ])
-        sd = vals.std(ddof=1)
-        err = vals.mean() - logz_gap
-        upper = 3 * sd / math.sqrt(r_keys)
-        assert -(upper + 0.5 * sd**2) <= err <= upper
-
-    def test_inputs_channel_matches_kalman_with_control(self):
-        # x_t = A x_{t-1} + B u_t + noise; u known. ADR-0008 trailing
-        # input_t on both callbacks (observation ignores it here).
-        b_ctrl = 0.7
-        rng = np.random.default_rng(9)
-        u = rng.normal(size=T)
-        x = np.empty(T)
-        x[0] = rng.normal(M0, math.sqrt(P0))
-        for t in range(1, T):
-            x[t] = A * x[t - 1] + b_ctrl * u[t] + rng.normal(0, math.sqrt(Q))
-        y = x + rng.normal(0, math.sqrt(R_NOISE), size=T)
-        logz_true, _, _ = kalman_1d(y, A, Q, R_NOISE, M0, P0, b=b_ctrl, u=u)
-
-        init, _, _ = _make_model()
-        sq = math.sqrt(Q)
-
-        def trans_u(key, state, input_t):
-            return (
-                A * state
-                + b_ctrl * input_t
-                + sq * mx.random.normal(state.shape, key=key)
-            )
-
-        def logobs_u(yv, state, input_t):
-            return -0.5 * (
-                math.log(2 * math.pi * R_NOISE)
-                + (yv[0] - state[0]) ** 2 / R_NOISE
-            )
-
-        y_mx = mx.array(y.astype(np.float32))[:, None]
-        u_mx = mx.array(u.astype(np.float32))
-        r_keys = 10
-        vals = np.array([
-            smcx.bootstrap_filter(
-                mx.random.key(s),
-                init,
-                trans_u,
-                logobs_u,
-                y_mx,
-                10_000,
-                inputs=u_mx,
-            ).marginal_loglik.item()
-            for s in range(r_keys)
-        ])
-        sd = vals.std(ddof=1)
-        err = vals.mean() - logz_true
-        upper = 3 * sd / math.sqrt(r_keys)
-        assert -(upper + 0.5 * sd**2) <= err <= upper
-
-    def test_arity_mismatch_raises_named_error(self):
-        init, trans, logobs = _make_model()  # two-arg forms
-        with pytest.raises(TypeError, match="input_t"):
-            smcx.bootstrap_filter(
-                mx.random.key(0),
-                init,
-                trans,
-                logobs,
-                Y_MX,
-                100,
-                inputs=mx.zeros((T,)),
-            )
-
-
-class TestSimulate:
-    """Dual-arity initial sampler + inputs reuse (ADR-0008 item 3)."""
-
-    def test_cloud_form_initial_sampler(self):
-        init, trans, _ = _make_model()
-
-        def emit(key, state):
-            return state + math.sqrt(R_NOISE) * mx.random.normal(
-                state.shape, key=key
-            )
-
-        states, ems = smcx.simulate(mx.random.key(0), init, trans, emit, 25)
-        assert states.shape == (25, 1) and ems.shape == (25, 1)
-
-    def test_single_draw_form_initial_sampler(self):
-        _, trans, _ = _make_model()
-
-        def init_single(key):
-            return M0 + math.sqrt(P0) * mx.random.normal((1,), key=key)
-
-        def emit(key, state):
-            return state
-
-        states, _ = smcx.simulate(
-            mx.random.key(1), init_single, trans, emit, 10
+        # Bootstrap PF with many particles
+        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
+        pf_post = bootstrap_filter(
+            key=jr.PRNGKey(123),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            emissions=emissions,
+            num_particles=10_000,
         )
-        assert states.shape == (10, 1)
+        pf_ll = float(pf_post.marginal_loglik)
 
-    def test_simulated_data_is_filterable(self):
-        init, trans, logobs = _make_model()
-
-        def emit(key, state):
-            return state + math.sqrt(R_NOISE) * mx.random.normal(
-                state.shape, key=key
-            )
-
-        _, ems = smcx.simulate(mx.random.key(2), init, trans, emit, 30)
-        post = smcx.bootstrap_filter(
-            mx.random.key(3), init, trans, logobs, ems, 1000
+        assert pf_ll == pytest.approx(exact_ll, rel=0.05), (
+            f"PF log-ML {pf_ll:.2f} vs Kalman {exact_ll:.2f}"
         )
-        assert math.isfinite(post.marginal_loglik.item())
+
+    def test_filtered_means(self, lgssm_params, lgssm_data):
+        """PF weighted means should track the Kalman filtered means."""
+        from dynamax.linear_gaussian_ssm.inference import (
+            lgssm_filter,
+            make_lgssm_params,
+        )
+
+        _, emissions = lgssm_data
+        params = make_lgssm_params(**lgssm_params)
+
+        kalman_post = lgssm_filter(params, emissions)
+        kalman_means = kalman_post.filtered_means  # (T, 1)
+
+        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
+        pf_post = bootstrap_filter(
+            key=jr.PRNGKey(456),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            emissions=emissions,
+            num_particles=10_000,
+        )
+
+        # Compute weighted mean of particles at each time step
+        from smcx.weights import normalize
+
+        weights = jnp.array([
+            normalize(pf_post.filtered_log_weights[t]) for t in range(50)
+        ])  # (T, N)
+        pf_means = jnp.sum(
+            weights[:, :, None] * pf_post.filtered_particles, axis=1
+        )  # (T, 1)
+
+        assert jnp.allclose(pf_means, kalman_means, atol=0.15), (
+            f"Max error: {jnp.max(jnp.abs(pf_means - kalman_means)):.4f}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test: convergence with increasing particles
+# ---------------------------------------------------------------------------
+
+
+class TestBootstrapConvergence:
+    """PF estimates should improve with more particles."""
+
+    def test_log_ml_converges(self, lgssm_params, lgssm_data):
+        """Log-ML variance decreases with more particles."""
+        from dynamax.linear_gaussian_ssm.inference import (
+            lgssm_filter,
+            make_lgssm_params,
+        )
+
+        _, emissions = lgssm_data
+        params = make_lgssm_params(**lgssm_params)
+        exact_ll = float(lgssm_filter(params, emissions).marginal_loglik)
+
+        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
+        errors = []
+        for n in [100, 1_000, 10_000]:
+            pf = bootstrap_filter(
+                key=jr.PRNGKey(999),
+                initial_sampler=init_fn,
+                transition_sampler=trans_fn,
+                log_observation_fn=obs_fn,
+                emissions=emissions,
+                num_particles=n,
+            )
+            errors.append(abs(float(pf.marginal_loglik) - exact_ll))
+
+        # Error should generally decrease with more particles
+        assert errors[-1] < errors[0], f"Error did not decrease: {errors}"
+
+
+class TestBootstrapESSTrace:
+    """ESS trace should be reasonable."""
+
+    def test_ess_bounded(self, lgssm_params, lgssm_data):
+        """ESS should be between 1 and N at every time step."""
+        _, emissions = lgssm_data
+        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
+        n = 1_000
+        pf = bootstrap_filter(
+            key=jr.PRNGKey(111),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            emissions=emissions,
+            num_particles=n,
+        )
+        assert jnp.all(pf.ess >= 0.9)  # ESS >= ~1
+        assert jnp.all(pf.ess <= n + 0.1)
+
+
+class TestBootstrapLogEvidenceIncrements:
+    """log_evidence_increments field should be consistent."""
+
+    def test_log_evidence_increments_shape(self, lgssm_params, lgssm_data):
+        """Shape should be (ntime,)."""
+        _, emissions = lgssm_data
+        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
+        pf = bootstrap_filter(
+            key=jr.PRNGKey(0),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            emissions=emissions,
+            num_particles=1_000,
+        )
+        assert pf.log_evidence_increments.shape == (emissions.shape[0],)
+
+    def test_log_evidence_increments_sum_to_marginal(
+        self, lgssm_params, lgssm_data
+    ):
+        """Increments should sum to marginal_loglik."""
+        _, emissions = lgssm_data
+        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
+        pf = bootstrap_filter(
+            key=jr.PRNGKey(0),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            emissions=emissions,
+            num_particles=1_000,
+        )
+        total = float(jnp.sum(pf.log_evidence_increments))
+        assert total == pytest.approx(float(pf.marginal_loglik), abs=1e-6)
+
+    def test_log_evidence_increments_finite(self, lgssm_params, lgssm_data):
+        """All increments should be finite."""
+        _, emissions = lgssm_data
+        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
+        pf = bootstrap_filter(
+            key=jr.PRNGKey(0),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            emissions=emissions,
+            num_particles=1_000,
+        )
+        assert jnp.all(jnp.isfinite(pf.log_evidence_increments))

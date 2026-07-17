@@ -7,10 +7,9 @@ authors = [
     { name = "Michael Ellis", email = "michaelellis003@gmail.com" }
 ]
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = [
-    "mlx",
-    "apple-silicon",
+        "apple-silicon",
     "particle-filter",
     "sequential-monte-carlo",
     "bayesian-inference",
@@ -32,11 +31,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "jax>=0.10,<0.11",
+    "jaxlib>=0.10,<0.11",
     "jaxtyping>=0.3.7",
-    "mlx>=0.32.0",
-    # mlx ships the Linux backend (libmlx.so) in a separate wheel
-    # gated behind the [cpu] extra; without it, import fails on Linux.
-    "mlx[cpu]>=0.32.0; sys_platform == 'linux'",
     "numpy>=2.2.6",
 ]
 
@@ -51,9 +48,14 @@ Changelog = "https://github.com/michaelellis003/smcx/blob/main/CHANGELOG.md"
 requires = ["uv_build>=0.9.5,<0.12.0"]
 build-backend = "uv_build"
 
+[project.optional-dependencies]
+# Apple-GPU acceleration via the jax-mps PJRT plugin (ADR-0018).
+metal = ["jax-mps>=0.10.9,<0.11"]
+
 [dependency-groups]
 dev = [
     "beartype>=0.22.9",
+    "dynamax>=1.0.2",
     "hypothesis>=6.156.6",
     "mkdocs-gen-files>=0.6.1",
     "mkdocs-literate-nav>=0.6.3",
@@ -97,8 +99,11 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-# Tests use class-based grouping; method docstrings are noisy.
-"tests/*" = ["D102", "D103", "D104"]
+# Tests use class-based grouping; method docstrings are noisy. LGSSM
+# tests keep the literature's matrix notation (F, Q, H, R, P0).
+"tests/*" = ["D102", "D103", "D104", "N806", "N803"]
+# The version fallback try/except is standard packaging boilerplate.
+"src/smcx/__init__.py" = ["RUF067"]
 # Protocol stubs: the class docstring documents the contract.
 "src/smcx/types.py" = ["D102"]
 "src/smcx/containers.py" = ["D102"]
@@ -144,11 +149,15 @@ upload_to_vcs_release = true
 # construction). The native-vs-jax-mps JAX worker is the same case: it
 # runs only inside the pinned `uv run --no-project` env, so jax and the
 # jax_plugins.mps backend are unresolvable in the project environment.
+# The MLX-era benchmark workers reference the pre-ADR-0018 API and the
+# vendored MLX stubs; they are retained as historical harness code until
+# the harness is re-aimed at the jax-mps backend (pivot spec, slice 7).
 exclude = [
     "benchmarks/exploratory/**",
     "benchmarks/killtest/**",
     "benchmarks/native_vs_jax_mps/jax_worker.py",
-    "benchmarks/smc2/particles_side.py",
+    "benchmarks/native_vs_jax_mps/mlx_worker.py",
+    "benchmarks/smc2/**",
     "typings/**",
 ]
 

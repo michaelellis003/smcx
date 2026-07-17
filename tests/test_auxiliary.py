@@ -1,173 +1,223 @@
-# Copyright Contributors to the smcx project.
+# Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Auxiliary filter tests (spec: feat-6-auxiliary; ADR-0002 twist)."""
+"""Tests for smcx.auxiliary_filter.
 
-import math
+Cross-validates against:
+1. Dynamax Kalman filter (exact solution for linear Gaussian SSMs)
+2. smcx bootstrap filter (APF with flat auxiliary = bootstrap)
+"""
 
-import mlx.core as mx
-import numpy as np
+import jax.numpy as jnp
+import jax.random as jr
 import pytest
 
-import smcx
-from tests._kalman import kalman_1d
+from smcx.auxiliary import auxiliary_filter
+from smcx.bootstrap import bootstrap_filter
+from tests.conftest import _mvn_logpdf, _mvn_sample
 
-A, Q, R = 0.9, 0.5, 0.3
-M0, P0 = 0.0, 1.0
-T = 50
-
-
-def _model():
-    sq, sp = math.sqrt(Q), math.sqrt(P0)
-
-    def init(key, n):
-        return M0 + sp * mx.random.normal((n, 1), key=key)
-
-    def trans(key, s):
-        return A * s + sq * mx.random.normal(s.shape, key=key)
-
-    def logobs(y, s):
-        return -0.5 * (math.log(2 * math.pi * R) + (y[0] - s[0]) ** 2 / R)
-
-    def logaux_exact(y, s):
-        # Exact predictive p(y_t | x_{t-1}) = N(y; A*x, Q + R) — the
-        # "fully adapted" look-ahead for this LGSSM.
-        v = Q + R
-        return -0.5 * (math.log(2 * math.pi * v) + (y[0] - A * s[0]) ** 2 / v)
-
-    return init, trans, logobs, logaux_exact
+# ---------------------------------------------------------------------------
+# Helpers to define the LGSSM for smcx APF
+# ---------------------------------------------------------------------------
 
 
-def _data(seed=0):
-    rng = np.random.default_rng(seed)
-    x = np.empty(T)
-    x[0] = rng.normal(M0, math.sqrt(P0))
-    for t in range(1, T):
-        x[t] = A * x[t - 1] + rng.normal(0, math.sqrt(Q))
-    return x + rng.normal(0, math.sqrt(R), T)
+def _make_smcx_fns(lgssm_params):
+    """Build (initial, transition, log_obs, log_aux) closures."""
+    m0 = lgssm_params["initial_mean"]
+    P0 = lgssm_params["initial_cov"]
+    F = lgssm_params["dynamics_weights"]
+    Q = lgssm_params["dynamics_cov"]
+    H = lgssm_params["emissions_weights"]
+    R = lgssm_params["emissions_cov"]
+
+    def initial_sampler(key, n):
+        return _mvn_sample(key, m0, P0, shape=(n,))
+
+    def transition_sampler(key, state):
+        mean = (F @ state[:, None]).squeeze(-1)
+        return _mvn_sample(key, mean, Q)
+
+    def log_observation_fn(emission, state):
+        mean = (H @ state[:, None]).squeeze(-1)
+        return _mvn_logpdf(emission, mean, R)
+
+    def log_auxiliary_fn(emission, state):
+        """Look-ahead: p(y_{t+1} | mu_{t+1}) where mu = F @ x_t."""
+        predicted_mean = (H @ F @ state[:, None]).squeeze(-1)
+        return _mvn_logpdf(emission, predicted_mean, R)
+
+    return (
+        initial_sampler,
+        transition_sampler,
+        log_observation_fn,
+        log_auxiliary_fn,
+    )
 
 
-Y = _data()
-LOGZ_TRUE, _, _ = kalman_1d(Y, A, Q, R, M0, P0)
-Y_MX = mx.array(Y.astype(np.float32))[:, None]
+# ---------------------------------------------------------------------------
+# Test: APF vs. Kalman filter (exact)
+# ---------------------------------------------------------------------------
 
 
-class TestReductions:
-    """The two structural equivalences from design §2/§9."""
+class TestAuxiliaryVsKalman:
+    """APF on a linear Gaussian SSM should approximate Kalman."""
 
-    def test_flat_auxiliary_matches_bootstrap(self):
-        # eta == 1: first-stage weights equal carried weights up to a
-        # renormalization ulp, so results match to f32 tolerance (not
-        # bit-exact: log_normalize of already-normalized weights).
-        init, trans, logobs, _ = _model()
-
-        def flat(y, s):
-            return mx.array(0.0)
-
-        a = smcx.auxiliary_filter(
-            mx.random.key(1), init, trans, logobs, flat, Y_MX, 2000
+    def test_auxiliary_log_ml_matches_kalman(self, lgssm_params, lgssm_data):
+        """APF log-ML should be close to Kalman exact log-ML."""
+        from dynamax.linear_gaussian_ssm.inference import (
+            lgssm_filter,
+            make_lgssm_params,
         )
-        b = smcx.bootstrap_filter(
-            mx.random.key(1), init, trans, logobs, Y_MX, 2000
-        )
-        assert a.marginal_loglik.item() == pytest.approx(
-            b.marginal_loglik.item(), abs=1e-3
-        )
-        assert np.allclose(np.array(a.ess), np.array(b.ess), rtol=1e-3)
 
-    def test_nontrivial_eta_never_resampling_is_bootstrap_exact(self):
-        # threshold=0 => the skip branch runs every step; eta must
-        # appear NOWHERE (spurious eta-division would bias weights,
-        # and the flat-aux test above cannot catch it). Same key,
-        # same RNG consumption => bit-identical.
-        init, trans, logobs, logaux = _model()
-        a = smcx.auxiliary_filter(
-            mx.random.key(2),
-            init,
-            trans,
-            logobs,
-            logaux,
-            Y_MX,
-            1000,
-            resampling_threshold=0.0,
+        _, emissions = lgssm_data
+        params = make_lgssm_params(**lgssm_params)
+
+        # Exact Kalman
+        kalman_post = lgssm_filter(params, emissions)
+        exact_ll = float(kalman_post.marginal_loglik)
+
+        # APF with many particles
+        init_fn, trans_fn, obs_fn, aux_fn = _make_smcx_fns(lgssm_params)
+        pf_post = auxiliary_filter(
+            key=jr.PRNGKey(123),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            log_auxiliary_fn=aux_fn,
+            emissions=emissions,
+            num_particles=10_000,
         )
-        b = smcx.bootstrap_filter(
-            mx.random.key(2),
-            init,
-            trans,
-            logobs,
-            Y_MX,
-            1000,
-            resampling_threshold=0.0,
-        )
-        assert a.marginal_loglik.item() == b.marginal_loglik.item()
-        assert np.array_equal(
-            np.array(a.filtered_log_weights),
-            np.array(b.filtered_log_weights),
-        )
-        assert np.array_equal(
-            np.array(a.log_evidence_increments),
-            np.array(b.log_evidence_increments),
+        pf_ll = float(pf_post.marginal_loglik)
+
+        assert pf_ll == pytest.approx(exact_ll, rel=0.05), (
+            f"APF log-ML {pf_ll:.2f} vs Kalman {exact_ll:.2f}"
         )
 
 
-class TestKalmanGate:
-    """PROTOCOL-semantics gate with the exact-predictive look-ahead."""
-
-    def test_log_ml_gate_r20(self):
-        init, trans, logobs, logaux = _model()
-        r_keys = 20
-        vals = np.array([
-            smcx.auxiliary_filter(
-                mx.random.key(s), init, trans, logobs, logaux, Y_MX, 10_000
-            ).marginal_loglik.item()
-            for s in range(r_keys)
-        ])
-        sd = vals.std(ddof=1)
-        err = vals.mean() - LOGZ_TRUE
-        upper = 3 * sd / math.sqrt(r_keys)
-        assert -(upper + 0.5 * sd**2) <= err <= upper, (err, sd)
+# ---------------------------------------------------------------------------
+# Test: flat auxiliary fn → same as bootstrap
+# ---------------------------------------------------------------------------
 
 
-class TestStructure:
-    """Invariants, store_history, and entry validation."""
+class TestAuxiliaryFlatMatchesBootstrap:
+    """APF with log_auxiliary_fn=0 should match bootstrap."""
 
-    def test_invariants_and_protocol(self):
-        init, trans, logobs, logaux = _model()
-        post = smcx.auxiliary_filter(
-            mx.random.key(3), init, trans, logobs, logaux, Y_MX, 1000
+    def test_auxiliary_flat_auxiliary_matches_bootstrap(
+        self, lgssm_params, lgssm_data
+    ):
+        """With flat auxiliary, APF log-ML ≈ bootstrap log-ML."""
+        _, emissions = lgssm_data
+        init_fn, trans_fn, obs_fn, _ = _make_smcx_fns(lgssm_params)
+
+        def flat_auxiliary_fn(emission, state):
+            return jnp.float64(0.0)
+
+        # Run both with same key and particle count
+        key = jr.PRNGKey(42)
+        n = 5_000
+
+        bpf_post = bootstrap_filter(
+            key=key,
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            emissions=emissions,
+            num_particles=n,
         )
-        assert isinstance(post, smcx.ParticleFilterResult)
-        total = np.array(post.log_evidence_increments, dtype=np.float64).sum()
-        assert post.marginal_loglik.item() == pytest.approx(total, abs=5e-4)
-        e = np.array(post.ess)
-        assert np.all(e >= 1 - 1e-4) and np.all(e <= 1000 * (1 + 1e-4))
 
-    def test_store_history_final_only(self):
-        init, trans, logobs, logaux = _model()
-        post = smcx.auxiliary_filter(
-            mx.random.key(4),
-            init,
-            trans,
-            logobs,
-            logaux,
-            Y_MX,
-            500,
-            store_history=False,
+        apf_post = auxiliary_filter(
+            key=key,
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            log_auxiliary_fn=flat_auxiliary_fn,
+            emissions=emissions,
+            num_particles=n,
         )
-        assert post.filtered_particles.shape == (1, 500, 1)
-        assert post.ess.shape == (T,)
 
-    def test_arity_mismatch_raises(self):
-        init, _, _, logaux = _model()
-        with pytest.raises(TypeError, match="log_auxiliary_fn"):
-            smcx.auxiliary_filter(
-                mx.random.key(5),
-                init,
-                lambda k, s, u: s,
-                lambda y, s, u: mx.array(0.0),
-                logaux,  # 2-arg while inputs supplied
-                Y_MX,
-                100,
-                inputs=mx.zeros((T,)),
-            )
+        bpf_ll = float(bpf_post.marginal_loglik)
+        apf_ll = float(apf_post.marginal_loglik)
+
+        # Both are Monte Carlo estimates; with N=5000 and T=50,
+        # std of log-ML ≈ O(1), so atol=3 is ~3 sigma.
+        assert apf_ll == pytest.approx(bpf_ll, abs=3.0), (
+            f"APF {apf_ll:.2f} vs bootstrap {bpf_ll:.2f}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test: ESS trace
+# ---------------------------------------------------------------------------
+
+
+class TestAuxiliaryESSTrace:
+    """ESS trace should be reasonable."""
+
+    def test_auxiliary_ess_bounded(self, lgssm_params, lgssm_data):
+        """ESS should be between 1 and N at every time step."""
+        _, emissions = lgssm_data
+        init_fn, trans_fn, obs_fn, aux_fn = _make_smcx_fns(lgssm_params)
+        n = 1_000
+        pf = auxiliary_filter(
+            key=jr.PRNGKey(111),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            log_auxiliary_fn=aux_fn,
+            emissions=emissions,
+            num_particles=n,
+        )
+        assert jnp.all(pf.ess >= 0.9)  # ESS >= ~1
+        assert jnp.all(pf.ess <= n + 0.1)
+
+
+class TestAuxiliaryLogEvidenceIncrements:
+    """log_evidence_increments field should be consistent."""
+
+    def test_log_evidence_increments_shape(self, lgssm_params, lgssm_data):
+        """Shape should be (ntime,)."""
+        _, emissions = lgssm_data
+        init_fn, trans_fn, obs_fn, aux_fn = _make_smcx_fns(lgssm_params)
+        pf = auxiliary_filter(
+            key=jr.PRNGKey(0),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            log_auxiliary_fn=aux_fn,
+            emissions=emissions,
+            num_particles=1_000,
+        )
+        assert pf.log_evidence_increments.shape == (emissions.shape[0],)
+
+    def test_log_evidence_increments_sum_to_marginal(
+        self, lgssm_params, lgssm_data
+    ):
+        """Increments should sum to marginal_loglik."""
+        _, emissions = lgssm_data
+        init_fn, trans_fn, obs_fn, aux_fn = _make_smcx_fns(lgssm_params)
+        pf = auxiliary_filter(
+            key=jr.PRNGKey(0),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            log_auxiliary_fn=aux_fn,
+            emissions=emissions,
+            num_particles=1_000,
+        )
+        total = float(jnp.sum(pf.log_evidence_increments))
+        assert total == pytest.approx(float(pf.marginal_loglik), abs=1e-6)
+
+    def test_log_evidence_increments_finite(self, lgssm_params, lgssm_data):
+        """All increments should be finite."""
+        _, emissions = lgssm_data
+        init_fn, trans_fn, obs_fn, aux_fn = _make_smcx_fns(lgssm_params)
+        pf = auxiliary_filter(
+            key=jr.PRNGKey(0),
+            initial_sampler=init_fn,
+            transition_sampler=trans_fn,
+            log_observation_fn=obs_fn,
+            log_auxiliary_fn=aux_fn,
+            emissions=emissions,
+            num_particles=1_000,
+        )
+        assert jnp.all(jnp.isfinite(pf.log_evidence_increments))

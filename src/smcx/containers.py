@@ -1,157 +1,143 @@
-# Copyright Contributors to the smcx project.
+# Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Result containers (field-for-field parity with smcjax).
+"""Containers for particle filter state and posteriors.
 
-NamedTuples so ``mx.compile`` round-trips them class-intact
-(engineering-practices.md); the ``ParticleFilterResult`` Protocol is
-the structural type all diagnostics accept, mirroring smcjax's
-Protocol + NamedTuple pattern (NamedTuples cannot subclass).
-Weights are stored as normalized log-weights with a time axis; t=0 is
-included so every array covers all ``ntime`` steps.
+All containers are :class:`~typing.NamedTuple` subclasses so they are
+registered as JAX PyTrees by default.
 """
 
 from typing import NamedTuple, Protocol, runtime_checkable
 
-import mlx.core as mx
-from jaxtyping import Float, Int32
+from jaxtyping import Array, Float, Int
+
+from smcx.types import Scalar
 
 
 @runtime_checkable
 class ParticleFilterResult(Protocol):
-    """Structural type for filter outputs accepted by diagnostics.
+    r"""Structural type for any particle filter posterior.
 
-    Members are read-only properties so NamedTuple posteriors (whose
-    fields are immutable) satisfy the protocol structurally.
+    Both :class:`ParticleFilterPosterior` and
+    :class:`LiuWestPosterior` satisfy this protocol, so diagnostic
+    functions can accept either without type errors.
+
+    Attributes:
+        marginal_loglik: Scalar estimate of
+            :math:`\log p(y_{1:T})`.
+        filtered_particles: Particle values at each time step,
+            shape ``(ntime, num_particles, state_dim)``.
+        filtered_log_weights: Normalised log weights at each step,
+            shape ``(ntime, num_particles)``.
+        ancestors: Resampled ancestor indices at each time step,
+            shape ``(ntime, num_particles)``.
+        ess: Effective sample size at each time step,
+            shape ``(ntime,)``.
+        log_evidence_increments: Per-step log marginal likelihood
+            increments, shape ``(ntime,)``.
     """
 
+    # Read-only properties, not bare attributes: NamedTuple fields are
+    # immutable, and a mutable protocol member would make the concrete
+    # posteriors fail structural checks under strict variance rules.
     @property
-    def marginal_loglik(self) -> Float[mx.array, ""]: ...
+    def marginal_loglik(self) -> Scalar: ...
 
     @property
     def filtered_particles(
         self,
-    ) -> Float[mx.array, "ntime num_particles state_dim"]: ...
+    ) -> Float[Array, "ntime num_particles state_dim"]: ...
 
     @property
     def filtered_log_weights(
         self,
-    ) -> Float[mx.array, "ntime num_particles"]: ...
+    ) -> Float[Array, "ntime num_particles"]: ...
 
     @property
-    def ancestors(self) -> Int32[mx.array, "ntime num_particles"]: ...
+    def ancestors(self) -> Int[Array, "ntime num_particles"]: ...
 
     @property
-    def ess(self) -> Float[mx.array, " ntime"]: ...
+    def ess(self) -> Float[Array, " ntime"]: ...
 
     @property
-    def log_evidence_increments(self) -> Float[mx.array, " ntime"]: ...
-
-
-@runtime_checkable
-class ParamPosterior(Protocol):
-    """Structural type for parameter-cloud summaries.
-
-    The contract ``param_weighted_mean`` / ``param_weighted_quantile``
-    need: a time-indexed parameter cloud with per-step normalized
-    log-weights. Satisfied by both ``LiuWestPosterior`` (the outer
-    weights are the particle weights) and ``SMC2Posterior`` (the outer
-    parameter weights).
-    """
-
-    @property
-    def filtered_params(
-        self,
-    ) -> Float[mx.array, "ntime num_particles param_dim"]: ...
-
-    @property
-    def filtered_log_weights(
-        self,
-    ) -> Float[mx.array, "ntime num_particles"]: ...
+    def log_evidence_increments(self) -> Float[Array, " ntime"]: ...
 
 
 class ParticleState(NamedTuple):
-    """One-step filter carry.
+    r"""State of a particle cloud at a single time step.
 
-    Invariant: ``log_weights`` are normalized (``logsumexp == 0``).
+    Attributes:
+        particles: Particle values, shape ``(num_particles, state_dim)``.
+        log_weights: Unnormalized log importance weights,
+            shape ``(num_particles,)``.
+        log_marginal_likelihood: Running log marginal likelihood estimate.
     """
 
-    particles: Float[mx.array, "num_particles state_dim"]
-    log_weights: Float[mx.array, " num_particles"]
-    log_marginal_likelihood: Float[mx.array, ""]
-
-
-class LiuWestPosterior(NamedTuple):
-    """Liu-West filter output: the Protocol fields + parameter cloud.
-
-    ``filtered_params`` carries the per-step parameter particles;
-    the state fields match :class:`ParticleFilterPosterior` exactly
-    (NamedTuples cannot subclass — the Protocol is the shared type).
-    """
-
-    marginal_loglik: Float[mx.array, ""]
-    filtered_particles: Float[mx.array, "ntime num_particles state_dim"]
-    filtered_log_weights: Float[mx.array, "ntime num_particles"]
-    ancestors: Int32[mx.array, "ntime num_particles"]
-    ess: Float[mx.array, " ntime"]
-    log_evidence_increments: Float[mx.array, " ntime"]
-    filtered_params: Float[mx.array, "ntime num_particles param_dim"]
-
-
-class TemperedPosterior(NamedTuple):
-    """Tempered-SMC output (ADR-0008 item 6).
-
-    ``particles`` are equal-weight draws from the target (final
-    resample + pi-invariant moves), so ``log_weights`` is uniform —
-    kept for interface symmetry and Rao-Blackwell reminders: compute
-    summaries from weighted clouds when you have them.
-    ``marginal_loglik`` is the Neumaier-compensated log-evidence;
-    E[exp(marginal_loglik)] = Z (log Zhat itself is Jensen-biased).
-    """
-
-    particles: Float[mx.array, "num_particles dim"]
-    log_weights: Float[mx.array, " num_particles"]
-    marginal_loglik: Float[mx.array, ""]
-    temperatures: Float[mx.array, " num_stages"]
-    ess: Float[mx.array, " num_stages"]
-    acceptance_rates: Float[mx.array, " num_stages"]
+    particles: Float[Array, "num_particles state_dim"]
+    log_weights: Float[Array, " num_particles"]
+    log_marginal_likelihood: Scalar
 
 
 class ParticleFilterPosterior(NamedTuple):
-    """Filtered posterior (Dynamax ``PosteriorGSSMFiltered`` convention).
+    r"""Full output of a particle filter run.
 
-    ``log_evidence_increments`` sums to ``marginal_loglik`` (tested
-    invariant; the total is Neumaier-compensated, ADR-0003).
+    Follows the Dynamax ``PosteriorGSSMFiltered`` convention of storing
+    the marginal log-likelihood as a scalar summary alongside the
+    time-indexed arrays.
+
+    Attributes:
+        marginal_loglik: Scalar estimate of
+            :math:`\log p(y_{1:T})`.
+        filtered_particles: Particle values at each time step,
+            shape ``(ntime, num_particles, state_dim)``.
+        filtered_log_weights: Unnormalized log weights at each time step,
+            shape ``(ntime, num_particles)``.
+        ancestors: Resampled ancestor indices at each time step,
+            shape ``(ntime, num_particles)``.
+        ess: Effective sample size at each time step,
+            shape ``(ntime,)``.
+        log_evidence_increments: Per-step log marginal likelihood
+            increments, shape ``(ntime,)``.  These sum to
+            ``marginal_loglik``.
     """
 
-    marginal_loglik: Float[mx.array, ""]
-    filtered_particles: Float[mx.array, "ntime num_particles state_dim"]
-    filtered_log_weights: Float[mx.array, "ntime num_particles"]
-    ancestors: Int32[mx.array, "ntime num_particles"]
-    ess: Float[mx.array, " ntime"]
-    log_evidence_increments: Float[mx.array, " ntime"]
+    marginal_loglik: Scalar
+    filtered_particles: Float[Array, "ntime num_particles state_dim"]
+    filtered_log_weights: Float[Array, "ntime num_particles"]
+    ancestors: Int[Array, "ntime num_particles"]
+    ess: Float[Array, " ntime"]
+    log_evidence_increments: Float[Array, " ntime"]
 
 
-class SMC2Posterior(NamedTuple):
-    """SMC² output (ADR-0014): a posterior over static parameters.
+class LiuWestPosterior(NamedTuple):
+    r"""Full output of a Liu-West particle filter run.
 
-    The outer layer is an SMC sampler over ``num_theta`` parameter
-    particles; each carries an ``num_x``-particle inner filter whose
-    unbiased likelihood estimate drives the outer weights.
-    ``filtered_params`` is the parameter cloud and ``filtered_log_weights``
-    its normalized outer log-weights at each step (final step only when
-    ``store_history=False``, ADR-0011) — the field name matches
-    ``LiuWestPosterior`` so ``param_weighted_mean`` and
-    ``param_weighted_quantile`` apply directly.
-    ``marginal_loglik`` is the Neumaier-compensated SMC² log-evidence;
-    E[exp(marginal_loglik)] = Z (log Zhat itself is Jensen-biased).
-    ``acceptance_rates`` is the PMMH move acceptance at each step (0
-    where the outer ESS stayed above threshold and no move fired).
+    Extends :class:`ParticleFilterPosterior` with parameter samples.
+    The Liu-West filter (Liu & West, 2001) jointly estimates latent
+    states and static parameters using kernel density smoothing.
+
+    Attributes:
+        marginal_loglik: Scalar estimate of
+            :math:`\log p(y_{1:T})`.
+        filtered_particles: Particle values at each time step,
+            shape ``(ntime, num_particles, state_dim)``.
+        filtered_log_weights: Unnormalized log weights at each step,
+            shape ``(ntime, num_particles)``.
+        ancestors: Resampled ancestor indices at each time step,
+            shape ``(ntime, num_particles)``.
+        ess: Effective sample size at each time step,
+            shape ``(ntime,)``.
+        log_evidence_increments: Per-step log marginal likelihood
+            increments, shape ``(ntime,)``.  These sum to
+            ``marginal_loglik``.
+        filtered_params: Parameter samples at each time step,
+            shape ``(ntime, num_particles, param_dim)``.
     """
 
-    marginal_loglik: Float[mx.array, ""]
-    filtered_params: Float[mx.array, "ntime num_theta param_dim"]
-    filtered_log_weights: Float[mx.array, "ntime num_theta"]
-    ess: Float[mx.array, " ntime"]
-    log_evidence_increments: Float[mx.array, " ntime"]
-    acceptance_rates: Float[mx.array, " ntime"]
+    marginal_loglik: Scalar
+    filtered_particles: Float[Array, "ntime num_particles state_dim"]
+    filtered_log_weights: Float[Array, "ntime num_particles"]
+    ancestors: Int[Array, "ntime num_particles"]
+    ess: Float[Array, " ntime"]
+    log_evidence_increments: Float[Array, " ntime"]
+    filtered_params: Float[Array, "ntime num_particles param_dim"]

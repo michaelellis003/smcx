@@ -1,184 +1,182 @@
-# Copyright Contributors to the smcx project.
+# Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
 r"""Bootstrap (SIR) particle filter.
 
-The bootstrap filter [Gordon *et al.*, 1993] propagates particles
-through the transition prior and weights them by the observation
-likelihood, resampling conditionally on ESS. Built as a thin
-constructor over the internal Feynman-Kac core (ADR-0002): the time
-loop is Python over one ``mx.compile``d step (MLX has no scan;
-async + lagged-eval cadence per mlx-performance.md).
+The bootstrap filter [Gordon *et al.*, 1993] is the simplest Sequential
+Monte Carlo algorithm.  At each time step it:
+
+1. **Resamples** (conditionally on ESS) to focus particles on
+   high-likelihood regions.
+2. **Propagates** particles through the transition prior.
+3. **Weights** particles by the observation likelihood.
+
+The implementation uses :func:`jax.lax.scan` so the full time-loop is
+compiled into a single XLA program.
 """
 
-from typing import Any
+from collections.abc import Callable
 
-import mlx.core as mx
-from jaxtyping import Float
+import jax.numpy as jnp
+import jax.random as jr
+from jax import lax, vmap
+from jaxtyping import Array, Float
 
-from smcx import _utils
-from smcx._fk import FKModel, run_filter
-from smcx.containers import ParticleFilterPosterior
+from smcx._utils import _conditional_resample, _init_standard, _prepend
+from smcx.containers import ParticleFilterPosterior, ParticleState
 from smcx.resampling import systematic
-from smcx.types import (
-    InitialSampler,
-    KeyT,
-    LogObservationFn,
-    LogObservationFnWithInput,
-    ResamplingFn,
-    TransitionSampler,
-    TransitionSamplerWithInput,
-)
+from smcx.types import PRNGKeyT
+from smcx.weights import ess as compute_ess
+from smcx.weights import log_normalize
 
 
 def bootstrap_filter(
-    key: KeyT,
-    initial_sampler: InitialSampler,
-    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
-    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
-    emissions: Float[mx.array, "ntime emission_dim"]
-    | Float[mx.array, " ntime"],
+    key: PRNGKeyT,
+    initial_sampler: Callable,
+    transition_sampler: Callable,
+    log_observation_fn: Callable,
+    emissions: Float[Array, "ntime emission_dim"],
     num_particles: int,
-    resampling_fn: ResamplingFn = systematic,
+    resampling_fn: Callable = systematic,
     resampling_threshold: float = 0.5,
-    *,
-    inputs: mx.array | None = None,
-    store_history: bool = True,
-    batched: bool = False,
 ) -> ParticleFilterPosterior:
     r"""Run a bootstrap (SIR) particle filter.
 
     Args:
-        key: PRNG key.
-        initial_sampler: ``(key, num_particles) -> particles`` drawing
-            the whole initial cloud from :math:`p(z_1)`.
-        transition_sampler: ``(key, state) -> state`` drawing from
-            :math:`p(z_t \mid z_{t-1})`; vmapped internally over
-            particles. With ``inputs``: ``(key, state, input_t)``.
-        log_observation_fn: ``(emission, state) -> log_prob``
-            evaluating :math:`\log p(y_t \mid z_t)`; vmapped
-            internally (second argument). With ``inputs``:
-            ``(emission, state, input_t)``. NaN emissions are passed
-            through untouched — mask them here (design §4):
-            ``mx.where(mx.isnan(y), 0.0, logpdf)``.
-        emissions: Observations, shape ``(T, D)`` (a ``(T,)`` series
-            is canonicalized to ``(T, 1)``).
-        num_particles: Number of particles N.
-        resampling_fn: ADR-0004 contract resampler
-            (``(key, weights, num_samples) -> indices``); defaults to
-            :func:`smcx.systematic`.
-        resampling_threshold: Resample when
-            ``ESS < resampling_threshold * num_particles``.
-        inputs: Optional per-step exogenous inputs, leading dim T
-            aligned with emissions; ``inputs[t]`` feeds the
-            transition *into* t and the observation *at* t
-            (ADR-0008).
-        batched: When True (ADR-0013), callbacks receive the whole
-            cloud with ONE key — ``trans_any(key,
-            particles[, input_t])`` and ``log_observation_fn(
-            emission, particles[, input_t]) -> (N,)`` — skipping the
-            internal vmap/per-particle key split. Use for
-            matrix-valued models (MLX's vmap does not fuse matvecs
-            to GEMM; measured 5.1x). Same arities as the default
-            convention.
-        store_history: When False (ADR-0011), particle/weight/
-            ancestor arrays cover only the final step (time axis
-            length 1) and memory drops from O(T*N) to O(N);
-            ``ess`` and ``log_evidence_increments`` stay full and
-            ``marginal_loglik`` is bit-identical at the same key.
-            Use for log-ML-only workloads (model comparison, PMMH
-            inner loops); genealogy/smoothing needs the default.
+        key: JAX PRNG key.
+        initial_sampler: Function ``(key, num_particles) -> particles``
+            that draws from the initial state distribution
+            :math:`p(z_1)`.
+        transition_sampler: Function ``(key, state) -> state`` that draws
+            from the transition distribution
+            :math:`p(z_t \mid z_{t-1})`.  Will be ``vmap``-ped over the
+            particle dimension internally.
+        log_observation_fn: Function
+            ``(emission, state) -> log_prob`` that evaluates the
+            observation log-density :math:`\log p(y_t \mid z_t)`.
+            Will be ``vmap``-ped over the particle dimension (second
+            argument) internally.
+        emissions: Observed emissions, shape ``(T, D)``.
+        num_particles: Number of particles :math:`N`.
+        resampling_fn: Resampling algorithm matching the Blackjax
+            signature ``(key, weights, num_samples) -> indices``.
+            Defaults to :func:`~smcx.resampling.systematic`.
+        resampling_threshold: Fraction of ``num_particles`` below which
+            resampling is triggered (e.g. 0.5 means resample when
+            ``ESS < 0.5 * N``).
 
     Returns:
-        :class:`~smcx.containers.ParticleFilterPosterior`.
-
-    Raises:
-        DegenerateWeightsError: All weights collapsed at some step.
-        TypeError: Callback arity inconsistent with ``inputs``.
-        ValueError: Malformed shapes or ``num_particles < 1``.
+        :class:`~smcx.containers.ParticleFilterPosterior` containing
+        filtered particles, log weights, ancestor indices, the
+        marginal log-likelihood estimate, and ESS trace.
     """
-    if num_particles < 1:
-        raise ValueError(f"num_particles must be >= 1; got {num_particles}")
-    emissions = _utils.canonicalize_emissions(emissions)
-    num_timesteps = emissions.shape[0]
+    key, init_key = jr.split(key)
+    log_n = jnp.log(jnp.asarray(num_particles, dtype=jnp.float64))
 
-    has_inputs = inputs is not None
-    _utils.check_callback_arity(
-        transition_sampler, "transition_sampler", 2, has_inputs
-    )
-    _utils.check_callback_arity(
-        log_observation_fn, "log_observation_fn", 2, has_inputs
-    )
-
-    trans_any: Any = transition_sampler  # ty: union not narrowable by flags
-    obs_any: Any = log_observation_fn  # ty: union not narrowable by flags
-
-    if has_inputs:
-        inputs_arr = _utils.canonicalize_inputs(inputs, num_timesteps)
-
-        if batched:
-
-            def mutate(key, particles, data):
-                _, input_t = data
-                return trans_any(key, particles, input_t)
-
-            def log_g(prev, particles, data):
-                y_t, input_t = data
-                del prev
-                return obs_any(y_t, particles, input_t)
-
-        else:
-
-            def mutate(key, particles, data):
-                _, input_t = data
-                keys = mx.random.split(key, particles.shape[0])
-                return mx.vmap(transition_sampler, in_axes=(0, 0, None))(
-                    keys, particles, input_t
-                )
-
-            def log_g(prev, particles, data):
-                y_t, input_t = data
-                del prev
-                return mx.vmap(log_observation_fn, in_axes=(None, 0, None))(
-                    y_t, particles, input_t
-                )
-
-        data = (emissions, inputs_arr)
-    else:
-        if batched:
-
-            def mutate(key, particles, data):
-                del data
-                return trans_any(key, particles)
-
-            def log_g(prev, particles, data):
-                (y_t,) = data
-                del prev
-                return obs_any(y_t, particles)
-
-        else:
-
-            def mutate(key, particles, data):
-                del data
-                keys = mx.random.split(key, particles.shape[0])
-                return mx.vmap(transition_sampler)(keys, particles)
-
-            def log_g(prev, particles, data):
-                (y_t,) = data
-                del prev
-                return mx.vmap(log_observation_fn, in_axes=(None, 0))(
-                    y_t, particles
-                )
-
-        data = (emissions,)
-
-    fk = FKModel(m0=initial_sampler, m=mutate, log_g=log_g)
-    return run_filter(
-        key,
-        fk,
-        data,
+    # --- Initialise at t=0 -------------------------------------------------
+    (
+        particles_0,
+        log_w_0,
+        log_ev_0,
+        ess_0,
+        identity_ancestors,
+        init_state,
+    ) = _init_standard(
+        init_key,
+        initial_sampler,
+        log_observation_fn,
+        emissions[0],
         num_particles,
-        resampling_fn,
-        resampling_threshold,
-        store_history=store_history,
+        log_n,
+    )
+
+    # --- Scan body for t = 1, ..., T-1 -------------------------------------
+    def _step(
+        carry: ParticleState,
+        args: tuple[PRNGKeyT, Float[Array, " emission_dim"]],
+    ) -> tuple[ParticleState, tuple[Array, Array, Array, Array, Array]]:
+        state, (step_key, y_t) = carry, args
+        k1, k2 = jr.split(step_key)
+        # Invariant: state.log_weights are normalized (logsumexp = 0).
+
+        # 1. Conditionally resample
+        threshold = resampling_threshold * num_particles
+        do_resample, ancestors = _conditional_resample(
+            k1,
+            state.log_weights,
+            resampling_fn,
+            threshold,
+            num_particles,
+            identity_ancestors,
+        )
+        resampled_particles = state.particles[ancestors]
+
+        # 2. Propagate through transition
+        keys = jr.split(k2, num_particles)
+        propagated = vmap(transition_sampler)(keys, resampled_particles)
+
+        # 3. Weight by observation likelihood
+        log_obs = vmap(lambda z: log_observation_fn(y_t, z))(propagated)
+
+        # Compute evidence increment and normalize.
+        # If resampled: weights were reset to uniform (1/N), so
+        #   increment = logsumexp(log_obs) - log(N)
+        # If not resampled: old normalized weights W_i sum to 1, so
+        #   increment = logsumexp(log_W + log_obs)
+        log_w_unnorm = jnp.where(
+            do_resample,
+            log_obs,
+            state.log_weights + log_obs,
+        )
+        log_w_norm, log_sum = log_normalize(log_w_unnorm)
+        log_ev_inc = jnp.where(
+            do_resample,
+            log_sum - log_n,
+            log_sum,
+        )
+
+        new_state = ParticleState(
+            particles=propagated,
+            log_weights=log_w_norm,
+            log_marginal_likelihood=(
+                state.log_marginal_likelihood + log_ev_inc
+            ),
+        )
+        ess_t: Array = jnp.asarray(compute_ess(log_w_norm))
+        return new_state, (
+            propagated,
+            log_w_norm,
+            ancestors,
+            ess_t,
+            log_ev_inc,
+        )
+
+    # Run the scan over t = 1 ... T-1
+    step_keys = jr.split(key, emissions.shape[0] - 1)
+    (
+        final_state,
+        (
+            particles_rest,
+            log_w_rest,
+            ancestors_rest,
+            ess_rest,
+            log_ev_inc_rest,
+        ),
+    ) = lax.scan(_step, init_state, (step_keys, emissions[1:]))
+
+    # --- Combine t=0 with t=1..T-1 -----------------------------------------
+    all_particles = _prepend(particles_0, particles_rest)
+    all_log_w = _prepend(log_w_0, log_w_rest)
+    all_ancestors = _prepend(identity_ancestors, ancestors_rest)
+    ess_0_arr: Array = jnp.asarray(ess_0)
+    all_ess = _prepend(ess_0_arr, ess_rest)
+    all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
+
+    return ParticleFilterPosterior(
+        marginal_loglik=final_state.log_marginal_likelihood,
+        filtered_particles=all_particles,
+        filtered_log_weights=all_log_w,
+        ancestors=all_ancestors,
+        ess=all_ess,
+        log_evidence_increments=all_log_ev_inc,
     )

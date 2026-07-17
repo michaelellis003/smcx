@@ -1,122 +1,71 @@
-# Copyright Contributors to the smcx project.
+# Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""__all__ lock test (ADR-0008 item 5, v0.1 phase-in rule).
+"""Tests for the package-level API."""
 
-During v0.1: smcx.__all__ must be a subset of (smcjax's 32 names
-union the ADR-cited additions), and every name v0.1 implements must
-be present. The full direction — all 32 smcjax names present —
-activates at the release completing the port (v0.2). Never assert a
-count.
-"""
+from importlib.metadata import PackageNotFoundError
+from unittest.mock import patch
 
-import smcx
-
-SMCJAX_ALL = {
-    "LiuWestPosterior",
-    "ParticleFilterPosterior",
-    "ParticleFilterResult",
-    "ParticleState",
-    "TemperedPosterior",
-    "__version__",
-    "auxiliary_filter",
-    "bootstrap_filter",
-    "crps",
-    "cumulative_log_score",
-    "diagnose",
-    "ess",
-    "liu_west_filter",
-    "log_bayes_factor",
-    "log_ess",
-    "log_ml_increments",
-    "log_normalize",
-    "multinomial",
-    "normalize",
-    "param_weighted_mean",
-    "param_weighted_quantile",
-    "pareto_k_diagnostic",
-    "particle_diversity",
-    "posterior_predictive_sample",
-    "replicated_log_ml",
-    "residual",
-    "simulate",
-    "stratified",
-    "systematic",
-    "tail_ess",
-    "weighted_mean",
-    "weighted_quantile",
-    "weighted_variance",
-}
-
-# Every addition beyond smcjax's export list cites its ratifying ADR.
-ADDITIONS = {
-    "DegenerateWeightsError": "ADR-0003",
-    "guided_filter": "ADR-0008",
-    "TemperedPosterior": "ADR-0008",
-    "temper": "ADR-0008",
-    "smc2": "ADR-0014",
-    "SMC2Posterior": "ADR-0014",
-}
-
-V01_IMPLEMENTED = {
-    "DegenerateWeightsError",
-    "LiuWestPosterior",
-    "auxiliary_filter",
-    "ParticleFilterPosterior",
-    "ParticleFilterResult",
-    "ParticleState",
-    "TemperedPosterior",
-    "__version__",
-    "bootstrap_filter",
-    "crps",
-    "cumulative_log_score",
-    "diagnose",
-    "ess",
-    "guided_filter",
-    "liu_west_filter",
-    "log_bayes_factor",
-    "log_ess",
-    "log_ml_increments",
-    "log_normalize",
-    "param_weighted_mean",
-    "param_weighted_quantile",
-    "pareto_k_diagnostic",
-    "particle_diversity",
-    "posterior_predictive_sample",
-    "replicated_log_ml",
-    "tail_ess",
-    "weighted_mean",
-    "weighted_quantile",
-    "weighted_variance",
-    "multinomial",
-    "normalize",
-    "residual",
-    "simulate",
-    "stratified",
-    "systematic",
-    "temper",
-}
+from smcx import __version__
 
 
-def test_all_is_subset_of_smcjax_plus_cited_additions():
-    extras = set(smcx.__all__) - SMCJAX_ALL
-    uncited = extras - set(ADDITIONS)
-    assert not uncited, f"exports without a ratifying ADR: {uncited}"
+def test_version_is_accessible():
+    """Test that __version__ is a non-empty string."""
+    assert isinstance(__version__, str)
+    assert __version__ != ""
 
 
-def test_full_direction_port_complete():
-    # ADR-0008 item 5 phase-in: with liu_west_filter landed the port
-    # is complete, so the full direction activates — every one of
-    # smcjax's 32 names must be present from now on.
-    missing = SMCJAX_ALL - set(smcx.__all__)
-    assert not missing, f"port regression, smcjax names missing: {missing}"
+def test_public_api_exports_all_expected_names(package):
+    """Test that __all__ contains exactly the expected public API."""
+    expected = [
+        "LiuWestPosterior",
+        "ParticleFilterPosterior",
+        "ParticleFilterResult",
+        "ParticleState",
+        "__version__",
+        "auxiliary_filter",
+        "bootstrap_filter",
+        "crps",
+        "cumulative_log_score",
+        "diagnose",
+        "ess",
+        "liu_west_filter",
+        "log_bayes_factor",
+        "log_ess",
+        "log_ml_increments",
+        "log_normalize",
+        "multinomial",
+        "normalize",
+        "param_weighted_mean",
+        "param_weighted_quantile",
+        "pareto_k_diagnostic",
+        "particle_diversity",
+        "posterior_predictive_sample",
+        "replicated_log_ml",
+        "residual",
+        "simulate",
+        "stratified",
+        "systematic",
+        "tail_ess",
+        "weighted_mean",
+        "weighted_quantile",
+        "weighted_variance",
+    ]
+    assert sorted(package.__all__) == sorted(expected)
 
 
-def test_v01_names_are_present_and_sorted():
-    assert set(smcx.__all__) >= V01_IMPLEMENTED
-    assert list(smcx.__all__) == sorted(smcx.__all__)
+def test_version_fallback_when_package_not_found():
+    """Test that __version__ falls back to '0.0.0' when not installed."""
+    import importlib
 
+    import smcx
 
-def test_exports_resolve():
-    for name in smcx.__all__:
-        assert getattr(smcx, name) is not None
+    with patch(
+        "importlib.metadata.version",
+        side_effect=PackageNotFoundError,
+    ):
+        importlib.reload(smcx)
+        assert smcx.__version__ == "0.0.0"
+
+    # Restore the real version
+    importlib.reload(smcx)

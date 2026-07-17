@@ -1,26 +1,17 @@
-# Copyright Contributors to the smcx project.
+# Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Log-space weight utilities.
+"""Log-space weight normalization utilities."""
 
-All weight arithmetic in smcx is log-domain (ADR-0003): these are the
-only sanctioned conversions between log-weights and probability-space
-weights. On fully degenerate input (every log-weight ``-inf``) these
-functions do not raise — ``log_normalize`` returns a ``-inf``
-normalizer and ``ess`` returns NaN; raising ``DegenerateWeightsError``
-on those signals is the filter loop shell's job (design §6).
+import jax.numpy as jnp
+from jaxtyping import Array, Float
 
-The ESS identity ``2*LSE(logw) - LSE(2*logw)`` matches BlackJAX's
-``blackjax.smc.ess`` semantics, so smcjax call sites port unchanged.
-"""
-
-import mlx.core as mx
-from jaxtyping import Float
+from smcx.types import Scalar
 
 
 def log_normalize(
-    log_weights: Float[mx.array, " num_particles"],
-) -> tuple[Float[mx.array, " num_particles"], Float[mx.array, ""]]:
+    log_weights: Float[Array, " num_particles"],
+) -> tuple[Float[Array, " num_particles"], Scalar]:
     """Normalize log weights and return the log normalizing constant.
 
     Args:
@@ -28,63 +19,56 @@ def log_normalize(
 
     Returns:
         A tuple ``(log_normalized, log_normalizer)`` where
-        *log_normalized* has ``logsumexp == 0`` and *log_normalizer*
-        is ``logsumexp(log_weights)`` (``-inf`` when every input
-        weight is ``-inf`` — the degeneracy signal).
+        *log_normalized* has ``logsumexp == 0`` and
+        *log_normalizer* is ``logsumexp(log_weights)``.
     """
-    log_normalizer = mx.logsumexp(log_weights)
+    log_normalizer = jnp.logaddexp.reduce(log_weights)  # type: ignore[union-attr]
     log_normalized = log_weights - log_normalizer
     return log_normalized, log_normalizer
 
 
 def normalize(
-    log_weights: Float[mx.array, " num_particles"],
-) -> Float[mx.array, " num_particles"]:
+    log_weights: Float[Array, " num_particles"],
+) -> Float[Array, " num_particles"]:
     """Exponentiate and normalize log weights.
 
     Args:
         log_weights: Unnormalized log importance weights.
 
     Returns:
-        Normalized probability-space weights that sum to one.
+        Normalized weights that sum to one.
     """
-    log_normalized, _ = log_normalize(log_weights)
-    return mx.exp(log_normalized)
+    log_norm, _ = log_normalize(log_weights)
+    return jnp.exp(log_norm)
 
 
 def log_ess(
-    log_weights: Float[mx.array, " num_particles"],
-) -> Float[mx.array, ""]:
-    """Compute the logarithm of the effective sample size.
+    log_weights: Float[Array, " num_particles"],
+) -> Scalar:
+    """Log effective sample size from (possibly unnormalized) log weights.
 
-    Uses the max-shift-safe identity
-    ``log ESS = 2*logsumexp(logw) - logsumexp(2*logw)``, which never
-    materializes probability-space weights (identity error <= 1.6e-6
-    at N = 1e6 in float32; see docs/research/numerical-methods.md).
+    Shift-invariant: ``log_ess = 2*LSE(lw) - LSE(2*lw)``.
 
     Args:
-        log_weights: Log importance weights, normalized or not.
+        log_weights: Log importance weights (any normalization).
 
     Returns:
-        ``log(ESS)``, a scalar in ``[0, log num_particles]``.
+        ``log(ESS)`` as a scalar array.
     """
-    return 2.0 * mx.logsumexp(log_weights) - mx.logsumexp(2.0 * log_weights)
+    two_lse = 2.0 * jnp.logaddexp.reduce(log_weights)  # type: ignore[union-attr]
+    lse_two = jnp.logaddexp.reduce(2.0 * log_weights)  # type: ignore[union-attr]
+    return two_lse - lse_two
 
 
 def ess(
-    log_weights: Float[mx.array, " num_particles"],
-) -> Float[mx.array, ""]:
-    """Compute the effective sample size ``1 / sum(W**2)``.
-
-    ESS is a resampling trigger, not a convergence certificate
-    (Elvira, Martino & Robert 2022): it reads ≈N even when the
-    proposal has missed the target entirely.
+    log_weights: Float[Array, " num_particles"],
+) -> Scalar:
+    """Effective sample size ``1 / sum(w_norm**2)`` from log weights.
 
     Args:
-        log_weights: Log importance weights, normalized or not.
+        log_weights: Log importance weights (any normalization).
 
     Returns:
-        The effective sample size, a scalar in ``[1, num_particles]``
-        (NaN when every weight is ``-inf`` — the degeneracy signal).
+        The ESS as a scalar array in ``(0, num_particles]``.
     """
-    return mx.exp(log_ess(log_weights))
+    return jnp.exp(log_ess(log_weights))
