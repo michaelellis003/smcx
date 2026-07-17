@@ -593,64 +593,66 @@ def tail_ess(
     posterior: ParticleFilterResult,
     q: float = 0.05,
 ) -> Float[Array, " ntime"]:
-    r"""Compute tail effective sample size at each time step.
+    r"""Effective particles supporting the distribution tails.
 
-    Tail-ESS measures how well the weighted particle approximation
-    represents the tails of the distribution (Vehtari, Gelman,
-    Simpson, Carpenter, and Burkner, 2020).  We compute the ESS
-    for the indicator function :math:`I(w_i \ge w_{(q)})`, i.e.
-    how well the largest weights are distributed.
+    For each step, each state dimension, and each tail, restrict the
+    normalized weights to the particles beyond the weighted q / 1-q
+    quantile of the particle *values* and compute
+    :math:`(\sum w)^2 / \sum w^2` — the effective number of particles
+    estimating that tail. Returns the minimum over dimensions and both
+    tails (in the spirit of the quantile tail-ESS of Vehtari, Gelman,
+    Simpson, Carpenter & Burkner 2021).
 
-    Specifically, for normalised weights :math:`w_i` we compute
-    the ESS of the weights truncated below the :math:`(1-q)`
-    quantile:
+    Uniform weights give roughly ``q * N`` (a tail only ever holds a
+    ``q`` fraction of the mass); compare against ``q * N``, not ``N``.
 
-    .. math::
-
-        \text{tail-ESS} = \frac{
-            \bigl(\sum_{i : w_i \ge c} w_i \bigr)^2
-        }{
-            \sum_{i : w_i \ge c} w_i^2
-        }
-
-    where :math:`c` is the :math:`(1-q)` quantile of the weights.
+    Note: this replaces the earlier smcjax quantity of the same name,
+    which measured top-weight-mass concentration and did not examine
+    particle values (panel finding; ported from the MLX
+    implementation, ADR-0010/0018).
 
     Args:
-        posterior: Particle filter posterior output.
-        q: Tail probability.  Default 0.05, so we examine the top
-            5% weight mass.
+        posterior: Any :class:`ParticleFilterResult`.
+        q: Tail fraction (each tail is the mass beyond the weighted
+            ``q`` / ``1 - q`` quantile).
 
     Returns:
-        Tail-ESS at each time step, shape ``(ntime,)``.
+        Per-step minimum tail-ESS, shape ``(ntime,)``.
     """
+    qs = jnp.array([q, 1.0 - q])
+    ntime, _, dim = posterior.filtered_particles.shape
 
-    def _tail_ess_one_step(
-        log_weights: Float[Array, " num_particles"],
-    ) -> Float[Array, ""]:
-        """Compute tail-ESS for one time step."""
-        weights = jnp.exp(log_weights - jnp.max(log_weights))
-        weights = weights / jnp.sum(weights)
-        # Threshold: (1-q) quantile of weights
-        sorted_w = jnp.sort(weights)
-        cum_w = jnp.cumsum(sorted_w)
-        threshold = sorted_w[jnp.searchsorted(cum_w, 1.0 - q)]
-        # Tail weights
-        tail_mask = weights >= threshold
-        tail_w = jnp.where(tail_mask, weights, 0.0)
-        sum_w = jnp.sum(tail_w)
-        sum_w2 = jnp.sum(tail_w**2)
-        return jnp.asarray(
-            jnp.where(
-                sum_w2 > 0.0,
-                sum_w**2 / sum_w2,
-                jnp.float64(0.0),
-            )
+    def n_eff(tw):
+        s2 = jnp.sum(tw * tw)
+        return jnp.where(
+            s2 > 0.0, jnp.sum(tw) ** 2 / jnp.maximum(s2, 1e-30), 0.0
         )
 
-    return vmap(_tail_ess_one_step)(posterior.filtered_log_weights)
-
-
-# --- Cumulative log-score ---------------------------------------------------
+    # Plain Python loops over the small time/dim axes — diagnostics
+    # are not hot-loop code, and the loop keeps the per-dim weighted
+    # quantile trivially readable.
+    out = []
+    for t in range(ntime):
+        w = jnp.exp(posterior.filtered_log_weights[t])
+        w = w / jnp.maximum(jnp.sum(w), 1e-30)
+        per_dim = []
+        for d in range(dim):
+            vals = posterior.filtered_particles[t, :, d]
+            order = jnp.argsort(vals)
+            v_sorted = vals[order]
+            w_sorted = w[order]
+            cum = jnp.cumsum(w_sorted)
+            # Midpoint CDF: centre each particle's mass in its
+            # interval, normalized so the axis is [0, 1].
+            mid = (jnp.concatenate([jnp.zeros(1), cum[:-1]]) + cum) / (
+                2.0 * jnp.maximum(cum[-1], 1e-30)
+            )
+            edges = jnp.interp(qs, mid, v_sorted)
+            lo = jnp.where(vals <= edges[0], w, 0.0)
+            hi = jnp.where(vals >= edges[1], w, 0.0)
+            per_dim.append(jnp.minimum(n_eff(lo), n_eff(hi)))
+        out.append(jnp.min(jnp.stack(per_dim)))
+    return jnp.stack(out)
 
 
 def cumulative_log_score(
@@ -687,7 +689,7 @@ def diagnose(
     posterior: ParticleFilterResult,
     ess_threshold: float = 0.1,
     diversity_threshold: float = 0.1,
-    pareto_k_threshold: float = 0.7,
+    pareto_k_threshold: float | None = None,
 ) -> dict[str, Any]:
     r"""Summarise filter health and flag potential problems.
 
@@ -738,6 +740,13 @@ def diagnose(
         warnings.append(
             f"Particle diversity fell below "
             f"{diversity_threshold:.0%} (min = {min_div:.3f})"
+        )
+    if pareto_k_threshold is None:
+        # Sample-size-dependent PSIS reliability threshold
+        # (Vehtari et al.): min(1 - 1/log10(N), 0.7).
+        n_particles = posterior.filtered_log_weights.shape[1]
+        pareto_k_threshold = min(
+            1.0 - 1.0 / math.log10(max(n_particles, 11)), 0.7
         )
     if max_k > pareto_k_threshold:
         warnings.append(

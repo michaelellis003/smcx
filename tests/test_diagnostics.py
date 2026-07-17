@@ -698,24 +698,25 @@ class TestTailESS:
         assert jnp.all(result >= 0.0)
         assert jnp.all(result <= n)
 
-    def test_tail_ess_uniform_equals_n(self):
-        """Uniform weights should give tail-ESS close to N."""
+    def test_tail_ess_uniform_is_q_fraction(self):
+        """Uniform weights: each tail holds ~q*N effective particles."""
+        import jax.random as jr
+
         from smcx.containers import ParticleFilterPosterior
 
-        n = 1000
-        log_w = jnp.full((3, n), -jnp.log(n))
-        particles = jnp.zeros((3, n, 1))
+        n = 4000
+        log_w = jnp.full((1, n), -jnp.log(n))
+        particles = jr.normal(jr.key(2), (1, n, 1))
         posterior = ParticleFilterPosterior(
             marginal_loglik=jnp.float64(0.0),
             filtered_particles=particles,
             filtered_log_weights=log_w,
-            ancestors=jnp.zeros((3, n), dtype=jnp.int32),
-            ess=jnp.full(3, float(n)),
-            log_evidence_increments=jnp.zeros(3),
+            ancestors=jnp.zeros((1, n), dtype=jnp.int32),
+            ess=jnp.full((1,), float(n)),
+            log_evidence_increments=jnp.zeros((1,)),
         )
-        result = tail_ess(posterior)
-        # For uniform weights, tail-ESS should be close to N
-        assert jnp.all(result > 0.5 * n)
+        te = float(tail_ess(posterior, q=0.05)[0])
+        assert te == pytest.approx(0.05 * n, rel=0.15)
 
     def test_tail_ess_leq_standard_ess(self, lgssm_params, lgssm_data):
         """Tail-ESS <= standard ESS (tails are harder to estimate)."""
