@@ -67,8 +67,12 @@ def log_observation(y, z):
 
 
 post = smcx.bootstrap_filter(
-    jr.key(0), init, transition, log_observation,
-    emissions, num_particles=10_000,
+    jr.key(0),
+    init,
+    transition,
+    log_observation,
+    emissions,
+    num_particles=10_000,
 )
 post.marginal_loglik  # unbiased evidence estimate (log-domain)
 smcx.diagnose(post)  # ESS / diversity / Pareto-k health summary

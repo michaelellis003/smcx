@@ -176,16 +176,27 @@ at O(N) memory:
 ```python
 def boot_lml(key):
     return smcx.bootstrap_filter(
-        key, initial_sampler, transition_sampler, log_observation_fn,
-        observations, num_particles=10_000, store_history=False,
+        key,
+        initial_sampler,
+        transition_sampler,
+        log_observation_fn,
+        observations,
+        num_particles=10_000,
+        store_history=False,
     ).marginal_loglik
 
 
 def guided_lml(key):
     return smcx.guided_filter(
-        key, initial_sampler, proposal_sampler, log_proposal_fn,
-        log_transition_fn, log_observation_fn,
-        observations, num_particles=10_000, store_history=False,
+        key,
+        initial_sampler,
+        proposal_sampler,
+        log_proposal_fn,
+        log_transition_fn,
+        log_observation_fn,
+        observations,
+        num_particles=10_000,
+        store_history=False,
     ).marginal_loglik
 
 
