@@ -186,13 +186,15 @@ class TestLogMLIncrements:
 
         # float32 (Metal) carries ~7 significant digits; float64 gets
         # the sharp absolute bound.
-        if pf_post.marginal_loglik.dtype == jnp.float64:
-            tol = dict(abs=1e-6)
+        f64 = jnp.asarray(pf_post.marginal_loglik).dtype == jnp.float64
+        if f64:
+            assert float(jnp.sum(increments)) == pytest.approx(
+                float(pf_post.marginal_loglik), abs=1e-6
+            )
         else:
-            tol = dict(rel=1e-5)
-        assert float(jnp.sum(increments)) == pytest.approx(
-            float(pf_post.marginal_loglik), **tol
-        )
+            assert float(jnp.sum(increments)) == pytest.approx(
+                float(pf_post.marginal_loglik), rel=1e-5
+            )
 
 
 class TestParticleDiversity:

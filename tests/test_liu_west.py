@@ -343,11 +343,11 @@ class TestLiuWestLogEvidenceIncrements:
         total = float(jnp.sum(post.log_evidence_increments))
         # float32 (Metal) carries ~7 significant digits; float64 gets
         # the sharp absolute bound.
-        if post.marginal_loglik.dtype == jnp.float64:
-            tol = dict(abs=1e-6)
+        f64 = jnp.asarray(post.marginal_loglik).dtype == jnp.float64
+        if f64:
+            assert total == pytest.approx(float(post.marginal_loglik), abs=1e-6)
         else:
-            tol = dict(rel=1e-5)
-        assert total == pytest.approx(float(post.marginal_loglik), **tol)
+            assert total == pytest.approx(float(post.marginal_loglik), rel=1e-5)
 
     def test_log_evidence_increments_finite(self, lgssm_params, lgssm_data):
         """All increments should be finite."""
