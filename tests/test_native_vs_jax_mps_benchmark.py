@@ -11,6 +11,10 @@ from pathlib import Path
 import pytest
 
 from benchmarks.native_vs_jax_mps.common import (
+    BOOTSTRAP_SEED,
+    PINNED_VERSIONS,
+    SCHEMA_VERSION,
+    WORKLOAD_GRIDS,
     balanced_orders,
     bootstrap_ratio_ci,
     kalman_gate,
@@ -18,7 +22,14 @@ from benchmarks.native_vs_jax_mps.common import (
     validate_result,
 )
 from benchmarks.native_vs_jax_mps.run import (
+    ARMS,
+    Cell,
+    build_manifest,
     build_worker_command,
+    main,
+    plan_cells,
+    raw_filename,
+    supervise,
     worker_environment,
 )
 
@@ -271,3 +282,131 @@ def test_cpu_workers_smoke_the_matched_lgssm_filter(arm):
     validate_result(result)
     assert result["correctness"]["passed"]
     assert result["correctness"]["replicates"] == 20
+
+
+def test_plan_cells_smoke_uses_smallest_registered_sizes():
+    cells = plan_cells("smoke")
+
+    assert {cell.workload for cell in cells} == set(WORKLOAD_GRIDS)
+    assert {cell.arm for cell in cells} == set(ARMS)
+    assert {cell.block for cell in cells} == {0}
+    for cell in cells:
+        assert cell.size == min(WORKLOAD_GRIDS[cell.workload])
+        assert cell.repeats == 1
+        assert cell.warmups == 1
+
+
+def test_plan_cells_full_covers_every_size_block_and_arm():
+    cells = plan_cells("full")
+
+    for workload, grid in WORKLOAD_GRIDS.items():
+        sizes = {cell.size for cell in cells if cell.workload == workload}
+        assert sizes == set(grid)
+    assert {cell.block for cell in cells} == set(range(5))
+    matmul = [c for c in cells if c.workload == "matmul" and c.size == 256]
+    assert {cell.repeats for cell in matmul} == {7}
+    assert {cell.warmups for cell in matmul} == {1}
+    keys = {(c.workload, c.size, c.block, c.arm) for c in cells}
+    assert len(keys) == len(cells)
+
+
+def test_plan_cells_assigns_r20_only_to_block_zero_lgssm():
+    for cell in plan_cells("full"):
+        if cell.workload == "lgssm_pf" and cell.block == 0:
+            assert cell.correctness_replicates == 20
+        else:
+            assert cell.correctness_replicates == 0
+
+
+def test_plan_cells_balances_arms_and_is_deterministic():
+    assert plan_cells("full") == plan_cells("full")
+
+    columns: dict[tuple[str, int], dict[int, list[str]]] = {}
+    for cell in plan_cells("full"):
+        block_map = columns.setdefault((cell.workload, cell.size), {})
+        block_map.setdefault(cell.block, []).append(cell.arm)
+
+    for block_map in columns.values():
+        for position in range(len(ARMS)):
+            column = {block_map[block][position] for block in range(len(ARMS))}
+            assert column == set(ARMS)
+
+
+def test_raw_filename_is_unique_and_stable():
+    cells = plan_cells("full")
+    names = [raw_filename(cell) for cell in cells]
+
+    assert len(set(names)) == len(names)
+    assert all(name.endswith(".json") for name in names)
+    assert raw_filename(cells[0]) == raw_filename(cells[0])
+
+
+def test_build_manifest_persists_ordered_cells_and_pins():
+    cells = plan_cells("smoke")
+    manifest = build_manifest("smoke", cells, seed=BOOTSTRAP_SEED)
+
+    assert manifest["profile"] == "smoke"
+    assert manifest["seed"] == BOOTSTRAP_SEED
+    assert manifest["schema_version"] == SCHEMA_VERSION
+    assert manifest["versions"] == PINNED_VERSIONS
+    assert len(manifest["cells"]) == len(cells)
+    assert [entry["arm"] for entry in manifest["cells"]] == [
+        cell.arm for cell in cells
+    ]
+
+
+def test_supervise_resumes_without_overwriting_completed_raw(tmp_path):
+    root = Path(__file__).parents[1]
+    cells = plan_cells("smoke")
+    target = cells[0]
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    sentinel = {"failure": None, "sentinel": True}
+    (raw_dir / raw_filename(target)).write_text(json.dumps(sentinel))
+
+    called: list[Cell] = []
+
+    def runner(cell: Cell) -> dict:
+        called.append(cell)
+        return {"failure": None, "arm": cell.arm, "fresh": True}
+
+    supervise("smoke", root=root, output_dir=tmp_path, runner=runner)
+
+    assert target not in called
+    assert len(called) == len(cells) - 1
+    preserved = json.loads((raw_dir / raw_filename(target)).read_text())
+    assert preserved == sentinel
+
+
+def test_supervise_retains_failure_records(tmp_path):
+    root = Path(__file__).parents[1]
+    cells = plan_cells("smoke")
+
+    def runner(cell: Cell) -> dict:
+        if cell == cells[0]:
+            return {"failure": {"reason": "boom"}, "arm": cell.arm}
+        return {"failure": None, "arm": cell.arm}
+
+    summary = supervise("smoke", root=root, output_dir=tmp_path, runner=runner)
+
+    first_raw = json.loads(
+        (tmp_path / "raw" / raw_filename(cells[0])).read_text()
+    )
+    assert first_raw["failure"] == {"reason": "boom"}
+    assert summary["failed"] == 1
+    assert summary["completed"] == len(cells)
+
+
+def test_main_dry_run_writes_manifest_without_workers(tmp_path):
+    exit_code = main([
+        "--profile",
+        "smoke",
+        "--output-dir",
+        str(tmp_path),
+        "--dry-run",
+    ])
+
+    assert exit_code == 0
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["profile"] == "smoke"
+    assert not (tmp_path / "raw").exists()
