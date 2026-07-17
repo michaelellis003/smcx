@@ -14,10 +14,13 @@ os.environ.setdefault(
     "JAX_PLATFORMS", os.environ.get("SMCX_TEST_PLATFORM", "cpu")
 )
 
-# Configure JAX to use 64-bit floats for higher precision in tests.
+# Configure JAX to use 64-bit floats for higher precision in tests —
+# on CPU only: the Metal backend has no float64 (jax-mps/MLX limit),
+# so the SMCX_TEST_PLATFORM=mps run stays in float32.
 import jax
 
-jax.config.update("jax_enable_x64", True)
+if os.environ["JAX_PLATFORMS"] == "cpu":
+    jax.config.update("jax_enable_x64", True)
 
 # Install the jaxtyping import hook BEFORE importing smcx so that all
 # jaxtyped annotations are validated at runtime during tests.
