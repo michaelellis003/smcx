@@ -24,6 +24,7 @@ from benchmarks.native_vs_jax_mps.common import (
 )
 from benchmarks.native_vs_jax_mps.run import (
     ARMS,
+    REPORT_ONLY_WORKLOADS,
     Cell,
     build_manifest,
     build_worker_command,
@@ -33,6 +34,8 @@ from benchmarks.native_vs_jax_mps.run import (
     supervise,
     worker_environment,
 )
+
+_VERDICT_WORKLOADS = set(WORKLOAD_GRIDS) - REPORT_ONLY_WORKLOADS
 
 
 def test_summarize_retains_robust_statistics():
@@ -285,10 +288,45 @@ def test_cpu_workers_smoke_the_matched_lgssm_filter(arm):
     assert result["correctness"]["replicates"] == 20
 
 
+def test_plan_cells_excludes_report_only_workloads():
+    workloads = {cell.workload for cell in plan_cells("full")}
+
+    assert "lgssm_pf" in workloads
+    assert "lgssm_pf_nohist" not in workloads
+
+
+@pytest.mark.parametrize("arm", ["mlx_cpu", "jax_cpu"])
+def test_cpu_workers_smoke_the_tuned_nohist_filter(arm):
+    root = Path(__file__).parents[1]
+    command = build_worker_command(
+        root=root,
+        arm=arm,
+        block=0,
+        correctness_replicates=20,
+        repeats=1,
+        size=256,
+        warmups=1,
+        workload="lgssm_pf_nohist",
+    )
+    completed = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        env=worker_environment(arm),
+        text=True,
+        timeout=90,
+    )
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    validate_result(result)
+    assert result["correctness"]["passed"]
+    assert result["correctness"]["replicates"] == 20
+
+
 def test_plan_cells_smoke_uses_smallest_registered_sizes():
     cells = plan_cells("smoke")
 
-    assert {cell.workload for cell in cells} == set(WORKLOAD_GRIDS)
+    assert {cell.workload for cell in cells} == _VERDICT_WORKLOADS
     assert {cell.arm for cell in cells} == set(ARMS)
     assert {cell.block for cell in cells} == {0}
     for cell in cells:
@@ -301,6 +339,8 @@ def test_plan_cells_full_covers_every_size_block_and_arm():
     cells = plan_cells("full")
 
     for workload, grid in WORKLOAD_GRIDS.items():
+        if workload in REPORT_ONLY_WORKLOADS:
+            continue
         sizes = {cell.size for cell in cells if cell.workload == workload}
         assert sizes == set(grid)
     assert {cell.block for cell in cells} == set(range(5))
