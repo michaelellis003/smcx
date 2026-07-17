@@ -133,13 +133,19 @@ def test_select_loop_mode_never_resample_at_threshold_zero():
     assert _fk._select_loop_mode(False, 10**6, 0.0) == "never_resample"
 
 
-def test_select_loop_mode_value_branch_is_size_gated():
+def test_select_loop_mode_value_branch_is_size_and_threshold_gated():
+    # Bake-off (perf-analysis.md, ADR-0016 decision 3): the sync only
+    # pays for itself at large N and low trigger rates.
     assert (
         _fk._select_loop_mode(False, _fk._VALUE_BRANCH_MIN_N, 0.5)
         == "value_branch"
     )
     assert (
         _fk._select_loop_mode(False, _fk._VALUE_BRANCH_MIN_N - 1, 0.5)
+        == "branchless"
+    )
+    assert (
+        _fk._select_loop_mode(False, _fk._VALUE_BRANCH_MIN_N, 0.75)
         == "branchless"
     )
 

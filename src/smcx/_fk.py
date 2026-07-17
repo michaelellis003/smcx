@@ -38,16 +38,19 @@ from smcx.weights import log_normalize
 
 _EVAL_LAG = 4
 
-# Value-branch conditional resampling (perf-analysis.md #1): above
-# this N, log_eta-free filters branch host-side on the previous
-# step's already-materialized ESS and skip the resample pipeline
-# entirely on skip steps (43-45% of a 1e6 step; smcjax's lax.cond
-# does the same, so this is fairness-restoring). Below it, the
-# branchless where-select wins (the sync tax dominates the skipped
-# work). Results are bit-identical either way (explicit keys: the
-# unconsumed resample key shifts nothing). APF keeps branchless:
-# its trigger (first-stage W*eta ESS) only exists inside the step.
-_VALUE_BRANCH_MIN_N = 50_000
+# Value-branch conditional resampling (perf-analysis.md #1, re-tuned
+# for the v2 shell): the host branch on the previous step's ESS skips
+# the resample pipeline on skip steps at the price of one blocking
+# .item() per step. Against the pipelined single-ESS branchless step
+# (2026-07-16 bake-off, LGSSM), that sync pays for itself only at
+# large N with a low trigger rate: at 1e6 it wins 137 vs 235 ms
+# (thr=0.25) and 172 vs 239 (0.5) but loses at 0.75; at <= 2.5e5 it
+# loses everywhere. Results are bit-identical either way (explicit
+# keys: the unconsumed resample key shifts nothing). APF keeps
+# branchless: its trigger (first-stage W*eta ESS) only exists inside
+# the step.
+_VALUE_BRANCH_MIN_N = 500_000
+_VALUE_BRANCH_MAX_THRESHOLD = 0.5
 
 
 def _select_loop_mode(
@@ -72,7 +75,10 @@ def _select_loop_mode(
         return "always_resample"
     if resampling_threshold <= 0.0:
         return "never_resample"
-    if num_particles >= _VALUE_BRANCH_MIN_N:
+    if (
+        num_particles >= _VALUE_BRANCH_MIN_N
+        and resampling_threshold <= _VALUE_BRANCH_MAX_THRESHOLD
+    ):
         return "value_branch"
     return "branchless"
 
