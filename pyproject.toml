@@ -1,7 +1,7 @@
 [project]
 name = "smcx"
 version = "1.0.0"
-description = "Sequential Monte Carlo for Apple silicon, built on MLX"
+description = "Sequential Monte Carlo in JAX: particle filters, tempered SMC, and SMC2 on CPU, CUDA, TPU, and Apple-silicon GPUs"
 readme = "README.md"
 authors = [
     { name = "Michael Ellis", email = "michaelellis003@gmail.com" }
@@ -9,21 +9,21 @@ authors = [
 license = "Apache-2.0"
 requires-python = ">=3.11"
 keywords = [
-        "apple-silicon",
+    "jax",
     "particle-filter",
     "sequential-monte-carlo",
     "bayesian-inference",
+    "apple-silicon",
     "state-space-models",
     "hidden-markov-models",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
