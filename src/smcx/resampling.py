@@ -82,7 +82,9 @@ def _searchsorted_metal(cdf: mx.array, u: mx.array) -> mx.array:
         inputs=[cdf, u],
         template=[("T", cdf.dtype)],
         grid=(u.shape[0], 1, 1),
-        threadgroup=(min(256, max(u.shape[0], 1)), 1, 1),
+        # 1024 (the Apple-GPU max) measured 1.75x over 256 at N=1e6
+        # fresh-process (perf-analysis.md 2026-07-16 late section).
+        threadgroup=(min(1024, max(u.shape[0], 1)), 1, 1),
         output_shapes=[u.shape],
         output_dtypes=[mx.int32],
     )
