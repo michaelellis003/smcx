@@ -190,3 +190,54 @@ StableHLO/provenance trace bundles under the sibling `traces/` directory. The
 verdict machinery, correctness gates, and balanced ordering are covered by
 `tests/test_native_vs_jax_mps_benchmark.py` and
 `tests/test_native_vs_jax_mps_report.py`.
+
+## Addendum — 2026-07-16: tuned-JAX counter-experiment and scan correction
+
+*Added after an adversarial review of the result above. The original text is
+retained unchanged; this section corrects how two of its numbers should be
+read. Report-only: nothing here enters the pre-registered verdict.*
+
+### The tuned filter
+
+The review's central objection was that the JAX arm above is a naive port:
+full history forces the compiler to materialize five (T, N) arrays, and the
+`lax.cond` resampling branch blocks optimization. We built the strongest fair
+JAX filter the reviewer asked for (`lgssm_pf_nohist`): unconditional
+systematic resampling with no `lax.cond`, a scan that emits no per-step
+outputs, and only the marginal log-likelihood returned. The native arm was
+changed identically (`smcx.bootstrap_filter` with `resampling_threshold=1.0`,
+`store_history=False`), so both sides do the same work. Design: 3 blocks x 7
+repeats per arm and size, R=20 Kalman gate on block 0; every gate passed.
+This is lighter than the main matrix (3 blocks, not 5) and resamples every
+step where the primary arm resamples conditionally, so the two experiments
+measure related but not identical filters.
+
+| N | native median (s) | best jax arm | jax median (s) | ratio low/est/high | native/jax peak | frozen-arm ratio |
+|---|---|---|---|---|---|---|
+| 10000 | 0.0294 | jax_mps_async | 0.1513 | 5.11 / 5.14 / 5.19 | 0.50 | 5.70 |
+| 100000 | 0.1057 | jax_mps_async | 0.1605 | 1.51 / 1.52 / 1.54 | 0.11 | 23.90 |
+| 1000000 | 0.2613 | jax_mps_sync | 1.5189 | 5.77 / 5.81 / 5.89 | 0.10 | 59.86 |
+
+Two conclusions follow. The bulk of the headline gap above was the
+implementation, not the substrate: at N=10^6 the tuned arm takes jax-mps from
+12.45 s to 1.52 s, and the ratio falls from 59.9 to 5.8. And the advantage
+that remains is real: native MLX wins at every size with tight intervals,
+2-10x less peak memory, and all correctness gates passed. The dip to 1.5x at
+N=10^5 reflects jax-mps's roughly 0.15 s per-run floor, which dominates until
+the arrays are large enough to hide it; native has no such floor. Quote this
+experiment as "roughly 1.5-6x with less memory on the strongest fair JAX
+implementation we could write," not the 60x above, whenever the comparison is
+about backends rather than about shipped libraries. The raw records and
+summary are committed as `tuned_lgssm_nohist.json` beside this report.
+
+### The scan memory number was our artifact
+
+The Reading section above flags native SCAN peak memory at 9-16x jax-mps.
+That is a defect in the benchmark motif, not in MLX: the committed kernel
+calls `mx.async_eval` on every step, a cadence the project's own MLX
+constraints document bans at large N precisely because it pins every
+intermediate. Re-measured at N=10^6 with the library's recommended
+eval-every-4 cadence, peak memory falls from 200.7 MB to 12.0 MB, a factor of
+16.7 that matches the reported blowup. The SCAN timing comparison stands; the
+memory column for SCAN should be disregarded. The motif is retained unchanged
+because the protocol froze it, and this note is the correction.
