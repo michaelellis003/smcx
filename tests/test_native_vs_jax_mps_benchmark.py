@@ -17,6 +17,7 @@ from benchmarks.native_vs_jax_mps.common import (
     WORKLOAD_GRIDS,
     balanced_orders,
     bootstrap_ratio_ci,
+    count_stablehlo_ops,
     kalman_gate,
     summarize,
     validate_result,
@@ -395,6 +396,75 @@ def test_supervise_retains_failure_records(tmp_path):
     assert first_raw["failure"] == {"reason": "boom"}
     assert summary["failed"] == 1
     assert summary["completed"] == len(cells)
+
+
+_STABLEHLO_SNIPPET = """
+module @jit_operation {
+  func.func public @main(%arg0: tensor<8xf32>) -> tensor<f32> {
+    %0 = stablehlo.tanh %arg0 : tensor<8xf32>
+    %1 = stablehlo.logistic %arg0 : tensor<8xf32>
+    %2 = stablehlo.multiply %0, %1 : tensor<8xf32>
+    %cst = stablehlo.constant dense<1.0> : tensor<f32>
+    %3 = "stablehlo.reduce"(%2, %cst) : (tensor<8xf32>) -> tensor<f32>
+    return %3 : tensor<f32>
+  }
+}
+"""
+
+
+def test_count_stablehlo_ops_counts_assigned_operations():
+    counts = count_stablehlo_ops(_STABLEHLO_SNIPPET)
+
+    assert counts["stablehlo.tanh"] == 1
+    assert counts["stablehlo.multiply"] == 1
+    assert counts["stablehlo.reduce"] == 1
+    assert counts["stablehlo.constant"] == 1
+    assert "func.func" not in counts
+
+
+def test_capture_ir_command_appends_the_flag():
+    root = Path(__file__).parents[1]
+    command = build_worker_command(
+        root=root,
+        arm="jax_mps_sync",
+        block=0,
+        capture_ir=True,
+        repeats=1,
+        size=16,
+        warmups=0,
+        workload="eltwise_reduce",
+    )
+
+    assert "--capture-ir" in command
+
+
+def test_isolated_jax_cpu_capture_emits_stablehlo_and_op_counts():
+    root = Path(__file__).parents[1]
+    command = build_worker_command(
+        root=root,
+        arm="jax_cpu",
+        block=0,
+        capture_ir=True,
+        repeats=1,
+        size=16,
+        warmups=0,
+        workload="eltwise_reduce",
+    )
+    completed = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        env=worker_environment("jax_cpu"),
+        text=True,
+        timeout=120,
+    )
+    bundle = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert bundle["workload"] == "eltwise_reduce"
+    assert "stablehlo." in bundle["stablehlo"]
+    assert bundle["stablehlo_op_counts"]
+    assert bundle["versions"]["jax"]
+    assert "provenance" in bundle
 
 
 def test_main_dry_run_writes_manifest_without_workers(tmp_path):
