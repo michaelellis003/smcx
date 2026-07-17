@@ -184,8 +184,14 @@ class TestLogMLIncrements:
         pf_post = _run_bootstrap(lgssm_params, lgssm_data)
         increments = log_ml_increments(pf_post)
 
+        # float32 (Metal) carries ~7 significant digits; float64 gets
+        # the sharp absolute bound.
+        if pf_post.marginal_loglik.dtype == jnp.float64:
+            tol = dict(abs=1e-6)
+        else:
+            tol = dict(rel=1e-5)
         assert float(jnp.sum(increments)) == pytest.approx(
-            float(pf_post.marginal_loglik), abs=1e-6
+            float(pf_post.marginal_loglik), **tol
         )
 
 
