@@ -141,3 +141,22 @@ class LiuWestPosterior(NamedTuple):
     ess: Float[Array, " ntime"]
     log_evidence_increments: Float[Array, " ntime"]
     filtered_params: Float[Array, "ntime num_particles param_dim"]
+
+
+class TemperedPosterior(NamedTuple):
+    """Tempered-SMC output (ADR-0008 item 6).
+
+    ``particles`` are equal-weight draws from the target (final
+    resample + pi-invariant moves), so ``log_weights`` is uniform —
+    kept for interface symmetry and Rao-Blackwell reminders: compute
+    summaries from weighted clouds when you have them.
+    ``marginal_loglik`` is the Neumaier-compensated log-evidence;
+    E[exp(marginal_loglik)] = Z (log Zhat itself is Jensen-biased).
+    """
+
+    particles: Float[Array, "num_particles dim"]
+    log_weights: Float[Array, " num_particles"]
+    marginal_loglik: Float[Array, ""]
+    temperatures: Float[Array, " num_stages"]
+    ess: Float[Array, " num_stages"]
+    acceptance_rates: Float[Array, " num_stages"]

@@ -13,6 +13,7 @@ from smcx.containers import (
     ParticleFilterPosterior,
     ParticleFilterResult,
     ParticleState,
+    TemperedPosterior,
 )
 from smcx.diagnostics import (
     crps,
@@ -41,6 +42,7 @@ from smcx.resampling import (
     systematic,
 )
 from smcx.simulate import simulate
+from smcx.tempering import temper
 from smcx.weights import ess, log_ess, log_normalize, normalize
 
 try:
@@ -54,6 +56,7 @@ __all__ = [
     "ParticleFilterPosterior",
     "ParticleFilterResult",
     "ParticleState",
+    "TemperedPosterior",
     "__version__",
     "auxiliary_filter",
     "bootstrap_filter",
@@ -80,6 +83,7 @@ __all__ = [
     "stratified",
     "systematic",
     "tail_ess",
+    "temper",
     "weighted_mean",
     "weighted_quantile",
     "weighted_variance",
