@@ -73,9 +73,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Only versions satisfying requires-python; older ones fail uv sync.
-        # 3.14 is excluded until MLX publishes wheels for it.
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # Only versions satisfying requires-python (>=3.11, the
+        # jax 0.10 line); older ones fail uv sync.
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
