@@ -42,6 +42,7 @@ def _parse_args() -> argparse.Namespace:
             "eltwise_reduce",
             "gather_scatter",
             "lgssm_pf",
+            "lgssm_pf_nohist",
             "matmul",
             "random",
             "scan",
@@ -321,6 +322,75 @@ def _lgssm_pf(size, jax, jnp):
     return inputs, jax.jit(operation), np.asarray(oracle)
 
 
+def _lgssm_pf_nohist(size, jax, jnp):
+    """Build the report-only tuned JAX filter for jax-mps.
+
+    This is the strongest fair JAX implementation the adversarial review asked
+    for: unconditional systematic resampling removes the `lax.cond` branch, and
+    the scan returns no per-step outputs, so the compiler need not materialize
+    any (T, N) history. Only the marginal log-likelihood leaves the function.
+    """
+    observations_np, oracle = lgssm_data()
+    normalizer = float(np.log(2.0 * np.pi * LGSSM["r"]))
+    initial_scale = float(np.sqrt(LGSSM["p0"]))
+    transition_scale = float(np.sqrt(LGSSM["q"]))
+    log_size = float(np.log(size))
+
+    def logsumexp(values):
+        maximum = jnp.max(values)
+        return maximum + jnp.log(jnp.sum(jnp.exp(values - maximum)))
+
+    def operation(key, observations):
+        key, initial_key = jax.random.split(key)
+        particles = LGSSM["m0"] + initial_scale * jax.random.normal(
+            initial_key, shape=(size, 1), dtype=jnp.float32
+        )
+        residual = observations[0] - particles[:, 0]
+        unnormalized = -0.5 * (normalizer + residual**2 / LGSSM["r"])
+        log_sum = logsumexp(unnormalized)
+        log_weights = unnormalized - log_sum
+        marginal = log_sum - log_size
+        step_keys = jax.random.split(key, observations.shape[0] - 1)
+
+        def step(carry, inputs):
+            current_particles, current_log_weights, current_marginal = carry
+            step_key, observation = inputs
+            resampling_key, transition_key = jax.random.split(step_key)
+            cdf = jnp.cumsum(jnp.exp(current_log_weights))
+            cdf = cdf / cdf[-1]
+            offset = jax.random.uniform(resampling_key)
+            queries = (offset + jnp.arange(size)) / size
+            indices = jnp.clip(
+                jnp.searchsorted(cdf, queries, side="right"), 0, size - 1
+            )
+            parents = jnp.take(current_particles, indices, axis=0)
+            noise = jax.random.normal(
+                transition_key, shape=parents.shape, dtype=jnp.float32
+            )
+            next_particles = LGSSM["a"] * parents + transition_scale * noise
+            residual = observation - next_particles[:, 0]
+            log_observation = -0.5 * (normalizer + residual**2 / LGSSM["r"])
+            next_log_sum = logsumexp(log_observation)
+            next_log_weights = log_observation - next_log_sum
+            increment = next_log_sum - log_size
+            carry = (
+                next_particles,
+                next_log_weights,
+                current_marginal + increment,
+            )
+            return carry, None
+
+        (_, _, marginal), _ = jax.lax.scan(
+            step,
+            (particles, log_weights, marginal),
+            (step_keys, observations[1:]),
+        )
+        return (marginal,)
+
+    inputs = (jax.random.key(20260715), observations_np)
+    return inputs, jax.jit(operation), np.asarray(oracle)
+
+
 def _random(size, jax, jnp):
     """Build a fixed-key normal draw with moment output."""
 
@@ -377,6 +447,7 @@ def _build_workload(name, size, jax, jnp):
         "eltwise_reduce": _eltwise_reduce,
         "gather_scatter": _gather_scatter,
         "lgssm_pf": _lgssm_pf,
+        "lgssm_pf_nohist": _lgssm_pf_nohist,
         "matmul": _matmul,
         "random": _random,
         "scan": _scan,
@@ -416,7 +487,7 @@ def main() -> None:
     jax.block_until_ready(output)
     cold_s = time.perf_counter() - started
 
-    if args.workload == "lgssm_pf":
+    if args.workload in ("lgssm_pf", "lgssm_pf_nohist"):
         actual = float(output[0])
         passed = bool(np.isfinite(actual))
         expected_json = float(expected)
@@ -449,7 +520,10 @@ def main() -> None:
         "passed": passed,
         "rtol": rtol,
     }
-    if args.workload == "lgssm_pf" and args.correctness_replicates:
+    if (
+        args.workload in ("lgssm_pf", "lgssm_pf_nohist")
+        and args.correctness_replicates
+    ):
         log_evidence = []
         for seed in range(args.correctness_replicates):
             replicate_inputs = (jax.random.key(seed), *inputs[1:])

@@ -25,6 +25,10 @@ from benchmarks.native_vs_jax_mps.common import (
 
 ARMS = ("mlx_gpu", "mlx_cpu", "jax_mps_sync", "jax_mps_async", "jax_cpu")
 
+# Registered but held out of the pre-registered verdict matrix: report-only
+# counter-experiments driven separately, never expanded into profile cells.
+REPORT_ONLY_WORKLOADS = frozenset({"lgssm_pf_nohist"})
+
 
 class Profile(NamedTuple):
     """Registered measurement schedule for a named benchmark profile."""
@@ -157,7 +161,10 @@ def plan_cells(profile: str, *, seed: int = BOOTSTRAP_SEED) -> list[Cell]:
     settings = PROFILES[profile]
 
     cells: list[Cell] = []
-    for index, workload in enumerate(sorted(WORKLOAD_GRIDS)):
+    schedule = [
+        w for w in sorted(WORKLOAD_GRIDS) if w not in REPORT_ONLY_WORKLOADS
+    ]
+    for index, workload in enumerate(schedule):
         grid = WORKLOAD_GRIDS[workload]
         sizes = grid if settings.all_sizes else (min(grid),)
         for size in sizes:

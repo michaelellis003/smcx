@@ -123,6 +123,49 @@ def _lgssm_pf(size: int):
     return (mx.random.key(20260715),), operation, np.asarray(oracle)
 
 
+def _lgssm_pf_nohist(size: int):
+    """Build the report-only tuned smcx filter mirroring the JAX arm.
+
+    Unconditional resampling (`resampling_threshold=1.0`) and
+    `store_history=False` give the native side the same no-history,
+    always-resample semantics the tuned JAX arm uses, so the two are compared
+    on identical work rather than the frozen full-history filter.
+    """
+    observations_np, oracle = lgssm_data()
+    observations = mx.array(observations_np)[:, None]
+    normalizer = float(np.log(2.0 * np.pi * LGSSM["r"]))
+    initial_scale = float(np.sqrt(LGSSM["p0"]))
+    transition_scale = float(np.sqrt(LGSSM["q"]))
+
+    def initial(key, num_particles):
+        noise = mx.random.normal((num_particles, 1), key=key)
+        return LGSSM["m0"] + initial_scale * noise
+
+    def transition(key, particles):
+        noise = mx.random.normal(particles.shape, key=key)
+        return LGSSM["a"] * particles + transition_scale * noise
+
+    def log_observation(observation, particles):
+        residual = observation[0] - particles[:, 0]
+        return -0.5 * (normalizer + residual**2 / LGSSM["r"])
+
+    def operation(key):
+        posterior = smcx.bootstrap_filter(
+            key,
+            initial,
+            transition,
+            log_observation,
+            observations,
+            size,
+            resampling_threshold=1.0,
+            store_history=False,
+            batched=True,
+        )
+        return (posterior.marginal_loglik,)
+
+    return (mx.random.key(20260715),), operation, np.asarray(oracle)
+
+
 def _random(size: int):
     """Build a fixed-key normal draw with moment output."""
     key = mx.random.key(20260715)
@@ -193,6 +236,8 @@ def _build_workload(name: str, size: int):
         return _gather_scatter(size)
     if name == "lgssm_pf":
         return _lgssm_pf(size)
+    if name == "lgssm_pf_nohist":
+        return _lgssm_pf_nohist(size)
     if name == "matmul":
         return _matmul(size)
     if name == "random":
@@ -218,6 +263,7 @@ def _parse_args() -> argparse.Namespace:
             "eltwise_reduce",
             "gather_scatter",
             "lgssm_pf",
+            "lgssm_pf_nohist",
             "matmul",
             "random",
             "scan",
@@ -241,7 +287,7 @@ def main() -> None:
     _fence(output)
     cold_s = time.perf_counter() - started
 
-    if args.workload == "lgssm_pf":
+    if args.workload in ("lgssm_pf", "lgssm_pf_nohist"):
         actual = float(output[0].item())
         passed = bool(np.isfinite(actual))
         expected_json = float(expected)
@@ -274,7 +320,10 @@ def main() -> None:
         "passed": passed,
         "rtol": rtol,
     }
-    if args.workload == "lgssm_pf" and args.correctness_replicates:
+    if (
+        args.workload in ("lgssm_pf", "lgssm_pf_nohist")
+        and args.correctness_replicates
+    ):
         log_evidence = []
         for seed in range(args.correctness_replicates):
             replicate = operation(mx.random.key(seed), *inputs[1:])

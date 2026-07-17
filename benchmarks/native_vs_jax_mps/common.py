@@ -30,6 +30,11 @@ WORKLOAD_GRIDS = {
     "eltwise_reduce": (10_000, 1_000_000, 10_000_000),
     "gather_scatter": (10_000, 100_000, 1_000_000),
     "lgssm_pf": (10_000, 100_000, 1_000_000),
+    # Report-only tuned counter-experiment (see run.REPORT_ONLY_WORKLOADS): the
+    # same bootstrap filter with unconditional resampling and no stored history,
+    # returning only the marginal log-likelihood. It gives jax-mps its strongest
+    # fair implementation and never enters the pre-registered verdict matrix.
+    "lgssm_pf_nohist": (10_000, 100_000, 1_000_000),
     "matmul": (256, 1_024, 2_048),
     "random": (10_000, 1_000_000, 10_000_000),
     "scan": (10_000, 100_000, 1_000_000),
