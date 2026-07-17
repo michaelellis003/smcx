@@ -22,6 +22,7 @@ The implementation uses :func:`jax.lax.scan` so the full time-loop is
 compiled into a single XLA program.
 """
 
+import math
 from collections.abc import Callable
 
 import jax.numpy as jnp
@@ -62,7 +63,7 @@ def _init_liu_west(
         Tuple of (particles_0, params_0, log_w_0, log_ev_0, ess_0,
         identity_ancestors).
     """
-    log_n = jnp.log(jnp.asarray(num_particles, dtype=jnp.float64))
+    log_n = jnp.asarray(math.log(num_particles))
     k_z, k_p = jr.split(init_key)
     particles_0 = initial_sampler(k_z, num_particles)
     params_0 = param_initial_sampler(k_p, num_particles)
@@ -146,8 +147,8 @@ def liu_west_filter(
         the marginal log-likelihood estimate, and ESS trace.
     """
     key, init_key = jr.split(key)
-    log_n = jnp.log(jnp.asarray(num_particles, dtype=jnp.float64))
-    a = jnp.asarray(shrinkage, dtype=jnp.float64)
+    log_n = jnp.asarray(math.log(num_particles))
+    a = jnp.asarray(shrinkage)
     h_sq = 1.0 - a**2
 
     (

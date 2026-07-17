@@ -83,7 +83,8 @@ def _init_standard(
             ``(emission, state) -> log_prob``.
         first_emission: First observation y_0.
         num_particles: Number of particles N.
-        log_n: Precomputed ``log(N)`` as a float64 array.
+        log_n: Precomputed ``log(N)`` as a scalar array in the
+            default float dtype.
 
     Returns:
         Tuple of ``(particles_0, log_w_0, log_ev_0, ess_0,

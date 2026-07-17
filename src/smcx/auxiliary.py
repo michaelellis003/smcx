@@ -24,6 +24,7 @@ The implementation uses :func:`jax.lax.scan` so the full time-loop is
 compiled into a single XLA program.
 """
 
+import math
 from collections.abc import Callable
 
 import jax.numpy as jnp
@@ -99,7 +100,7 @@ def auxiliary_filter(
         marginal log-likelihood estimate, and ESS trace.
     """
     key, init_key = jr.split(key)
-    log_n = jnp.log(jnp.asarray(num_particles, dtype=jnp.float64))
+    log_n = jnp.asarray(math.log(num_particles))
 
     # --- Initialise at t=0 -------------------------------------------------
     (

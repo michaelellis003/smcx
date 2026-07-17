@@ -471,7 +471,7 @@ def _fit_generalized_pareto(
     # Zhang-Stephens candidate b values:
     #   b_i = 1/x_star + (1 - sqrt(m / i)) / (prior * x_q25)
     # for i = 0.5, 1.5, ..., num_candidates - 0.5
-    i = jnp.arange(1, num_candidates + 1, dtype=jnp.float64) - 0.5
+    i = jnp.arange(1, num_candidates + 1) - 0.5
     b_grid = 1.0 / x_star + (1.0 - jnp.sqrt(m / i)) / (prior * x_q25)
 
     # Profile log-likelihood for each candidate:
@@ -492,7 +492,7 @@ def _fit_generalized_pareto(
     w = w / (w_sum + _EXC_FLOOR)
 
     # Zero out negligible weights for numerical stability
-    eps_threshold = 10.0 * jnp.finfo(jnp.float64).eps
+    eps_threshold = 10.0 * jnp.finfo(w.dtype).eps
     w = jnp.where(w >= eps_threshold, w, 0.0)
     w = w / (jnp.sum(w) + _EXC_FLOOR)
 
@@ -502,7 +502,7 @@ def _fit_generalized_pareto(
 
     # Vehtari et al. (2024) prior regularisation:
     #   k_final = k * m/(m+a) + a * 0.5/(m+a)
-    a = jnp.float64(_PRIOR_STRENGTH)
+    a = _PRIOR_STRENGTH
     k_reg = k_hat * m / (m + a) + a * _PRIOR_K / (m + a)
     return jnp.asarray(k_reg)
 

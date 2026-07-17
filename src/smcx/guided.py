@@ -16,6 +16,7 @@ bootstrap (same key stream, agreement to floating-point tolerance —
 the ``f/q`` cancellation is mathematical, not bitwise; tested).
 """
 
+import math
 from collections.abc import Callable
 
 import jax.numpy as jnp
@@ -85,7 +86,7 @@ def guided_filter(
             only; under ``jax.jit`` the ``-inf`` marginal propagates).
     """
     key, init_key = jr.split(key)
-    log_n = jnp.log(jnp.asarray(num_particles, dtype=jnp.float64))
+    log_n = jnp.asarray(math.log(num_particles))
 
     # --- t = 0: observation-only weighting ---------------------------------
     (
