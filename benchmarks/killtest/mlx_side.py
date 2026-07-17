@@ -20,10 +20,10 @@ import mlx.core as mx
 import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
+import smcx._fk as fk
 from gen_data import LGSSM, SV, track_matrices
 
 import smcx
-import smcx._fk as fk
 
 DATA = pathlib.Path(__file__).parent.parent / "data"
 R_KEYS = 20
