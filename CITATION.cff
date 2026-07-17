@@ -16,12 +16,6 @@ keywords:
   - bayesian-inference
 references:
   - type: software
-    title: "smcjax: Sequential Monte Carlo and particle filtering in JAX"
-    authors:
-      - family-names: Ellis
-        given-names: Michael
-    repository-code: "https://github.com/michaelellis003/smcjax"
-  - type: software
     title: "MLX: An array framework for Apple silicon"
     authors:
       - name: "Apple Inc."

@@ -9,9 +9,6 @@ filters, adaptive tempered SMC, and SMC² with a small, flat API. Runs on
 CPU, CUDA, and TPU through stock JAX, and on Apple-silicon GPUs through
 the optional [jax-mps](https://github.com/tillahoffmann/jax-mps) backend.
 
-smcx succeeds [smcjax](https://github.com/michaelellis003/smcjax); all of
-its functionality was ported forward and extended.
-
 ## Install
 
 ```bash
@@ -149,8 +146,7 @@ implementation remains in git history at the `mlx-final` tag.
 ## Acknowledgments
 
 smcx's design draws on the SMC ecosystem:
-[smcjax](https://github.com/michaelellis003/smcjax) (the predecessor
-library), [particles](https://github.com/nchopin/particles) and Chopin &
+[particles](https://github.com/nchopin/particles) and Chopin &
 Papaspiliopoulos's *An Introduction to Sequential Monte Carlo* (the
 Feynman-Kac architecture),
 [BlackJAX](https://github.com/blackjax-devs/blackjax) (the resampling
