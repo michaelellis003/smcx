@@ -240,7 +240,36 @@ class TestSystematicBisectSemantics:
 
         u0 = np.float32(mx.random.uniform(key=key).item())
         cdf = np.array(resampling._normalized_cdf(w))
-        # Match the kernel's f32 op order exactly: (u0 + j) then / n.
+        # Match the kernel's f32 op order exactly: (u0 + j) then / n,
+        # then the sub-1 endpoint clamp (numerics review).
         q = (u0 + np.arange(n, dtype=np.float32)) / np.float32(n)
+        q = np.minimum(q, np.float32(1.0) - np.float32(2**-24))
         expected = np.clip(np.searchsorted(cdf, q, side="right"), 0, n - 1)
         assert np.array_equal(ancestors, expected)
+
+
+class TestGridEndpointGuard:
+    """The query grid must stay strictly below 1.0 (numerics review).
+
+    ``(u0 + (m-1))/m`` rounds to exactly 1.0 in f32 with probability
+    ~ulp(m)/2 per call (near-certain at m >= 2^23); an unclamped
+    right-bisect then returns n and the clip pins the ancestor to
+    particle n-1 regardless of its weight — selecting a
+    zero-probability ancestor when trailing weights are zero. The
+    counting formulation's counts>0 fill-forward could never do this.
+    """
+
+    def test_never_selects_zero_weight_trailing_particle(self):
+        m = 2**24
+        w = mx.array([1.0] + [0.0] * 7)
+        hit_edge = False
+        for seed in range(24):
+            key = mx.random.key(seed)
+            u0 = np.float32(mx.random.uniform(key=key).item())
+            q_last = (u0 + np.float32(m - 1)) / np.float32(m)
+            if q_last == np.float32(1.0):
+                hit_edge = True
+                ancestors = resampling.systematic(key, w, m)
+                assert int(mx.max(ancestors).item()) == 0
+                break
+        assert hit_edge, "no edge key found in 24 seeds (P ~ 2^-24)"

@@ -14,13 +14,12 @@ residual draws.
 
 Kernels:
 
-- ``systematic`` uses the offspring-counting formulation of
-  Murray, Lee & Jacob (2016, JCGS 25(3)) in pure MLX — O(N), no
-  dependent-dispatch chain, vmap-clean.
-- ``stratified``/``multinomial`` locate strata edges / sorted
-  uniforms in the CDF by binary search: a fused
-  ``mx.fast.metal_kernel`` on the GPU (no vmap/vjp — ADR-0009), with
-  a pure-MLX take-chain fallback elsewhere.
+- ``systematic``/``stratified``/``multinomial`` locate their query
+  grids / sorted uniforms in the CDF by right binary search: a fused
+  ``mx.fast.metal_kernel`` on the GPU (no vmap/vjp — ADR-0009/0017;
+  under vmap use the take-chain explicitly), with a pure-MLX
+  take-chain fallback elsewhere. Query grids are clamped strictly
+  below 1 (``_BELOW_ONE``).
 - ``multinomial`` draws already-sorted uniforms in O(N) via
   exponential spacings (Devroye 1986, Ch. V.3.1) using
   ``-log1p(-u)`` — ``mx.random.uniform`` can return exactly 0.
@@ -40,6 +39,14 @@ from smcx.types import KeyT
 # Avoids 0/0 on all-zero CDFs (outputs are masked wherever this can
 # engage; f32 min normal is ~1.18e-38, see ADR-0003 FTZ note).
 _TINY = 1e-30
+
+# Largest f32 below 1. Query grids are clamped here: (u0 + (m-1))/m
+# rounds to exactly 1.0 with probability ~ulp(m)/2 per call
+# (near-certain at m >= 2^23), and an unclamped right-bisect of 1.0
+# returns n — the clip then selects particle n-1 regardless of its
+# weight (numerics review, 2026-07-16). The counting formulation's
+# counts>0 fill-forward guarded this implicitly.
+_BELOW_ONE = 1.0 - 2.0**-24
 
 _METAL_SEARCHSORTED_SRC = """
     uint i = thread_position_in_grid.x;
@@ -177,7 +184,7 @@ def systematic(
     # (sorted queries on a sorted CDF), preserving the
     # monotone-gather invariant. Under vmap use the take-chain
     # fallback explicitly (the fused kernel has no vmap; ADR-0009).
-    q = (u0 + mx.arange(m)) / m
+    q = mx.minimum((u0 + mx.arange(m)) / m, _BELOW_ONE)
     return _searchsorted(_normalized_cdf(weights), q)
 
 
@@ -201,7 +208,7 @@ def stratified(
     """
     m = num_samples
     v = mx.random.uniform(shape=(m,), key=key)
-    u = (mx.arange(m) + v) / m
+    u = mx.minimum((mx.arange(m) + v) / m, _BELOW_ONE)
     return _searchsorted(_normalized_cdf(weights), u)
 
 
@@ -224,7 +231,7 @@ def multinomial(
     Returns:
         Nondecreasing int32 ancestor indices.
     """
-    u = _sorted_uniforms(key, num_samples)
+    u = mx.minimum(_sorted_uniforms(key, num_samples), _BELOW_ONE)
     return _searchsorted(_normalized_cdf(weights), u)
 
 
