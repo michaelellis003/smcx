@@ -326,7 +326,11 @@ def run_filter(
             all_ancestors.append(ancestors)
         all_ess.append(ess_t)
         all_inc.append(inc)
-        mx.async_eval(state.particles, state.log_weights, ancestors)
+        # The checked scalars ride the same async pass: if inc/ess
+        # stay out of the schedule, the lagged _check's blocking eval
+        # recomputes step t-lag's reductions synchronously — measured
+        # at ~0.17 ms/step, the dominant shell cost at small N.
+        mx.async_eval(state.particles, state.log_weights, ancestors, inc, ess_t)
         pending.append((t, inc, ess_t))
         if len(pending) > _EVAL_LAG:
             _check(*pending.popleft())
