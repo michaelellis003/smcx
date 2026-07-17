@@ -4,10 +4,17 @@
 """Shared contracts for the native MLX versus jax-mps benchmark."""
 
 import random
+import re
 from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+
+# StableHLO textual form assigns each operation to an SSA value, either bare
+# (`%0 = stablehlo.tanh ...`) or in the generic quoted form
+# (`%3 = "stablehlo.reduce"(...)`). Declarations such as `func.func` have no
+# `=` and are intentionally excluded from the operation census.
+_STABLEHLO_OP = re.compile(r'=\s*"?([a-z_][\w]*\.[\w.]+)"?')
 
 SCHEMA_VERSION = 1
 BOOTSTRAP_SEED = 20260715
@@ -59,7 +66,7 @@ REQUIRED_RESULT_FIELDS = {
 def lgssm_data() -> tuple[np.ndarray, float]:
     """Generate the committed-seed LGSSM data and exact f64 log evidence."""
     rng = np.random.default_rng(20260714)
-    state = np.empty(LGSSM["timesteps"], dtype=np.float64)
+    state = np.empty(int(LGSSM["timesteps"]), dtype=np.float64)
     state[0] = rng.normal(LGSSM["m0"], np.sqrt(LGSSM["p0"]))
     for index in range(1, state.size):
         state[index] = LGSSM["a"] * state[index - 1] + rng.normal(
@@ -84,6 +91,15 @@ def lgssm_data() -> tuple[np.ndarray, float]:
         mean += gain * innovation
         variance *= 1.0 - gain
     return observations.astype(np.float32), float(log_evidence)
+
+
+def count_stablehlo_ops(text: str) -> dict[str, int]:
+    """Count StableHLO operations by dialect-qualified name in lowered IR."""
+    counts: dict[str, int] = {}
+    for match in _STABLEHLO_OP.finditer(text):
+        name = match.group(1)
+        counts[name] = counts.get(name, 0) + 1
+    return counts
 
 
 def summarize(times: Sequence[float]) -> dict[str, float]:

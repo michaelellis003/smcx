@@ -4,14 +4,23 @@
 """Fresh-process JAX CPU or jax-mps benchmark worker."""
 
 import argparse
+import hashlib
 import json
 import os
 import platform
 import time
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 import numpy as np
-from common import LGSSM, SCHEMA_VERSION, kalman_gate, lgssm_data, summarize
+from common import (
+    LGSSM,
+    SCHEMA_VERSION,
+    count_stablehlo_ops,
+    kalman_gate,
+    lgssm_data,
+    summarize,
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -22,6 +31,7 @@ def _parse_args() -> argparse.Namespace:
         required=True,
     )
     parser.add_argument("--block", required=True, type=int)
+    parser.add_argument("--capture-ir", action="store_true")
     parser.add_argument("--correctness-replicates", default=0, type=int)
     parser.add_argument("--repeats", required=True, type=int)
     parser.add_argument("--size", required=True, type=int)
@@ -48,6 +58,95 @@ def _package_version(name: str) -> str | None:
         return version(name)
     except PackageNotFoundError:
         return None
+
+
+def _file_digest(path: Path) -> dict | None:
+    """Return the size and SHA-256 of a file, or None when it is absent."""
+    if not path.exists():
+        return None
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {"bytes": path.stat().st_size, "path": str(path), "sha256": digest}
+
+
+def _dispatch_mode(arm: str) -> str:
+    """Return the jax-mps dispatch label for the active environment."""
+    if not arm.startswith("jax_mps_"):
+        return "cpu"
+    if os.environ.get("JAX_MPS_ASYNC_DISPATCH") == "1":
+        return "async"
+    return "safe"
+
+
+def _provenance() -> dict:
+    """Capture pinned versions and the vendored jax-mps binary hashes.
+
+    The jax-mps wheel ships its own compiled PJRT plugin and an ``mlx.metallib``
+    snapshot; the audit records their hashes rather than calling that snapshot a
+    released MLX version. On the CPU arm the plugin is absent and the binary
+    fields are null.
+    """
+    provenance: dict = {
+        "versions": {
+            "jax-mps": _package_version("jax-mps"),
+            "jaxlib": _package_version("jaxlib"),
+            "python": platform.python_version(),
+        }
+    }
+    try:
+        import jax_plugins.mps as mps
+        from jax_plugins.mps import sysinfo
+
+        base = Path(mps.__file__).parent
+        provenance["jax_mps_dylib"] = _file_digest(
+            base / "lib" / "libpjrt_plugin_mps.dylib"
+        )
+        provenance["mlx_metallib"] = _file_digest(base / "lib" / "mlx.metallib")
+        provenance["sysinfo"] = sysinfo.get_info()
+    except Exception as error:  # plugin is absent on the CPU arm
+        provenance["plugin_error"] = str(error)
+    return provenance
+
+
+def _capture_ir(args, jax, jnp) -> dict:
+    """Lower one workload and retain its StableHLO, optimized IR, provenance."""
+    host_inputs, compiled, _expected = _build_workload(
+        args.workload, args.size, jax, jnp
+    )
+    inputs = tuple(jax.device_put(value) for value in host_inputs)
+    lowered = compiled.lower(*inputs)
+    stablehlo = lowered.as_text()
+
+    compiled_ir = None
+    compiled_ir_error = None
+    try:
+        compiled_ir = lowered.compile().as_text()
+        if not compiled_ir:
+            compiled_ir = None
+            compiled_ir_error = "backend exposes no compiled-executable text"
+    except Exception as error:  # the backend may withhold compiled text
+        compiled_ir_error = str(error)
+
+    return {
+        "arm": args.arm,
+        "backend": jax.default_backend(),
+        "compiled_ir": compiled_ir,
+        "compiled_ir_error": compiled_ir_error,
+        "dispatch_mode": _dispatch_mode(args.arm),
+        "failure": None,
+        "kind": "ir_capture",
+        "parameters": {"size": args.size},
+        "provenance": _provenance(),
+        "schema_version": SCHEMA_VERSION,
+        "stablehlo": stablehlo,
+        "stablehlo_op_counts": count_stablehlo_ops(stablehlo),
+        "versions": {
+            "jax": jax.__version__,
+            "jax-mps": _package_version("jax-mps"),
+            "jaxlib": _package_version("jaxlib"),
+            "python": platform.python_version(),
+        },
+        "workload": args.workload,
+    }
 
 
 def _peak_memory(device) -> int | None:
@@ -301,6 +400,10 @@ def main() -> None:
             f"requested {expected_backend} backend, got {actual_backend}"
         )
 
+    if args.capture_ir:
+        print(json.dumps(_capture_ir(args, jax, jnp), sort_keys=True))
+        return
+
     host_inputs, compiled, expected = _build_workload(
         args.workload, args.size, jax, jnp
     )
@@ -367,20 +470,13 @@ def main() -> None:
         jax.block_until_ready(compiled(*inputs))
         times.append(time.perf_counter() - started)
 
-    dispatch_mode = "cpu"
-    if args.arm.startswith("jax_mps_"):
-        dispatch_mode = (
-            "async"
-            if os.environ.get("JAX_MPS_ASYNC_DISPATCH") == "1"
-            else "safe"
-        )
     result = {
         "arm": args.arm,
         "backend": actual_backend,
         "block": args.block,
         "cold_s": cold_s,
         "correctness": correctness,
-        "dispatch_mode": dispatch_mode,
+        "dispatch_mode": _dispatch_mode(args.arm),
         "failure": None,
         "parameters": {"size": args.size},
         "peak_memory_bytes": _peak_memory(jax.devices()[0]),

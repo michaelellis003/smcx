@@ -67,6 +67,7 @@ def build_worker_command(
     root: Path,
     arm: str,
     block: int,
+    capture_ir: bool = False,
     correctness_replicates: int = 0,
     repeats: int,
     size: int,
@@ -76,6 +77,8 @@ def build_worker_command(
     """Construct one fully pinned fresh-process worker command."""
     if arm not in ARMS:
         raise ValueError(f"unknown arm: {arm}")
+    if capture_ir and arm.startswith("mlx_"):
+        raise ValueError("IR capture is JAX-only; MLX exposes no StableHLO")
 
     if arm.startswith("mlx_"):
         command = [
@@ -115,6 +118,8 @@ def build_worker_command(
         "--workload",
         workload,
     ])
+    if capture_ir:
+        command.append("--capture-ir")
     if correctness_replicates:
         command.extend([
             "--correctness-replicates",
