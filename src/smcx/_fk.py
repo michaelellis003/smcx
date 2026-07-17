@@ -50,6 +50,33 @@ _EVAL_LAG = 4
 _VALUE_BRANCH_MIN_N = 50_000
 
 
+def _select_loop_mode(
+    has_log_eta: bool,
+    num_particles: int,
+    resampling_threshold: float,
+) -> str:
+    """Choose the loop-shell route (ADR-0016).
+
+    Degenerate thresholds need no trigger, so they run dedicated
+    pipelined steps with no host sync at any N. One documented edge:
+    the where-rule resamples iff ``ess < threshold * N``, so at
+    ``threshold >= 1.0`` it would skip only when the ESS equals N
+    *exactly* (exactly uniform weights) or is NaN (degenerate, about
+    to raise); the always-resample route resamples there too. APF's
+    trigger (first-stage W*eta ESS) exists only inside the step, so
+    ``log_eta`` pins the branchless route.
+    """
+    if has_log_eta:
+        return "branchless"
+    if resampling_threshold >= 1.0:
+        return "always_resample"
+    if resampling_threshold <= 0.0:
+        return "never_resample"
+    if num_particles >= _VALUE_BRANCH_MIN_N:
+        return "value_branch"
+    return "branchless"
+
+
 class FKModel(NamedTuple):
     """Data-sliced Feynman-Kac model (internal).
 
@@ -240,7 +267,10 @@ def run_filter(
 
     step_resample = mx.compile(_step_resample)
     step_skip = mx.compile(_step_skip)
-    use_value_branch = fk.log_eta is None and n >= _VALUE_BRANCH_MIN_N
+    # ADR-0016: degenerate thresholds run the matching variant
+    # pipelined (no host sync); mx.compile traces lazily, so unused
+    # variants cost nothing.
+    mode = _select_loop_mode(fk.log_eta is not None, n, resampling_threshold)
 
     # --- Loop shell: async + lag-k eval, degeneracy at the boundary ---
     step_keys = mx.random.split(key, max(num_timesteps - 1, 1))
@@ -264,7 +294,7 @@ def run_filter(
 
     for t in range(1, num_timesteps):
         data_t = tuple(d[t] for d in data)
-        if use_value_branch:
+        if mode == "value_branch":
             # Host branch on the previous step's ESS — the same
             # array the branchless where-select compares in-graph,
             # so the decision (and the results) are identical.
@@ -278,6 +308,14 @@ def run_filter(
                 state, ancestors, ess_t, inc = step_skip(
                     state, step_keys[t - 1], *data_t
                 )
+        elif mode == "always_resample":
+            state, ancestors, ess_t, inc = step_resample(
+                state, step_keys[t - 1], *data_t
+            )
+        elif mode == "never_resample":
+            state, ancestors, ess_t, inc = step_skip(
+                state, step_keys[t - 1], *data_t
+            )
         else:
             state, ancestors, ess_t, inc = step(
                 state, ess_t, step_keys[t - 1], *data_t

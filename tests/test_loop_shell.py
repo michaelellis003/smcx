@@ -212,6 +212,22 @@ def test_routes_bit_identical(monkeypatch, runner, threshold, store_history):
     _assert_posteriors_identical(reference, other)
 
 
+@pytest.mark.parametrize("store_history", [True, False])
+@pytest.mark.parametrize("threshold", [0.0, 0.5, 1.0])
+@pytest.mark.parametrize("runner", [_run_bootstrap, _run_guided])
+def test_natural_route_matches_branchless_reference(
+    monkeypatch, runner, threshold, store_history
+):
+    # The where-rule branchless step is the semantic reference: the
+    # always-/never-resample fast paths and the value branch must all
+    # reproduce it bit-for-bit (same stochastic-model caveat as above
+    # for the threshold=1.0 exactly-uniform edge).
+    natural = runner(threshold, store_history)
+    monkeypatch.setattr(_fk, "_select_loop_mode", lambda *args: "branchless")
+    reference = runner(threshold, store_history)
+    _assert_posteriors_identical(reference, natural)
+
+
 @pytest.mark.parametrize("min_n", [1, 10**12])
 def test_degenerate_raises_on_every_route(monkeypatch, min_n):
     monkeypatch.setattr(_fk, "_VALUE_BRANCH_MIN_N", min_n)
