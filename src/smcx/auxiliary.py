@@ -54,6 +54,8 @@ def auxiliary_filter(
     num_particles: int,
     resampling_fn: Callable = systematic,
     resampling_threshold: float = 0.5,
+    *,
+    store_history: bool = True,
 ) -> ParticleFilterPosterior:
     r"""Run an auxiliary particle filter (Pitt & Shephard, 1999).
 
@@ -86,6 +88,10 @@ def auxiliary_filter(
         resampling_threshold: Fraction of ``num_particles`` below
             which resampling is triggered (e.g. 0.5 means resample
             when ``ESS < 0.5 * N``).
+        store_history: When False (ADR-0011), the scan stacks no
+            per-step particle/weight/ancestor histories — the returned
+            arrays cover only the final step (time axis length 1)
+            while ``ess``/``log_evidence_increments`` stay full.
 
     Returns:
         :class:`~smcx.containers.ParticleFilterPosterior` containing
@@ -114,10 +120,10 @@ def auxiliary_filter(
 
     # --- Scan body for t = 1, ..., T-1 -------------------------------------
     def _step(
-        carry: ParticleState,
+        carry: tuple[ParticleState, Array],
         args: tuple[PRNGKeyT, Float[Array, " emission_dim"]],
-    ) -> tuple[ParticleState, tuple[Array, Array, Array, Array, Array]]:
-        state, (step_key, y_t) = carry, args
+    ):
+        (state, _prev_ancestors), (step_key, y_t) = carry, args
         k1, k2 = jr.split(step_key)
         # Invariant: state.log_weights are normalized (logsumexp = 0).
 
@@ -185,31 +191,43 @@ def auxiliary_filter(
             ),
         )
         ess_t: Array = jnp.asarray(compute_ess(log_w_norm))
-        return new_state, (
-            propagated,
-            log_w_norm,
-            ancestors,
-            ess_t,
-            log_ev_inc,
-        )
+        if store_history:
+            return (new_state, ancestors), (
+                propagated,
+                log_w_norm,
+                ancestors,
+                ess_t,
+                log_ev_inc,
+            )
+        # Final-only mode (ADR-0011): ancestors ride the carry (O(N));
+        # the scan stacks just the scalar traces.
+        return (new_state, ancestors), (ess_t, log_ev_inc)
 
     # Run the scan over t = 1 ... T-1
     step_keys = jr.split(key, emissions.shape[0] - 1)
-    (
-        final_state,
+    init_carry = (init_state, identity_ancestors)
+    if store_history:
         (
-            particles_rest,
-            log_w_rest,
-            ancestors_rest,
-            ess_rest,
-            log_ev_inc_rest,
-        ),
-    ) = lax.scan(_step, init_state, (step_keys, emissions[1:]))
-
-    # --- Combine t=0 with t=1..T-1 -----------------------------------------
-    all_particles = _prepend(particles_0, particles_rest)
-    all_log_w = _prepend(log_w_0, log_w_rest)
-    all_ancestors = _prepend(identity_ancestors, ancestors_rest)
+            (final_state, _),
+            (
+                particles_rest,
+                log_w_rest,
+                ancestors_rest,
+                ess_rest,
+                log_ev_inc_rest,
+            ),
+        ) = lax.scan(_step, init_carry, (step_keys, emissions[1:]))
+        all_particles = _prepend(particles_0, particles_rest)
+        all_log_w = _prepend(log_w_0, log_w_rest)
+        all_ancestors = _prepend(identity_ancestors, ancestors_rest)
+    else:
+        (
+            (final_state, final_ancestors),
+            (ess_rest, log_ev_inc_rest),
+        ) = lax.scan(_step, init_carry, (step_keys, emissions[1:]))
+        all_particles = final_state.particles[None]
+        all_log_w = final_state.log_weights[None]
+        all_ancestors = final_ancestors[None]
     ess_0_arr: Array = jnp.asarray(ess_0)
     all_ess = _prepend(ess_0_arr, ess_rest)
     all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)

@@ -88,3 +88,44 @@ def test_final_step_matches_full_history_run():
 
 def test_still_satisfies_protocol():
     assert isinstance(_run(False), smcx.ParticleFilterResult)
+
+
+def test_guided_and_auxiliary_final_only():
+    init, trans, logobs = _model()
+
+    def prop(key, z, y):
+        return trans(key, z)
+
+    def log_q(y, z_new, z_old):
+        return -0.5 * (
+            math.log(2 * math.pi * Q) + (z_new[0] - A * z_old[0]) ** 2 / Q
+        )
+
+    def log_trans(z_new, z_old):
+        return -0.5 * (
+            math.log(2 * math.pi * Q) + (z_new[0] - A * z_old[0]) ** 2 / Q
+        )
+
+    g = smcx.guided_filter(
+        jr.key(1),
+        init,
+        prop,
+        log_q,
+        log_trans,
+        logobs,
+        Y,
+        500,
+        store_history=False,
+    )
+    assert g.filtered_particles.shape == (1, 500, 1)
+    assert g.ess.shape == (T,)
+
+    def logaux(y, z):
+        v = Q + R
+        return -0.5 * (math.log(2 * math.pi * v) + (y[0] - A * z[0]) ** 2 / v)
+
+    a = smcx.auxiliary_filter(
+        jr.key(2), init, trans, logobs, logaux, Y, 500, store_history=False
+    )
+    assert a.filtered_particles.shape == (1, 500, 1)
+    assert a.ess.shape == (T,)
