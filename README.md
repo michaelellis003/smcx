@@ -132,17 +132,6 @@ make docs        # build docs
 Releases are automated: `python-semantic-release` reads conventional
 commits on merge to main, bumps the version, tags, and publishes.
 
-## Design notes
-
-Decision records live in `docs/adr/` and dated evidence in
-`docs/research/` — including the benchmark study that shaped the
-architecture: a native-MLX implementation of this library was built,
-measured against jax-mps on equal terms, and retired when the
-measurements showed the compatibility path could be made equally fast
-with fixes contributed upstream
-(`docs/research/2026-07-16-jax-mps-internals.md`). The MLX
-implementation remains in git history at the `mlx-final` tag.
-
 ## Acknowledgments
 
 smcx's design draws on the SMC ecosystem:
@@ -153,8 +142,7 @@ Feynman-Kac architecture),
 contract), [Dynamax](https://github.com/probml/dynamax) (container
 conventions), TensorFlow Probability (criterion/trace hooks), and
 design lessons from PyMC, FilterPy, pfilter, pyfilter, Stone Soup,
-pomp, nimbleSMC, and ArviZ. See `CITATION.cff` for formal references
-and `docs/research/licensing.md` for the full provenance record.
+pomp, nimbleSMC, and ArviZ. See `CITATION.cff` for formal references.
 
 ## License
 

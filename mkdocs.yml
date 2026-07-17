@@ -1,6 +1,6 @@
 # Project Information
 site_name: smcx
-site_description: Sequential Monte Carlo for Apple silicon, built on MLX
+site_description: Sequential Monte Carlo in JAX — particle filters, tempered SMC, and SMC²
 site_author: Michael Ellis
 site_url: https://michaelellis003.github.io/smcx/
 repo_url: https://github.com/michaelellis003/smcx
@@ -67,14 +67,3 @@ nav:
       - Quickstart: guides/quickstart.md
       - Stochastic Volatility: guides/stochastic-volatility.md
   - API Reference: api/
-  - Design:
-      - v0 Design: design/v0-design.md
-      - Decisions (ADRs): adr/index.md
-  - Research:
-      - Literature Review: research/literature-review.md
-      - Library Survey: research/library-survey.md
-      - MLX Audit: research/mlx-audit.md
-      - Engineering Practices: research/engineering-practices.md
-      - Licensing & Upstream: research/licensing.md
-      - MLX Performance: research/mlx-performance.md
-      - Numerical Methods: research/numerical-methods.md

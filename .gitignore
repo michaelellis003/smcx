@@ -185,3 +185,11 @@ __marimo__/
 # smcx: agent spec files (prompts, not documentation) and benchmark data
 specs/
 benchmarks/data/
+
+# Internal design records — kept locally, never tracked (2026-07-17)
+docs/adr/
+docs/research/
+docs/design/
+docs/conversation.md
+docs/ecosystem-conversation.md
+AGENTS.md
