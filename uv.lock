@@ -1794,7 +1794,7 @@ dependencies = [
 
 [package.optional-dependencies]
 metal = [
-    { name = "jax-mps" },
+    { name = "jax-mps", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
 ]
 
 [package.dev-dependencies]
@@ -1818,7 +1818,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "jax", specifier = ">=0.10,<0.11" },
-    { name = "jax-mps", marker = "extra == 'metal'", specifier = ">=0.10.9,<0.11" },
+    { name = "jax-mps", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'metal'", specifier = ">=0.10.9,<0.11" },
     { name = "jaxlib", specifier = ">=0.10,<0.11" },
     { name = "jaxtyping", specifier = ">=0.3.7" },
     { name = "numpy", specifier = ">=2.2.6" },
