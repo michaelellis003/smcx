@@ -77,6 +77,11 @@ Beyond filtering, `smcx.temper` targets a static posterior with
 adaptive tempered SMC, and `smcx.smc2` nests particle filters inside
 an SMC sampler for full state-and-parameter inference.
 
+smcx is deliberately just the inference engine: no model classes, no
+distributions. Models enter as JAX callables — your own closures, or
+thin wrappers around a model library such as
+[Dynamax](https://github.com/probml/dynamax).
+
 ## Where to go next
 
 - [Quickstart](guides/quickstart.md) — the same model end to end:

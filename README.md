@@ -82,6 +82,12 @@ Callbacks are per-particle; smcx vmaps them internally. Everything
 takes an explicit PRNG key, and posteriors are NamedTuples — ordinary
 JAX pytrees.
 
+smcx is deliberately just the inference engine: it defines no model
+classes and no distributions. Models enter as JAX callables — your
+own closures, or thin wrappers around a model library such as
+[Dynamax](https://github.com/probml/dynamax) (the test suite itself
+uses Dynamax models this way).
+
 ## Apple silicon
 
 The `[metal]` extra runs the same code on M-series GPUs via jax-mps.

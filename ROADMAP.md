@@ -111,6 +111,9 @@ The theme: prove the thesis before building breadth.
 - FFBSi smoothing (dense batched backward weights); fixed-lag comes
   cheap earlier
 - `to_arviz()` InferenceData export; independent runs as chains
+- `from_dynamax` adapter/recipe: map a Dynamax SSM definition to the
+  filter callback signature (ADR-0019 boundary: adapter produces
+  callables, adds no required dependency)
 - CESS tempering; MALA/HMC moves once model grads are wired
 - Island-mode resampling for N beyond a single population
 - Benchmark suite tracking MLX releases (re-run audit + kill test)
@@ -148,5 +151,8 @@ requests:
 - float64 on GPU, or emulating it
 - OT/DET resampling as a default (O(N²), biased likelihood)
 - SSP / Hilbert-ordered resampling (sequential-scan-shaped)
-- Windows support; non-Apple hardware as a design target
+- Windows as a tested platform (JAX itself is the constraint)
 - Distribution-framework ambitions (objects, bijectors, constraints)
+- Model classes or a model zoo of any kind (ADR-0019): smcx consumes
+  models as JAX callables — user closures or thin adapters over model
+  libraries such as Dynamax — and never defines them
