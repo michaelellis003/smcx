@@ -569,9 +569,13 @@ def pareto_k_diagnostic(
 
     The shape parameter :math:`\hat{k}` indicates reliability:
 
-    - :math:`\hat{k} < 0.5`: good, finite variance of the IS estimate
-    - :math:`0.5 \le \hat{k} < 0.7`: marginal
-    - :math:`0.7 \le \hat{k} < 1.0`: unreliable (infinite variance)
+    - :math:`\hat{k} < 0.5`: good; the IS estimate has finite
+      variance
+    - :math:`0.5 \le \hat{k} < 0.7`: variance is infinite, but the
+      PSIS convergence-rate results say estimates remain practically
+      reliable
+    - :math:`0.7 \le \hat{k} < 1.0`: unreliable (the practical
+      threshold of Vehtari et al. 2024)
     - :math:`\hat{k} \ge 1.0`: very unreliable (infinite mean)
 
     The tail size is ``ceil(min(0.2 * N, 3 * sqrt(N)))`` order
@@ -750,9 +754,10 @@ def diagnose(
         )
     if max_k > pareto_k_threshold:
         warnings.append(
-            f"Pareto-k exceeded {pareto_k_threshold} "
-            f"(max k = {max_k:.3f}); importance weights "
-            f"have infinite variance at some steps"
+            f"Pareto-k exceeded {pareto_k_threshold:.2f} "
+            f"(max k = {max_k:.3f}); estimates at those steps "
+            f"are unreliable (PSIS practical threshold — weight "
+            f"variance is already infinite for k >= 0.5)"
         )
 
     return {
