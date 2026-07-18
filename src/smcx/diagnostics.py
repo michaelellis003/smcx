@@ -16,6 +16,8 @@ uncertainty*; McElreath: *always report intervals, not just means*):
 Computational faithfulness (Vehtari: *can we trust the computation?*):
 
 - :func:`particle_diversity` — fraction of unique particles per step
+- :func:`reconstruct_trajectories` — genealogy-traced particle paths
+- :func:`log_ml_variance` — single-run log-evidence variance
 - :func:`log_ml_increments` — per-step evidence contributions
 - :func:`pareto_k_diagnostic` — per-step Pareto-k reliability
 - :func:`tail_ess` — ESS for tail quantiles
@@ -47,7 +49,7 @@ from typing import Any
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import vmap
+from jax import lax, vmap
 from jaxtyping import Array, Float, Int
 
 from smcx._utils import _weighted_quantile_1d
@@ -236,6 +238,133 @@ def particle_diversity(
         return jnp.sum(is_unique) / num_particles
 
     return vmap(_diversity_one_step)(ancestors)
+
+
+def reconstruct_trajectories(
+    posterior: ParticleFilterResult,
+) -> Float[Array, "ntime num_particles state_dim"]:
+    r"""Trace each surviving particle's full path through the genealogy.
+
+    The filter's per-step particle clouds approximate the filtering
+    distributions; the paths obtained by following each final
+    particle's ancestor indices backwards approximate the smoothing
+    distribution (with the usual path-degeneracy caveat: early
+    segments collapse onto few distinct values as the genealogy
+    coalesces). Output ``[t, n]`` is the state at time t of the
+    lineage that ends at particle n at the final step, so weighting
+    trajectories by the final-step weights gives smoothing
+    expectations.
+
+    Args:
+        posterior: Particle filter posterior with full history
+            (``store_history=True``, the default).
+
+    Returns:
+        Trajectories, shape ``(ntime, num_particles, state_dim)``.
+    """
+    ancestors = posterior.ancestors
+    num_particles = ancestors.shape[1]
+    final_idx = jnp.arange(num_particles, dtype=ancestors.dtype)
+
+    def _back(idx: Array, anc_t: Array) -> tuple[Array, Array]:
+        """One backward step: parent indices of the current lineage."""
+        return anc_t[idx], idx
+
+    # Walking t = T-1, ..., 1 yields the selector for t-1 at each step.
+    last, selectors = lax.scan(_back, final_idx, ancestors[1:], reverse=True)
+    selectors = jnp.concatenate([last[None], selectors], axis=0)
+    return jnp.take_along_axis(
+        posterior.filtered_particles, selectors[:, :, None], axis=1
+    )
+
+
+def _eve_indices(
+    ancestors: Int[Array, "ntime num_particles"],
+) -> Int[Array, "ntime num_particles"]:
+    """Time-0 ancestor (Eve) index of every particle at every step."""
+    num_particles = ancestors.shape[1]
+    eve_0 = jnp.arange(num_particles, dtype=ancestors.dtype)
+
+    def _fwd(eve: Array, anc_t: Array) -> tuple[Array, Array]:
+        eve_t = eve[anc_t]
+        return eve_t, eve_t
+
+    _, eves = lax.scan(_fwd, eve_0, ancestors[1:])
+    return jnp.concatenate([eve_0[None], eves], axis=0)
+
+
+def _eve_class_mass_sq(
+    log_w_t: Float[Array, " num_particles"],
+    eve_t: Int[Array, " num_particles"],
+) -> Float[Array, ""]:
+    """Sum over Eve classes of squared normalized-weight mass."""
+    num_particles = log_w_t.shape[0]
+    weights = normalize(log_w_t)
+    class_mass = jnp.zeros(num_particles).at[eve_t].add(weights)
+    est = jnp.sum(class_mass**2)
+    # One Eve class left: the run carries no variance information
+    # (ADR-0021 reports this honestly instead of saturating at 1).
+    sorted_eve = jnp.sort(eve_t)
+    num_classes = 1 + jnp.sum(sorted_eve[1:] != sorted_eve[:-1])
+    return jnp.where(num_classes > 1, est, jnp.inf)
+
+
+def log_ml_variance(
+    posterior: ParticleFilterResult,
+    lag: int | None = None,
+) -> Float[Array, " ntime"]:
+    r"""Estimate the variance of the log-evidence from a single run.
+
+    Implements the genealogy-based estimator of Chan and Lai (2013)
+    and Lee and Whiteley (2018): with Eve variables :math:`B_t^n`
+    tracing particle n at time t to its time-0 ancestor, the estimate
+    at time t is
+
+    .. math::
+
+        \widehat{V}_t = \sum_{e} \Big( \sum_{n : B_t^n = e}
+            W_t^n \Big)^2,
+
+    the sum over Eve classes of squared normalized-weight mass. For
+    large N this estimates the variance of ``marginal_loglik`` up to
+    time t, and it costs one filter run where
+    :func:`replicated_log_ml` costs R. The estimate degenerates as
+    the genealogy coalesces; once a single Eve class remains the
+    function returns ``inf`` for that step (the run carries no
+    variance information there).
+
+    Passing ``lag`` uses the ancestor at time ``t - lag`` instead of
+    time 0 (Olsson and Douc, 2019), trading a lag-controlled bias
+    for estimates that stay usable on long series.
+
+    Args:
+        posterior: Particle filter posterior with full history
+            (``store_history=True``, the default).
+        lag: Optional fixed lag for the Olsson-Douc variant. ``None``
+            uses time-0 Eves (the exact Lee-Whiteley estimator).
+
+    Returns:
+        Per-step variance estimates, shape ``(ntime,)``.
+    """
+    ancestors = posterior.ancestors
+    ntime, num_particles = ancestors.shape
+
+    if lag is None or lag >= ntime:
+        eves = _eve_indices(ancestors)
+    else:
+        exact = _eve_indices(ancestors)
+        identity = jnp.arange(num_particles, dtype=ancestors.dtype)
+
+        def _composed(t: Array) -> Array:
+            idx = identity
+            for j in range(lag):
+                idx = ancestors[t - j][idx]
+            return idx
+
+        lagged = vmap(_composed)(jnp.arange(lag, ntime))
+        eves = jnp.concatenate([exact[:lag], lagged], axis=0)
+
+    return vmap(_eve_class_mass_sq)(posterior.filtered_log_weights, eves)
 
 
 def log_bayes_factor(
