@@ -2,6 +2,26 @@
 
 <!-- version list -->
 
+## v1.1.0 (2026-07-18)
+
+### Bug Fixes
+
+- Restore the Zhang-Stephens candidate grid in the Pareto-k fit
+  ([#14](https://github.com/michaelellis003/smcx/pull/14),
+  [`84dbda7`](https://github.com/michaelellis003/smcx/commit/84dbda7e03b6165387990b5a1ffe2e83a33e99cf))
+
+### Documentation
+
+- Draw the diagnostics boundary (ADR-0020) ([#13](https://github.com/michaelellis003/smcx/pull/13),
+  [`4bbb03f`](https://github.com/michaelellis003/smcx/commit/4bbb03f9d57eb5f55b3f7ec75bca139642739df9))
+
+### Features
+
+- Genealogy diagnostics — trajectories and log-ML variance
+  ([#15](https://github.com/michaelellis003/smcx/pull/15),
+  [`85bc967`](https://github.com/michaelellis003/smcx/commit/85bc967ca3c79621cae28de5ac6963f77191a612))
+
+
 ## v1.0.2 (2026-07-18)
 
 ### Bug Fixes
