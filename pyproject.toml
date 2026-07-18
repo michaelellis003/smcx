@@ -183,6 +183,9 @@ upload_to_vcs_release = true
 # vendored MLX stubs; they are retained as historical harness code until
 # the harness is re-aimed at the jax-mps backend (pivot spec, slice 7).
 exclude = [
+    # Example notebooks: runtime-verified by execution; *fns unpacking
+    # and blackjax's own stubs defeat static arity analysis.
+    "docs/examples/**",
     "benchmarks/exploratory/**",
     "benchmarks/killtest/**",
     "benchmarks/native_vs_jax_mps/jax_worker.py",
