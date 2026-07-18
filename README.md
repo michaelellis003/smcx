@@ -29,8 +29,10 @@ pip install "smcx[metal]"   # + jax-mps for Apple-silicon GPUs
   one contract, log-domain weights throughout, float32-safe query
   grids.
 - **Diagnostics**: ESS traces, quantile tail-ESS, Pareto-k
-  reliability, CRPS, cumulative log score, Bayes factors,
-  posterior-predictive sampling, and a one-call `diagnose` summary.
+  reliability, single-run log-evidence variance from the genealogy
+  (Lee & Whiteley 2018), trajectory reconstruction, CRPS,
+  cumulative log score, Bayes factors, posterior-predictive
+  sampling, and a one-call `diagnose` summary.
 - `store_history=False` on every filter drops memory from O(T·N) to
   O(N) with a bit-identical evidence estimate.
 
