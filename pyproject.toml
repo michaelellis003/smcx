@@ -62,6 +62,7 @@ dev = [
     "dynamax>=1.0.2",
     "hypothesis>=6.156.6",
     "mkdocs-gen-files>=0.6.1",
+    "mkdocs-jupyter>=0.26.3",
     "mkdocs-literate-nav>=0.6.3",
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.3",
@@ -72,6 +73,15 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.15.9",
     "ty>=0.0.29",
+]
+notebooks = [
+    "blackjax>=1.2",
+    "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.11.0",
+    "nbconvert>=7.17.1",
+    "scipy>=1.17.1",
+    "yfinance>=1.5.1",
 ]
 
 [tool.ruff]
@@ -105,6 +115,19 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 # Tests use class-based grouping; method docstrings are noisy. LGSSM
 # tests keep the literature's matrix notation (F, Q, H, R, P0).
+# Example notebooks keep the thesis's mathematical notation
+# (Gamma, EPS), pedagogical lambdas, and per-section imports.
+"docs/examples/*.ipynb" = [
+    "N806",
+    "N803",
+    "D103",
+    "E731",
+    "E741",
+    "E402",
+    "B905",
+    "RUF059",
+    "E501",
+]
 "tests/*" = ["D102", "D103", "D104", "N806", "N803"]
 # The version fallback try/except is standard packaging boilerplate.
 "src/smcx/__init__.py" = ["RUF067"]

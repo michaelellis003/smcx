@@ -90,6 +90,10 @@ thin wrappers around a model library such as
 - [Stochastic volatility](guides/stochastic-volatility.md) — a
   worked example that learns a static parameter online with the
   Liu-West filter.
+- [Regime-switching HMM](examples/thesis_hmm_bayesian_workflow.ipynb)
+  — a full Bayesian workflow on S&P 500 returns: prior predictive
+  checks, NUTS warm-start, Liu-West filtering, SBC, forecasting
+  with proper scoring rules, and a float32 precision study.
 - [API reference](api/) — every public function, generated from the
   source docstrings.
 
