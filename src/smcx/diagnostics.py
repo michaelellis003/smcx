@@ -598,10 +598,14 @@ def _fit_generalized_pareto(
     x_q25 = x[max(0, m // 4 - 1)]
 
     # Zhang-Stephens candidate b values:
-    #   b_i = 1/x_star + (1 - sqrt(m / i)) / (prior * x_q25)
-    # for i = 0.5, 1.5, ..., num_candidates - 0.5
+    #   b_i = 1/x_star + (1 - sqrt(M / i)) / (prior * x_q25)
+    # for i = 0.5, 1.5, ..., M - 0.5, where M is the CANDIDATE count,
+    # not the sample size (using m here is a known porting bug: it
+    # skews the grid and biases k upward, worst at small k).
     i = jnp.arange(1, num_candidates + 1) - 0.5
-    b_grid = 1.0 / x_star + (1.0 - jnp.sqrt(m / i)) / (prior * x_q25)
+    b_grid = 1.0 / x_star + (1.0 - jnp.sqrt(num_candidates / i)) / (
+        prior * x_q25
+    )
 
     # Profile log-likelihood for each candidate:
     #   k_i = mean(log1p(-b_i * x))

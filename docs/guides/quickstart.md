@@ -111,12 +111,13 @@ for w in report["warnings"]:
     print("warning:", w)
 ```
 
-The effective sample size stays above ten percent of $N$, but the
-Pareto-$k$ tail index of the importance weights crosses the 0.7
-reliability threshold at some steps: the weight distribution is
-heavy-tailed there, so a few particles carry most of the mass. That
-is the signature of a filter that works but leaves
-variance-reduction on the table.
+Both diagnostics come back clean: the effective sample size stays
+above ten percent of $N$ at every step, and the Pareto-$k$ tail
+index of the importance weights sits far below the 0.7 reliability
+threshold, so no warnings fire. Clean weight diagnostics do not make
+the bootstrap proposal free, though — ignoring the current
+observation still costs variance in the evidence estimate, and that
+is where a better proposal earns its keep.
 
 ## Cut the variance with a guided proposal
 
