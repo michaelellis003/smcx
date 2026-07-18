@@ -2,6 +2,36 @@
 
 <!-- version list -->
 
+## v1.0.2 (2026-07-18)
+
+### Bug Fixes
+
+- State the Pareto-k threshold as a reliability boundary
+  ([#12](https://github.com/michaelellis003/smcx/pull/12),
+  [`246acce`](https://github.com/michaelellis003/smcx/commit/246acce5ded1e718ff12a220272f92a61a452968))
+
+### Continuous Integration
+
+- Exclude example notebooks from ty
+  ([`812bada`](https://github.com/michaelellis003/smcx/commit/812bada2d8313443af5549ac4acf412479a71b17))
+
+### Documentation
+
+- Add the thesis regime-switching HMM example notebook
+  ([`de795d0`](https://github.com/michaelellis003/smcx/commit/de795d05bf7ed114efdaa08211fc95bcd80da8f7))
+
+- Bust the cached PyPI badge
+  ([`553e1f8`](https://github.com/michaelellis003/smcx/commit/553e1f8c0843820d22345f92376d9bc84c0848d1))
+
+- Document the trunk-based branching workflow
+  ([#10](https://github.com/michaelellis003/smcx/pull/10),
+  [`7ba6165`](https://github.com/michaelellis003/smcx/commit/7ba6165e6b9aabde5b9301292be8fb2de7bf7639))
+
+- Rewrite the roadmap for the released library
+  ([#11](https://github.com/michaelellis003/smcx/pull/11),
+  [`ebfb884`](https://github.com/michaelellis003/smcx/commit/ebfb884e165da825ad457a9d0a2f12ade0b8097f))
+
+
 ## v1.0.1 (2026-07-17)
 
 ### Bug Fixes
