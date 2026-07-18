@@ -32,6 +32,10 @@ the small carry-overs the 2026-07 library review surfaced.
       controlled/covariate-driven models. The MLX-era ADR-0008
       channel did not survive the pivot; re-decide it for the JAX
       core.
+- [ ] `to_arviz()` InferenceData export (ADR-0020): the single
+      reporting bridge — independent runs as chains, weighted clouds
+      resampled to draws — so ArviZ owns plots, R-hat, and posterior
+      exploration and smcx never grows a reporting layer.
 - [ ] Dynamax interop recipe: a documented `from_dynamax` pattern
       plus a worked Rao-Blackwellized particle filter example
       (per-particle Kalman statistics in the state, Dynamax KF
@@ -68,7 +72,6 @@ the small carry-overs the 2026-07 library review surfaced.
   documented as PMMH-incompatible).
 - Differentiable resampling: Ścibior-Wood stop-gradient first;
   OT/DET only ever as opt-in.
-- `to_arviz()` InferenceData export; independent runs as chains.
 - CESS-based tempering schedules; MALA/HMC move kernels in `temper`
   once model grads are wired.
 - SMC² follow-ups deferred by ADR-0014: adaptive N_x, the exchange
@@ -104,3 +107,6 @@ requests:
 - Model classes or a model zoo of any kind (ADR-0019): smcx consumes
   models as JAX callables — user closures or thin adapters over model
   libraries such as Dynamax — and never defines them
+- Plotting or visualization of any kind (ADR-0020): reporting
+  delegates to ArviZ through `to_arviz()`; diagnostics stay in-library
+  only when they consume SMC-native structures
