@@ -17,13 +17,18 @@ import jax.random as jr
 import numpy as np
 import pytest
 
-# ArviZ 1.x moved the PSIS machinery out of the top-level namespace
-# into arviz-stats; array_stats is its array-facing implementation.
-from arviz_stats.base import array_stats
-
 from smcx.containers import ParticleFilterPosterior
 from smcx.diagnostics import pareto_k_diagnostic
 from smcx.weights import log_normalize
+
+# ArviZ 1.x moved the PSIS machinery out of the top-level namespace
+# into arviz-stats, whose floor is Python 3.12 — on 3.11 the resolver
+# falls back to arviz 0.x without it, so the cross-validation runs on
+# the interpreters where the reference exists (3.12+ legs of CI).
+array_stats = pytest.importorskip(
+    "arviz_stats.base",
+    reason="arviz-stats requires Python >= 3.12",
+).array_stats
 
 
 def _khat_arviz(log_weights: np.ndarray) -> float:
