@@ -27,8 +27,17 @@ runs it on the GPU in float32.
 - Every `.py` file carries the Apache-2.0 header; `make license`
   adds it for you.
 
-## Pull requests
+## Branching and pull requests
 
+The repo runs trunk-based: `main` is the only long-lived branch and
+every change lands through a short-lived branch and a squash-merged
+PR.
+
+- Branch from up-to-date `main`, named `<type>/<short-summary>`
+  where `<type>` is the Conventional Commit type your change will
+  carry (`fix/resampling-clamp`, `docs/quickstart-typo`).
+- Keep branches short-lived; rebase on `main` rather than merging
+  it in. Squash-merging keeps `main` linear either way.
 - For anything larger than a small fix, open an issue first so the
   approach is agreed before you write code.
 - Keep PRs small — under roughly 400 changed lines.
@@ -44,7 +53,10 @@ runs it on the GPU in float32.
 
 ## Releases
 
-Releases are automated and gated. After CI passes on `main`, the
-release job waits for a manual approval that attests the full suite
-passed on Metal GPU hardware; it then versions, tags, and publishes
-to PyPI via trusted publishing.
+Releases are fully automated: python-semantic-release reads the
+commit types on `main`, so a merged `fix:` or `feat:` PR publishes
+to PyPI (patch or minor) within minutes of CI going green, and
+`docs:`/`test:`/`chore:` PRs release nothing. Your PR title is
+therefore a release decision — maintainers may adjust the type
+during review. Never edit version fields by hand; the release bot
+owns them.
