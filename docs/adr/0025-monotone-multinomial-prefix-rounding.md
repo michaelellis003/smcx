@@ -16,14 +16,17 @@ nondecreasing-output contract.
   construction to O(N log N).
 - Use a sequential prefix sum — preserves the mathematical construction, but
   serializes a large part of the GPU kernel.
-- Project the rounded prefix sums through cumulative maximum — restores the
-  exact mathematical invariant with one additional O(N) parallel scan.
+- Project the rounded prefix sums through `jnp.maximum.accumulate` — restores
+  the invariant in O(N), but its jax-mps 0.10.9 lowering is pathologically
+  slow at the campaign scales.
+- Project them through `jax.lax.associative_scan(jnp.maximum, ...)` — the same
+  O(N) prefix-maximum semantics with a performant lowering on CPU and Metal.
 
 ## Decision
 
-We will apply a cumulative maximum to the rounded exponential-spacing prefix
-sums before normalization. The resulting nondecreasing queries continue
-through the shared clipped right-bisect kernel.
+We will apply `jax.lax.associative_scan(jnp.maximum, ...)` to the rounded
+exponential-spacing prefix sums before normalization. The resulting
+nondecreasing queries continue through the shared clipped right-bisect kernel.
 
 ## Consequences
 

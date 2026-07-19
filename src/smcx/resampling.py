@@ -122,7 +122,10 @@ def multinomial(
         Nondecreasing int32 ancestor indices.
     """
     e = -jnp.log1p(-jax.random.uniform(key, (num_samples + 1,)))
-    s = jnp.maximum.accumulate(jnp.cumsum(e))
+    # ``maximum.accumulate`` has a pathological jax-mps 0.10.9 lowering.
+    # The explicit associative prefix has the same semantics and stays O(N)
+    # on both supported backends.
+    s = jax.lax.associative_scan(jnp.maximum, jnp.cumsum(e))
     queries = jnp.minimum(s[:-1] / jnp.maximum(s[-1], _TINY), _BELOW_ONE)
     return _searchsorted_clipped(_normalized_cdf(weights), queries)
 
