@@ -38,8 +38,10 @@ Algorithm: Chopin, Jacob, and Papaspiliopoulos (2013),
 https://doi.org/10.1111/j.1467-9868.2012.01046.x
 """
 
+import importlib
 import math
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
@@ -125,6 +127,39 @@ def _run(seed, n_theta=64, n_x=128, ess_threshold=0.0, **kw):
     )
 
 
+def _small_cache_model():
+    emissions = jnp.array([[0.25], [-0.4], [0.1]], dtype=jnp.float64)
+
+    def param_init(key, n_theta):
+        return 0.7 + 0.2 * jr.uniform(key, (n_theta, 1), dtype=jnp.float64)
+
+    def log_prior(theta):
+        return -0.5 * jnp.sum(theta**2)
+
+    def inner_init(key, n_x, theta):
+        return theta[0] + 0.3 * jr.normal(key, (n_x, 1), dtype=jnp.float64)
+
+    def inner_trans(key, state, theta):
+        return theta[0] * state + 0.2 * jr.normal(
+            key, state.shape, dtype=jnp.float64
+        )
+
+    def inner_logobs(y, state, theta):
+        del theta
+        return -0.5 * (
+            jnp.log(2.0 * jnp.pi * 0.4) + (y[0] - state[0]) ** 2 / 0.4
+        )
+
+    return (
+        param_init,
+        log_prior,
+        inner_init,
+        inner_trans,
+        inner_logobs,
+        emissions,
+    )
+
+
 class TestStructure:
     """Shapes, invariants, determinism, degeneracy."""
 
@@ -184,6 +219,240 @@ class TestStructure:
                 32,
                 32,
                 ess_threshold=0.0,
+            )
+
+
+class TestInnerKernelCache:
+    """Module-stable inner JITs preserve exact public behavior."""
+
+    def test_inner_factory_is_reused_for_same_callbacks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        smc2_module = importlib.import_module("smcx.smc2")
+        smc2_module._cached_inner_kernels.cache_clear()
+        original_factory = smc2_module._build_inner_kernels
+        builds = 0
+
+        def recording_factory(*args, **kwargs):
+            nonlocal builds
+            builds += 1
+            return original_factory(*args, **kwargs)
+
+        monkeypatch.setattr(
+            smc2_module,
+            "_build_inner_kernels",
+            recording_factory,
+        )
+        callbacks = _small_cache_model()
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+        ) = callbacks
+        try:
+            for seed in (10, 11):
+                smcx.smc2(
+                    jr.key(seed),
+                    param_init,
+                    log_prior,
+                    inner_init,
+                    inner_trans,
+                    inner_logobs,
+                    emissions,
+                    3,
+                    4,
+                    ess_threshold=0.0,
+                )
+            cache_info = smc2_module._cached_inner_kernels.cache_info()
+        finally:
+            smc2_module._cached_inner_kernels.cache_clear()
+
+        assert builds == 1
+        assert cache_info.hits == 1
+        assert cache_info.misses == 1
+
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu",
+        reason="frozen CPU/x64 arithmetic contract",
+    )
+    def test_inner_factory_preserves_frozen_fixed_key_output(self):
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+        ) = _small_cache_model()
+        posterior = smcx.smc2(
+            jr.key(314159),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+            3,
+            4,
+            ess_threshold=0.0,
+        )
+
+        np.testing.assert_array_equal(
+            np.asarray(posterior.marginal_loglik),
+            np.asarray(-3.421747990559213),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.filtered_params),
+            np.array([
+                [
+                    [0.8690271497469142],
+                    [0.892344905318535],
+                    [0.7275650823743653],
+                ],
+                [
+                    [0.8690271497469142],
+                    [0.892344905318535],
+                    [0.7275650823743653],
+                ],
+                [
+                    [0.8690271497469142],
+                    [0.892344905318535],
+                    [0.7275650823743653],
+                ],
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.filtered_log_weights),
+            np.array([
+                [-1.1037195976548424, -0.9457871459341566, -1.2729977505620504],
+                [-1.1812879768008746, -0.9261661263302763, -1.2138632483444947],
+                [-1.4378978303439447, -0.7854789880395324, -1.1819752775167212],
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.ess),
+            np.array([
+                2.948017030946551,
+                2.9473711233956394,
+                2.7912284636963074,
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.log_evidence_increments),
+            np.array([
+                -0.9132325220568566,
+                -1.8150181135800527,
+                -0.6934973549223041,
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.acceptance_rates),
+            np.zeros(3),
+        )
+
+    def test_unhashable_callbacks_use_uncached_inner_factory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        class UnhashableCallback:
+            __hash__ = None
+
+            def __init__(self, callback):
+                self.callback = callback
+
+            def __call__(self, *args):
+                return self.callback(*args)
+
+        smc2_module = importlib.import_module("smcx.smc2")
+        smc2_module._cached_inner_kernels.cache_clear()
+        original_factory = smc2_module._build_inner_kernels
+        callbacks = _small_cache_model()
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+        ) = callbacks
+        expected = smcx.smc2(
+            jr.key(2718),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+            3,
+            4,
+            ess_threshold=0.0,
+        )
+        builds = 0
+
+        def recording_factory(*args, **kwargs):
+            nonlocal builds
+            builds += 1
+            return original_factory(*args, **kwargs)
+
+        monkeypatch.setattr(
+            smc2_module,
+            "_build_inner_kernels",
+            recording_factory,
+        )
+        wrapped = (
+            param_init,
+            log_prior,
+            UnhashableCallback(inner_init),
+            UnhashableCallback(inner_trans),
+            UnhashableCallback(inner_logobs),
+            emissions,
+        )
+        (
+            wrapped_param_init,
+            wrapped_log_prior,
+            wrapped_inner_init,
+            wrapped_inner_trans,
+            wrapped_inner_logobs,
+            wrapped_emissions,
+        ) = wrapped
+        try:
+            actual = smcx.smc2(
+                jr.key(2718),
+                wrapped_param_init,
+                wrapped_log_prior,
+                wrapped_inner_init,
+                wrapped_inner_trans,
+                wrapped_inner_logobs,
+                wrapped_emissions,
+                3,
+                4,
+                ess_threshold=0.0,
+            )
+            smcx.smc2(
+                jr.key(2719),
+                wrapped_param_init,
+                wrapped_log_prior,
+                wrapped_inner_init,
+                wrapped_inner_trans,
+                wrapped_inner_logobs,
+                wrapped_emissions,
+                3,
+                4,
+                ess_threshold=0.0,
+            )
+            cache_info = smc2_module._cached_inner_kernels.cache_info()
+        finally:
+            smc2_module._cached_inner_kernels.cache_clear()
+
+        assert builds == 2
+        assert cache_info.hits == 0
+        assert cache_info.misses == 1
+        for expected_value, actual_value in zip(expected, actual, strict=True):
+            np.testing.assert_array_equal(
+                np.asarray(actual_value),
+                np.asarray(expected_value),
             )
 
 
