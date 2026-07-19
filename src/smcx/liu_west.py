@@ -1,6 +1,10 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
+# Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
+# Apache-2.0. Modified: local ESS/resampling and validation, shrinkage
+# guidance, typed callbacks, exogenous inputs, and optional history storage.
+
 r"""Liu-West particle filter for joint state-parameter estimation.
 
 The Liu-West filter (Liu & West, 2001) extends the auxiliary particle
@@ -20,6 +24,12 @@ and :math:`h^2 = 1 - a^2`.
 
 The implementation uses :func:`jax.lax.scan` so the full time-loop is
 compiled into a single XLA program.
+
+References:
+    Liu, J. and West, M. (2001). Combined Parameter and State Estimation
+    in Simulation-Based Filtering. *Sequential Monte Carlo Methods in
+    Practice*, 197--223.
+    https://doi.org/10.1007/978-1-4757-3437-9_10
 """
 
 import math
