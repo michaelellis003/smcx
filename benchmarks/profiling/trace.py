@@ -3,9 +3,9 @@
 
 """Capture a fenced CPU JAX trace for one selected raw cell.
 
-jax-mps 0.10.9's PJRT profiler is an explicit unsupported stub, so this tool
+jax-mps 0.10.10's PJRT profiler is an explicit unsupported stub, so this tool
 must never label a JAX profiler artifact as an MPS device trace:
-https://github.com/tillahoffmann/jax-mps/blob/7b1ae828cabbf5baf58e197d3b645eccb34293a9/src/pjrt_plugin/pjrt_profiler.cc#L57-L79
+https://github.com/tillahoffmann/jax-mps/blob/v0.10.10/src/pjrt_plugin/pjrt_profiler.cc#L57-L79
 """
 
 import argparse

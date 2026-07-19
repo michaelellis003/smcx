@@ -65,9 +65,9 @@ the small carry-overs the 2026-07 library review surfaced.
 - [x] ~~jax-mps CI leg: `SMCX_TEST_PLATFORM=mps` as a scheduled or
       best-effort job on macOS runners (they expose a paravirtual
       Metal device).~~
-- [ ] Thesis-notebook Metal appendix once a jax-mps release ships
-      the scan-history fixes (#219/#220): large-N f32 filtering on
-      the GPU, f64 oracle checks staying on CPU.
+- [ ] Thesis-notebook Metal appendix against jax-mps 0.10.10, which
+      ships the scan-history fixes (#219/#220): large-N f32 filtering
+      on the GPU, f64 oracle checks staying on CPU.
 
 ## Later — ideas, ordered by fit
 
@@ -86,7 +86,7 @@ the small carry-overs the 2026-07 library review surfaced.
   pypomp's territory; a scope expansion that needs its own ADR
   discussion before any code.
 - **jax-mps tracking (standing)**: re-run the CPU-vs-Metal benchmark
-  when jax-mps ships relevant fixes (#219/#220 merged upstream;
+  against jax-mps 0.10.10 (#219/#220 shipped;
   searchsorted contribution queued on their #203 mechanism
   decision), and contribute optimizations upstream when the gap is
   theirs to close. Performance claims about Apple silicon stay

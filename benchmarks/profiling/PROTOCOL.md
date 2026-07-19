@@ -522,14 +522,14 @@ PyTree on every timed call, not from claiming synchronous dispatch. This
 follows the official
 [JAX asynchronous-dispatch documentation](https://docs.jax.dev/en/latest/async_dispatch.html).
 
-The JAX profiler is restricted to selected CPU cells. jax-mps 0.10.9's PJRT
+The JAX profiler is restricted to selected CPU cells. jax-mps 0.10.10's PJRT
 profiler extension is explicitly unsupported and returns errors for profiler
 operations in its
-[immutable implementation](https://github.com/tillahoffmann/jax-mps/blob/7b1ae828cabbf5baf58e197d3b645eccb34293a9/src/pjrt_plugin/pjrt_profiler.cc#L57-L79).
+[immutable implementation](https://github.com/tillahoffmann/jax-mps/blob/v0.10.10/src/pjrt_plugin/pjrt_profiler.cc#L57-L79).
 It must not be described as a Metal device trace. The plugin separately
 implements a process-global bounded `.gputrace` capture through
 `JAX_MPS_GPU_CAPTURE`, as shown in its
-[Metal executable source](https://github.com/tillahoffmann/jax-mps/blob/7b1ae828cabbf5baf58e197d3b645eccb34293a9/src/pjrt_plugin/mlx_executable.cc#L443-L550).
+[Metal executable source](https://github.com/tillahoffmann/jax-mps/blob/v0.10.10/src/pjrt_plugin/mlx_executable.cc#L456-L559).
 That capture changes dispatch behavior, starts at the first eligible execute,
 and counts PJRT dispatches rather than public host-shell calls. It is therefore
 deferred until a baseline identifies one outer-jitted MPS bottleneck for a
@@ -538,10 +538,26 @@ separately preregistered, non-timing diagnostic capture.
 Executable memory analysis and device allocator statistics remain separate
 columns. jax-mps does not implement PJRT compiled-executable memory statistics
 in
-[v0.10.9](https://github.com/tillahoffmann/jax-mps/blob/7b1ae828cabbf5baf58e197d3b645eccb34293a9/src/pjrt_plugin/pjrt_executable.cc#L260-L263),
+[v0.10.10](https://github.com/tillahoffmann/jax-mps/blob/v0.10.10/src/pjrt_plugin/pjrt_executable.cc#L260-L263),
 while its device statistics are process-global MLX unified-memory counters.
 Neither scope is silently substituted for or directly compared with the
 other.
+
+### 2026-07-19 — jax-mps floor correction
+
+The first baseline and representation campaigns used jax-mps 0.10.9. The
+representation result exposed the release's operand-wide
+`dynamic_update_slice` lowering: a 45.8 MiB dense history reached 1.16 GiB of
+Metal allocator use, and the two-leaf equivalent reached 1.52 GiB. jax-mps
+0.10.10 was then available with native
+[`slice_update`](https://github.com/tillahoffmann/jax-mps/pull/219) and
+[`dynamic_slice`](https://github.com/tillahoffmann/jax-mps/pull/220)
+lowerings. ADR-0026 raises the supported floor.
+
+All 0.10.9 Metal timings remain diagnostic evidence for identifying the
+backend defect, not current performance evidence. The complete baseline,
+representation, integration, filter-regime, and scaling profiles restart
+under 0.10.10. CPU/Metal ratios never mix dependency identities.
 
 ### 2026-07-19 — pre-measurement claim-scope and source audit
 
