@@ -816,6 +816,12 @@ def plan_cells(
                             profile == "representation"
                             and bool(parameters.get("store_history"))
                         )
+                        and not (
+                            profile == "filter-regimes"
+                            and workload
+                            in {"bootstrap_lgssm", "auxiliary_lgssm"}
+                            and not float(parameters["resampling_threshold"])
+                        )
                     )
                     else 0
                 )

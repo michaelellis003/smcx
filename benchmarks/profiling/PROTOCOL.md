@@ -159,6 +159,9 @@ At `N=10,000`, compare bootstrap, auxiliary, and guided L1 across:
 This is 54 mathematical cells per backend before process blocks. It runs only
 after baseline and may be narrowed only by a dated amendment based on a failed
 correctness or resource feasibility gate, never based on a preferred result.
+Threshold-zero bootstrap and auxiliary cells are structural-only after the
+dated validation amendment below; guided threshold-zero retains its oracle
+gate.
 
 ### `scaling`
 
@@ -651,6 +654,34 @@ four validation workers, 160 timed calls, and 80 validation calls. It now
 schedules 1,818 fresh processes and 16,200 public-workload calls across smoke,
 baseline, filter-regimes, scaling, and representation. This supersedes the
 latest count table without rewriting its historical snapshot.
+
+### 2026-07-19 — no-resampling validation feasibility correction
+
+The first complete filter-regimes campaign retained all timing cells but
+failed 24 of 108 validation workers. Every failure was a threshold-zero
+bootstrap or auxiliary cell: three observation regimes, history off/on, and
+both backends. CPU and MPS results agreed closely. With calibrated observations
+the 20-replicate mean evidence ratio was about `5.33e-17`; under sharp
+observations it was about `6.35e-237`. The sample standard error collapses with
+the estimate because none of twenty runs samples the rare path governing the
+unbiased evidence mean. This is the same importance-sampling feasibility
+failure previously observed in the initial D1 threshold-zero campaign, not
+evidence of a CPU/MPS implementation disagreement.
+
+No practical replicate increase can make those `T=100`, `N=10,000`
+counterfactuals an informative evidence-accuracy test. They remain in timing
+because never-resampling performance is important, but are structural-only.
+Guided threshold-zero cells retain the oracle gate: their locally optimal
+proposal passed at the registered sample size. Threshold `0.5` and `1.1` cells
+for all three filters also retain their independent Kalman gates. This
+supersedes the earlier claim that every oracle-capable filter-regime variant
+runs replicated validation.
+
+Removing the 24 infeasible validation workers changes filter-regimes to 540
+timing workers, 84 validation workers, 4,320 timed calls, and 1,680 validation
+calls. The current full campaign is 1,794 fresh processes and 15,720 public
+calls. The failed campaign is retained as diagnostic evidence and is not
+performance-eligible; the matrix restarts under the amended contract.
 
 Primary algorithm and model sources used to define the campaign are:
 

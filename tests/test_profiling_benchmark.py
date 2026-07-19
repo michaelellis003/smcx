@@ -395,9 +395,39 @@ def test_oracle_backed_inferential_variants_validate_in_block_zero() -> None:
         ]
         assert oracle_cells
         assert all(
-            (cell.correctness_replicates > 0) is (cell.block == 0)
+            (cell.correctness_replicates > 0)
+            is (
+                cell.block == 0
+                and not (
+                    profile == "filter-regimes"
+                    and cell.workload in {"bootstrap_lgssm", "auxiliary_lgssm"}
+                    and not cell.parameters["resampling_threshold"]
+                )
+            )
             for cell in oracle_cells
         )
+
+
+def test_collapsed_no_resampling_cells_are_structural_only() -> None:
+    cells = plan_cells("filter-regimes", platforms=("cpu",), seed=17)
+    no_resampling = [
+        cell for cell in cells if not cell.parameters["resampling_threshold"]
+    ]
+    collapsed = [
+        cell
+        for cell in no_resampling
+        if cell.workload in {"bootstrap_lgssm", "auxiliary_lgssm"}
+    ]
+    stable = [
+        cell
+        for cell in no_resampling
+        if cell.workload == "guided_lgssm" and cell.block == 0
+    ]
+
+    assert collapsed
+    assert all(cell.correctness_replicates == 0 for cell in collapsed)
+    assert stable
+    assert all(cell.correctness_replicates == 20 for cell in stable)
 
 
 def test_representation_history_validation_is_structural_only() -> None:
