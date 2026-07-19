@@ -372,3 +372,48 @@ class TestLiuWestLogEvidenceIncrements:
             shrinkage=0.95,
         )
         assert jnp.all(jnp.isfinite(post.log_evidence_increments))
+
+
+class TestLiuWestInputs:
+    """Inputs follow parameters in every Liu-West callback."""
+
+    def test_inputs_condition_initial_state_and_follow_params(self):
+        inputs = jnp.array([1.0, 2.0, 3.0])
+        emissions = jnp.array([[2.0], [5.0], [9.0]])
+
+        def initial_sampler(key, n, input_t):
+            del key
+            return jnp.full((n, 1), input_t[0])
+
+        def param_initial_sampler(key, n):
+            del key
+            return jnp.zeros((n, 2))
+
+        def transition_sampler(key, state, params, input_t):
+            del key
+            return state + input_t + 0.0 * params[1]
+
+        def log_observation_fn(emission, state, params, input_t):
+            error = emission[0] - state[0] - input_t[0]
+            return -0.5 * error**2 + 0.0 * params[1]
+
+        def log_auxiliary_fn(emission, state, params, input_t):
+            del emission, state
+            return 0.0 * params[1] + 0.0 * input_t[0]
+
+        post = liu_west_filter(
+            key=jr.key(0),
+            initial_sampler=initial_sampler,
+            transition_sampler=transition_sampler,
+            log_observation_fn=log_observation_fn,
+            log_auxiliary_fn=log_auxiliary_fn,
+            param_initial_sampler=param_initial_sampler,
+            emissions=emissions,
+            num_particles=4,
+            resampling_threshold=0.0,
+            inputs=inputs,
+        )
+
+        expected = jnp.broadcast_to(jnp.array([1.0, 3.0, 6.0])[:, None], (3, 4))
+        assert jnp.array_equal(post.filtered_particles[:, :, 0], expected)
+        assert post.marginal_loglik == pytest.approx(0.0)

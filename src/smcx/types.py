@@ -169,6 +169,60 @@ class LogTransitionFnWithInput(Protocol):
 
 
 @runtime_checkable
+class ParamTransitionSampler(Protocol):
+    """Draw one parameter-conditioned transition."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        state: Float[Array, " state_dim"],
+        params: Float[Array, " param_dim"],
+        /,
+    ) -> Float[Array, " state_dim"]: ...
+
+
+@runtime_checkable
+class ParamTransitionSamplerWithInput(Protocol):
+    """Draw one parameter- and input-conditioned transition."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        state: Float[Array, " state_dim"],
+        params: Float[Array, " param_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Float[Array, " state_dim"]: ...
+
+
+@runtime_checkable
+class ParamLogObservationFn(Protocol):
+    """Evaluate one parameter-conditioned observation log-density."""
+
+    def __call__(
+        self,
+        emission: Float[Array, " emission_dim"],
+        state: Float[Array, " state_dim"],
+        params: Float[Array, " param_dim"],
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
+class ParamLogObservationFnWithInput(Protocol):
+    """Evaluate a parameter- and input-conditioned log-density."""
+
+    def __call__(
+        self,
+        emission: Float[Array, " emission_dim"],
+        state: Float[Array, " state_dim"],
+        params: Float[Array, " param_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
 class ResamplingFn(Protocol):
     """Draw ancestor indices from normalized particle weights."""
 
