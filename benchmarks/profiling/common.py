@@ -25,11 +25,9 @@ import numpy as np
 SCHEMA_VERSION = 1
 DEFAULT_SEED = 20260719
 DEFAULT_ORDER_SEED = DEFAULT_SEED
-DYNAMAX_PROFILE_VERSION = "1.0.2"
 SEED_CONTRACT = {
     "data_seed_base": DEFAULT_SEED,
     "data_seed_offsets": {
-        "dynamax_lgssm": 0,
         "lgssm": 0,
         "stochastic_volatility": 1,
         "tracking": 3,
@@ -51,7 +49,6 @@ def _package_version(name: str) -> str | None:
 def package_versions() -> dict[str, str | None]:
     """Return the complete package identity relevant to this campaign."""
     return {
-        "dynamax": _package_version("dynamax"),
         "jax": _package_version("jax"),
         "jax-mps": _package_version("jax-mps"),
         "jaxlib": _package_version("jaxlib"),
@@ -207,7 +204,6 @@ PROFILES = {
     "smoke": Profile(blocks=1, repeats=1, warmups=1),
     "baseline": Profile(blocks=5, repeats=7, warmups=1),
     "filter-regimes": Profile(blocks=5, repeats=7, warmups=1),
-    "integration": Profile(blocks=5, repeats=7, warmups=1),
     "representation": Profile(blocks=5, repeats=7, warmups=1),
     "scaling": Profile(blocks=5, repeats=7, warmups=1),
 }
@@ -264,7 +260,6 @@ WORKLOADS: dict[str, WorkloadSpec] = {
             "baseline",
             "filter-regimes",
             "scaling",
-            "integration",
         ),
     ),
     "auxiliary_lgssm": WorkloadSpec(
@@ -452,16 +447,6 @@ WORKLOADS: dict[str, WorkloadSpec] = {
         baseline_correctness_replicates=20,
         replicated_correctness_level="oracle_accuracy",
         profiles=("representation",),
-    ),
-    "bootstrap_lgssm_dynamax": WorkloadSpec(
-        algorithm="bootstrap",
-        model="lgssm_dynamax_adapter",
-        execution_mode="whole_program_jit",
-        smoke_parameters=_L1_SMOKE,
-        baseline_parameters=_L1_BASELINE,
-        baseline_correctness_replicates=20,
-        replicated_correctness_level="oracle_accuracy",
-        profiles=("integration",),
     ),
 }
 
@@ -724,18 +709,8 @@ def _scaling_variants() -> list[tuple[str, dict[str, Any]]]:
     return variants
 
 
-def _supported_dynamax_available() -> bool:
-    """Return whether the preregistered optional Dynamax release exists."""
-    try:
-        return version("dynamax") == DYNAMAX_PROFILE_VERSION
-    except PackageNotFoundError:
-        return False
-
-
 def _profile_variants(
     profile: str,
-    *,
-    include_optional_dynamax: bool | None = None,
 ) -> list[tuple[str, dict[str, Any]]]:
     """Return the exact mathematical cells registered for one profile."""
     if profile in {"smoke", "baseline"}:
@@ -783,30 +758,6 @@ def _profile_variants(
                 ),
             ))
         return variants
-    if profile == "integration":
-        variants = [
-            (
-                "bootstrap_lgssm",
-                _updated_parameters(
-                    WORKLOADS["bootstrap_lgssm"].baseline_parameters,
-                    resampling_threshold=1.1,
-                ),
-            )
-        ]
-        include_dynamax = (
-            _supported_dynamax_available()
-            if include_optional_dynamax is None
-            else include_optional_dynamax
-        )
-        if include_dynamax:
-            variants.append((
-                "bootstrap_lgssm_dynamax",
-                _updated_parameters(
-                    WORKLOADS["bootstrap_lgssm_dynamax"].baseline_parameters,
-                    resampling_threshold=1.1,
-                ),
-            ))
-        return variants
     raise ValueError(f"unknown profile: {profile}")
 
 
@@ -815,7 +766,6 @@ def plan_cells(
     *,
     platforms: Sequence[str] = PLATFORMS,
     order_seed: int = DEFAULT_ORDER_SEED,
-    include_optional_dynamax: bool | None = None,
     seed: int | None = None,
 ) -> list[Cell]:
     """Expand a profile into its deterministic fresh-process cell order."""
@@ -837,10 +787,7 @@ def plan_cells(
         raise ValueError(f"unknown platform: {names}")
 
     settings = PROFILES[profile]
-    variants = _profile_variants(
-        profile,
-        include_optional_dynamax=include_optional_dynamax,
-    )
+    variants = _profile_variants(profile)
     variant_orders = _variant_orders(
         len(variants),
         blocks=settings.blocks,
@@ -912,18 +859,6 @@ def build_manifest(
         raise ValueError("manifest platforms must be non-empty and unique")
     if set(platform_order) != {cell.platform for cell in cells}:
         raise ValueError("manifest platforms do not match scheduled cells")
-    exclusions = []
-    dynamax_scheduled = any(
-        cell.workload == "bootstrap_lgssm_dynamax" for cell in cells
-    )
-    if profile == "integration" and not dynamax_scheduled:
-        exclusions.append({
-            "reason": (
-                "optional dependency unavailable at preregistered version "
-                f"{DYNAMAX_PROFILE_VERSION}"
-            ),
-            "workload": "bootstrap_lgssm_dynamax",
-        })
     serialized_cells = [cell._asdict() for cell in cells]
     plan_sha256 = hashlib.sha256(
         json.dumps(
@@ -936,7 +871,7 @@ def build_manifest(
     return {
         "campaign_identity": campaign_identity(),
         "cells": serialized_cells,
-        "exclusions": exclusions,
+        "exclusions": [],
         "order_seed": order_seed,
         "plan_sha256": plan_sha256,
         "platforms": platform_order,

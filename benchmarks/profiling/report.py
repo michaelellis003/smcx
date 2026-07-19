@@ -18,7 +18,6 @@ if __package__ in (None, ""):  # Allow direct ``python .../report.py`` use.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from benchmarks.profiling.common import (
-    DYNAMAX_PROFILE_VERSION,
     PLATFORMS,
     SCHEMA_VERSION,
     SEED_CONTRACT,
@@ -146,14 +145,10 @@ def _parse_manifest(path: Path) -> tuple[dict[str, Any], list[Cell]]:
         raise ValueError("manifest order_seed must be an integer")
     if manifest.get("seed_contract") != SEED_CONTRACT:
         raise ValueError("manifest seed_contract disagrees with registry")
-    packages = cast(Mapping[str, Any], identity["packages"])
     registered_cells = plan_cells(
         manifest["profile"],
         platforms=platforms,
         order_seed=order_seed,
-        include_optional_dynamax=(
-            packages.get("dynamax") == DYNAMAX_PROFILE_VERSION
-        ),
     )
     registered_plan = [cell._asdict() for cell in registered_cells]
     if raw_cells != registered_plan:
@@ -735,17 +730,12 @@ def _comparisons(
 def _arm_comparisons(
     aggregates: Sequence[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Compare preregistered equivalent representation/integration arms."""
+    """Compare preregistered equivalent representation arms."""
     pairs = (
         (
             "representation",
             "bootstrap_tracking_dense",
             "bootstrap_tracking_pytree",
-        ),
-        (
-            "integration",
-            "bootstrap_lgssm",
-            "bootstrap_lgssm_dynamax",
         ),
     )
     comparisons = []
@@ -1437,7 +1427,7 @@ def render_markdown(
 
     lines.extend([
         "",
-        "## Matched representation/integration comparisons",
+        "## Matched representation comparisons",
         "",
     ])
     if report["arm_comparisons"]:
@@ -1454,8 +1444,7 @@ def render_markdown(
             )
     else:
         lines.append(
-            "No matched, correctness-eligible representation or integration "
-            "pair is available."
+            "No matched, correctness-eligible representation pair is available."
         )
     if report["arm_comparison_exclusions"]:
         lines.extend(["", "Ratios withheld for unmatched adaptive work:"])

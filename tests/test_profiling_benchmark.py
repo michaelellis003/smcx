@@ -269,29 +269,16 @@ def test_manifest_records_frozen_cell_order() -> None:
     identity = manifest["campaign_identity"]
     assert len(identity["source"]["source_sha256"]) == 64
     assert len(identity["source"]["lock_sha256"]) == 64
-    assert "dynamax" in identity["packages"]
     assert "tfp-nightly" in identity["packages"]
     assert identity["host"]["machine"]
 
 
-def test_integration_plan_can_freeze_optional_dynamax_membership() -> None:
-    without = plan_cells(
-        "integration",
-        platforms=("cpu",),
-        order_seed=7,
-        include_optional_dynamax=False,
-    )
-    with_optional = plan_cells(
-        "integration",
-        platforms=("cpu",),
-        order_seed=7,
-        include_optional_dynamax=True,
-    )
-    assert {cell.workload for cell in without} == {"bootstrap_lgssm"}
-    assert {cell.workload for cell in with_optional} == {
-        "bootstrap_lgssm",
-        "bootstrap_lgssm_dynamax",
-    }
+def test_one_time_dynamax_profile_is_not_permanent() -> None:
+    assert "integration" not in PROFILES
+    assert not any("dynamax" in workload for workload in WORKLOADS)
+    assert "dynamax_lgssm" not in SEED_CONTRACT["data_seed_offsets"]
+    with pytest.raises(ValueError, match="unknown profile: integration"):
+        plan_cells("integration", platforms=("cpu",), order_seed=7)
 
 
 def test_profiles_have_protocol_minimums() -> None:
@@ -479,14 +466,6 @@ def test_representation_profile_covers_liu_west_history() -> None:
     assert {
         cell.parameters["resampling_threshold"] for cell in liu_west_cells
     } == {1.1}
-
-
-def test_integration_profile_always_has_local_l1_arm() -> None:
-    cells = plan_cells("integration", platforms=("cpu",), seed=14)
-    workloads = {cell.workload for cell in cells}
-    assert "bootstrap_lgssm" in workloads
-    assert workloads <= {"bootstrap_lgssm", "bootstrap_lgssm_dynamax"}
-    assert {cell.parameters["resampling_threshold"] for cell in cells} == {1.1}
 
 
 def test_scaling_forces_exact_work_for_hidden_resampling_decisions() -> None:

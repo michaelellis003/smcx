@@ -105,15 +105,15 @@ The observed vector is fixed and deterministic. Dimensions are `4`, `32`, and
 anchor adaptive tempered SMC. A Bayesian logistic-regression workload may be
 added only by dated amendment after G1 establishes the host/model split.
 
-### D1 — optional Dynamax adapter
+### D1 — completed one-time Dynamax adapter
 
 Dynamax 1.0.2 defines the exact same L1 parameters and emissions. Its public
 `initial_distribution`, `transition_distribution`, and
 `emission_distribution` methods are closed over to produce smcx bootstrap
 callbacks. The local and adapter arms use identical keys, data, and inference
-settings. This arm measures integration overhead; it is excluded when the
-notebook dependency group is unavailable and never becomes a runtime or test
-dependency.
+settings. This arm measured integration overhead and never became a runtime or
+test dependency. The adapter and integration profile were deleted after the
+registered campaign passed; the dated result preserves the evidence.
 
 The undocumented `dynamax.slds` particle filters are not validators or timed
 production comparators.
@@ -173,13 +173,11 @@ correctness or resource feasibility gate, never based on a preferred result.
 - Resamplers: `N in {10,000, 100,000, 1,000,000}` under uniform,
   moderately uneven, one-dominant, and zero-tail normalized weights.
 
-### `representation` and `integration`
+### `representation`
 
 - Representation: L2 dense versus two-leaf state, `N=10,000`, `T=200`,
   history off/on; and P1 Liu--West, `N=10,000`, `T=100`, parameter dimension
   one, history off/on, with threshold `1.1` for equal discrete work.
-- Integration: local L1 versus D1 adapter, `N=10,000`, `T=100`, bootstrap,
-  no history. Lowered IR census is captured for both.
 
 ## Correctness gates
 
@@ -261,9 +259,10 @@ untimed counterfactuals for callbacks only, resampling only, history, and state
 representation. These use the same inputs and output fences.
 
 Capture one StableHLO operation census for each outer-jittable baseline arm on
-CPU, plus local-versus-Dynamax integration. Capture a JAX profiler trace only
-for representative bottlenecks selected by baseline timing. Trace files are
-local raw artifacts; dated findings record the command and interpretation.
+CPU. The completed one-time local-versus-Dynamax integration captured both
+arms before its adapter was deleted. Capture a JAX profiler trace only for
+representative bottlenecks selected by baseline timing. Trace files are local
+raw artifacts; dated findings record the command and interpretation.
 
 ## Reporting rules
 
@@ -631,6 +630,28 @@ The source audit narrows several statements made earlier in this document:
   from its ordered-uniform construction, not a universal property of every
   multinomial-resampling implementation.
 
+### 2026-07-19 — one-time Dynamax adapter removal
+
+The rerun on jax-mps 0.10.10 completed all 20 timing cells and four validation
+workers. Both callback arms passed their independent 20-replicate Kalman gates
+on CPU and MPS. The measured Dynamax/local steady ratios were `1.075` on CPU
+and `0.969` on MPS; the adapter increased process RSS by about 96 MiB and
+115 MiB, respectively. The complete metadata, gates, immutable sources, and
+license are retained in
+[`2026-07-19-dynamax-integration-validation.md`](../results/2026-07-19-dynamax-integration-validation.md).
+
+As preregistered for one-time external validation, the adapter, its boundary
+tests, the D1 workload, and the `integration` profile were then deleted. The
+notebook dependency group still contains Dynamax for the worked HMM notebook;
+ordinary unit tests retain only dependency-free numerical fixtures with exact
+source and license citations.
+
+The current registered campaign therefore excludes the 20 D1 timing workers,
+four validation workers, 160 timed calls, and 80 validation calls. It now
+schedules 1,818 fresh processes and 16,200 public-workload calls across smoke,
+baseline, filter-regimes, scaling, and representation. This supersedes the
+latest count table without rewriting its historical snapshot.
+
 Primary algorithm and model sources used to define the campaign are:
 
 - Gordon, Salmond, and Smith (1993), bootstrap filtering
@@ -662,7 +683,7 @@ Primary algorithm and model sources used to define the campaign are:
 - Kim, Shephard, and Chib (1998), the stochastic-volatility model
   ([DOI](https://doi.org/10.1111/1467-937X.00050)).
 
-No implementation code was copied from these sources. The Dynamax adapter is
-original public-API glue against MIT-licensed Dynamax 1.0.2, and the jax-mps
-capability audit inspects Apache-2.0 source without porting it. No GPL or other
-red-line source is required by this campaign.
+No implementation code was copied from these sources. The deleted Dynamax
+adapter was original public-API glue against MIT-licensed Dynamax 1.0.2, and
+the jax-mps capability audit inspects Apache-2.0 source without porting it. No
+GPL or other red-line source is required by this campaign.
