@@ -1,6 +1,6 @@
 # Roadmap
 
-*Last updated: 2026-07-18. Directional, not a promise; solo-maintained.
+*Last updated: 2026-07-19. Directional, not a promise; solo-maintained.
 Themes here, tracking in GitHub issues. Decisions: `docs/adr/`.
 Non-goals at the bottom are a standing scope guard.*
 
@@ -30,6 +30,9 @@ the small carry-overs the 2026-07 library review surfaced.
 - [x] ~~Exogenous-inputs channel (ADR-0022): explicit per-step
       covariates for controlled and covariate-driven models across
       all filters and simulation.~~
+- [x] ~~Structured latent-state PyTrees (ADR-0024) in the bootstrap,
+      auxiliary, and guided filters plus simulation, including joint
+      genealogy and posterior-predictive operations.~~
 - [ ] `to_arviz()` InferenceData export (ADR-0020): the single
       reporting bridge — independent runs as chains, weighted clouds
       resampled to draws — so ArviZ owns plots, R-hat, and posterior
