@@ -176,7 +176,8 @@ correctness or resource feasibility gate, never based on a preferred result.
 ### `representation` and `integration`
 
 - Representation: L2 dense versus two-leaf state, `N=10,000`, `T=200`,
-  history off/on.
+  history off/on; and P1 Liu--West, `N=10,000`, `T=100`, parameter dimension
+  one, history off/on, with threshold `1.1` for equal discrete work.
 - Integration: local L1 versus D1 adapter, `N=10,000`, `T=100`, bootstrap,
   no history. Lowered IR census is captured for both.
 
@@ -273,6 +274,8 @@ local raw artifacts; dated findings record the command and interpretation.
 - Smoke numbers are labeled non-inferential and do not support rankings.
 - CPU/MPS comparisons use ratios only for matched mathematical cells.
 - Adaptive algorithms are not compared without their work counters.
+- History on/off ratios require equal non-history parameters and exact
+  per-block adaptive-work counters; unmatched pairs are reported as exclusions.
 - Correctness and accuracy-per-time accompany runtime where an oracle exists.
 - No optimization is credited without a new matched before/after campaign and
   unchanged correctness gate.
@@ -298,7 +301,8 @@ These clarifications were recorded before any inferential profile was run.
   observation correlation `0.3`. L2 `diagonal` preserves the same marginal
   variances while setting all process and observation cross-covariances to
   zero. Representation crosses both regimes with history off/on, for eight
-  mathematical cells per backend.
+  L2 mathematical cells per backend. A later amendment adds two Liu--West
+  history cells.
 - L2 replicated Kalman evidence gates run on history-off arms. History-on arms
   retain structural/evidence-identity gates and the independently tested
   dense/PyTree equivalence, avoiding retention of twenty full `N x T`
@@ -558,6 +562,32 @@ All 0.10.9 Metal timings remain diagnostic evidence for identifying the
 backend defect, not current performance evidence. The complete baseline,
 representation, integration, filter-regime, and scaling profiles restart
 under 0.10.10. CPU/Metal ratios never mix dependency identities.
+
+### 2026-07-19 — Liu--West history coverage completion
+
+The history audit found that representation covered bootstrap state history
+but not Liu--West's separate state and parameter histories. Representation
+therefore adds one P1 pair at `N=10,000`, `T=100`, parameter dimension one,
+and history off/on. Threshold `1.1` forces exactly `T - 1 = 99` resampling
+decisions in both arms, so the matched comparison changes only retained
+history. History-off receives the registered twelve-replicate oracle gate;
+history-on remains structural-only to avoid retaining twelve additional full
+histories for an untimed check.
+
+The current exact counts with both backends and Dynamax 1.0.2 are:
+
+| Profile | Timing workers | Validation workers | Timed calls | Validation calls |
+|---|---:|---:|---:|---:|
+| smoke | 24 | 0 | 48 | 0 |
+| baseline | 120 | 22 | 960 | 264 |
+| filter-regimes | 540 | 108 | 4,320 | 2,160 |
+| scaling | 750 | 144 | 6,000 | 1,464 |
+| representation | 100 | 10 | 800 | 184 |
+| integration | 20 | 4 | 160 | 80 |
+
+The full registered campaign therefore schedules 1,842 fresh processes and
+16,440 public-workload calls. This table supersedes earlier count tables; it
+does not revise their historical preregistration snapshots.
 
 ### 2026-07-19 — pre-measurement claim-scope and source audit
 

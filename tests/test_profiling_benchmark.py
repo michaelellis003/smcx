@@ -422,28 +422,63 @@ def test_representation_history_validation_is_structural_only() -> None:
 
 def test_representation_profile_pairs_dense_and_pytree_states() -> None:
     cells = plan_cells("representation", platforms=("cpu",), seed=13)
+    tracking_cells = [
+        cell
+        for cell in cells
+        if cell.workload.startswith("bootstrap_tracking_")
+    ]
     mathematical_cells = {
         (
             cell.workload,
             tuple(sorted(cell.parameters.items())),
         )
-        for cell in cells
+        for cell in tracking_cells
     }
     assert len(mathematical_cells) == 8
-    assert {cell.workload for cell in cells} == {
+    assert {cell.workload for cell in tracking_cells} == {
         "bootstrap_tracking_dense",
         "bootstrap_tracking_pytree",
     }
-    assert {cell.parameters["store_history"] for cell in cells} == {
+    assert {cell.parameters["store_history"] for cell in tracking_cells} == {
         False,
         True,
     }
-    assert {cell.parameters["covariance_regime"] for cell in cells} == {
+    assert {
+        cell.parameters["covariance_regime"] for cell in tracking_cells
+    } == {
         "correlated",
         "diagonal",
     }
-    assert {cell.parameters["num_particles"] for cell in cells} == {10_000}
-    assert {cell.parameters["timesteps"] for cell in cells} == {200}
+    assert {cell.parameters["num_particles"] for cell in tracking_cells} == {
+        10_000
+    }
+    assert {cell.parameters["timesteps"] for cell in tracking_cells} == {200}
+
+
+def test_representation_profile_covers_liu_west_history() -> None:
+    cells = plan_cells("representation", platforms=("cpu",), seed=13)
+    liu_west_cells = [
+        cell for cell in cells if cell.workload == "liu_west_unknown_ar"
+    ]
+    mathematical_cells = {
+        tuple(sorted(cell.parameters.items())) for cell in liu_west_cells
+    }
+
+    assert len(mathematical_cells) == 2
+    assert {cell.parameters["store_history"] for cell in liu_west_cells} == {
+        False,
+        True,
+    }
+    assert {cell.parameters["num_particles"] for cell in liu_west_cells} == {
+        10_000
+    }
+    assert {
+        cell.parameters["parameter_dimension"] for cell in liu_west_cells
+    } == {1}
+    assert {cell.parameters["timesteps"] for cell in liu_west_cells} == {100}
+    assert {
+        cell.parameters["resampling_threshold"] for cell in liu_west_cells
+    } == {1.1}
 
 
 def test_integration_profile_always_has_local_l1_arm() -> None:

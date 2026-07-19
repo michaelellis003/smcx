@@ -498,10 +498,13 @@ def test_representation_profile_reports_matched_arm_overhead(
         is_tree = cell.workload == "bootstrap_tracking_pytree"
         history_cost = 0.5 if cell.parameters["store_history"] else 0.0
         process_median = 1.0 + history_cost + (0.25 if is_tree else 0.0)
+        record = _record(cell, process_median)
+        if cell.workload == "liu_west_unknown_ar":
+            record["work_metrics"]["resampling_event_count"] = 99
         _write_record(
             tmp_path,
             f"{index}.json",
-            _record(cell, process_median),
+            record,
         )
 
     report = build_report(tmp_path)
@@ -517,6 +520,22 @@ def test_representation_profile_reports_matched_arm_overhead(
     assert no_history["ratio"] == pytest.approx(1.25)
     assert no_history["numerator_workload"] == "bootstrap_tracking_pytree"
     assert no_history["denominator_workload"] == "bootstrap_tracking_dense"
+
+    history_comparisons = report["history_comparisons"]
+    assert len(history_comparisons) == 5
+    liu_west = next(
+        comparison
+        for comparison in history_comparisons
+        if comparison["workload"] == "liu_west_unknown_ar"
+    )
+    assert liu_west["history_on_over_off"] == pytest.approx(1.5)
+    assert liu_west["parameters"] == {
+        "num_particles": 10_000,
+        "parameter_dimension": 1,
+        "resampling_threshold": 1.1,
+        "shrinkage": 0.95,
+        "timesteps": 100,
+    }
 
 
 def test_arm_comparison_requires_matching_adaptive_work(
@@ -549,7 +568,8 @@ def test_arm_comparison_requires_matching_adaptive_work(
             "parameters": next(
                 cell.parameters
                 for cell in cells
-                if cell.parameters["covariance_regime"] == "correlated"
+                if cell.workload.startswith("bootstrap_tracking_")
+                and cell.parameters["covariance_regime"] == "correlated"
                 and not cell.parameters["store_history"]
             ),
             "platform": "cpu",

@@ -772,6 +772,16 @@ def _profile_variants(
                             store_history=store_history,
                         ),
                     ))
+        liu_west_baseline = WORKLOADS["liu_west_unknown_ar"].baseline_parameters
+        for store_history in (False, True):
+            variants.append((
+                "liu_west_unknown_ar",
+                _updated_parameters(
+                    liu_west_baseline,
+                    resampling_threshold=1.1,
+                    store_history=store_history,
+                ),
+            ))
         return variants
     if profile == "integration":
         variants = [

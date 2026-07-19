@@ -36,7 +36,7 @@ from benchmarks.profiling.common import (
 from benchmarks.profiling.preflight import estimate_plan
 from benchmarks.profiling.run import raw_filename
 
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 
 _ADAPTIVE_WORK_COUNTERS = {
     "auxiliary": ("resampling_event_count",),
@@ -804,6 +804,71 @@ def _arm_comparisons(
     return comparisons, exclusions
 
 
+def _history_comparisons(
+    aggregates: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Compare registered history-on/off cells with otherwise equal work."""
+    groups: dict[tuple[str, str, str], dict[bool, Mapping[str, Any]]] = (
+        defaultdict(dict)
+    )
+    parameters_by_group: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for aggregate in aggregates:
+        parameters = dict(aggregate["parameters"])
+        if "store_history" not in parameters:
+            continue
+        store_history = bool(parameters.pop("store_history"))
+        key = (
+            str(aggregate["platform"]),
+            str(aggregate["workload"]),
+            _canonical(parameters),
+        )
+        groups[key][store_history] = aggregate
+        parameters_by_group[key] = parameters
+
+    comparisons = []
+    exclusions = []
+    for key in sorted(groups):
+        members = groups[key]
+        if set(members) != {False, True}:
+            continue
+        history_off = members[False]
+        history_on = members[True]
+        if (
+            not history_off["timing_eligible"]
+            or not history_on["timing_eligible"]
+        ):
+            continue
+        work_evidence, work_error = _matched_adaptive_work(
+            history_off,
+            history_on,
+            mismatch_reason=(
+                "discrete adaptive work differs between history arms"
+            ),
+        )
+        if work_error is not None:
+            exclusions.append({
+                "parameters": parameters_by_group[key],
+                "platform": history_off["platform"],
+                "reason": work_error,
+                "workload": history_off["workload"],
+            })
+            continue
+        off_median = float(history_off["steady"]["median_s"])
+        on_median = float(history_on["steady"]["median_s"])
+        if off_median <= 0.0:
+            continue
+        comparisons.append({
+            "adaptive_work": work_evidence,
+            "history_off_median_s": off_median,
+            "history_on_median_s": on_median,
+            "history_on_over_off": on_median / off_median,
+            "parameters": parameters_by_group[key],
+            "platform": history_off["platform"],
+            "workload": history_off["workload"],
+        })
+    return comparisons, exclusions
+
+
 def build_report(output_dir: Path) -> dict[str, Any]:
     """Load, validate, and aggregate one profiling output directory."""
     output_dir = Path(output_dir)
@@ -941,6 +1006,9 @@ def build_report(output_dir: Path) -> dict[str, Any]:
     accepted_records = list(accepted.values())
     comparisons, comparison_exclusions = _comparisons(aggregates)
     arm_comparisons, arm_comparison_exclusions = _arm_comparisons(aggregates)
+    history_comparisons, history_comparison_exclusions = _history_comparisons(
+        aggregates
+    )
     timing_state_failures = [
         {
             "parameters": aggregate["parameters"],
@@ -966,6 +1034,8 @@ def build_report(output_dir: Path) -> dict[str, Any]:
         "environments": _environment_metadata(accepted_records),
         "expected_cells": len(cells),
         "exclusions": manifest.get("exclusions", []),
+        "history_comparison_exclusions": history_comparison_exclusions,
+        "history_comparisons": history_comparisons,
         "identity_mismatches": identity_mismatches,
         "invalid_records": invalid_records,
         "matched_cells": len(accepted),
@@ -1394,6 +1464,32 @@ def render_markdown(
             f"`{item['denominator_workload']}` on {item['platform']} with "
             f"`{_canonical(item['parameters'])}`: {item['reason']}"
             for item in report["arm_comparison_exclusions"]
+        )
+
+    lines.extend(["", "## Matched history comparisons", ""])
+    if report["history_comparisons"]:
+        lines.extend([
+            "| Workload | Platform | Off, ms | On, ms | On / off |",
+            "|---|---:|---:|---:|---:|",
+        ])
+        for comparison in report["history_comparisons"]:
+            lines.append(
+                f"| `{comparison['workload']}` | "
+                f"{comparison['platform']} | "
+                f"{1_000.0 * comparison['history_off_median_s']:.3f} | "
+                f"{1_000.0 * comparison['history_on_median_s']:.3f} | "
+                f"{comparison['history_on_over_off']:.3f} |"
+            )
+    else:
+        lines.append(
+            "No exact matched, correctness-eligible history pair is available."
+        )
+    if report["history_comparison_exclusions"]:
+        lines.extend(["", "Ratios withheld for unmatched adaptive work:"])
+        lines.extend(
+            f"- `{item['workload']}` on {item['platform']} with "
+            f"`{_canonical(item['parameters'])}`: {item['reason']}"
+            for item in report["history_comparison_exclusions"]
         )
 
     lines.extend(["", "## Failures and completeness", ""])
