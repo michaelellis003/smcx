@@ -4,11 +4,13 @@
 """Inverse-CDF resampling kernels (ADR-0004 contract, JAX port).
 
 Every kernel takes ``(key, weights, num_samples)`` — probability-space
-weights, any positive scale — and returns nondecreasing ``int32``
-ancestor indices in ``[0, num_particles)``. Query grids are clamped
-strictly below 1 so a grid point that rounds to 1.0 in float32 cannot
-select past the final positive-weight slot (the ADR-0017 endpoint
-guard, inherited from the MLX implementation).
+weights, any positive scale — and returns ``int32`` ancestor indices in
+``[0, num_particles)``. Systematic, stratified, and multinomial outputs
+are nondecreasing; residual returns its deterministic block followed by
+iid remainder draws. Query grids are clamped strictly below 1 so a grid
+point that rounds to 1.0 in float32 cannot select past the final
+positive-weight slot (the ADR-0017 endpoint guard, inherited from the
+MLX implementation).
 """
 
 import jax
@@ -128,6 +130,11 @@ def residual(
     Returns:
         Int32 ancestor indices (deterministic block first, remainder
         drawn multinomially from the residual weights).
+
+    References:
+        Douc, R., Cappe, O., and Moulines, E. (2005). Comparison of
+        resampling schemes for particle filtering.
+        https://doi.org/10.1109/ISPA.2005.195385
     """
     m = num_samples
     w = weights / jnp.maximum(jnp.sum(weights), _TINY)
@@ -144,5 +151,12 @@ def residual(
         0,
         w.shape[0] - 1,
     ).astype(jnp.int32)
-    rem_idx = multinomial(key, residual_w + _TINY, m)
+    # Draw iid candidates, then keep exactly the ``m - n_det`` entries
+    # selected by the static-shape mask below. Using sorted order
+    # statistics here would bias that selected suffix toward larger CDF
+    # values: an arbitrary fixed subset is iid only before sorting.
+    rem_queries = jnp.minimum(
+        jax.random.uniform(key, (m,), dtype=weights.dtype), _BELOW_ONE
+    )
+    rem_idx = _searchsorted_clipped(_normalized_cdf(residual_w), rem_queries)
     return jnp.where(positions < n_det, det_idx, rem_idx)
