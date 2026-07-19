@@ -1047,11 +1047,77 @@ def _accuracy_text(correctness: Mapping[str, Any]) -> str:
     rendered = []
     for summary in summaries:
         status = "passed" if summary["passed"] else "failed"
+        metrics = summary["metrics"]
+        details = _accuracy_metric_details(metrics)
+        detail_text = f"; {details}" if details else ""
         rendered.append(
-            f"block {summary['block']}, R={summary['replicates']}, "
-            f"{status}: `{_canonical(summary['metrics'])}`"
+            f"block {summary['block']}: {status} "
+            f"(R={summary['replicates']}{detail_text})"
         )
     return "<br>".join(rendered)
+
+
+def _accuracy_number(value: Any) -> str | None:
+    """Format one finite scalar accuracy diagnostic."""
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    ):
+        return f"{float(value):.4g}"
+    return None
+
+
+def _accuracy_gate_text(name: str, value: Mapping[str, Any]) -> str:
+    """Render one named replicated gate without embedding raw arrays."""
+    passed = value.get("passed")
+    status = (
+        "passed"
+        if passed is True
+        else "failed"
+        if passed is False
+        else "reported"
+    )
+    details = []
+    for field in ("mean_ratio", "mean", "oracle", "error", "tolerance"):
+        rendered = _accuracy_number(value.get(field))
+        if rendered is not None:
+            details.append(f"{field}={rendered}")
+    error = value.get("error")
+    if isinstance(error, Mapping):
+        rendered = _accuracy_number(error.get("maximum_absolute"))
+        if rendered is not None:
+            details.append(f"max|error|={rendered}")
+    tolerance = value.get("tolerance")
+    if isinstance(tolerance, Mapping):
+        rendered = _accuracy_number(tolerance.get("maximum"))
+        if rendered is not None:
+            details.append(f"max_tolerance={rendered}")
+    suffix = f" [{', '.join(details)}]" if details else ""
+    return f"{name}: {status}{suffix}"
+
+
+def _accuracy_metric_details(metrics: Mapping[str, Any]) -> str:
+    """Render the salient scalar diagnostics from replicated evidence."""
+    nested = [
+        _accuracy_gate_text(str(name), value)
+        for name, value in sorted(metrics.items())
+        if isinstance(value, Mapping)
+        and "passed" in value
+        and not (
+            name == "bin_probabilities"
+            and "contiguous_probabilities" in metrics
+        )
+    ]
+    if nested:
+        return "; ".join(nested)
+
+    details = []
+    for field in ("mean_ratio", "mean", "oracle", "error", "tolerance"):
+        rendered = _accuracy_number(metrics.get(field))
+        if rendered is not None:
+            details.append(f"{field}={rendered}")
+    return ", ".join(details)
 
 
 def _timing_state_text(state: Mapping[str, Any]) -> str:

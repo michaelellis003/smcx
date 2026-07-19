@@ -317,6 +317,9 @@ def test_aggregate_uses_fresh_process_medians_and_matches_backends(
     assert "worker processes" in markdown
     assert "Executable peak, MiB" in markdown
     assert "Device peak, MiB" in markdown
+    assert "passed (R=20" in markdown
+    assert "mean_ratio=0.99" in markdown
+    assert '"evidence_ratios"' not in markdown
 
 
 def test_inferential_timing_requires_ac_and_no_thermal_warning(
