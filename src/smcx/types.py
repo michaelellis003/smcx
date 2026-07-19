@@ -65,6 +65,47 @@ class TransitionSamplerWithInput(Protocol):
 
 
 @runtime_checkable
+class SingleInitialSampler(Protocol):
+    """Draw one initial state for forward simulation."""
+
+    def __call__(self, key: PRNGKeyT, /) -> Float[Array, " state_dim"]: ...
+
+
+@runtime_checkable
+class SingleInitialSamplerWithInput(Protocol):
+    """Draw one input-conditioned initial state."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Float[Array, " state_dim"]: ...
+
+
+@runtime_checkable
+class EmissionSampler(Protocol):
+    """Draw one emission conditional on a state."""
+
+    def __call__(
+        self, key: PRNGKeyT, state: Float[Array, " state_dim"], /
+    ) -> Float[Array, " emission_dim"]: ...
+
+
+@runtime_checkable
+class EmissionSamplerWithInput(Protocol):
+    """Draw one input-conditioned emission."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        state: Float[Array, " state_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Float[Array, " emission_dim"]: ...
+
+
+@runtime_checkable
 class LogObservationFn(Protocol):
     """Evaluate one particle's observation log-density."""
 
