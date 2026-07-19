@@ -256,3 +256,36 @@ class TestBootstrapInputs:
         expected_cloud = jnp.broadcast_to(expected[:, None], (3, 4))
         assert jnp.array_equal(post.filtered_particles[:, :, 0], expected_cloud)
         assert post.marginal_loglik == pytest.approx(0.0)
+
+    @pytest.mark.parametrize(
+        ("inputs", "message"),
+        [
+            (jnp.zeros((3, 1, 1)), "inputs must have shape"),
+            (jnp.zeros((2, 1)), "inputs must have leading dimension"),
+        ],
+    )
+    def test_inputs_reject_malformed_shapes_at_public_entry(
+        self, inputs, message
+    ):
+        def initial_sampler(key, n, input_t):
+            del key, input_t
+            return jnp.zeros((n, 1))
+
+        def transition_sampler(key, state, input_t):
+            del key, input_t
+            return state
+
+        def log_observation_fn(emission, state, input_t):
+            del emission, state, input_t
+            return jnp.array(0.0)
+
+        with pytest.raises(ValueError, match=message):
+            bootstrap_filter(
+                key=jr.key(0),
+                initial_sampler=initial_sampler,
+                transition_sampler=transition_sampler,
+                log_observation_fn=log_observation_fn,
+                emissions=jnp.zeros((3, 1)),
+                num_particles=4,
+                inputs=inputs,
+            )

@@ -16,8 +16,8 @@ PRNGKeyT = PRNGKeyArray
 Scalar = float | Float[Array, ""]
 """Python float or scalar JAX array with float dtype."""
 
-InputSequence = Float[Array, " ntime"] | Float[Array, "ntime input_dim"]
-"""Rank-one or rank-two sequence of per-step exogenous inputs."""
+InputSequence = Float[Array, "*input_shape"]
+"""Candidate input sequence; public entry points validate rank one or two."""
 
 
 @runtime_checkable
