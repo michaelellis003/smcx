@@ -18,6 +18,10 @@ The theme: extend the two things that differentiate smcx — the
 diagnostics suite and the plain-callable model boundary — and fix
 the small carry-overs the 2026-07 library review surfaced.
 
+- [ ] All-algorithm correctness-first profiling campaign: CPU versus
+      jax-mps across linear/nonlinear, parameter-learning, tempering,
+      SMC², resampling, dense/PyTree representation, and optional Dynamax
+      callback workloads; use the measured bottlenecks to prioritize fixes.
 - [ ] Correct the Pareto-k warning text: weight variance is infinite
       for all k ≥ 0.5; 0.7 is the practical-reliability threshold
       (PSIS rate results), not the infinite-variance boundary.
@@ -61,8 +65,6 @@ the small carry-overs the 2026-07 library review surfaced.
 - [x] ~~jax-mps CI leg: `SMCX_TEST_PLATFORM=mps` as a scheduled or
       best-effort job on macOS runners (they expose a paravirtual
       Metal device).~~
-- [ ] Benchmark harness re-aim: CPU vs jax-mps on the shipped
-      filters, replacing the retired MLX-native comparison.
 - [ ] Thesis-notebook Metal appendix once a jax-mps release ships
       the scan-history fixes (#219/#220): large-N f32 filtering on
       the GPU, f64 oracle checks staying on CPU.
