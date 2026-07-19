@@ -26,8 +26,8 @@ pip install "smcx[metal]"   # + jax-mps for Apple-silicon GPUs
 - **Parameter inference**: `smc2` — nested SMC² with vmapped inner
   filters and PMMH rejuvenation.
 - **Resampling**: systematic, stratified, multinomial, and residual —
-  one contract, log-domain weights throughout, float32-safe query
-  grids.
+  one probability-space contract and float32-safe query grids; filters
+  retain their weights in the log domain.
 - **Diagnostics**: ESS traces, quantile tail-ESS, Pareto-k
   reliability, single-run log-evidence variance from the genealogy
   (Lee & Whiteley 2018), trajectory reconstruction, CRPS,
@@ -36,10 +36,20 @@ pip install "smcx[metal]"   # + jax-mps for Apple-silicon GPUs
 - `store_history=False` on every filter drops memory from O(T·N) to
   O(N) with a bit-identical evidence estimate.
 
-Every sampler is validated against exact references — Kalman oracles
-for the filters, conjugate evidence for tempering, grid-integrated
-posteriors for SMC² — with Monte-Carlo-calibrated gates, not loose
-tolerances.
+Permanent SMC/PF tests use dependency-free mathematical oracles and fixed,
+Monte-Carlo-calibrated gates. The outside SMC/PF implementations were run once
+in isolated environments; their pinned sources, licenses, settings, and
+numerical summaries are retained beside the corresponding unit tests, not as
+test dependencies. Diagnostics retain their separately documented ArviZ
+cross-validation dependency.
+
+| Component | Permanent oracle | One-time independent comparison |
+|---|---|---|
+| Resampling | Exact offspring moments | particles, BlackJAX |
+| Bootstrap / APF / guided | Kalman evidence and moments | particles; TFP where applicable |
+| Liu–West | Conjugate posterior | nimbleSMC/NIMBLE under matched semantics |
+| Tempering | Conjugate evidence and moments | particles, BlackJAX |
+| SMC² | Grid-converged Kalman integral | particles; limited TFP diagnostic |
 
 ## Quick start
 
@@ -85,7 +95,7 @@ post = smcx.bootstrap_filter(
     emissions,
     num_particles=10_000,
 )
-post.marginal_loglik  # unbiased evidence estimate (log-domain)
+post.marginal_loglik  # log of an unbiased evidence estimate
 smcx.diagnose(post)  # ESS / diversity / Pareto-k health summary
 ```
 
@@ -99,8 +109,8 @@ their final argument.
 smcx is deliberately just the inference engine: it defines no model
 classes and no distributions. Models enter as JAX callables — your
 own closures, or thin wrappers around a model library such as
-[Dynamax](https://github.com/probml/dynamax) (the test suite itself
-uses Dynamax models this way).
+[Dynamax](https://github.com/probml/dynamax) (the example notebook uses
+Dynamax models this way; unit tests use frozen dependency-free oracles).
 
 ## Apple silicon
 
@@ -147,7 +157,8 @@ Feynman-Kac architecture),
 contract), [Dynamax](https://github.com/probml/dynamax) (container
 conventions), TensorFlow Probability (criterion/trace hooks), and
 design lessons from PyMC, FilterPy, pfilter, pyfilter, Stone Soup,
-pomp, nimbleSMC, and ArviZ. See `CITATION.cff` for formal references.
+pomp, nimbleSMC, and ArviZ. Algorithm docstrings and validation tests carry
+the formal references and immutable implementation pins.
 
 ## License
 
