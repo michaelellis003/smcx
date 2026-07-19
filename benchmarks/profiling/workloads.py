@@ -1046,6 +1046,13 @@ def _prepare_temper(
         }
 
     def check_replicates(posteriors):
+        particle_clouds = [
+            np.asarray(
+                jax.device_get(posterior.particles),
+                dtype=np.float64,
+            )
+            for posterior in posteriors
+        ]
         evidence_ratios = [
             math.exp(
                 float(jax.device_get(posterior.marginal_loglik))
@@ -1058,31 +1065,19 @@ def _prepare_temper(
             oracle=1.0,
         )
         posterior_mean = _replicated_vector_mean_gate(
-            [
-                np.mean(
-                    np.asarray(
-                        jax.device_get(posterior.particles),
-                        dtype=np.float64,
-                    ),
-                    axis=0,
-                )
-                for posterior in posteriors
-            ],
+            [np.mean(particles, axis=0) for particles in particle_clouds],
             oracle=oracle.posterior_mean,
         )
         posterior_second_moment = _replicated_vector_mean_gate(
-            [
-                np.mean(
-                    np.asarray(
-                        jax.device_get(posterior.particles),
-                        dtype=np.float64,
-                    )
-                    ** 2,
-                    axis=0,
-                )
-                for posterior in posteriors
-            ],
+            [np.mean(particles**2, axis=0) for particles in particle_clouds],
             oracle=oracle.posterior_variance + oracle.posterior_mean**2,
+        )
+        posterior_within_variance = _replicated_scalar_mean_gate(
+            [
+                float(np.mean(np.var(particles, axis=0, ddof=1)))
+                for particles in particle_clouds
+            ],
+            oracle=float(oracle.posterior_variance),
         )
         return {
             "evidence_ratio": evidence,
@@ -1090,9 +1085,11 @@ def _prepare_temper(
                 evidence["passed"]
                 and posterior_mean["passed"]
                 and posterior_second_moment["passed"]
+                and posterior_within_variance["passed"]
             ),
             "posterior_mean": posterior_mean,
             "posterior_second_moment": posterior_second_moment,
+            "posterior_within_variance": posterior_within_variance,
             "replicates": len(posteriors),
         }
 

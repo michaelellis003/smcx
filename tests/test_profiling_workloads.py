@@ -11,7 +11,10 @@ import pytest
 
 from benchmarks.profiling import workloads as profiling_workloads
 from benchmarks.profiling.common import WORKLOADS, plan_cells
-from benchmarks.profiling.models import gaussian_target_oracle
+from benchmarks.profiling.models import (
+    gaussian_target_oracle,
+    make_gaussian_target_callbacks,
+)
 from benchmarks.profiling.workloads import prepare_workload
 
 
@@ -506,6 +509,49 @@ def test_temper_gate_enforces_full_contract() -> None:
     nonuniform_result = prepared.check(output._replace(log_weights=nonuniform))
     assert not nonuniform_result["uniform_log_weights_ok"]
     assert not nonuniform_result["passed"]
+
+
+def test_temper_replicates_reject_within_cloud_collapse() -> None:
+    parameters = WORKLOADS["temper_gaussian"].smoke_parameters
+    prepared = prepare_workload(
+        "temper_gaussian",
+        parameters=parameters,
+        seed=20260719,
+    )
+    template = prepared.operation(*prepared.arguments)
+    callbacks = make_gaussian_target_callbacks(
+        dimension=parameters["dimension"],
+    )
+    oracle = gaussian_target_oracle(
+        dimension=parameters["dimension"],
+        observation=np.asarray(callbacks.observation, dtype=np.float32),
+        observation_variance=float(callbacks.observation_variance),
+    )
+    offset = np.sqrt(oracle.posterior_variance)
+    outputs = []
+    for sign in (-1.0, 1.0):
+        point = jnp.asarray(
+            oracle.posterior_mean + sign * offset,
+            dtype=jnp.float32,
+        )
+        collapsed = jnp.broadcast_to(point, template.particles.shape)
+        outputs.extend([
+            template._replace(
+                particles=collapsed,
+                marginal_loglik=jnp.asarray(
+                    oracle.log_evidence,
+                    dtype=jnp.float32,
+                ),
+            )
+            for _ in range(6)
+        ])
+
+    replicated = prepared.check_replicates(outputs)
+
+    assert replicated["posterior_mean"]["passed"]
+    assert replicated["posterior_second_moment"]["passed"]
+    assert not replicated["posterior_within_variance"]["passed"]
+    assert not replicated["passed"]
 
 
 def test_temper_oracle_uses_callback_f32_observation_variance(

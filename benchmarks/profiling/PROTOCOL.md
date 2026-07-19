@@ -683,6 +683,79 @@ calls. The current full campaign is 1,794 fresh processes and 15,720 public
 calls. The failed campaign is retained as diagnostic evidence and is not
 performance-eligible; the matrix restarts under the amended contract.
 
+### 2026-07-19 — post-scaling validation-power correction
+
+The first complete scaling campaign ran all 750 timing workers and 144
+validation workers. Twelve mathematical cells failed. The timing artifacts
+remain immutable, and none of the failed cells is eligible for a performance
+claim. The failures exposed two distinct limits rather than one production
+backend defect.
+
+Six resampler cells failed only the eight-way hashed probability projection;
+all sixteen contiguous projections and every algorithm-specific hard invariant
+passed. The gate estimated each coordinate's standard error from only eight
+independent outputs and rejected a complete cell when any of 24 coordinates
+exceeded five estimated standard errors. Scaling applied that rule to 96
+resampler cells, or 2,304 coordinate comparisons. Under the usual Student-t
+calibration, `P(|t_7| > 5) = 0.001565`, so the design expects about 3.61 null
+coordinate exceedances before accounting for dependence. The six observed
+cell failures are therefore not evidence of biased kernels.
+
+A one-time 64-replicate diagnostic retained the original eight keys and added
+56 deterministic independent keys. All six suspect cells passed; their worst
+absolute standardized error fell from `5.12--7.40` to `0.81--1.86`. Registered
+resampler validation now uses 64 replicates. Its versioned key schedule keeps
+`split(key(20260720), 8)` as the exact prefix and extends it with a fixed,
+tagged `fold_in` sequence, so the failed committed draw is never rerolled and
+future extensions are prefix-stable. At 64 replicates,
+`P(|t_63| > 5) = 4.857e-6`; the Bonferroni sum over all 2,304 coordinates is
+`0.0112`. These t calculations are design diagnostics under the corresponding
+replicate-normal approximation, not claims that the dependent partition
+coordinates are independent. Monte Carlo standard errors and the finite
+replicate design follow Morris et al. (2019)
+([DOI](https://doi.org/10.1002/sim.8086)).
+
+The remaining six failures were the same three G1 tempering arms on CPU and
+MPS: `(d=32, N=1,000)`, `(d=128, N=1,000)`, and
+`(d=128, N=10,000)`. The backend agreement and a variance decomposition show
+finite-resource particle impoverishment, not an MPS discrepancy. With five
+RWM sweeps per stage, the average within-run particle variance retained
+`88.0%`, `19.7%`, and `34.5%` of the exact posterior variance on CPU
+(`87.6%`, `20.2%`, and `34.9%` on MPS). At `d=128`, every coordinate's raw
+second-moment error was negative and 116--122 of 128 coordinates failed.
+Evidence-ratio means of `1e8--7e9` were not rejected only because their Monte
+Carlo error was still larger; those evidence checks are visibly low-precision,
+not affirmative validation.
+
+The tempering oracle gate therefore adds the replicated mean of each cloud's
+coordinate-averaged, `ddof=1` within-cloud variance. This catches a particle
+cloud that collapses around a run-specific random mean even when repeated raw
+moments happen to match the target. A fixed-key CPU tuning diagnostic confirms
+the invariant RWM kernel moves toward the correct cloud as rejuvenation rises:
+
+| Dimension | Particles | 5 sweeps | 20 sweeps | 50 sweeps |
+|---:|---:|---:|---:|---:|
+| 32 | 1,000 | 88.0% | 96.0% | — |
+| 32 | 10,000 | 91.5% | 99.3% | — |
+| 128 | 1,000 | 19.7% | 44.8% | 70.1% |
+| 128 | 10,000 | 34.5% | 68.0% | 91.1% |
+
+These are accuracy diagnostics, not timed results. They support the expected
+dimension-dependent mixing cost of local random-walk mutation. Five moves are
+a workload/default, never an accuracy guarantee. Changing that default or the
+mutation kernel would change fixed-key numerical output and requires a new ADR
+and the repository's output-change process. See Roberts, Gelman, and Gilks
+(1997) ([DOI](https://doi.org/10.1214/aoap/1034625254)) and Beskos, Crisan,
+and Jasra (2014) ([DOI](https://doi.org/10.1214/13-AAP951)).
+
+The stronger resampler gate changes baseline to 120 timing workers, 22
+validation workers, 960 timed calls, and 712 validation calls. Scaling remains
+750 timing workers and 144 validation workers but rises to 6,840 validation
+calls. The current full campaign remains 1,794 fresh processes and now
+schedules 21,544 public calls. The failed scaling campaign and fixed-prefix
+diagnostic are retained in the dated results; no resampling implementation is
+changed in response to the false rejections.
+
 Primary algorithm and model sources used to define the campaign are:
 
 - Gordon, Salmond, and Smith (1993), bootstrap filtering

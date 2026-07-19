@@ -312,6 +312,32 @@ def _measure_host_shell(
     return output, lifecycle, first_execution_s, steady_times, None
 
 
+_RESAMPLER_COMMITTED_KEY_COUNT = 8
+_RESAMPLER_EXTENSION_TAG = 0x534D4358
+
+
+def _correctness_keys(
+    jax: Any,
+    *,
+    workload: str,
+    count: int,
+) -> Any:
+    """Return fixed validation keys without rerolling resampler failures."""
+    root = jax.random.key(DEFAULT_SEED + 1)
+    if not workload.startswith("resample_"):
+        return jax.random.split(root, count)
+
+    committed = jax.random.split(root, _RESAMPLER_COMMITTED_KEY_COUNT)
+    if count <= _RESAMPLER_COMMITTED_KEY_COUNT:
+        return committed[:count]
+    extension_root = jax.random.fold_in(root, _RESAMPLER_EXTENSION_TAG)
+    extension = jax.numpy.stack([
+        jax.random.fold_in(extension_root, index)
+        for index in range(count - _RESAMPLER_COMMITTED_KEY_COUNT)
+    ])
+    return jax.numpy.concatenate((committed, extension))
+
+
 def _run_correctness_replicates(
     prepared: Any,
     arguments: tuple[Any, ...],
@@ -320,9 +346,10 @@ def _run_correctness_replicates(
     device: Any,
     executable: Any,
     jax: Any,
+    workload: str,
 ) -> list[Any]:
     """Run independent, fenced outputs outside all measured regions."""
-    keys = jax.random.split(jax.random.key(DEFAULT_SEED + 1), count)
+    keys = _correctness_keys(jax, workload=workload, count=count)
     outputs = []
     operation = executable if executable is not None else prepared.operation
     for key in keys:
@@ -408,6 +435,7 @@ def run_cell(cell: Cell) -> dict[str, Any]:
             device=device,
             executable=executable,
             jax=jax,
+            workload=cell.workload,
         )
         replicated = _jsonable(prepared.check_replicates(outputs))
         if not isinstance(replicated, dict):
@@ -511,6 +539,7 @@ def run_validation(cell: Cell) -> dict[str, Any]:
         device=device,
         executable=executable,
         jax=jax,
+        workload=cell.workload,
     )
     replicated = _jsonable(prepared.check_replicates(outputs))
     if not isinstance(replicated, dict):

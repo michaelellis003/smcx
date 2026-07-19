@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 import benchmarks.profiling.run as run_module
+import benchmarks.profiling.worker as worker_module
 from benchmarks.profiling.common import (
     ALGORITHMS,
     PROFILES,
@@ -382,6 +383,44 @@ def test_scaling_profile_covers_every_preregistered_axis() -> None:
         100_000,
         1_000_000,
     }
+    assert all(cell.correctness_replicates == 64 for cell in resampler_cells)
+
+
+def test_resampler_validation_keys_preserve_committed_prefix() -> None:
+    root = jr.key(SEED_CONTRACT["validation_seed"])
+    committed = jr.split(root, 8)
+
+    keys_64 = worker_module._correctness_keys(
+        jax,
+        workload="resample_systematic",
+        count=64,
+    )
+    keys_80 = worker_module._correctness_keys(
+        jax,
+        workload="resample_systematic",
+        count=80,
+    )
+
+    np.testing.assert_array_equal(
+        jr.key_data(keys_64[:8]),
+        jr.key_data(committed),
+    )
+    np.testing.assert_array_equal(
+        jr.key_data(keys_80[:64]),
+        jr.key_data(keys_64),
+    )
+    key_rows = np.asarray(jr.key_data(keys_80))
+    assert np.unique(key_rows, axis=0).shape[0] == 80
+
+    unchanged = worker_module._correctness_keys(
+        jax,
+        workload="bootstrap_lgssm",
+        count=3,
+    )
+    np.testing.assert_array_equal(
+        jr.key_data(unchanged),
+        jr.key_data(jr.split(root, 3)),
+    )
 
 
 def test_oracle_backed_inferential_variants_validate_in_block_zero() -> None:
