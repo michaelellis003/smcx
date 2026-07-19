@@ -8,7 +8,8 @@ y_t = x_t + N(0, r). Supports missing observations (NaN y_t skips
 the update — the exact treatment, matching the masking recipe users
 apply in log_observation_fn) and an optional control input u_t
 applied to the transition INTO t (inputs[0] unused by the
-transition, per the ADR-0008 alignment).
+transition; an input-conditioned initial distribution belongs in
+``m0`` and ``p0`` for this oracle).
 """
 
 import numpy as np

@@ -7,11 +7,16 @@ Cross-validates against the Dynamax Kalman filter (exact solution
 for linear Gaussian SSMs).
 """
 
+import math
+
+import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 import pytest
 
 from smcx.bootstrap import bootstrap_filter
+from tests._kalman import kalman_1d
 from tests.conftest import _mvn_logpdf, _mvn_sample
 
 # ---------------------------------------------------------------------------
@@ -289,3 +294,96 @@ class TestBootstrapInputs:
                 num_particles=4,
                 inputs=inputs,
             )
+
+    def test_controlled_lgssm_matches_kalman_oracle(self):
+        a, b = 0.9, 0.7
+        q, r = 0.25, 1.0
+        m0, p0 = 0.0, 1.0
+        num_timesteps = 40
+        rng = np.random.default_rng(9)
+        inputs = rng.normal(size=num_timesteps)
+        states = np.empty(num_timesteps)
+        states[0] = rng.normal(m0, math.sqrt(p0))
+        for t in range(1, num_timesteps):
+            states[t] = (
+                a * states[t - 1]
+                + b * inputs[t]
+                + rng.normal(0.0, math.sqrt(q))
+            )
+        observations = states + rng.normal(
+            0.0, math.sqrt(r), size=num_timesteps
+        )
+        exact_loglik, _, _ = kalman_1d(
+            observations, a, q, r, m0, p0, b=b, u=inputs
+        )
+
+        def initial_sampler(key, n, input_t):
+            del input_t
+            return m0 + math.sqrt(p0) * jr.normal(key, (n, 1))
+
+        def transition_sampler(key, state, input_t):
+            return (
+                a * state
+                + b * input_t
+                + math.sqrt(q) * jr.normal(key, state.shape)
+            )
+
+        def log_observation_fn(emission, state, input_t):
+            del input_t
+            return -0.5 * (
+                math.log(2.0 * math.pi * r) + (emission[0] - state[0]) ** 2 / r
+            )
+
+        emissions_arr = jnp.asarray(observations)[:, None]
+        inputs_arr = jnp.asarray(inputs)
+        estimates = np.asarray([
+            bootstrap_filter(
+                jr.key(seed),
+                initial_sampler,
+                transition_sampler,
+                log_observation_fn,
+                emissions_arr,
+                5_000,
+                inputs=inputs_arr,
+            ).marginal_loglik
+            for seed in range(8)
+        ])
+
+        # For R independent estimates, SE(mean(log Z-hat)) = s/sqrt(R).
+        # The lower bound includes the lognormal approximation to Jensen
+        # bias, -s^2/2; five SE gives an MC-error-honest tolerance.
+        sd = estimates.std(ddof=1)
+        se = sd / math.sqrt(estimates.size)
+        error = estimates.mean() - exact_loglik
+        assert -(5.0 * se + 0.5 * sd**2) <= error <= 5.0 * se
+
+    def test_inputs_remain_dynamic_under_jit(self):
+        def initial_sampler(key, n, input_t):
+            del key
+            return jnp.full((n, 1), input_t[0])
+
+        def transition_sampler(key, state, input_t):
+            del key
+            return state + input_t
+
+        def log_observation_fn(emission, state, input_t):
+            return 0.0 * (emission[0] + state[0] + input_t[0])
+
+        @jax.jit
+        def run(input_values):
+            post = bootstrap_filter(
+                jr.key(0),
+                initial_sampler,
+                transition_sampler,
+                log_observation_fn,
+                jnp.zeros((4, 1)),
+                4,
+                inputs=input_values,
+                store_history=False,
+            )
+            return post.filtered_particles[0, 0, 0]
+
+        zero_result = run(jnp.zeros((4, 1)))
+        one_result = run(jnp.ones((4, 1)))
+        assert jnp.array_equal(zero_result, jnp.array(0.0))
+        assert jnp.array_equal(one_result, jnp.array(4.0))
