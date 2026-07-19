@@ -27,11 +27,9 @@ the small carry-overs the 2026-07 library review surfaced.
 - [ ] Single-run log-ML variance estimators (Chan & Lai 2013,
       Lee & Whiteley 2018): Monte Carlo variance from one run's
       genealogy instead of `replicated_log_ml`'s R repeat runs.
-- [ ] Exogenous-inputs channel (ADR required): per-step covariates
-      and the time index are invisible to callbacks, which blocks
-      controlled/covariate-driven models. The MLX-era ADR-0008
-      channel did not survive the pivot; re-decide it for the JAX
-      core.
+- [x] ~~Exogenous-inputs channel (ADR-0022): explicit per-step
+      covariates for controlled and covariate-driven models across
+      all filters and simulation.~~
 - [ ] `to_arviz()` InferenceData export (ADR-0020): the single
       reporting bridge — independent runs as chains, weighted clouds
       resampled to draws — so ArviZ owns plots, R-hat, and posterior

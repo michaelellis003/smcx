@@ -91,7 +91,10 @@ smcx.diagnose(post)  # ESS / diversity / Pareto-k health summary
 
 Callbacks are per-particle; smcx vmaps them internally. Everything
 takes an explicit PRNG key, and posteriors are NamedTuples — ordinary
-JAX pytrees.
+JAX pytrees. The four filters and `simulate` accept a keyword-only
+`inputs` sequence for controlled dynamics and covariate-driven
+observations; input-aware callbacks receive the aligned `input_t` as
+their final argument.
 
 smcx is deliberately just the inference engine: it defines no model
 classes and no distributions. Models enter as JAX callables — your
