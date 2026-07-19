@@ -357,11 +357,10 @@ def _conditional_resample(
         identity) indices.
     """
     cur_ess = compute_ess(log_weights)
-    w_norm = normalize(log_weights)
     do_resample: Array = jnp.asarray(cur_ess < threshold)
     ancestors = lax.cond(
         do_resample,
-        lambda: resampling_fn(key, w_norm, num_particles),
+        lambda: resampling_fn(key, normalize(log_weights), num_particles),
         lambda: identity,
     )
     return do_resample, ancestors
