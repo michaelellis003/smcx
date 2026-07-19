@@ -93,6 +93,17 @@ class ParamInitialSampler(Protocol):
 
 
 @runtime_checkable
+class StaticLogDensity(Protocol):
+    """Evaluate one dense static-target log-density."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
 class TransitionSampler(Protocol):
     """Draw one particle from the transition distribution."""
 

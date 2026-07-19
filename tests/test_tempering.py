@@ -28,8 +28,10 @@ Algorithm: Del Moral, Doucet, and Jasra (2006),
 https://doi.org/10.1111/j.1467-9868.2006.00553.x
 """
 
+import importlib
 import math
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
@@ -71,6 +73,21 @@ def _model():
 def _run(seed, n=4000, **kw):
     init, log_prior, log_lik = _model()
     return smcx.temper(jr.key(seed), init, log_prior, log_lik, n, **kw)
+
+
+def _small_cache_model():
+    observation = jnp.array([0.25], dtype=jnp.float64)
+
+    def init(_key, n):
+        return jnp.linspace(-1.0, 1.0, n, dtype=jnp.float64)[:, None]
+
+    def log_prior(x):
+        return -0.5 * jnp.sum(x**2)
+
+    def log_lik(x):
+        return -0.5 * jnp.sum((observation - x) ** 2 / 0.7)
+
+    return init, log_prior, log_lik
 
 
 class TestEvidence:
@@ -152,6 +169,127 @@ class TestMechanics:
             np.array(a.marginal_loglik), np.array(b.marginal_loglik)
         )
         assert np.array_equal(np.array(a.particles), np.array(b.particles))
+
+    def test_rwm_factory_is_reused_for_same_callbacks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        tempering = importlib.import_module("smcx.tempering")
+        tempering._cached_rwm_sweep.cache_clear()
+        original_factory = tempering._build_rwm_sweep
+        builds = 0
+
+        def recording_factory(*args, **kwargs):
+            nonlocal builds
+            builds += 1
+            return original_factory(*args, **kwargs)
+
+        monkeypatch.setattr(
+            tempering,
+            "_build_rwm_sweep",
+            recording_factory,
+        )
+        init, log_prior, log_lik = _small_cache_model()
+        try:
+            for seed in (10, 11):
+                smcx.temper(
+                    jr.key(seed),
+                    init,
+                    log_prior,
+                    log_lik,
+                    5,
+                    num_mcmc_steps=2,
+                    target_ess=0.6,
+                )
+            cache_info = tempering._cached_rwm_sweep.cache_info()
+        finally:
+            tempering._cached_rwm_sweep.cache_clear()
+
+        assert builds == 1
+        assert cache_info.hits == 1
+        assert cache_info.misses == 1
+
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu",
+        reason="frozen CPU/x64 arithmetic contract",
+    )
+    def test_rwm_factory_preserves_frozen_fixed_key_output(self):
+        init, log_prior, log_lik = _small_cache_model()
+        posterior = smcx.temper(
+            jr.key(314159),
+            init,
+            log_prior,
+            log_lik,
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.6,
+        )
+
+        np.testing.assert_array_equal(
+            np.asarray(posterior.particles),
+            np.array([
+                [1.5109879397100636],
+                [0.8820825513186982],
+                [0.0],
+                [0.3108199100404425],
+                [-0.4867093863813025],
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.log_weights),
+            np.full(5, -1.6094379124341003),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.marginal_loglik),
+            np.asarray(-0.33449690533561793),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.temperatures),
+            np.array([1.0]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.ess),
+            np.array([4.5218752201463674]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.acceptance_rates),
+            np.array([0.4000000134110451]),
+        )
+
+    def test_unhashable_callbacks_use_uncached_rwm_factory(self):
+        class UnhashableCallback:
+            __hash__ = None
+
+            def __init__(self, callback):
+                self.callback = callback
+
+            def __call__(self, value):
+                return self.callback(value)
+
+        init, log_prior, log_lik = _small_cache_model()
+        expected = smcx.temper(
+            jr.key(2718),
+            init,
+            log_prior,
+            log_lik,
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.6,
+        )
+        actual = smcx.temper(
+            jr.key(2718),
+            init,
+            UnhashableCallback(log_prior),
+            UnhashableCallback(log_lik),
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.6,
+        )
+
+        for expected_value, actual_value in zip(expected, actual, strict=True):
+            np.testing.assert_array_equal(
+                np.asarray(actual_value),
+                np.asarray(expected_value),
+            )
 
     def test_degenerate_likelihood_raises(self):
         init, log_prior, _ = _model()
