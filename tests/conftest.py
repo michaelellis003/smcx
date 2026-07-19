@@ -34,6 +34,7 @@ import jax.scipy.stats as jstats
 import pytest
 
 import smcx
+from tests._lgssm_reference import EMISSIONS, STATES
 
 
 def _mvn_sample(key, mean, cov, shape=()):
@@ -83,16 +84,9 @@ def lgssm_params():
 
 
 @pytest.fixture
-def lgssm_data(key, lgssm_params):
-    """Simulate T=50 observations from the 1-D LGSSM.
+def lgssm_data():
+    """Return frozen externally generated 1-D LGSSM data.
 
     Returns (states, emissions) each of shape (50, 1).
     """
-    from dynamax.linear_gaussian_ssm.inference import (
-        lgssm_joint_sample,
-        make_lgssm_params,
-    )
-
-    params = make_lgssm_params(**lgssm_params)
-    states, emissions = lgssm_joint_sample(params, key, num_timesteps=50)
-    return states, emissions
+    return jnp.asarray(STATES), jnp.asarray(EMISSIONS)

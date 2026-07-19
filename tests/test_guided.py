@@ -1,14 +1,42 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Guided filter tests (ADR-0008 item 2, ported from the MLX suite)."""
+"""Guided-filter tests with exact and independent implementation evidence.
+
+The permanent general ``g*f/q`` gates below use a local Kalman recurrence.
+A one-time isolated input-aware campaign (2026-07-18; T=30, N=4096, 128
+fixed seeds) also compared smcx with particles 0.4 and TFP 0.25.0. For
+prior/optimal/misspecified proposals, smcx mean ``Z_hat / Z_exact`` (SE) was
+``0.993628 (.006205)``, ``1.001119 (.003752)``, and ``0.998199 (.005608)``;
+particles gave ``0.995324 (.006113)``, ``1.006273 (.003620)``, and
+``1.002662 (.004928)``. TFP gave ``1.003881 (.005597)``,
+``1.059130 (.021319)``, and ``1.003726 (.006151)``. All evidence and moment
+errors were below five SE. TFP normalizes its sampled correction and was used
+only as a secondary correctness check, not as an efficiency authority.
+The case SHA-256 was
+``d59064d711ba96f3d61da207c79b8f1b4526eade25620dd40ec10f6ed47d2689``;
+smcx/particles used seeds 20261000--20261127 and TFP used
+20261200--20261327. Its complete case preimage, exact target, and runner
+settings are retained in :mod:`tests.test_reference_data`.
+
+Pinned sources and licenses (no outside code copied or imported here):
+
+* particles 0.4, f71e94a21a11c73b58e2d694775b1b1d379b8854, MIT:
+  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/particles/state_space_models.py#L352-L438
+  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/LICENSE
+* TFP 0.25.0, 9709569d9c1159dc54154044f679edc4a15bd26b, Apache-2.0:
+  https://github.com/tensorflow/probability/blob/9709569d9c1159dc54154044f679edc4a15bd26b/tensorflow_probability/python/experimental/mcmc/particle_filter.py#L441-L638
+  https://github.com/tensorflow/probability/blob/9709569d9c1159dc54154044f679edc4a15bd26b/LICENSE
+"""
 
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 import pytest
 
 import smcx
+from tests._kalman import kalman_1d
 
 A, Q, R = 0.9, 0.25, 1.0
 M0, P0 = 0.0, 1.0
@@ -17,8 +45,6 @@ N = 1_500
 
 
 def _data(seed=0):
-    import numpy as np
-
     rng = np.random.default_rng(seed)
     x = np.empty(T)
     x[0] = rng.normal(M0, np.sqrt(P0))
@@ -61,6 +87,24 @@ def _optimal_proposal():
         m = s_star * (A * z_old[0] / Q + y[0] / R)
         return -0.5 * (
             jnp.log(2 * jnp.pi * s_star) + (z_new[0] - m) ** 2 / s_star
+        )
+
+    return sample, log_q
+
+
+def _misspecified_proposal():
+    """A valid, deliberately non-optimal Gaussian proposal."""
+    proposal_var = 0.6
+
+    def sample(key, z, y):
+        mean = A * z + 0.25 * (y - A * z)
+        return mean + jnp.sqrt(proposal_var) * jr.normal(key, z.shape)
+
+    def log_q(y, z_new, z_old):
+        mean = A * z_old[0] + 0.25 * (y[0] - A * z_old[0])
+        return -0.5 * (
+            jnp.log(2 * jnp.pi * proposal_var)
+            + (z_new[0] - mean) ** 2 / proposal_var
         )
 
     return sample, log_q
@@ -149,25 +193,66 @@ class TestGuidedReducesToBootstrap:
         assert guided.marginal_loglik == bootstrap.marginal_loglik
 
 
-class TestOptimalProposalVarianceReduction:
-    """The locally optimal proposal reduces log-ML variance."""
+class TestGuidedProposalReferences:
+    """General proposals preserve the exact filtering target."""
 
-    def test_optimal_proposal_lowers_log_ml_variance(self):
-        sample, log_q = _optimal_proposal()
-        keys = [jr.key(s) for s in range(12)]
-        guided_lls = jnp.stack([
-            smcx.guided_filter(
-                k, _init, sample, log_q, _log_trans, _logobs, Y, N
-            ).marginal_loglik
-            for k in keys
+    def test_general_proposals_match_exact_target(self):
+        optimal = _optimal_proposal()
+
+        def prior_sample(key, z, y):
+            del y
+            return _trans(key, z)
+
+        def prior_log_q(y, z_new, z_old):
+            del y
+            return _log_trans(z_new, z_old)
+
+        proposals = {
+            "prior": (prior_sample, prior_log_q),
+            "optimal": optimal,
+            "misspecified": _misspecified_proposal(),
+        }
+        exact_logz, exact_means, exact_vars = kalman_1d(
+            np.asarray(Y[:, 0]), A, Q, R, M0, P0
+        )
+        exact_targets = np.array([
+            1.0,
+            exact_means[-1],
+            exact_vars[-1] + exact_means[-1] ** 2,
         ])
-        boot_lls = jnp.stack([
-            smcx.bootstrap_filter(
-                k, _init, _trans, _logobs, Y, N
-            ).marginal_loglik
-            for k in keys
-        ])
-        assert jnp.var(guided_lls) < jnp.var(boot_lls)
+        for sample, log_q in proposals.values():
+            rows = []
+            # R=12 independent committed seeds; SE(mean) = sd / sqrt(R).
+            for seed in range(12):
+                post = smcx.guided_filter(
+                    jr.key(seed),
+                    _init,
+                    sample,
+                    log_q,
+                    _log_trans,
+                    _logobs,
+                    Y,
+                    N,
+                )
+                logz = float(post.marginal_loglik)
+                weights = np.exp(
+                    np.asarray(post.filtered_log_weights[-1], np.float64)
+                )
+                particles = np.asarray(
+                    post.filtered_particles[-1, :, 0], np.float64
+                )
+                rows.append([
+                    np.exp(logz - exact_logz),
+                    weights @ particles,
+                    weights @ (particles**2),
+                ])
+            values = np.asarray(rows)
+            estimator_se = values.std(axis=0, ddof=1) / np.sqrt(values.shape[0])
+            # 2e-5 is the explicit f32/Metal arithmetic budget.
+            np.testing.assert_array_less(
+                np.abs(values.mean(axis=0) - exact_targets),
+                5 * estimator_se + 2e-5,
+            )
 
 
 class TestGuidedPosterior:

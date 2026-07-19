@@ -1,15 +1,12 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for smcx.diagnostics.
-
-Cross-validates against Dynamax Kalman filter and verifies
-mathematical properties of diagnostic functions.
-"""
+"""Tests for smcx.diagnostics against frozen exact references."""
 
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 import pytest
 
 from smcx.bootstrap import bootstrap_filter
@@ -27,6 +24,7 @@ from smcx.diagnostics import (
     weighted_quantile,
     weighted_variance,
 )
+from tests._kalman import kalman_1d
 from tests.conftest import _mvn_logpdf, _mvn_sample
 
 
@@ -72,15 +70,11 @@ class TestWeightedMean:
 
     def test_weighted_mean_matches_kalman(self, lgssm_params, lgssm_data):
         """PF weighted means should track Kalman filtered means."""
-        from dynamax.linear_gaussian_ssm.inference import (
-            lgssm_filter,
-            make_lgssm_params,
-        )
-
         _, emissions = lgssm_data
-        params = make_lgssm_params(**lgssm_params)
-        kalman_post = lgssm_filter(params, emissions)
-        kalman_means = kalman_post.filtered_means
+        _, kalman_means, _ = kalman_1d(
+            np.asarray(emissions[:, 0]), 0.9, 0.25, 1.0, 0.0, 1.0
+        )
+        kalman_means = jnp.asarray(kalman_means)[:, None]
 
         pf_post = _run_bootstrap(lgssm_params, lgssm_data)
         pf_means = weighted_mean(pf_post)
@@ -756,9 +750,16 @@ class TestCumulativeLogScore:
         """Last element should equal marginal_loglik."""
         pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=1_000)
         result = cumulative_log_score(pf_post)
-        assert float(result[-1]) == pytest.approx(
-            float(pf_post.marginal_loglik), abs=1e-6
-        )
+        f64 = jnp.asarray(pf_post.marginal_loglik).dtype == jnp.float64
+        if f64:
+            assert float(result[-1]) == pytest.approx(
+                float(pf_post.marginal_loglik), abs=1e-6
+            )
+        else:
+            # The cumulative f32 reduction may differ by several ulps.
+            assert float(result[-1]) == pytest.approx(
+                float(pf_post.marginal_loglik), rel=1e-5
+            )
 
     def test_cumulative_log_score_monotone_structure(
         self, lgssm_params, lgssm_data
