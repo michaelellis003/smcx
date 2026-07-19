@@ -28,7 +28,6 @@ Algorithm: Del Moral, Doucet, and Jasra (2006),
 https://doi.org/10.1111/j.1467-9868.2006.00553.x
 """
 
-import importlib
 import math
 
 import jax
@@ -75,7 +74,7 @@ def _run(seed, n=4000, **kw):
     return smcx.temper(jr.key(seed), init, log_prior, log_lik, n, **kw)
 
 
-def _small_cache_model():
+def _small_factory_model():
     observation = jnp.array([0.25], dtype=jnp.float64)
 
     def init(_key, n):
@@ -170,50 +169,72 @@ class TestMechanics:
         )
         assert np.array_equal(np.array(a.particles), np.array(b.particles))
 
-    def test_rwm_factory_is_reused_for_same_callbacks(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        tempering = importlib.import_module("smcx.tempering")
-        tempering._cached_rwm_sweep.cache_clear()
-        original_factory = tempering._build_rwm_sweep
-        builds = 0
+    def test_distinct_hash_equal_likelihood_uses_second_behavior(self):
+        init, log_prior, _ = _small_factory_model()
 
-        def recording_factory(*args, **kwargs):
-            nonlocal builds
-            builds += 1
-            return original_factory(*args, **kwargs)
+        def shifted_log_likelihood(center, value):
+            return -0.5 * jnp.sum((value - center) ** 2 / 0.2)
 
-        monkeypatch.setattr(
-            tempering,
-            "_build_rwm_sweep",
-            recording_factory,
+        class HashEqualLikelihood:
+            def __init__(self, center):
+                self.center = center
+
+            def __hash__(self):
+                return 1
+
+            def __eq__(self, other):
+                return isinstance(other, HashEqualLikelihood)
+
+            def __call__(self, value):
+                return shifted_log_likelihood(self.center, value)
+
+        class FreshLikelihood:
+            def __init__(self, center):
+                self.center = center
+
+            def __call__(self, value):
+                return shifted_log_likelihood(self.center, value)
+
+        smcx.temper(
+            jr.key(30),
+            init,
+            log_prior,
+            HashEqualLikelihood(-1.0),
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.6,
         )
-        init, log_prior, log_lik = _small_cache_model()
-        try:
-            for seed in (10, 11):
-                smcx.temper(
-                    jr.key(seed),
-                    init,
-                    log_prior,
-                    log_lik,
-                    5,
-                    num_mcmc_steps=2,
-                    target_ess=0.6,
-                )
-            cache_info = tempering._cached_rwm_sweep.cache_info()
-        finally:
-            tempering._cached_rwm_sweep.cache_clear()
+        actual = smcx.temper(
+            jr.key(31),
+            init,
+            log_prior,
+            HashEqualLikelihood(1.0),
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.6,
+        )
+        expected = smcx.temper(
+            jr.key(31),
+            init,
+            log_prior,
+            FreshLikelihood(1.0),
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.6,
+        )
 
-        assert builds == 1
-        assert cache_info.hits == 1
-        assert cache_info.misses == 1
+        for expected_value, actual_value in zip(expected, actual, strict=True):
+            np.testing.assert_array_equal(
+                np.asarray(actual_value),
+                np.asarray(expected_value),
+            )
 
     @pytest.mark.skipif(
         jax.default_backend() != "cpu",
         reason="frozen CPU/x64 arithmetic contract",
     )
     def test_rwm_factory_preserves_frozen_fixed_key_output(self):
-        init, log_prior, log_lik = _small_cache_model()
+        init, log_prior, log_lik = _small_factory_model()
         posterior = smcx.temper(
             jr.key(314159),
             init,
@@ -254,42 +275,6 @@ class TestMechanics:
             np.asarray(posterior.acceptance_rates),
             np.array([0.4000000134110451]),
         )
-
-    def test_unhashable_callbacks_use_uncached_rwm_factory(self):
-        class UnhashableCallback:
-            __hash__ = None
-
-            def __init__(self, callback):
-                self.callback = callback
-
-            def __call__(self, value):
-                return self.callback(value)
-
-        init, log_prior, log_lik = _small_cache_model()
-        expected = smcx.temper(
-            jr.key(2718),
-            init,
-            log_prior,
-            log_lik,
-            5,
-            num_mcmc_steps=2,
-            target_ess=0.6,
-        )
-        actual = smcx.temper(
-            jr.key(2718),
-            init,
-            UnhashableCallback(log_prior),
-            UnhashableCallback(log_lik),
-            5,
-            num_mcmc_steps=2,
-            target_ess=0.6,
-        )
-
-        for expected_value, actual_value in zip(expected, actual, strict=True):
-            np.testing.assert_array_equal(
-                np.asarray(actual_value),
-                np.asarray(expected_value),
-            )
 
     def test_degenerate_likelihood_raises(self):
         init, log_prior, _ = _model()

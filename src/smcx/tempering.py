@@ -22,7 +22,6 @@ The adaptive schedule is host-driven (bisection reads ESS values), so
 """
 
 import math
-from functools import lru_cache
 from typing import Protocol, runtime_checkable
 
 import jax.numpy as jnp
@@ -45,7 +44,6 @@ from smcx.weights import log_normalize
 
 _BISECT_ITERS = 60
 _RWM_SCALE = 2.38
-_RWM_SWEEP_CACHE_SIZE = 32
 
 
 @runtime_checkable
@@ -150,58 +148,6 @@ def _build_rwm_sweep(
     return _rwm_sweep
 
 
-@lru_cache(maxsize=_RWM_SWEEP_CACHE_SIZE)
-def _cached_rwm_sweep(
-    log_prior_fn: StaticLogDensity,
-    log_likelihood_fn: StaticLogDensity,
-    n: int,
-    dim: int,
-    num_mcmc_steps: int,
-) -> _RWMSweep:
-    """Return a module-stable jitted RWM sweep from the bounded cache."""
-    return _build_rwm_sweep(
-        log_prior_fn,
-        log_likelihood_fn,
-        n,
-        dim,
-        num_mcmc_steps,
-    )
-
-
-def _get_rwm_sweep(
-    log_prior_fn: StaticLogDensity,
-    log_likelihood_fn: StaticLogDensity,
-    n: int,
-    dim: int,
-    num_mcmc_steps: int,
-) -> _RWMSweep:
-    """Return a cached sweep, falling back for unhashable callables."""
-    cache_key = (
-        log_prior_fn,
-        log_likelihood_fn,
-        n,
-        dim,
-        num_mcmc_steps,
-    )
-    try:
-        hash(cache_key)
-    except TypeError:
-        return _build_rwm_sweep(
-            log_prior_fn,
-            log_likelihood_fn,
-            n,
-            dim,
-            num_mcmc_steps,
-        )
-    return _cached_rwm_sweep(
-        log_prior_fn,
-        log_likelihood_fn,
-        n,
-        dim,
-        num_mcmc_steps,
-    )
-
-
 def temper(
     key: PRNGKeyT,
     initial_sampler: DenseInitialSampler,
@@ -261,7 +207,7 @@ def temper(
         batch_prior(particles)
     )
     log_w = jnp.full((n,), -log_n)  # normalized (LSE == 0)
-    rwm_sweep = _get_rwm_sweep(
+    rwm_sweep = _build_rwm_sweep(
         log_prior_fn,
         log_likelihood_fn,
         n,

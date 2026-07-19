@@ -23,7 +23,6 @@ not jittable; the batched inner kernels are jitted.
 """
 
 import math
-from functools import lru_cache
 from typing import Protocol, cast, runtime_checkable
 
 import jax.numpy as jnp
@@ -47,7 +46,6 @@ from smcx.types import (
 from smcx.weights import ess as compute_ess
 
 _RWM_SCALE = 2.38
-_INNER_KERNEL_CACHE_SIZE = 32
 
 
 @runtime_checkable
@@ -199,58 +197,6 @@ def _build_inner_kernels(
     return inner_init, inner_step
 
 
-@lru_cache(maxsize=_INNER_KERNEL_CACHE_SIZE)
-def _cached_inner_kernels(
-    initial_sampler: ParamInitialStateSampler,
-    transition_sampler: ParamTransitionSampler,
-    log_observation_fn: ParamLogObservationFn,
-    num_theta: int,
-    num_x: int,
-) -> tuple[_InnerInitKernel, _InnerStepKernel]:
-    """Return module-stable inner kernels from the bounded cache."""
-    return _build_inner_kernels(
-        initial_sampler,
-        transition_sampler,
-        log_observation_fn,
-        num_theta,
-        num_x,
-    )
-
-
-def _get_inner_kernels(
-    initial_sampler: ParamInitialStateSampler,
-    transition_sampler: ParamTransitionSampler,
-    log_observation_fn: ParamLogObservationFn,
-    num_theta: int,
-    num_x: int,
-) -> tuple[_InnerInitKernel, _InnerStepKernel]:
-    """Return cached kernels, falling back for unhashable callables."""
-    cache_key = (
-        initial_sampler,
-        transition_sampler,
-        log_observation_fn,
-        num_theta,
-        num_x,
-    )
-    try:
-        hash(cache_key)
-    except TypeError:
-        return _build_inner_kernels(
-            initial_sampler,
-            transition_sampler,
-            log_observation_fn,
-            num_theta,
-            num_x,
-        )
-    return _cached_inner_kernels(
-        initial_sampler,
-        transition_sampler,
-        log_observation_fn,
-        num_theta,
-        num_x,
-    )
-
-
 def smc2(
     key: PRNGKeyT,
     param_initial_sampler: ParamInitialSampler,
@@ -314,7 +260,7 @@ def smc2(
     batch_prior = vmap(log_prior_fn)
 
     # --- batched inner kernels (flatten -> single vmap) ---------------
-    inner_init, inner_step = _get_inner_kernels(
+    inner_init, inner_step = _build_inner_kernels(
         initial_sampler,
         transition_sampler,
         log_observation_fn,

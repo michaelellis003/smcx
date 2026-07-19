@@ -127,7 +127,7 @@ def _run(seed, n_theta=64, n_x=128, ess_threshold=0.0, **kw):
     )
 
 
-def _small_cache_model():
+def _small_factory_model():
     emissions = jnp.array([[0.25], [-0.4], [0.1]], dtype=jnp.float64)
 
     def param_init(key, n_theta):
@@ -250,7 +250,7 @@ class TestInnerKernelReductions:
             transition_sampler,
             log_observation_fn,
             emissions,
-        ) = _small_cache_model()
+        ) = _small_factory_model()
         inner_init, inner_step = smc2_module._build_inner_kernels(
             inner_sampler,
             transition_sampler,
@@ -282,57 +282,78 @@ class TestInnerKernelReductions:
         assert len(lse_calls) == 1
 
 
-class TestInnerKernelCache:
-    """Module-stable inner JITs preserve exact public behavior."""
+class TestCallbackFreshness:
+    """Public calls observe current callback-object behavior."""
 
-    def test_inner_factory_is_reused_for_same_callbacks(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        smc2_module = importlib.import_module("smcx.smc2")
-        smc2_module._cached_inner_kernels.cache_clear()
-        original_factory = smc2_module._build_inner_kernels
-        builds = 0
-
-        def recording_factory(*args, **kwargs):
-            nonlocal builds
-            builds += 1
-            return original_factory(*args, **kwargs)
-
-        monkeypatch.setattr(
-            smc2_module,
-            "_build_inner_kernels",
-            recording_factory,
-        )
-        callbacks = _small_cache_model()
+    def test_mutated_observation_callback_matches_fresh_equivalent(self):
         (
             param_init,
             log_prior,
             inner_init,
             inner_trans,
-            inner_logobs,
+            _,
             emissions,
-        ) = callbacks
-        try:
-            for seed in (10, 11):
-                smcx.smc2(
-                    jr.key(seed),
-                    param_init,
-                    log_prior,
-                    inner_init,
-                    inner_trans,
-                    inner_logobs,
-                    emissions,
-                    3,
-                    4,
-                    ess_threshold=0.0,
-                )
-            cache_info = smc2_module._cached_inner_kernels.cache_info()
-        finally:
-            smc2_module._cached_inner_kernels.cache_clear()
+        ) = _small_factory_model()
 
-        assert builds == 1
-        assert cache_info.hits == 1
-        assert cache_info.misses == 1
+        class MutableObservation:
+            def __init__(self, variance):
+                self.variance = variance
+
+            def __call__(self, emission, state, theta):
+                del theta
+                return -0.5 * (
+                    jnp.log(2.0 * jnp.pi * self.variance)
+                    + (emission[0] - state[0]) ** 2 / self.variance
+                )
+
+        observation = MutableObservation(0.2)
+        smcx.smc2(
+            jr.key(40),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            observation,
+            emissions,
+            3,
+            4,
+            ess_threshold=0.0,
+        )
+        observation.variance = 0.9
+        actual = smcx.smc2(
+            jr.key(41),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            observation,
+            emissions,
+            3,
+            4,
+            ess_threshold=0.0,
+        )
+        expected = smcx.smc2(
+            jr.key(41),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            MutableObservation(0.9),
+            emissions,
+            3,
+            4,
+            ess_threshold=0.0,
+        )
+
+        for expected_value, actual_value in zip(expected, actual, strict=True):
+            np.testing.assert_array_equal(
+                np.asarray(actual_value),
+                np.asarray(expected_value),
+            )
+
+
+class TestInnerKernelFactory:
+    """The typed inner JIT factory preserves exact public behavior."""
 
     @pytest.mark.skipif(
         jax.default_backend() != "cpu",
@@ -346,7 +367,7 @@ class TestInnerKernelCache:
             inner_trans,
             inner_logobs,
             emissions,
-        ) = _small_cache_model()
+        ) = _small_factory_model()
         posterior = smcx.smc2(
             jr.key(314159),
             param_init,
@@ -412,108 +433,6 @@ class TestInnerKernelCache:
             np.asarray(posterior.acceptance_rates),
             np.zeros(3),
         )
-
-    def test_unhashable_callbacks_use_uncached_inner_factory(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        class UnhashableCallback:
-            __hash__ = None
-
-            def __init__(self, callback):
-                self.callback = callback
-
-            def __call__(self, *args):
-                return self.callback(*args)
-
-        smc2_module = importlib.import_module("smcx.smc2")
-        smc2_module._cached_inner_kernels.cache_clear()
-        original_factory = smc2_module._build_inner_kernels
-        callbacks = _small_cache_model()
-        (
-            param_init,
-            log_prior,
-            inner_init,
-            inner_trans,
-            inner_logobs,
-            emissions,
-        ) = callbacks
-        expected = smcx.smc2(
-            jr.key(2718),
-            param_init,
-            log_prior,
-            inner_init,
-            inner_trans,
-            inner_logobs,
-            emissions,
-            3,
-            4,
-            ess_threshold=0.0,
-        )
-        builds = 0
-
-        def recording_factory(*args, **kwargs):
-            nonlocal builds
-            builds += 1
-            return original_factory(*args, **kwargs)
-
-        monkeypatch.setattr(
-            smc2_module,
-            "_build_inner_kernels",
-            recording_factory,
-        )
-        wrapped = (
-            param_init,
-            log_prior,
-            UnhashableCallback(inner_init),
-            UnhashableCallback(inner_trans),
-            UnhashableCallback(inner_logobs),
-            emissions,
-        )
-        (
-            wrapped_param_init,
-            wrapped_log_prior,
-            wrapped_inner_init,
-            wrapped_inner_trans,
-            wrapped_inner_logobs,
-            wrapped_emissions,
-        ) = wrapped
-        try:
-            actual = smcx.smc2(
-                jr.key(2718),
-                wrapped_param_init,
-                wrapped_log_prior,
-                wrapped_inner_init,
-                wrapped_inner_trans,
-                wrapped_inner_logobs,
-                wrapped_emissions,
-                3,
-                4,
-                ess_threshold=0.0,
-            )
-            smcx.smc2(
-                jr.key(2719),
-                wrapped_param_init,
-                wrapped_log_prior,
-                wrapped_inner_init,
-                wrapped_inner_trans,
-                wrapped_inner_logobs,
-                wrapped_emissions,
-                3,
-                4,
-                ess_threshold=0.0,
-            )
-            cache_info = smc2_module._cached_inner_kernels.cache_info()
-        finally:
-            smc2_module._cached_inner_kernels.cache_clear()
-
-        assert builds == 2
-        assert cache_info.hits == 0
-        assert cache_info.misses == 1
-        for expected_value, actual_value in zip(expected, actual, strict=True):
-            np.testing.assert_array_equal(
-                np.asarray(actual_value),
-                np.asarray(expected_value),
-            )
 
 
 class TestNumericalReference:
