@@ -114,6 +114,10 @@ def auxiliary_filter(
         :class:`~smcx.containers.ParticleFilterPosterior` containing
         filtered particles, log weights, ancestor indices, the
         marginal log-likelihood estimate, and ESS trace.
+
+    Raises:
+        ValueError: ``inputs`` is not rank one or two, or its leading
+            dimension does not match ``emissions``.
     """
     inputs_arr = (
         None

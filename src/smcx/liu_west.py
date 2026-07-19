@@ -42,6 +42,7 @@ from smcx.types import (
     InitialSampler,
     InitialSamplerWithInput,
     InputSequence,
+    ParamInitialSampler,
     ParamLogObservationFn,
     ParamLogObservationFnWithInput,
     ParamTransitionSampler,
@@ -59,7 +60,7 @@ _Carry = tuple[Array, Array, Array, Array, Array]
 def _init_liu_west(
     init_key: PRNGKeyT,
     initial_sampler: InitialSampler | InitialSamplerWithInput,
-    param_initial_sampler: InitialSampler,
+    param_initial_sampler: ParamInitialSampler,
     log_observation_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
     first_emission: Array,
     num_particles: int,
@@ -124,7 +125,7 @@ def liu_west_filter(
     | ParamTransitionSamplerWithInput,
     log_observation_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
     log_auxiliary_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
-    param_initial_sampler: InitialSampler,
+    param_initial_sampler: ParamInitialSampler,
     emissions: Float[Array, "ntime emission_dim"],
     num_particles: int,
     shrinkage: float = 0.95,
@@ -188,6 +189,10 @@ def liu_west_filter(
         :class:`~smcx.containers.LiuWestPosterior` containing
         filtered particles, parameters, log weights, ancestor indices,
         the marginal log-likelihood estimate, and ESS trace.
+
+    Raises:
+        ValueError: ``inputs`` is not rank one or two, or its leading
+            dimension does not match ``emissions``.
     """
     inputs_arr = (
         None

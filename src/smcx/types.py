@@ -6,9 +6,9 @@
 Matches the conventions used by Dynamax (``dynamax.types``).
 """
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
 
-from jaxtyping import Array, Float, Int, PRNGKeyArray
+from jaxtyping import Array, Float, Int32, PRNGKeyArray
 
 PRNGKeyT = PRNGKeyArray
 """JAX PRNG key (handles both old and new JAX key formats)."""
@@ -16,8 +16,15 @@ PRNGKeyT = PRNGKeyArray
 Scalar = float | Float[Array, ""]
 """Python float or scalar JAX array with float dtype."""
 
-InputSequence = Float[Array, "*input_shape"]
-"""Candidate input sequence; public entry points validate rank one or two."""
+# Static checkers see the accepted rank-one/rank-two contract. At runtime,
+# beartype must admit any rank so the public plain-Python validator can raise
+# the documented ValueError instead of a wrapper-specific type-check error.
+if TYPE_CHECKING:
+    InputSequence: TypeAlias = (
+        Float[Array, " ntime"] | Float[Array, "ntime input_dim"]
+    )
+else:
+    InputSequence: TypeAlias = Float[Array, "*input_shape"]
 
 
 @runtime_checkable
@@ -40,6 +47,15 @@ class InitialSamplerWithInput(Protocol):
         input_t: Float[Array, " input_dim"],
         /,
     ) -> Float[Array, "num_particles state_dim"]: ...
+
+
+@runtime_checkable
+class ParamInitialSampler(Protocol):
+    """Draw an initial parameter cloud."""
+
+    def __call__(
+        self, key: PRNGKeyT, num_particles: int, /
+    ) -> Float[Array, "num_particles param_dim"]: ...
 
 
 @runtime_checkable
@@ -273,4 +289,4 @@ class ResamplingFn(Protocol):
         weights: Float[Array, " num_particles"],
         num_samples: int,
         /,
-    ) -> Int[Array, " num_samples"]: ...
+    ) -> Int32[Array, " num_samples"]: ...

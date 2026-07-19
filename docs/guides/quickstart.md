@@ -113,6 +113,7 @@ model generates and filters the data:
 ```python
 controls = jnp.sin(jnp.linspace(0.0, 4.0 * jnp.pi, 100))[:, None]
 control_scale = 0.2
+key_control_sim, key_control_filt = jr.split(jr.key(1))
 
 
 def controlled_initial(key, input_0):
@@ -140,7 +141,7 @@ def controlled_log_observation(y, state, input_t):
 
 
 controlled_states, controlled_observations = smcx.simulate(
-    key_sim,
+    key_control_sim,
     controlled_initial,
     controlled_transition,
     controlled_emission,
@@ -148,7 +149,7 @@ controlled_states, controlled_observations = smcx.simulate(
     inputs=controls,
 )
 controlled_posterior = smcx.bootstrap_filter(
-    key_filt,
+    key_control_filt,
     controlled_initial_cloud,
     controlled_transition,
     controlled_log_observation,

@@ -106,6 +106,8 @@ def guided_filter(
     Raises:
         DegenerateWeightsError: All weights collapsed (eager execution
             only; under ``jax.jit`` the ``-inf`` marginal propagates).
+        ValueError: ``inputs`` is not rank one or two, or its leading
+            dimension does not match ``emissions``.
     """
     inputs_arr = (
         None

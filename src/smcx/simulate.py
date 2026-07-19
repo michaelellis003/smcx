@@ -67,6 +67,10 @@ def simulate(
         A tuple ``(states, emissions)`` where *states* has shape
         ``(T, state_dim)`` and *emissions* has shape
         ``(T, emission_dim)``.
+
+    Raises:
+        ValueError: ``inputs`` is not rank one or two, or its leading
+            dimension does not equal ``num_timesteps``.
     """
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
