@@ -109,7 +109,9 @@ def multinomial(
     Sorted order statistics come from normalized running sums of iid
     Exp(1) spacings (Devroye 1986, Ch. V.3.1) — O(N), no sort — using
     ``-log1p(-u)`` so a uniform that returns exactly 0 never reaches
-    ``log(0)``. Sorted queries keep the ancestor gather monotone.
+    ``log(0)``. A cumulative maximum restores the mathematical monotonicity
+    that parallel float32 prefix rounding can otherwise violate locally.
+    Sorted queries keep the ancestor gather monotone.
 
     Args:
         key: PRNG key.
@@ -120,7 +122,7 @@ def multinomial(
         Nondecreasing int32 ancestor indices.
     """
     e = -jnp.log1p(-jax.random.uniform(key, (num_samples + 1,)))
-    s = jnp.cumsum(e)
+    s = jnp.maximum.accumulate(jnp.cumsum(e))
     queries = jnp.minimum(s[:-1] / jnp.maximum(s[-1], _TINY), _BELOW_ONE)
     return _searchsorted_clipped(_normalized_cdf(weights), queries)
 
