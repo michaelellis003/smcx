@@ -97,6 +97,73 @@ The filtered RMSE comes out near 0.37, roughly half the observation
 noise $\sigma_r = 0.7$ — the filter is extracting signal, not echoing
 the data.
 
+## Add time-varying inputs
+
+Controlled dynamics and covariate-driven observations use the
+keyword-only `inputs` channel. An input sequence has shape `(T, U)`;
+a scalar sequence `(T,)` becomes `(T, 1)`. At time zero, `inputs[0]`
+reaches the initial-state and observation callbacks. At each later
+time t, `inputs[t]` reaches the transition into t and the observation
+at t. Every input-aware callback takes `input_t` last, even when that
+callback does not use it.
+
+Here a known control shifts the latent dynamics. The same input-aware
+model generates and filters the data:
+
+```python
+controls = jnp.sin(jnp.linspace(0.0, 4.0 * jnp.pi, 100))[:, None]
+control_scale = 0.2
+key_control_sim, key_control_filt = jr.split(jr.key(1))
+
+
+def controlled_initial(key, input_0):
+    return jr.normal(key, (1,)) + control_scale * input_0
+
+
+def controlled_initial_cloud(key, n, input_0):
+    return jr.normal(key, (n, 1)) + control_scale * input_0
+
+
+def controlled_transition(key, state, input_t):
+    noise = q_sd * jr.normal(key, state.shape)
+    return rho * state + control_scale * input_t + noise
+
+
+def controlled_emission(key, state, input_t):
+    del input_t
+    return state + r_sd * jr.normal(key, state.shape)
+
+
+def controlled_log_observation(y, state, input_t):
+    del input_t
+    z = (y[0] - state[0]) / r_sd
+    return -0.5 * z * z - math.log(r_sd * math.sqrt(2 * math.pi))
+
+
+controlled_states, controlled_observations = smcx.simulate(
+    key_control_sim,
+    controlled_initial,
+    controlled_transition,
+    controlled_emission,
+    num_timesteps=100,
+    inputs=controls,
+)
+controlled_posterior = smcx.bootstrap_filter(
+    key_control_filt,
+    controlled_initial_cloud,
+    controlled_transition,
+    controlled_log_observation,
+    controlled_observations,
+    num_particles=10_000,
+    inputs=controls,
+)
+```
+
+The auxiliary and guided filters follow the same input-last rule.
+Liu–West keeps parameters first, so its callbacks end in
+`(..., params, input_t)`; its parameter initializer remains
+`(key, num_particles)`.
+
 ## Diagnose
 
 `diagnose` returns a dictionary of health summaries and a list of

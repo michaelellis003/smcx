@@ -7,11 +7,16 @@ Cross-validates against the Dynamax Kalman filter (exact solution
 for linear Gaussian SSMs).
 """
 
+import math
+
+import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 import pytest
 
 from smcx.bootstrap import bootstrap_filter
+from tests._kalman import kalman_1d
 from tests.conftest import _mvn_logpdf, _mvn_sample
 
 # ---------------------------------------------------------------------------
@@ -221,3 +226,213 @@ class TestBootstrapLogEvidenceIncrements:
             num_particles=1_000,
         )
         assert jnp.all(jnp.isfinite(pf.log_evidence_increments))
+
+
+class TestBootstrapInputs:
+    """Per-step exogenous inputs reach every model callback."""
+
+    def test_inputs_reach_initial_transition_and_observation_callbacks(self):
+        inputs = jnp.array([1.0, 2.0, 3.0])
+        emissions = jnp.array([[2.0], [5.0], [9.0]])
+
+        def initial_sampler(key, n, input_t):
+            del key
+            return jnp.full((n, 1), input_t[0])
+
+        def transition_sampler(key, state, input_t):
+            del key
+            return state + input_t
+
+        def log_observation_fn(emission, state, input_t):
+            error = emission[0] - state[0] - input_t[0]
+            return -0.5 * error**2
+
+        post = bootstrap_filter(
+            key=jr.key(0),
+            initial_sampler=initial_sampler,
+            transition_sampler=transition_sampler,
+            log_observation_fn=log_observation_fn,
+            emissions=emissions,
+            num_particles=4,
+            inputs=inputs,
+        )
+
+        expected = jnp.array([1.0, 3.0, 6.0])
+        expected_cloud = jnp.broadcast_to(expected[:, None], (3, 4))
+        assert jnp.array_equal(post.filtered_particles[:, :, 0], expected_cloud)
+        assert post.marginal_loglik == pytest.approx(0.0)
+
+    @pytest.mark.parametrize(
+        ("inputs", "message"),
+        [
+            (jnp.zeros((3, 1, 1)), "inputs must have shape"),
+            (jnp.zeros((2, 1)), "inputs must have leading dimension"),
+        ],
+    )
+    def test_inputs_reject_malformed_shapes_at_public_entry(
+        self, inputs, message
+    ):
+        def initial_sampler(key, n, input_t):
+            del key, input_t
+            return jnp.zeros((n, 1))
+
+        def transition_sampler(key, state, input_t):
+            del key, input_t
+            return state
+
+        def log_observation_fn(emission, state, input_t):
+            del emission, state, input_t
+            return jnp.array(0.0)
+
+        with pytest.raises(ValueError, match=message):
+            bootstrap_filter(
+                key=jr.key(0),
+                initial_sampler=initial_sampler,
+                transition_sampler=transition_sampler,
+                log_observation_fn=log_observation_fn,
+                emissions=jnp.zeros((3, 1)),
+                num_particles=4,
+                inputs=inputs,
+            )
+
+    def test_controlled_lgssm_matches_kalman_oracle(self):
+        a, b = 0.9, 0.7
+        q, r = 0.25, 1.0
+        m0, p0 = 0.0, 1.0
+        num_timesteps = 40
+        rng = np.random.default_rng(9)
+        inputs = rng.normal(size=num_timesteps)
+        states = np.empty(num_timesteps)
+        states[0] = rng.normal(m0, math.sqrt(p0))
+        for t in range(1, num_timesteps):
+            states[t] = (
+                a * states[t - 1]
+                + b * inputs[t]
+                + rng.normal(0.0, math.sqrt(q))
+            )
+        observations = states + rng.normal(
+            0.0, math.sqrt(r), size=num_timesteps
+        )
+        exact_loglik, _, _ = kalman_1d(
+            observations, a, q, r, m0, p0, b=b, u=inputs
+        )
+
+        def initial_sampler(key, n, input_t):
+            del input_t
+            return m0 + math.sqrt(p0) * jr.normal(key, (n, 1))
+
+        def transition_sampler(key, state, input_t):
+            return (
+                a * state
+                + b * input_t
+                + math.sqrt(q) * jr.normal(key, state.shape)
+            )
+
+        def log_observation_fn(emission, state, input_t):
+            del input_t
+            return -0.5 * (
+                math.log(2.0 * math.pi * r) + (emission[0] - state[0]) ** 2 / r
+            )
+
+        emissions_arr = jnp.asarray(observations)[:, None]
+        inputs_arr = jnp.asarray(inputs)
+        estimates = np.asarray([
+            bootstrap_filter(
+                jr.key(seed),
+                initial_sampler,
+                transition_sampler,
+                log_observation_fn,
+                emissions_arr,
+                5_000,
+                inputs=inputs_arr,
+            ).marginal_loglik
+            for seed in range(8)
+        ])
+
+        # For R independent estimates, SE(mean(log Z-hat)) = s/sqrt(R).
+        # The lower bound includes the lognormal approximation to Jensen
+        # bias, -s^2/2; five SE gives an MC-error-honest tolerance.
+        sd = estimates.std(ddof=1)
+        se = sd / math.sqrt(estimates.size)
+        error = estimates.mean() - exact_loglik
+        assert -(5.0 * se + 0.5 * sd**2) <= error <= 5.0 * se
+
+    def test_inputs_remain_dynamic_under_jit(self):
+        def initial_sampler(key, n, input_t):
+            del key
+            return jnp.full((n, 1), input_t[0])
+
+        def transition_sampler(key, state, input_t):
+            del key
+            return state + input_t
+
+        def log_observation_fn(emission, state, input_t):
+            return 0.0 * (emission[0] + state[0] + input_t[0])
+
+        @jax.jit
+        def run(input_values):
+            post = bootstrap_filter(
+                jr.key(0),
+                initial_sampler,
+                transition_sampler,
+                log_observation_fn,
+                jnp.zeros((4, 1)),
+                4,
+                inputs=input_values,
+                store_history=False,
+            )
+            return post.filtered_particles[0, 0, 0]
+
+        zero_result = run(jnp.zeros((4, 1)))
+        one_result = run(jnp.ones((4, 1)))
+        assert jnp.array_equal(zero_result, jnp.array(0.0))
+        assert jnp.array_equal(one_result, jnp.array(4.0))
+
+    def test_ignored_inputs_preserve_key_stream_and_numerics(self):
+        emissions = jnp.linspace(-0.5, 0.5, 5)[:, None]
+
+        def initial_sampler(key, n):
+            return jr.normal(key, (n, 1))
+
+        def transition_sampler(key, state):
+            return 0.8 * state + 0.3 * jr.normal(key, state.shape)
+
+        def log_observation_fn(emission, state):
+            return -0.5 * (emission[0] - state[0]) ** 2
+
+        def initial_sampler_u(key, n, input_t):
+            del input_t
+            return initial_sampler(key, n)
+
+        def transition_sampler_u(key, state, input_t):
+            del input_t
+            return transition_sampler(key, state)
+
+        def log_observation_fn_u(emission, state, input_t):
+            del input_t
+            return log_observation_fn(emission, state)
+
+        legacy = bootstrap_filter(
+            jr.key(11),
+            initial_sampler,
+            transition_sampler,
+            log_observation_fn,
+            emissions,
+            32,
+        )
+        input_aware = bootstrap_filter(
+            jr.key(11),
+            initial_sampler_u,
+            transition_sampler_u,
+            log_observation_fn_u,
+            emissions,
+            32,
+            inputs=jnp.zeros((5, 2)),
+        )
+
+        for legacy_field, input_field in zip(
+            jax.tree_util.tree_leaves(legacy),
+            jax.tree_util.tree_leaves(input_aware),
+            strict=True,
+        ):
+            assert jnp.array_equal(legacy_field, input_field)
