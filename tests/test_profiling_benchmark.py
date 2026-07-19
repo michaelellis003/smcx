@@ -451,7 +451,7 @@ def test_integration_profile_always_has_local_l1_arm() -> None:
     workloads = {cell.workload for cell in cells}
     assert "bootstrap_lgssm" in workloads
     assert workloads <= {"bootstrap_lgssm", "bootstrap_lgssm_dynamax"}
-    assert {cell.parameters["resampling_threshold"] for cell in cells} == {0.0}
+    assert {cell.parameters["resampling_threshold"] for cell in cells} == {1.1}
 
 
 def test_scaling_forces_exact_work_for_hidden_resampling_decisions() -> None:

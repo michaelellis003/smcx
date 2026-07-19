@@ -471,9 +471,10 @@ to the first parameter-dimension cell. Before inferential measurement:
   the event count exactly `T - 1`. Their adaptive threshold `0.5` baseline
   remains measurable, but CPU/MPS ratios stay withheld because its internal
   lookahead decision is not observable without changing production code.
-- The local and Dynamax integration arms use threshold `0`, making the event
-  count exactly zero and isolating callback integration overhead from random
-  resampling-path differences.
+- The local and Dynamax integration arms initially used threshold `0`, making
+  the event count exactly zero and isolating callback integration overhead
+  from random resampling-path differences. The post-failure correction below
+  supersedes that setting.
 - A hidden resampling decision is reported as exactly zero for threshold
   `<= 0` and exactly `T - 1` for threshold `> 1`; it remains null otherwise.
 - The shared `N=1,000`, `d=1`, threshold-`1.1` Liu--West cell supplies both
@@ -482,6 +483,22 @@ to the first parameter-dimension cell. Before inferential measurement:
 - A nonblocking host-wide advisory lock covers each complete timing campaign,
   CPU profiler trace, or StableHLO census. Concurrent processes fail before
   device work rather than contaminating the Apple shared-SoC measurement.
+
+### 2026-07-19 — post-failure integration validation correction
+
+The first integration campaign showed that never resampling for the 100-step
+LGSSM makes the evidence gate uninformative. All 20 replicates from both the
+local and Dynamax callback arms produced nearly identical log-evidence
+estimates, but their mean likelihood ratio was approximately `5.33e-17`
+against the exact Kalman likelihood. No replicate sampled the rare tail that
+determines the expectation, so the sample standard error collapsed with the
+estimate and the registered five-standard-error gate correctly failed.
+
+The integration arms therefore use threshold `1.1`, forcing the same `T - 1`
+resampling decisions in both arms. This retains exact equal work and exercises
+the complete callback stack while restoring a statistically useful likelihood
+estimator. The failed never-resample campaign remains non-eligible evidence;
+its timings are not used.
 
 The corrected exact counts with both backends and Dynamax 1.0.2 are:
 

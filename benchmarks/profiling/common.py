@@ -779,7 +779,7 @@ def _profile_variants(
                 "bootstrap_lgssm",
                 _updated_parameters(
                     WORKLOADS["bootstrap_lgssm"].baseline_parameters,
-                    resampling_threshold=0.0,
+                    resampling_threshold=1.1,
                 ),
             )
         ]
@@ -793,7 +793,7 @@ def _profile_variants(
                 "bootstrap_lgssm_dynamax",
                 _updated_parameters(
                     WORKLOADS["bootstrap_lgssm_dynamax"].baseline_parameters,
-                    resampling_threshold=0.0,
+                    resampling_threshold=1.1,
                 ),
             ))
         return variants
