@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.2.1 (2026-07-19)
+
+### Bug Fixes
+
+- Validate SMC algorithms against independent implementations
+  ([#17](https://github.com/michaelellis003/smcx/pull/17),
+  [`da20e1a`](https://github.com/michaelellis003/smcx/commit/da20e1a222e0619d5b561819f8d033ae0668f068))
+
+
 ## v1.2.0 (2026-07-19)
 
 ### Features
