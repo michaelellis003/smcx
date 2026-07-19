@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-07-19)
+
+### Features
+
+- **filters**: Support structured latent state PyTrees
+  ([`350f511`](https://github.com/michaelellis003/smcx/commit/350f5114850f6ee00fbc24ec421cbb83f22800d5))
+
+
 ## v1.2.1 (2026-07-19)
 
 ### Bug Fixes
