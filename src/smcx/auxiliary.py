@@ -1,6 +1,10 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
+# Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
+# Apache-2.0. Modified: local ESS/resampling and validation, typed callback
+# protocols, exogenous inputs, and optional history storage.
+
 r"""Auxiliary particle filter (Pitt & Shephard, 1999).
 
 The auxiliary particle filter (APF) improves on the bootstrap filter by
