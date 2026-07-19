@@ -21,17 +21,31 @@ from smcx.types import PRNGKeyT
 
 # Largest float32 below 1 (see module docstring).
 _BELOW_ONE = 1.0 - 2.0**-24
-# Avoids 0/0 on all-zero CDFs; outputs are masked upstream wherever
-# that can engage.
+# Avoids a zero denominator in the exponential-spacing construction.
 _TINY = 1e-30
+
+
+def _scale_by_max(
+    weights: Float[Array, " num_particles"],
+) -> Float[Array, " num_particles"]:
+    """Scale finite nonnegative weights without overflowing their sum."""
+    # Dividing by a near-f32-max value can underflow through a reciprocal
+    # optimization. A power-of-two shift changes no relative weight and is
+    # exact for every finite normal or subnormal value.
+    _, exponent = jnp.frexp(jnp.max(weights))
+    return jnp.ldexp(weights, -exponent)
 
 
 def _normalized_cdf(
     weights: Float[Array, " num_particles"],
 ) -> Float[Array, " num_particles"]:
     """Cumulative distribution normalized so the final entry is 1."""
-    cdf = jnp.cumsum(weights)
-    return cdf / jnp.maximum(cdf[-1], _TINY)
+    cdf = jnp.cumsum(_scale_by_max(weights))
+    # Preserve every positive finite scale; use one only for the invalid
+    # all-zero fallback.
+    total = cdf[-1]
+    denominator = jnp.where(total > 0, total, jnp.ones_like(total))
+    return cdf / denominator
 
 
 def _searchsorted_clipped(
@@ -137,7 +151,10 @@ def residual(
         https://doi.org/10.1109/ISPA.2005.195385
     """
     m = num_samples
-    w = weights / jnp.maximum(jnp.sum(weights), _TINY)
+    scaled_weights = _scale_by_max(weights)
+    total = jnp.sum(scaled_weights)
+    denominator = jnp.where(total > 0, total, jnp.ones_like(total))
+    w = scaled_weights / denominator
     counts = jnp.floor(m * w)
     residual_w = m * w - counts
     # Deterministic block: positions [0, sum(counts)) filled by
