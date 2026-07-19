@@ -12,9 +12,16 @@ import numpy as np
 import pytest
 
 import smcx._utils as utils
+import smcx.auxiliary as auxiliary_module
 import smcx.bootstrap as bootstrap_module
 import smcx.guided as guided_module
-from smcx import bootstrap_filter, guided_filter
+import smcx.liu_west as liu_west_module
+from smcx import (
+    auxiliary_filter,
+    bootstrap_filter,
+    guided_filter,
+    liu_west_filter,
+)
 from smcx.resampling import systematic
 
 
@@ -64,6 +71,65 @@ def _run_standard_filter(
         log_proposal_fn,
         log_transition_fn,
         log_observation_fn,
+        emissions,
+        16,
+        resampling_threshold=threshold,
+        store_history=store_history,
+    )
+
+
+def _run_lookahead_filter(
+    algorithm: str,
+    threshold: float,
+    store_history: bool,
+):
+    def initial_sampler(key, num_particles):
+        return jr.normal(key, (num_particles, 1))
+
+    def transition_sampler(key, state):
+        return 0.8 * state + 0.1 * jr.normal(key, state.shape)
+
+    def log_observation_fn(emission, state):
+        return -10.0 * (emission[0] - state[0]) ** 2
+
+    emissions = jnp.array([[0.1], [-0.3], [0.2], [0.5], [-0.2]])
+    if algorithm == "auxiliary":
+
+        def log_auxiliary_fn(emission, state):
+            return -10.0 * (emission[0] - 0.8 * state[0]) ** 2
+
+        return auxiliary_filter(
+            jr.key(53),
+            initial_sampler,
+            transition_sampler,
+            log_observation_fn,
+            log_auxiliary_fn,
+            emissions,
+            16,
+            resampling_threshold=threshold,
+            store_history=store_history,
+        )
+
+    def param_initial_sampler(key, num_particles):
+        return 0.8 + 0.1 * jr.normal(key, (num_particles, 1))
+
+    def param_transition_sampler(key, state, params):
+        return params[0] * state + 0.1 * jr.normal(key, state.shape)
+
+    def param_log_observation_fn(emission, state, params):
+        del params
+        return -10.0 * (emission[0] - state[0]) ** 2
+
+    def param_log_auxiliary_fn(emission, state, params):
+        return -10.0 * (emission[0] - params[0] * state[0]) ** 2
+
+    return liu_west_filter(
+        jr.key(59),
+        initial_sampler,
+        param_transition_sampler,
+        param_log_observation_fn,
+        param_log_auxiliary_fn,
+        param_initial_sampler,
         emissions,
         16,
         resampling_threshold=threshold,
@@ -251,3 +317,81 @@ def test_standard_filter_ess_carry_preserves_recomputed_reference(
         resampled = np.any(ancestors != np.arange(16), axis=1)
         assert np.any(resampled)
         assert np.any(~resampled)
+
+
+@pytest.mark.parametrize("algorithm", ["auxiliary", "liu_west"])
+@pytest.mark.parametrize(
+    "threshold",
+    [0.0, 0.5, 1.1],
+    ids=["never", "adaptive", "forced"],
+)
+@pytest.mark.parametrize(
+    "store_history",
+    [True, False],
+    ids=["full-history", "final-only"],
+)
+def test_lookahead_ess_preserves_recomputed_reference(
+    algorithm: str,
+    threshold: float,
+    store_history: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Precomputed lookahead ESS must match exact recomputation."""
+    filter_module = (
+        auxiliary_module if algorithm == "auxiliary" else liu_west_module
+    )
+    precomputed_conditional_resample = filter_module._conditional_resample
+
+    def recomputing_conditional_resample(
+        key,
+        log_weights,
+        _precomputed_ess,
+        resampling_fn,
+        absolute_threshold,
+        num_particles,
+        identity,
+    ):
+        recomputed_ess = jnp.asarray(utils.compute_ess(log_weights))
+        return precomputed_conditional_resample(
+            key,
+            log_weights,
+            recomputed_ess,
+            resampling_fn,
+            absolute_threshold,
+            num_particles,
+            identity,
+        )
+
+    monkeypatch.setattr(
+        filter_module,
+        "_conditional_resample",
+        recomputing_conditional_resample,
+    )
+    reference = _run_lookahead_filter(algorithm, threshold, store_history)
+    monkeypatch.setattr(
+        filter_module,
+        "_conditional_resample",
+        precomputed_conditional_resample,
+    )
+    precomputed = _run_lookahead_filter(algorithm, threshold, store_history)
+
+    reference_leaves = jax.tree.leaves(reference)
+    precomputed_leaves = jax.tree.leaves(precomputed)
+    assert len(reference_leaves) == len(precomputed_leaves)
+    for reference_leaf, precomputed_leaf in zip(
+        reference_leaves,
+        precomputed_leaves,
+        strict=True,
+    ):
+        np.testing.assert_array_equal(precomputed_leaf, reference_leaf)
+
+    if store_history:
+        ancestors = np.asarray(reference.ancestors[1:])
+        resampled = np.any(ancestors != np.arange(16), axis=1)
+        if math.isclose(threshold, 0.0):
+            assert not np.any(resampled)
+        elif math.isclose(threshold, 1.1):
+            assert np.all(resampled)
+        else:
+            assert np.any(resampled)
+            assert np.any(~resampled)

@@ -434,6 +434,85 @@ class TestInnerKernelFactory:
             np.zeros(3),
         )
 
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu",
+        reason="frozen CPU/x64 arithmetic contract",
+    )
+    def test_inner_factory_preserves_frozen_rejuvenation_output(self):
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+        ) = _small_factory_model()
+        posterior = smcx.smc2(
+            jr.key(271828),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+            3,
+            4,
+            ess_threshold=1.1,
+            num_pmmh_steps=2,
+        )
+
+        np.testing.assert_array_equal(
+            np.asarray(posterior.marginal_loglik),
+            np.asarray(-3.0331045486577697),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.filtered_params),
+            np.array([
+                [
+                    [0.7586950197518261],
+                    [0.8187408484682641],
+                    [0.7589583281677461],
+                ],
+                [
+                    [0.8105932981742988],
+                    [0.6976200744967381],
+                    [0.7609658911048357],
+                ],
+                [
+                    [0.8249431380290069],
+                    [0.4310136770781425],
+                    [0.7311638511464534],
+                ],
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.filtered_log_weights),
+            np.full((3, 3), -1.0986122886681098),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.ess),
+            np.array([3.0, 3.0, 3.0]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.log_evidence_increments),
+            np.array([
+                -0.8723455471462007,
+                -1.4975149224137319,
+                -0.6632440790978372,
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.acceptance_rates),
+            np.array([
+                0.8333333432674408,
+                1.0,
+                0.6666666865348816,
+            ]),
+        )
+        # A threshold above one forces rejuvenation at every time, while
+        # positive acceptance records prove that each PMMH loop did work.
+        assert np.all(np.asarray(posterior.acceptance_rates) > 0.0)
+
 
 class TestNumericalReference:
     """The retained high-resolution grid constants are converged."""
