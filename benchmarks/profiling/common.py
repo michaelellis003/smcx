@@ -398,7 +398,7 @@ WORKLOADS: dict[str, WorkloadSpec] = {
             execution_mode="whole_program_jit",
             smoke_parameters=_RESAMPLER_SMOKE,
             baseline_parameters=_RESAMPLER_BASELINE,
-            baseline_correctness_replicates=64,
+            baseline_correctness_replicates=128,
             replicated_correctness_level="statistical",
             profiles=("smoke", "baseline", "scaling"),
         )

@@ -756,6 +756,59 @@ schedules 21,544 public calls. The failed scaling campaign and fixed-prefix
 diagnostic are retained in the dated results; no resampling implementation is
 changed in response to the false rejections.
 
+### 2026-07-19 — post-baseline resampler validation-power correction
+
+The first matched before-optimization baseline campaign used the registered
+64-replicate resampler gate. Its systematic CPU cell at `N=100,000` under
+moderately uneven weights failed exactly one of the eight hashed probability
+coordinates: error `0.00011463685632218112` versus five-SE tolerance
+`0.00011334678420486056`, or `|t_63| = 5.0569081922513535`. The other seven
+hashed coordinates, all sixteen contiguous coordinates, structural checks,
+and the systematic CDF discrepancy invariant passed. The corresponding MPS
+cell and every other baseline resampler cell also passed.
+
+A fixed-prefix diagnostic retained all 64 keys and evaluated the previously
+failing coordinate at the planned checkpoints `R=128`, `R=256`, and `R=512`.
+All three checkpoints passed. Their signed standardized errors were `1.493`,
+`-0.189`, and `0.075`, respectively, and the maximum absolute standardized
+error across all 24 projection coordinates remained below `1.95` at every
+checkpoint. The shrinking, sign-changing discrepancy, together with the hard
+invariants, is evidence of finite Monte Carlo gate error rather than production
+resampling bias. No production implementation changes in response to this
+result.
+
+Registered resampler validation now uses `R=128` for every baseline and
+scaling resampler cell, not only the observed failure. This is the first
+predeclared fixed-prefix checkpoint, not a replacement seed set chosen after
+the failure. The key schedule preserves the complete 64-key prefix and appends
+the same tagged, prefix-stable `fold_in` sequence. Choosing replication counts
+from the required Monte Carlo precision follows Morris, White, and Crowther
+(2019) ([DOI](https://doi.org/10.1002/sim.8086)); retaining the prefix enforces
+this protocol's no-reroll policy. The full registered family
+contains 104 resampler cells and 24 projection coordinates per cell, or 2,496
+coordinate comparisons. Under the protocol's replicate-normal Student-t
+diagnostic, the Bonferroni sum at the five-SE boundary falls from about
+`0.0121` at `R=64` to about `0.00465` at `R=128`. Dependence among projection
+coordinates does not invalidate the Bonferroni upper bound. Systematic
+resampling's single shared uniform grid is one direct source of that dependence;
+see Douc, Cappé, and Moulines (2005)
+([arXiv](https://arxiv.org/abs/cs/0507025)). The marginal Student-t calibration
+remains an approximation.
+
+The original 64-replicate campaign and its raw artifacts remain failed and
+timing-ineligible; the diagnostic does not retroactively pass them. The
+128-replicate rule applies prospectively to the next matched campaign. Exact
+preflight counts with both backends are:
+
+| Profile | Timing workers | Validation workers | Timed calls | Validation calls |
+|---|---:|---:|---:|---:|
+| baseline | 120 | 22 | 960 | 1,224 |
+| scaling | 750 | 144 | 6,000 | 12,984 |
+
+Other profile counts are unchanged. Across smoke, baseline, filter-regimes,
+scaling, and representation, the current campaign remains 1,794 fresh
+processes and now schedules 28,200 public-workload calls.
+
 Primary algorithm and model sources used to define the campaign are:
 
 - Gordon, Salmond, and Smith (1993), bootstrap filtering

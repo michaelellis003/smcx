@@ -277,7 +277,9 @@ def test_manifest_records_frozen_cell_order() -> None:
 def test_one_time_dynamax_profile_is_not_permanent() -> None:
     assert "integration" not in PROFILES
     assert not any("dynamax" in workload for workload in WORKLOADS)
-    assert "dynamax_lgssm" not in SEED_CONTRACT["data_seed_offsets"]
+    data_seed_offsets = SEED_CONTRACT["data_seed_offsets"]
+    assert isinstance(data_seed_offsets, dict)
+    assert "dynamax_lgssm" not in data_seed_offsets
     with pytest.raises(ValueError, match="unknown profile: integration"):
         plan_cells("integration", platforms=("cpu",), order_seed=7)
 
@@ -383,11 +385,13 @@ def test_scaling_profile_covers_every_preregistered_axis() -> None:
         100_000,
         1_000_000,
     }
-    assert all(cell.correctness_replicates == 64 for cell in resampler_cells)
+    assert all(cell.correctness_replicates == 128 for cell in resampler_cells)
 
 
 def test_resampler_validation_keys_preserve_committed_prefix() -> None:
-    root = jr.key(SEED_CONTRACT["validation_seed"])
+    validation_seed = SEED_CONTRACT["validation_seed"]
+    assert isinstance(validation_seed, int)
+    root = jr.key(validation_seed)
     committed = jr.split(root, 8)
 
     keys_64 = worker_module._correctness_keys(
@@ -395,10 +399,10 @@ def test_resampler_validation_keys_preserve_committed_prefix() -> None:
         workload="resample_systematic",
         count=64,
     )
-    keys_80 = worker_module._correctness_keys(
+    keys_128 = worker_module._correctness_keys(
         jax,
         workload="resample_systematic",
-        count=80,
+        count=128,
     )
 
     np.testing.assert_array_equal(
@@ -406,11 +410,11 @@ def test_resampler_validation_keys_preserve_committed_prefix() -> None:
         jr.key_data(committed),
     )
     np.testing.assert_array_equal(
-        jr.key_data(keys_80[:64]),
+        jr.key_data(keys_128[:64]),
         jr.key_data(keys_64),
     )
-    key_rows = np.asarray(jr.key_data(keys_80))
-    assert np.unique(key_rows, axis=0).shape[0] == 80
+    key_rows = np.asarray(jr.key_data(keys_128))
+    assert np.unique(key_rows, axis=0).shape[0] == 128
 
     unchanged = worker_module._correctness_keys(
         jax,
