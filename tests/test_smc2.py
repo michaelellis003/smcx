@@ -222,6 +222,66 @@ class TestStructure:
             )
 
 
+class TestInnerKernelReductions:
+    """Inner kernels reuse row reductions already needed for weights."""
+
+    @pytest.mark.parametrize("kernel_name", ["inner_init", "inner_step"])
+    def test_each_kernel_evaluates_row_lse_once(
+        self,
+        kernel_name: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        smc2_module = importlib.import_module("smcx.smc2")
+        original_lse_rows = smc2_module._lse_rows
+        lse_calls: list[None] = []
+
+        def record_call(_value: object) -> None:
+            lse_calls.append(None)
+
+        def observed_lse_rows(values: jax.Array) -> jax.Array:
+            jax.debug.callback(record_call, values)
+            return original_lse_rows(values)
+
+        monkeypatch.setattr(smc2_module, "_lse_rows", observed_lse_rows)
+        (
+            _,
+            _,
+            inner_sampler,
+            transition_sampler,
+            log_observation_fn,
+            emissions,
+        ) = _small_cache_model()
+        inner_init, inner_step = smc2_module._build_inner_kernels(
+            inner_sampler,
+            transition_sampler,
+            log_observation_fn,
+            3,
+            4,
+        )
+        params = jnp.array([[0.7], [0.8], [0.9]], dtype=jnp.float64)
+        if kernel_name == "inner_init":
+            result = inner_init(jr.key(20), params, emissions[0])
+        else:
+            particles = jnp.broadcast_to(params[:, None, :], (3, 4, 1))
+            log_weights = jnp.full(
+                (3, 4),
+                -math.log(4),
+                dtype=jnp.float64,
+            )
+            result = inner_step(
+                jr.key(21),
+                jr.key(22),
+                particles,
+                log_weights,
+                params,
+                emissions[1],
+            )
+        jax.block_until_ready(result)
+        jax.effects_barrier()
+
+        assert len(lse_calls) == 1
+
+
 class TestInnerKernelCache:
     """Module-stable inner JITs preserve exact public behavior."""
 

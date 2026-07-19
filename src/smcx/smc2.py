@@ -162,8 +162,8 @@ def _build_inner_kernels(
             vmap(lambda s, p: log_observation_fn(y0, s, p))(flat, th_flat),
         )
         log_g = flat_log_g.reshape(num_theta, num_x)
-        inner_log_w, _ = _normalize_rows(log_g)
-        return inner, inner_log_w, _lse_rows(log_g) - log_n_x
+        inner_log_w, log_g_lse = _normalize_rows(log_g)
+        return inner, inner_log_w, log_g_lse - log_n_x
 
     @jit
     def inner_step(
@@ -193,8 +193,8 @@ def _build_inner_kernels(
             ),
         )
         log_g = flat_log_g.reshape(num_theta, num_x)
-        inner_log_w, _ = _normalize_rows(log_g)
-        return moved, inner_log_w, _lse_rows(log_g) - log_n_x
+        inner_log_w, log_g_lse = _normalize_rows(log_g)
+        return moved, inner_log_w, log_g_lse - log_n_x
 
     return inner_init, inner_step
 
