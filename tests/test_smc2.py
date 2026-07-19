@@ -276,9 +276,14 @@ class TestRejuvenation:
 
     def test_evidence_increments_sum_under_rejuvenation(self):
         post = _run(13, ess_threshold=0.5)
-        assert float(jnp.sum(post.log_evidence_increments)) == pytest.approx(
-            float(post.marginal_loglik), rel=1e-8
-        )
+        total = float(jnp.sum(post.log_evidence_increments))
+        marginal = float(post.marginal_loglik)
+        if post.log_evidence_increments.dtype == jnp.float64:
+            assert total == pytest.approx(marginal, rel=1e-8)
+        else:
+            # The Metal path sums T float32 increments separately from the
+            # scan carry; their reduction orders can differ by several ulps.
+            assert total == pytest.approx(marginal, rel=1e-5)
 
 
 class TestBatchedIndependence:

@@ -167,7 +167,9 @@ class TestContract:
         np.testing.assert_array_equal(ancestors, np.arange(64))
 
     def test_residual_guarantees_the_deterministic_floor(self) -> None:
-        weights = np.array([0.55, 0.25, 0.20])
+        # Dyadic weights are exact in f32, so backend-specific reduction
+        # rounding cannot move an expected count across an integer boundary.
+        weights = np.array([0.53125, 0.28125, 0.1875])
         # floor(4 * weights) is exactly [2, 1, 0].
         counts = _replicated_counts(residual, weights, 4, 512)
 
@@ -224,9 +226,9 @@ class TestOffspringMoments:
             (
                 residual,
                 np.array([
-                    [0.16, 0.0, -0.16],
-                    [0.0, 0.0, 0.0],
-                    [-0.16, 0.0, 0.16],
+                    [0.109375, -0.015625, -0.09375],
+                    [-0.015625, 0.109375, -0.09375],
+                    [-0.09375, -0.09375, 0.1875],
                 ]),
             ),
         ],
@@ -239,11 +241,16 @@ class TestOffspringMoments:
     ) -> None:
         weights = np.array([0.55, 0.25, 0.20])
         expected_mean = np.array([2.20, 1.00, 0.80])
+        if resampler is residual:
+            # Exact-f32 fixture: floor(4w)=[2,1,0], leaving one categorical
+            # remainder draw with probabilities [.125, .125, .75].
+            weights = np.array([0.53125, 0.28125, 0.1875])
+            expected_mean = np.array([2.125, 1.125, 0.75])
         counts = _replicated_counts(resampler, weights, 4, 10_000)
 
         # On this fixture, systematic has one Bernoulli(0.2) boundary
         # crossing; stratified has two independent Bernoulli(0.2)
-        # crossings; residual has one Bernoulli(0.2) remainder draw.
+        # crossings; residual has the categorical remainder described above.
         # Multinomial uses M * (diag(w) - outer(w, w)). These identities
         # give the hard-coded matrices above without an outside package.
         centered_products = (counts - expected_mean)[:, :, None] * (
