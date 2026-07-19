@@ -1,6 +1,6 @@
 [project]
 name = "smcx"
-version = "1.1.0"
+version = "1.2.0"
 description = "Sequential Monte Carlo in JAX: particle filters, tempered SMC, and SMC2 on CPU, CUDA, TPU, and Apple-silicon GPUs"
 readme = "README.md"
 authors = [

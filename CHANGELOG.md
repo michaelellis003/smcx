@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.2.0 (2026-07-19)
+
+### Features
+
+- **inputs**: Add exogenous inputs to model callbacks
+  ([#16](https://github.com/michaelellis003/smcx/pull/16),
+  [`52f3b62`](https://github.com/michaelellis003/smcx/commit/52f3b62d1ab31d8e1958de27188e9cdb0f05a826))
+
+
 ## v1.1.0 (2026-07-18)
 
 ### Bug Fixes
