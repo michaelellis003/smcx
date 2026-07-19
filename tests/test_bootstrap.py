@@ -1,10 +1,31 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for smcx.bootstrap_filter.
+"""Tests for :func:`smcx.bootstrap_filter` against independent references.
 
-Cross-validates against the Dynamax Kalman filter (exact solution
-for linear Gaussian SSMs).
+The permanent gates use a dependency-free float64 Kalman recurrence and the
+frozen Dynamax fixture in :mod:`tests._lgssm_reference`. A one-time isolated
+campaign (2026-07-18; input-aware scalar LGSSM, T=30, N=4096, 128 seeds)
+also compared evidence and filtering moments out of process. Mean
+``Z_hat / Z_exact`` (Monte Carlo SE) was ``0.993628 (0.006205)`` for smcx,
+``0.995324 (0.006113)`` for particles, and ``1.003881 (0.005597)`` for TFP;
+all exact and cross-implementation moment discrepancies were below five SE.
+The frozen campaign case SHA-256 was
+``d59064d711ba96f3d61da207c79b8f1b4526eade25620dd40ec10f6ed47d2689``;
+smcx/particles used seeds 20261000--20261127 and TFP used
+20261200--20261327. Its complete case preimage, exact target, and runner
+settings are retained in :mod:`tests.test_reference_data`.
+
+Pinned external authorities (no code copied; neither is imported here):
+
+* particles 0.4, commit f71e94a21a11c73b58e2d694775b1b1d379b8854,
+  MIT source and license:
+  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/particles/state_space_models.py#L299-L351
+  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/LICENSE
+* TensorFlow Probability 0.25.0, commit
+  9709569d9c1159dc54154044f679edc4a15bd26b, Apache-2.0 source and license:
+  https://github.com/tensorflow/probability/blob/9709569d9c1159dc54154044f679edc4a15bd26b/tensorflow_probability/python/experimental/mcmc/particle_filter.py#L441-L638
+  https://github.com/tensorflow/probability/blob/9709569d9c1159dc54154044f679edc4a15bd26b/LICENSE
 """
 
 import math
@@ -17,6 +38,9 @@ import pytest
 
 from smcx.bootstrap import bootstrap_filter
 from tests._kalman import kalman_1d
+from tests._lgssm_reference import EXACT_LOG_LIKELIHOOD, REFERENCE_TIMES
+from tests._lgssm_reference import FILTERED_MEANS as EXACT_FILTERED_MEANS
+from tests._lgssm_reference import FILTERED_VARIANCES as EXACT_FILTERED_VARS
 from tests.conftest import _mvn_logpdf, _mvn_sample
 
 # ---------------------------------------------------------------------------
@@ -55,71 +79,55 @@ def _make_smcx_fns(lgssm_params):
 class TestBootstrapVsKalman:
     """Bootstrap PF on a linear Gaussian SSM matches the Kalman filter."""
 
-    def test_log_marginal_likelihood(self, lgssm_params, lgssm_data):
-        """PF log-ML should be close to the Kalman exact log-ML."""
-        from dynamax.linear_gaussian_ssm.inference import (
-            lgssm_filter,
-            make_lgssm_params,
-        )
-
+    def test_evidence_and_filtering_moments(self, lgssm_params, lgssm_data):
+        """Evidence and selected moments pass committed five-SE gates."""
         _, emissions = lgssm_data
-        params = make_lgssm_params(**lgssm_params)
-
-        # Exact Kalman
-        kalman_post = lgssm_filter(params, emissions)
-        exact_ll = float(kalman_post.marginal_loglik)
-
-        # Bootstrap PF with many particles
-        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
-        pf_post = bootstrap_filter(
-            key=jr.PRNGKey(123),
-            initial_sampler=init_fn,
-            transition_sampler=trans_fn,
-            log_observation_fn=obs_fn,
-            emissions=emissions,
-            num_particles=10_000,
-        )
-        pf_ll = float(pf_post.marginal_loglik)
-
-        assert pf_ll == pytest.approx(exact_ll, rel=0.05), (
-            f"PF log-ML {pf_ll:.2f} vs Kalman {exact_ll:.2f}"
-        )
-
-    def test_filtered_means(self, lgssm_params, lgssm_data):
-        """PF weighted means should track the Kalman filtered means."""
-        from dynamax.linear_gaussian_ssm.inference import (
-            lgssm_filter,
-            make_lgssm_params,
-        )
-
-        _, emissions = lgssm_data
-        params = make_lgssm_params(**lgssm_params)
-
-        kalman_post = lgssm_filter(params, emissions)
-        kalman_means = kalman_post.filtered_means  # (T, 1)
 
         init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
-        pf_post = bootstrap_filter(
-            key=jr.PRNGKey(456),
-            initial_sampler=init_fn,
-            transition_sampler=trans_fn,
-            log_observation_fn=obs_fn,
-            emissions=emissions,
-            num_particles=10_000,
-        )
+        ratios, means, second_moments = [], [], []
+        # Each row is one independent estimator. Therefore the SE of its
+        # across-run mean is sample_sd / sqrt(R), with R=20 fixed seeds.
+        for seed in range(20):
+            post = bootstrap_filter(
+                key=jr.key(seed),
+                initial_sampler=init_fn,
+                transition_sampler=trans_fn,
+                log_observation_fn=obs_fn,
+                emissions=emissions,
+                num_particles=2_048,
+            )
+            ratios.append(
+                math.exp(float(post.marginal_loglik) - EXACT_LOG_LIKELIHOOD)
+            )
+            weights = np.exp(
+                np.asarray(
+                    post.filtered_log_weights[REFERENCE_TIMES],
+                    dtype=np.float64,
+                )
+            )
+            particles = np.asarray(
+                post.filtered_particles[REFERENCE_TIMES, :, 0],
+                dtype=np.float64,
+            )
+            means.append(np.sum(weights * particles, axis=1))
+            second_moments.append(np.sum(weights * particles**2, axis=1))
 
-        # Compute weighted mean of particles at each time step
-        from smcx.weights import normalize
+        def assert_five_se(observed, expected):
+            values = np.asarray(observed, dtype=np.float64)
+            estimator_se = values.std(axis=0, ddof=1) / math.sqrt(
+                values.shape[0]
+            )
+            # 2e-5 is the explicit f32/Metal arithmetic budget.
+            np.testing.assert_array_less(
+                np.abs(values.mean(axis=0) - expected),
+                5 * estimator_se + 2e-5,
+            )
 
-        weights = jnp.array([
-            normalize(pf_post.filtered_log_weights[t]) for t in range(50)
-        ])  # (T, N)
-        pf_means = jnp.sum(
-            weights[:, :, None] * pf_post.filtered_particles, axis=1
-        )  # (T, 1)
-
-        assert jnp.allclose(pf_means, kalman_means, atol=0.15), (
-            f"Max error: {jnp.max(jnp.abs(pf_means - kalman_means)):.4f}"
+        assert_five_se(ratios, 1.0)
+        assert_five_se(means, EXACT_FILTERED_MEANS)
+        assert_five_se(
+            second_moments,
+            EXACT_FILTERED_VARS + EXACT_FILTERED_MEANS**2,
         )
 
 
@@ -131,32 +139,40 @@ class TestBootstrapVsKalman:
 class TestBootstrapConvergence:
     """PF estimates should improve with more particles."""
 
-    def test_log_ml_converges(self, lgssm_params, lgssm_data):
-        """Log-ML variance decreases with more particles."""
-        from dynamax.linear_gaussian_ssm.inference import (
-            lgssm_filter,
-            make_lgssm_params,
-        )
-
+    def test_log_ml_variance_decreases_at_alpha_0_05(
+        self, lgssm_params, lgssm_data
+    ):
+        """More particles reduce log-evidence variance at fixed alpha."""
         _, emissions = lgssm_data
-        params = make_lgssm_params(**lgssm_params)
-        exact_ll = float(lgssm_filter(params, emissions).marginal_loglik)
 
         init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
-        errors = []
-        for n in [100, 1_000, 10_000]:
-            pf = bootstrap_filter(
-                key=jr.PRNGKey(999),
-                initial_sampler=init_fn,
-                transition_sampler=trans_fn,
-                log_observation_fn=obs_fn,
-                emissions=emissions,
-                num_particles=n,
-            )
-            errors.append(abs(float(pf.marginal_loglik) - exact_ll))
+        variances = []
+        # Use disjoint committed seeds so the two samples are independent.
+        # A single seeded absolute error need not decrease monotonically.
+        campaigns = (
+            (256, range(3_000, 3_016)),
+            (4_096, range(4_000, 4_016)),
+        )
+        for num_particles, seeds in campaigns:
+            ratios = []
+            for seed in seeds:
+                pf = bootstrap_filter(
+                    key=jr.key(seed),
+                    initial_sampler=init_fn,
+                    transition_sampler=trans_fn,
+                    log_observation_fn=obs_fn,
+                    emissions=emissions,
+                    num_particles=num_particles,
+                )
+                ratios.append(
+                    math.exp(float(pf.marginal_loglik) - EXACT_LOG_LIKELIHOOD)
+                )
+            variances.append(np.var(ratios, ddof=1))
 
-        # Error should generally decrease with more particles
-        assert errors[-1] < errors[0], f"Error did not decrease: {errors}"
+        # Under equal normal variances, s_low^2 / s_high^2 ~ F(15, 15).
+        # The one-sided alpha=.05 critical value is 2.4034470714953375.
+        variance_ratio = variances[0] / variances[1]
+        assert variance_ratio > 2.4034470714953375, variances
 
 
 class TestBootstrapESSTrace:
@@ -211,7 +227,12 @@ class TestBootstrapLogEvidenceIncrements:
             num_particles=1_000,
         )
         total = float(jnp.sum(pf.log_evidence_increments))
-        assert total == pytest.approx(float(pf.marginal_loglik), abs=1e-6)
+        f64 = jnp.asarray(pf.marginal_loglik).dtype == jnp.float64
+        if f64:
+            assert total == pytest.approx(float(pf.marginal_loglik), abs=1e-6)
+        else:
+            # A 50-term f32 reduction accumulates several ulps on Metal.
+            assert total == pytest.approx(float(pf.marginal_loglik), rel=1e-5)
 
     def test_log_evidence_increments_finite(self, lgssm_params, lgssm_data):
         """All increments should be finite."""

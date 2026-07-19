@@ -55,9 +55,9 @@ the small carry-overs the 2026-07 library review surfaced.
       `particles` both carry it).
 - [ ] UKF-proposal particle filter recipe (dynamax #272 shape):
       Dynamax UKF step as `guided_filter`'s proposal.
-- [ ] jax-mps CI leg: `SMCX_TEST_PLATFORM=mps` as a scheduled or
+- [x] ~~jax-mps CI leg: `SMCX_TEST_PLATFORM=mps` as a scheduled or
       best-effort job on macOS runners (they expose a paravirtual
-      Metal device).
+      Metal device).~~
 - [ ] Benchmark harness re-aim: CPU vs jax-mps on the shipped
       filters, replacing the retired MLX-native comparison.
 - [ ] Thesis-notebook Metal appendix once a jax-mps release ships

@@ -135,9 +135,8 @@ jobs:
         run: uv run pytest -v --durations=0 -m 'not integration'
 
   # GPU release gate (roadmap; AGENTS.md step 9): the library's
-  # design target is the Metal GPU path, which device-dispatching
-  # code (Metal searchsorted, counting-kernel scatter) only exercises
-  # when a GPU is present. Releases are automated, so a GPU-only
+  # design target is the jax-mps Metal path, which only exercises when
+  # a GPU is present. Releases are automated, so a GPU-only
   # regression must be caught HERE when the runner exposes Metal —
   # or attested via the manual release-environment approval when it
   # does not (virtualized runners may not expose the GPU).
@@ -154,7 +153,7 @@ jobs:
       - name: Probe Metal availability
         id: metal
         run: |
-          if uv run python -c "import mlx.core as mx; mx.set_default_device(mx.Device(mx.gpu)); mx.eval(mx.zeros(8) + 1); print('Metal GPU:', mx.device_info())"; then
+          if JAX_PLATFORMS=mps uv run python -c "import jax; import jax.numpy as jnp; x = jnp.zeros(8) + 1; x.block_until_ready(); print('Metal devices:', jax.devices())"; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
@@ -163,7 +162,7 @@ jobs:
 
       - name: Run full suite on Metal GPU
         if: steps.metal.outputs.available == 'true'
-        run: uv run pytest -v --durations=0
+        run: SMCX_TEST_PLATFORM=mps uv run pytest -v --durations=0
 
   build:
     runs-on: ubuntu-latest

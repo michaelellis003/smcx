@@ -1,19 +1,37 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for smcx.auxiliary_filter.
+"""Tests for :func:`smcx.auxiliary_filter` against independent references.
 
-Cross-validates against:
-1. Dynamax Kalman filter (exact solution for linear Gaussian SSMs)
-2. smcx bootstrap filter (APF with flat auxiliary = bootstrap)
+A one-time isolated campaign (2026-07-18; input-aware scalar LGSSM, T=30,
+N=4096, 128 fixed seeds) compared the APF with an exact Kalman target and
+particles 0.4. Mean ``Z_hat / Z_exact`` (Monte Carlo SE) was
+``0.991542 (0.006764)`` for smcx and ``1.002977 (0.006071)`` for particles;
+evidence and filtering moments passed the preregistered five-SE gates.
+Both used seeds 20261000--20261127; the case SHA-256 was
+``d59064d711ba96f3d61da207c79b8f1b4526eade25620dd40ec10f6ed47d2689``.
+Its complete preimage, exact target, and runner settings are retained in
+:mod:`tests.test_reference_data`.
+
+Pinned external implementation (no code copied or imported here):
+particles 0.4, commit f71e94a21a11c73b58e2d694775b1b1d379b8854,
+MIT source and license:
+https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/particles/state_space_models.py#L352-L438
+https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/LICENSE
 """
+
+import math
 
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 import pytest
 
 from smcx.auxiliary import auxiliary_filter
 from smcx.bootstrap import bootstrap_filter
+from tests._lgssm_reference import EXACT_LOG_LIKELIHOOD, REFERENCE_TIMES
+from tests._lgssm_reference import FILTERED_MEANS as EXACT_FILTERED_MEANS
+from tests._lgssm_reference import FILTERED_VARIANCES as EXACT_FILTERED_VARS
 from tests.conftest import _mvn_logpdf, _mvn_sample
 
 # ---------------------------------------------------------------------------
@@ -62,35 +80,55 @@ def _make_smcx_fns(lgssm_params):
 class TestAuxiliaryVsKalman:
     """APF on a linear Gaussian SSM should approximate Kalman."""
 
-    def test_auxiliary_log_ml_matches_kalman(self, lgssm_params, lgssm_data):
-        """APF log-ML should be close to Kalman exact log-ML."""
-        from dynamax.linear_gaussian_ssm.inference import (
-            lgssm_filter,
-            make_lgssm_params,
-        )
-
+    def test_evidence_and_filtering_moments(self, lgssm_params, lgssm_data):
+        """Evidence and selected moments pass committed five-SE gates."""
         _, emissions = lgssm_data
-        params = make_lgssm_params(**lgssm_params)
 
-        # Exact Kalman
-        kalman_post = lgssm_filter(params, emissions)
-        exact_ll = float(kalman_post.marginal_loglik)
-
-        # APF with many particles
         init_fn, trans_fn, obs_fn, aux_fn = _make_smcx_fns(lgssm_params)
-        pf_post = auxiliary_filter(
-            key=jr.PRNGKey(123),
-            initial_sampler=init_fn,
-            transition_sampler=trans_fn,
-            log_observation_fn=obs_fn,
-            log_auxiliary_fn=aux_fn,
-            emissions=emissions,
-            num_particles=10_000,
-        )
-        pf_ll = float(pf_post.marginal_loglik)
+        ratios, means, second_moments = [], [], []
+        # Each row is independent, so SE(mean) = sample_sd / sqrt(R), R=20.
+        for seed in range(20):
+            post = auxiliary_filter(
+                key=jr.key(seed),
+                initial_sampler=init_fn,
+                transition_sampler=trans_fn,
+                log_observation_fn=obs_fn,
+                log_auxiliary_fn=aux_fn,
+                emissions=emissions,
+                num_particles=2_048,
+            )
+            ratios.append(
+                math.exp(float(post.marginal_loglik) - EXACT_LOG_LIKELIHOOD)
+            )
+            weights = np.exp(
+                np.asarray(
+                    post.filtered_log_weights[REFERENCE_TIMES],
+                    dtype=np.float64,
+                )
+            )
+            particles = np.asarray(
+                post.filtered_particles[REFERENCE_TIMES, :, 0],
+                dtype=np.float64,
+            )
+            means.append(np.sum(weights * particles, axis=1))
+            second_moments.append(np.sum(weights * particles**2, axis=1))
 
-        assert pf_ll == pytest.approx(exact_ll, rel=0.05), (
-            f"APF log-ML {pf_ll:.2f} vs Kalman {exact_ll:.2f}"
+        def assert_five_se(observed, expected):
+            values = np.asarray(observed, dtype=np.float64)
+            estimator_se = values.std(axis=0, ddof=1) / math.sqrt(
+                values.shape[0]
+            )
+            # 2e-5 is the explicit f32/Metal arithmetic budget.
+            np.testing.assert_array_less(
+                np.abs(values.mean(axis=0) - expected),
+                5 * estimator_se + 2e-5,
+            )
+
+        assert_five_se(ratios, 1.0)
+        assert_five_se(means, EXACT_FILTERED_MEANS)
+        assert_five_se(
+            second_moments,
+            EXACT_FILTERED_VARS + EXACT_FILTERED_MEANS**2,
         )
 
 

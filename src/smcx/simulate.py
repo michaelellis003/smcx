@@ -1,6 +1,9 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
+# Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
+# Apache-2.0. Modified: typed callback protocols and aligned exogenous inputs.
+
 r"""Forward simulation from a state-space model.
 
 Generates a single trajectory of latent states and observed emissions
