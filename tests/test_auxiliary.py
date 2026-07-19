@@ -227,3 +227,57 @@ class TestAuxiliaryLogEvidenceIncrements:
             num_particles=1_000,
         )
         assert jnp.all(jnp.isfinite(pf.log_evidence_increments))
+
+
+class TestAuxiliaryInputs:
+    """Input-aware APF preserves its bootstrap reduction."""
+
+    def test_flat_auxiliary_matches_input_aware_bootstrap(self):
+        inputs = jnp.array([1.0, 2.0, 3.0])
+        emissions = jnp.array([[2.0], [5.0], [9.0]])
+
+        def initial_sampler(key, n, input_t):
+            del key
+            return jnp.full((n, 1), input_t[0])
+
+        def transition_sampler(key, state, input_t):
+            del key
+            return state + input_t
+
+        def log_observation_fn(emission, state, input_t):
+            error = emission[0] - state[0] - input_t[0]
+            return -0.5 * error**2
+
+        def flat_auxiliary_fn(emission, state, input_t):
+            del emission, state
+            return 0.0 * input_t[0]
+
+        bootstrap = bootstrap_filter(
+            jr.key(0),
+            initial_sampler,
+            transition_sampler,
+            log_observation_fn,
+            emissions,
+            4,
+            resampling_threshold=0.0,
+            inputs=inputs,
+        )
+        auxiliary = auxiliary_filter(
+            jr.key(0),
+            initial_sampler,
+            transition_sampler,
+            log_observation_fn,
+            flat_auxiliary_fn,
+            emissions,
+            4,
+            resampling_threshold=0.0,
+            inputs=inputs,
+        )
+
+        assert jnp.array_equal(
+            auxiliary.filtered_particles, bootstrap.filtered_particles
+        )
+        assert jnp.array_equal(
+            auxiliary.filtered_log_weights, bootstrap.filtered_log_weights
+        )
+        assert auxiliary.marginal_loglik == bootstrap.marginal_loglik

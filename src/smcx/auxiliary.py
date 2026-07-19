@@ -25,7 +25,7 @@ compiled into a single XLA program.
 """
 
 import math
-from collections.abc import Callable
+from typing import cast
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -33,6 +33,7 @@ from jax import lax, vmap
 from jaxtyping import Array, Float
 
 from smcx._utils import (
+    _canonicalize_inputs,
     _conditional_resample,
     _init_standard,
     _prepend,
@@ -40,42 +41,53 @@ from smcx._utils import (
 )
 from smcx.containers import ParticleFilterPosterior, ParticleState
 from smcx.resampling import systematic
-from smcx.types import PRNGKeyT
+from smcx.types import (
+    InitialSampler,
+    InitialSamplerWithInput,
+    InputSequence,
+    LogObservationFn,
+    LogObservationFnWithInput,
+    PRNGKeyT,
+    ResamplingFn,
+    TransitionSampler,
+    TransitionSamplerWithInput,
+)
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
 
 
 def auxiliary_filter(
     key: PRNGKeyT,
-    initial_sampler: Callable,
-    transition_sampler: Callable,
-    log_observation_fn: Callable,
-    log_auxiliary_fn: Callable,
+    initial_sampler: InitialSampler | InitialSamplerWithInput,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
+    log_auxiliary_fn: LogObservationFn | LogObservationFnWithInput,
     emissions: Float[Array, "ntime emission_dim"],
     num_particles: int,
-    resampling_fn: Callable = systematic,
+    resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float = 0.5,
     *,
+    inputs: InputSequence | None = None,
     store_history: bool = True,
 ) -> ParticleFilterPosterior:
     r"""Run an auxiliary particle filter (Pitt & Shephard, 1999).
 
     Args:
         key: JAX PRNG key.
-        initial_sampler: Function ``(key, num_particles) -> particles``
-            that draws from the initial state distribution
+        initial_sampler: Function ``(key, num_particles[, input_0]) ->
+            particles`` that draws from the initial state distribution
             :math:`p(z_1)`.
-        transition_sampler: Function ``(key, state) -> state`` that
+        transition_sampler: Function ``(key, state[, input_t]) -> state`` that
             draws from the transition distribution
             :math:`p(z_t \mid z_{t-1})`.  Will be ``vmap``-ped over
             the particle dimension internally.
         log_observation_fn: Function
-            ``(emission, state) -> log_prob`` that evaluates the
+            ``(emission, state[, input_t]) -> log_prob`` that evaluates the
             observation log-density :math:`\log p(y_t \mid z_t)`.
             Will be ``vmap``-ped over the particle dimension (second
             argument) internally.
         log_auxiliary_fn: Function
-            ``(emission, state) -> log_prob`` that evaluates the
+            ``(emission, state[, input_t]) -> log_prob`` that evaluates the
             look-ahead log-density
             :math:`\log g(y_{t+1} \mid x_t)`.
             Will be ``vmap``-ped over the particle dimension (second
@@ -89,6 +101,10 @@ def auxiliary_filter(
         resampling_threshold: Fraction of ``num_particles`` below
             which resampling is triggered (e.g. 0.5 means resample
             when ``ESS < 0.5 * N``).
+        inputs: Optional exogenous inputs with shape ``(T, input_dim)``
+            or ``(T,)``. Input zero reaches initialization; each later
+            input reaches the transition, observation, and auxiliary
+            callbacks aligned at the same time step.
         store_history: When False (ADR-0011), the scan stacks no
             per-step particle/weight/ancestor histories — the returned
             arrays cover only the final step (time axis length 1)
@@ -99,6 +115,11 @@ def auxiliary_filter(
         filtered particles, log weights, ancestor indices, the
         marginal log-likelihood estimate, and ESS trace.
     """
+    inputs_arr = (
+        None
+        if inputs is None
+        else _canonicalize_inputs(inputs, emissions.shape[0])
+    )
     key, init_key = jr.split(key)
     log_n = jnp.asarray(math.log(num_particles))
 
@@ -110,27 +131,57 @@ def auxiliary_filter(
         ess_0,
         identity_ancestors,
         init_state,
-    ) = _init_standard(
-        init_key,
-        initial_sampler,
-        log_observation_fn,
-        emissions[0],
-        num_particles,
-        log_n,
+    ) = (
+        _init_standard(
+            init_key,
+            initial_sampler,
+            log_observation_fn,
+            emissions[0],
+            num_particles,
+            log_n,
+        )
+        if inputs_arr is None
+        else _init_standard(
+            init_key,
+            initial_sampler,
+            log_observation_fn,
+            emissions[0],
+            num_particles,
+            log_n,
+            inputs_arr[0],
+        )
     )
 
     # --- Scan body for t = 1, ..., T-1 -------------------------------------
     def _step(
         carry: tuple[ParticleState, Array],
-        args: tuple[PRNGKeyT, Float[Array, " emission_dim"]],
+        args: tuple[Array, ...],
     ):
-        (state, _prev_ancestors), (step_key, y_t) = carry, args
+        state, _prev_ancestors = carry
+        if inputs_arr is None:
+            step_key, y_t = args
+            input_t = None
+        else:
+            step_key, y_t, input_t = args
         k1, k2 = jr.split(step_key)
         # Invariant: state.log_weights are normalized (logsumexp = 0).
 
         # 1. First-stage weights: combine current weights with
         #    look-ahead g(y_{t+1} | x_t)
-        log_aux = vmap(lambda z: log_auxiliary_fn(y_t, z))(state.particles)
+        if input_t is None:
+            auxiliary_fn = cast(LogObservationFn, log_auxiliary_fn)
+            log_aux = cast(
+                Array,
+                vmap(lambda z: auxiliary_fn(y_t, z))(state.particles),
+            )
+        else:
+            auxiliary_fn_u = cast(LogObservationFnWithInput, log_auxiliary_fn)
+            log_aux = cast(
+                Array,
+                vmap(lambda z: auxiliary_fn_u(y_t, z, input_t))(
+                    state.particles
+                ),
+            )
         log_first_stage = state.log_weights + log_aux
 
         # Normalise first-stage weights for resampling
@@ -154,10 +205,28 @@ def auxiliary_filter(
 
         # 3. Propagate through transition
         keys = jr.split(k2, num_particles)
-        propagated = vmap(transition_sampler)(keys, resampled_particles)
+        if input_t is None:
+            transition_fn = cast(TransitionSampler, transition_sampler)
+            propagated = vmap(transition_fn)(keys, resampled_particles)
+        else:
+            transition_fn_u = cast(
+                TransitionSamplerWithInput, transition_sampler
+            )
+            propagated = vmap(transition_fn_u, in_axes=(0, 0, None))(
+                keys, resampled_particles, input_t
+            )
 
         # 4. Second-stage weights: observation / look-ahead adjustment
-        log_obs = vmap(lambda z: log_observation_fn(y_t, z))(propagated)
+        if input_t is None:
+            observation_fn = cast(LogObservationFn, log_observation_fn)
+            log_obs = vmap(lambda z: observation_fn(y_t, z))(propagated)
+        else:
+            observation_fn_u = cast(
+                LogObservationFnWithInput, log_observation_fn
+            )
+            log_obs = vmap(lambda z: observation_fn_u(y_t, z, input_t))(
+                propagated
+            )
         log_second_stage = log_obs - log_aux_ancestors
 
         # Compute evidence increment and normalize.
@@ -206,6 +275,11 @@ def auxiliary_filter(
 
     # Run the scan over t = 1 ... T-1
     step_keys = jr.split(key, emissions.shape[0] - 1)
+    scan_inputs = (
+        (step_keys, emissions[1:])
+        if inputs_arr is None
+        else (step_keys, emissions[1:], inputs_arr[1:])
+    )
     init_carry = (init_state, identity_ancestors)
     if store_history:
         (
@@ -217,7 +291,7 @@ def auxiliary_filter(
                 ess_rest,
                 log_ev_inc_rest,
             ),
-        ) = lax.scan(_step, init_carry, (step_keys, emissions[1:]))
+        ) = lax.scan(_step, init_carry, scan_inputs)
         all_particles = _prepend(particles_0, particles_rest)
         all_log_w = _prepend(log_w_0, log_w_rest)
         all_ancestors = _prepend(identity_ancestors, ancestors_rest)
@@ -225,7 +299,7 @@ def auxiliary_filter(
         (
             (final_state, final_ancestors),
             (ess_rest, log_ev_inc_rest),
-        ) = lax.scan(_step, init_carry, (step_keys, emissions[1:]))
+        ) = lax.scan(_step, init_carry, scan_inputs)
         all_particles = final_state.particles[None]
         all_log_w = final_state.log_weights[None]
         all_ancestors = final_ancestors[None]
