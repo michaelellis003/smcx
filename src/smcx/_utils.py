@@ -7,14 +7,22 @@ These utilities are extracted from the individual filter modules to
 eliminate duplication.  They are not part of the public API.
 """
 
-from collections.abc import Callable
+from typing import cast
 
 import jax.numpy as jnp
 from jax import lax, vmap
 from jaxtyping import Array, Float, Int
 
 from smcx.containers import ParticleState
-from smcx.types import PRNGKeyT
+from smcx.types import (
+    InitialSampler,
+    InitialSamplerWithInput,
+    InputSequence,
+    LogObservationFn,
+    LogObservationFnWithInput,
+    PRNGKeyT,
+    ResamplingFn,
+)
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize, normalize
 
@@ -30,6 +38,37 @@ def _prepend(first: Array, rest: Array) -> Array:
         Concatenated array of shape ``(T+1, ...)``.
     """
     return jnp.concatenate([jnp.expand_dims(first, 0), rest], axis=0)
+
+
+def _canonicalize_inputs(
+    inputs: InputSequence, num_timesteps: int
+) -> Float[Array, "ntime input_dim"]:
+    """Validate and canonicalize a per-step input sequence.
+
+    Args:
+        inputs: Input sequence with shape ``(T,)`` or ``(T, input_dim)``.
+        num_timesteps: Expected leading dimension T.
+
+    Returns:
+        Input sequence with shape ``(T, input_dim)``.
+
+    Raises:
+        ValueError: The rank is not one or two, or the leading dimension
+            does not equal ``num_timesteps``.
+    """
+    if inputs.ndim == 1:
+        inputs = inputs[:, None]
+    if inputs.ndim != 2:
+        raise ValueError(
+            "inputs must have shape (T,) or (T, input_dim); "
+            f"got ndim={inputs.ndim}"
+        )
+    if inputs.shape[0] != num_timesteps:
+        raise ValueError(
+            f"inputs must have leading dimension T={num_timesteps}; "
+            f"got {inputs.shape[0]}"
+        )
+    return inputs
 
 
 def _weighted_quantile_1d(
@@ -65,11 +104,12 @@ def _weighted_quantile_1d(
 
 def _init_standard(
     init_key: PRNGKeyT,
-    initial_sampler: Callable,
-    log_observation_fn: Callable,
+    initial_sampler: InitialSampler | InitialSamplerWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
     first_emission: Array,
     num_particles: int,
     log_n: Array,
+    input_t: Float[Array, " input_dim"] | None = None,
 ) -> tuple[Array, Array, Array, Array, Array, ParticleState]:
     """Initialise a standard (bootstrap/auxiliary) filter at t=0.
 
@@ -85,15 +125,28 @@ def _init_standard(
         num_particles: Number of particles N.
         log_n: Precomputed ``log(N)`` as a scalar array in the
             default float dtype.
+        input_t: Optional input at t=0. When present, both callbacks
+            receive it as their final argument.
 
     Returns:
         Tuple of ``(particles_0, log_w_0, log_ev_0, ess_0,
         identity_ancestors, init_state)``.
     """
-    particles_0 = initial_sampler(init_key, num_particles)
-    log_obs_0 = vmap(lambda z: log_observation_fn(first_emission, z))(
-        particles_0
-    )
+    if input_t is None:
+        init_fn = cast(InitialSampler, initial_sampler)
+        obs_fn = cast(LogObservationFn, log_observation_fn)
+        particles_0 = init_fn(init_key, num_particles)
+        log_obs_0 = cast(
+            Array, vmap(lambda z: obs_fn(first_emission, z))(particles_0)
+        )
+    else:
+        init_fn_u = cast(InitialSamplerWithInput, initial_sampler)
+        obs_fn_u = cast(LogObservationFnWithInput, log_observation_fn)
+        particles_0 = init_fn_u(init_key, num_particles, input_t)
+        log_obs_0 = cast(
+            Array,
+            vmap(lambda z: obs_fn_u(first_emission, z, input_t))(particles_0),
+        )
     log_w_0, log_sum_0 = log_normalize(log_obs_0)
     log_ev_0 = log_sum_0 - log_n
     ess_0: Array = jnp.asarray(compute_ess(log_w_0))
@@ -117,7 +170,7 @@ def _init_standard(
 def _conditional_resample(
     key: PRNGKeyT,
     log_weights: Float[Array, " num_particles"],
-    resampling_fn: Callable,
+    resampling_fn: ResamplingFn,
     threshold: float,
     num_particles: int,
     identity: Int[Array, " num_particles"],

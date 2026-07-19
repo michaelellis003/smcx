@@ -221,3 +221,38 @@ class TestBootstrapLogEvidenceIncrements:
             num_particles=1_000,
         )
         assert jnp.all(jnp.isfinite(pf.log_evidence_increments))
+
+
+class TestBootstrapInputs:
+    """Per-step exogenous inputs reach every model callback."""
+
+    def test_inputs_reach_initial_transition_and_observation_callbacks(self):
+        inputs = jnp.array([1.0, 2.0, 3.0])
+        emissions = jnp.array([[2.0], [5.0], [9.0]])
+
+        def initial_sampler(key, n, input_t):
+            del key
+            return jnp.full((n, 1), input_t[0])
+
+        def transition_sampler(key, state, input_t):
+            del key
+            return state + input_t
+
+        def log_observation_fn(emission, state, input_t):
+            error = emission[0] - state[0] - input_t[0]
+            return -0.5 * error**2
+
+        post = bootstrap_filter(
+            key=jr.key(0),
+            initial_sampler=initial_sampler,
+            transition_sampler=transition_sampler,
+            log_observation_fn=log_observation_fn,
+            emissions=emissions,
+            num_particles=4,
+            inputs=inputs,
+        )
+
+        expected = jnp.array([1.0, 3.0, 6.0])
+        expected_cloud = jnp.broadcast_to(expected[:, None], (3, 4))
+        assert jnp.array_equal(post.filtered_particles[:, :, 0], expected_cloud)
+        assert post.marginal_loglik == pytest.approx(0.0)
