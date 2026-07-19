@@ -203,12 +203,14 @@ def auxiliary_filter(
 
         # Normalise first-stage weights for resampling
         log_first_norm, log_first_sum = log_normalize(log_first_stage)
+        first_ess: Array = jnp.asarray(compute_ess(log_first_norm))
 
         # 2. Conditionally resample using first-stage weights
         threshold = resampling_threshold * num_particles
         do_resample, ancestors = _conditional_resample(
             k1,
             log_first_norm,
+            first_ess,
             resampling_fn,
             threshold,
             num_particles,
