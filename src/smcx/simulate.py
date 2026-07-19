@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
-# Apache-2.0. Modified: typed callback protocols and aligned exogenous inputs.
+# Apache-2.0. Modified: typed callback protocols, aligned exogenous inputs,
+# and structured latent state.
 
 r"""Forward simulation from a state-space model.
 
@@ -21,7 +22,13 @@ import jax.random as jr
 from jax import lax
 from jaxtyping import Array, Float
 
-from smcx._utils import _canonicalize_inputs, _prepend
+from smcx._utils import (
+    _canonicalize_inputs,
+    _prepend,
+    _prepend_state_history,
+    _validate_initial_state,
+    _validate_state_tree,
+)
 from smcx.types import (
     EmissionSampler,
     EmissionSamplerWithInput,
@@ -29,6 +36,8 @@ from smcx.types import (
     PRNGKeyT,
     SingleInitialSampler,
     SingleInitialSamplerWithInput,
+    StateHistory,
+    StateTree,
     TransitionSampler,
     TransitionSamplerWithInput,
 )
@@ -43,7 +52,7 @@ def simulate(
     *,
     inputs: InputSequence | None = None,
 ) -> tuple[
-    Float[Array, "ntime state_dim"],
+    StateHistory,
     Float[Array, "ntime emission_dim"],
 ]:
     r"""Simulate a single trajectory from a state-space model.
@@ -51,12 +60,11 @@ def simulate(
     Args:
         key: JAX PRNG key.
         initial_sampler: Function ``(key[, input_0]) -> state`` that
-            draws a single sample from the initial state distribution
-            :math:`p(z_1)`.  Unlike the filter interface, this draws
-            *one* sample (no ``num_particles`` argument).
+            draws one state from :math:`p(z_1)`. The state may be a dense
+            array or a nonempty PyTree of arrays.
         transition_sampler: Function ``(key, state[, input_t]) -> state`` that
-            draws from the transition distribution
-            :math:`p(z_t \mid z_{t-1})`.
+            draws from :math:`p(z_t \mid z_{t-1})` and preserves the
+            state's PyTree structure, leaf shapes, and dtypes.
         emission_sampler: Function ``(key, state[, input_t]) -> emission`` that
             draws from the emission distribution
             :math:`p(y_t \mid z_t)`.
@@ -67,13 +75,15 @@ def simulate(
             emission.
 
     Returns:
-        A tuple ``(states, emissions)`` where *states* has shape
-        ``(T, state_dim)`` and *emissions* has shape
+        A tuple ``(states, emissions)``. ``states`` preserves the latent
+        PyTree and adds a leading time axis to every leaf; a dense state
+        therefore has shape ``(T, state_dim)``. ``emissions`` has shape
         ``(T, emission_dim)``.
 
     Raises:
-        ValueError: ``inputs`` is not rank one or two, or its leading
-            dimension does not equal ``num_timesteps``.
+        ValueError: Inputs are malformed, the initial state tree is empty,
+            or a transition changes the state structure, leaf shape, or
+            dtype.
     """
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
@@ -88,14 +98,22 @@ def simulate(
         transition_fn = cast(TransitionSampler, transition_sampler)
         emission_fn = cast(EmissionSampler, emission_sampler)
         z_0 = initial_fn(k_z0)
+        state_signature = _validate_initial_state(
+            z_0, name="initial_sampler output"
+        )
         y_0 = emission_fn(k_y0, z_0)
 
         def _step(
-            z_prev: Array,
+            z_prev: StateTree,
             step_key: PRNGKeyT,
-        ) -> tuple[Array, tuple[Array, Array]]:
+        ) -> tuple[StateTree, tuple[StateTree, Array]]:
             k_z, k_y = jr.split(step_key)
             z_t = transition_fn(k_z, z_prev)
+            _validate_state_tree(
+                z_t,
+                state_signature,
+                name="transition_sampler output",
+            )
             y_t = emission_fn(k_y, z_t)
             return z_t, (z_t, y_t)
 
@@ -105,15 +123,23 @@ def simulate(
         transition_fn_u = cast(TransitionSamplerWithInput, transition_sampler)
         emission_fn_u = cast(EmissionSamplerWithInput, emission_sampler)
         z_0 = initial_fn_u(k_z0, inputs_arr[0])
+        state_signature = _validate_initial_state(
+            z_0, name="initial_sampler output"
+        )
         y_0 = emission_fn_u(k_y0, z_0, inputs_arr[0])
 
         def _step_with_input(
-            z_prev: Array,
+            z_prev: StateTree,
             args: tuple[PRNGKeyT, Float[Array, " input_dim"]],
-        ) -> tuple[Array, tuple[Array, Array]]:
+        ) -> tuple[StateTree, tuple[StateTree, Array]]:
             step_key, input_t = args
             k_z, k_y = jr.split(step_key)
             z_t = transition_fn_u(k_z, z_prev, input_t)
+            _validate_state_tree(
+                z_t,
+                state_signature,
+                name="transition_sampler output",
+            )
             y_t = emission_fn_u(k_y, z_t, input_t)
             return z_t, (z_t, y_t)
 
@@ -124,7 +150,7 @@ def simulate(
         )
 
     # --- Combine t=0 with t=1..T-1 ------------------------------------------
-    all_states = _prepend(z_0, states_rest)
+    all_states = _prepend_state_history(z_0, states_rest)
     all_emissions = _prepend(y_0, emissions_rest)
 
     return all_states, all_emissions

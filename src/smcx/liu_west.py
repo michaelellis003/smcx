@@ -49,8 +49,8 @@ from smcx._utils import (
 from smcx.containers import LiuWestPosterior
 from smcx.resampling import systematic
 from smcx.types import (
-    InitialSampler,
-    InitialSamplerWithInput,
+    DenseInitialSampler,
+    DenseInitialSamplerWithInput,
     InputSequence,
     ParamInitialSampler,
     ParamLogObservationFn,
@@ -69,7 +69,7 @@ _Carry = tuple[Array, Array, Array, Array, Array]
 
 def _init_liu_west(
     init_key: PRNGKeyT,
-    initial_sampler: InitialSampler | InitialSamplerWithInput,
+    initial_sampler: DenseInitialSampler | DenseInitialSamplerWithInput,
     param_initial_sampler: ParamInitialSampler,
     log_observation_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
     first_emission: Array,
@@ -95,10 +95,10 @@ def _init_liu_west(
     log_n = jnp.asarray(math.log(num_particles))
     k_z, k_p = jr.split(init_key)
     if input_t is None:
-        state_init = cast(InitialSampler, initial_sampler)
+        state_init = cast(DenseInitialSampler, initial_sampler)
         particles_0 = state_init(k_z, num_particles)
     else:
-        state_init_u = cast(InitialSamplerWithInput, initial_sampler)
+        state_init_u = cast(DenseInitialSamplerWithInput, initial_sampler)
         particles_0 = state_init_u(k_z, num_particles, input_t)
     params_0 = param_initial_sampler(k_p, num_particles)
 
@@ -130,7 +130,7 @@ def _init_liu_west(
 
 def liu_west_filter(
     key: PRNGKeyT,
-    initial_sampler: InitialSampler | InitialSamplerWithInput,
+    initial_sampler: DenseInitialSampler | DenseInitialSamplerWithInput,
     transition_sampler: ParamTransitionSampler
     | ParamTransitionSamplerWithInput,
     log_observation_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,

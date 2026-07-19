@@ -7,11 +7,14 @@ These utilities are extracted from the individual filter modules to
 eliminate duplication.  They are not part of the public API.
 """
 
-from typing import cast
+from typing import NamedTuple, TypeAlias, cast
 
+import jax
 import jax.numpy as jnp
-from jax import lax, vmap
-from jaxtyping import Array, Float, Int
+from jax import lax, tree, vmap
+from jax.core import Tracer
+from jax.tree_util import PyTreeDef, keystr
+from jaxtyping import Array, Float, Int, PyTree, Shaped
 
 from smcx.containers import ParticleState
 from smcx.types import (
@@ -20,11 +23,21 @@ from smcx.types import (
     InputSequence,
     LogObservationFn,
     LogObservationFnWithInput,
+    ParticleCloud,
+    ParticleHistory,
     PRNGKeyT,
     ResamplingFn,
+    StateHistory,
+    StateTree,
 )
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize, normalize
+
+_ParticleHistoryTail: TypeAlias = PyTree[
+    Shaped[Array, "remaining_time num_particles ..."]
+]
+_StateHistoryTail: TypeAlias = PyTree[Shaped[Array, "remaining_time ..."]]
+_SampledCloud: TypeAlias = PyTree[Shaped[Array, "num_samples ..."]]
 
 
 def _prepend(first: Array, rest: Array) -> Array:
@@ -38,6 +51,137 @@ def _prepend(first: Array, rest: Array) -> Array:
         Concatenated array of shape ``(T+1, ...)``.
     """
     return jnp.concatenate([jnp.expand_dims(first, 0), rest], axis=0)
+
+
+class _TreeSignature(NamedTuple):
+    """Fixed dynamic-leaf contract for one latent state."""
+
+    structure: PyTreeDef
+    paths: tuple[str, ...]
+    shapes: tuple[tuple[int, ...], ...]
+    dtypes: tuple[object, ...]
+
+
+def _array_tree_signature(value: object, *, name: str) -> _TreeSignature:
+    """Validate a nonempty PyTree of JAX arrays and describe its leaves."""
+    path_leaves, structure = tree.flatten_with_path(value)
+    if not path_leaves:
+        raise ValueError(f"{name} must be a nonempty PyTree of JAX arrays")
+
+    paths: list[str] = []
+    shapes: list[tuple[int, ...]] = []
+    dtypes: list[object] = []
+    for path, leaf in path_leaves:
+        path_text = keystr(path) or "<root>"
+        if not isinstance(leaf, (jax.Array, Tracer)):
+            raise ValueError(
+                f"{name} leaf {path_text} must be a JAX array; "
+                f"got {type(leaf).__name__}"
+            )
+        paths.append(path_text)
+        shapes.append(tuple(leaf.shape))
+        dtypes.append(leaf.dtype)
+    return _TreeSignature(
+        structure=structure,
+        paths=tuple(paths),
+        shapes=tuple(shapes),
+        dtypes=tuple(dtypes),
+    )
+
+
+def _validate_particle_cloud(
+    particles: object,
+    num_particles: int,
+    *,
+    name: str,
+) -> _TreeSignature:
+    """Validate a batched latent-state tree and return one-state metadata."""
+    cloud = _array_tree_signature(particles, name=name)
+    event_shapes: list[tuple[int, ...]] = []
+    for path, shape in zip(cloud.paths, cloud.shapes, strict=True):
+        if not shape:
+            raise ValueError(
+                f"{name} leaf {path} must have a leading particle axis"
+            )
+        if shape[0] != num_particles:
+            raise ValueError(
+                f"{name} leaf {path} must have leading dimension "
+                f"num_particles={num_particles}; got {shape[0]}"
+            )
+        event_shapes.append(shape[1:])
+    return _TreeSignature(
+        structure=cloud.structure,
+        paths=cloud.paths,
+        shapes=tuple(event_shapes),
+        dtypes=cloud.dtypes,
+    )
+
+
+def _validate_state_tree(
+    state: object,
+    expected: _TreeSignature,
+    *,
+    name: str,
+) -> None:
+    """Require an unbatched callback state to preserve its initial contract."""
+    actual = _array_tree_signature(state, name=name)
+    if actual.structure != expected.structure:
+        raise ValueError(
+            f"{name} must preserve the initial latent-state PyTree structure; "
+            f"expected {expected.structure}, got {actual.structure}"
+        )
+    for path, shape, expected_shape, dtype, expected_dtype in zip(
+        actual.paths,
+        actual.shapes,
+        expected.shapes,
+        actual.dtypes,
+        expected.dtypes,
+        strict=True,
+    ):
+        if shape != expected_shape:
+            raise ValueError(
+                f"{name} leaf {path} must preserve shape {expected_shape}; "
+                f"got {shape}"
+            )
+        if dtype != expected_dtype:
+            raise ValueError(
+                f"{name} leaf {path} must preserve dtype {expected_dtype}; "
+                f"got {dtype}"
+            )
+
+
+def _validate_initial_state(state: object, *, name: str) -> _TreeSignature:
+    """Validate one unbatched latent state and capture its fixed contract."""
+    return _array_tree_signature(state, name=name)
+
+
+def _gather_particles(
+    particles: ParticleCloud,
+    ancestors: Int[Array, " num_samples"],
+) -> _SampledCloud:
+    """Gather every state leaf with one shared ancestor index array."""
+    return tree.map(lambda leaf: leaf[ancestors], particles)
+
+
+def _prepend_particle_history(
+    first: ParticleCloud,
+    rest: _ParticleHistoryTail,
+) -> ParticleHistory:
+    """Prepend a particle cloud to every leaf of a scanned history."""
+    return tree.map(_prepend, first, rest)
+
+
+def _particle_time_axis(particles: ParticleCloud) -> ParticleHistory:
+    """Add a length-one time axis to every particle-cloud leaf."""
+    return tree.map(lambda leaf: leaf[None], particles)
+
+
+def _prepend_state_history(
+    first: StateTree,
+    rest: _StateHistoryTail,
+) -> StateHistory:
+    """Prepend one state to every leaf of a simulated state history."""
+    return tree.map(_prepend, first, rest)
 
 
 def _canonicalize_inputs(
@@ -110,7 +254,15 @@ def _init_standard(
     num_particles: int,
     log_n: Array,
     input_t: Float[Array, " input_dim"] | None = None,
-) -> tuple[Array, Array, Array, Array, Array, ParticleState]:
+) -> tuple[
+    ParticleCloud,
+    Array,
+    Array,
+    Array,
+    Array,
+    ParticleState,
+    _TreeSignature,
+]:
     """Initialise a standard (bootstrap/auxiliary) filter at t=0.
 
     Samples from the prior, weights by the first observation, and
@@ -130,12 +282,17 @@ def _init_standard(
 
     Returns:
         Tuple of ``(particles_0, log_w_0, log_ev_0, ess_0,
-        identity_ancestors, init_state)``.
+        identity_ancestors, init_state, state_signature)``.
     """
     if input_t is None:
         init_fn = cast(InitialSampler, initial_sampler)
         obs_fn = cast(LogObservationFn, log_observation_fn)
         particles_0 = init_fn(init_key, num_particles)
+        state_signature = _validate_particle_cloud(
+            particles_0,
+            num_particles,
+            name="initial_sampler output",
+        )
         log_obs_0 = cast(
             Array, vmap(lambda z: obs_fn(first_emission, z))(particles_0)
         )
@@ -143,6 +300,11 @@ def _init_standard(
         init_fn_u = cast(InitialSamplerWithInput, initial_sampler)
         obs_fn_u = cast(LogObservationFnWithInput, log_observation_fn)
         particles_0 = init_fn_u(init_key, num_particles, input_t)
+        state_signature = _validate_particle_cloud(
+            particles_0,
+            num_particles,
+            name="initial_sampler output",
+        )
         log_obs_0 = cast(
             Array,
             vmap(lambda z: obs_fn_u(first_emission, z, input_t))(particles_0),
@@ -164,6 +326,7 @@ def _init_standard(
         ess_0,
         identity_ancestors,
         init_state,
+        state_signature,
     )
 
 

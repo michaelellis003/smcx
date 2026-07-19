@@ -11,7 +11,7 @@ from typing import NamedTuple, Protocol, runtime_checkable
 
 from jaxtyping import Array, Float, Int
 
-from smcx.types import Scalar
+from smcx.types import ParticleCloud, ParticleHistory, Scalar
 
 
 @runtime_checkable
@@ -25,8 +25,8 @@ class ParticleFilterResult(Protocol):
     Attributes:
         marginal_loglik: Scalar estimate of
             :math:`\log p(y_{1:T})`.
-        filtered_particles: Particle values at each time step,
-            shape ``(ntime, num_particles, state_dim)``.
+        filtered_particles: Latent-state PyTree with every leaf shaped
+            ``(ntime, num_particles, ...)``.
         filtered_log_weights: Normalised log weights at each step,
             shape ``(ntime, num_particles)``.
         ancestors: Resampled ancestor indices at each time step,
@@ -46,7 +46,7 @@ class ParticleFilterResult(Protocol):
     @property
     def filtered_particles(
         self,
-    ) -> Float[Array, "ntime num_particles state_dim"]: ...
+    ) -> ParticleHistory: ...
 
     @property
     def filtered_log_weights(
@@ -67,13 +67,14 @@ class ParticleState(NamedTuple):
     r"""State of a particle cloud at a single time step.
 
     Attributes:
-        particles: Particle values, shape ``(num_particles, state_dim)``.
+        particles: Latent-state PyTree with every leaf shaped
+            ``(num_particles, ...)``.
         log_weights: Unnormalized log importance weights,
             shape ``(num_particles,)``.
         log_marginal_likelihood: Running log marginal likelihood estimate.
     """
 
-    particles: Float[Array, "num_particles state_dim"]
+    particles: ParticleCloud
     log_weights: Float[Array, " num_particles"]
     log_marginal_likelihood: Scalar
 
@@ -88,8 +89,9 @@ class ParticleFilterPosterior(NamedTuple):
     Attributes:
         marginal_loglik: Scalar estimate of
             :math:`\log p(y_{1:T})`.
-        filtered_particles: Particle values at each time step,
-            shape ``(ntime, num_particles, state_dim)``.
+        filtered_particles: Latent-state PyTree with every leaf shaped
+            ``(ntime, num_particles, ...)``. A dense state remains one
+            array of shape ``(ntime, num_particles, state_dim)``.
         filtered_log_weights: Unnormalized log weights at each time step,
             shape ``(ntime, num_particles)``.
         ancestors: Resampled ancestor indices at each time step,
@@ -102,7 +104,7 @@ class ParticleFilterPosterior(NamedTuple):
     """
 
     marginal_loglik: Scalar
-    filtered_particles: Float[Array, "ntime num_particles state_dim"]
+    filtered_particles: ParticleHistory
     filtered_log_weights: Float[Array, "ntime num_particles"]
     ancestors: Int[Array, "ntime num_particles"]
     ess: Float[Array, " ntime"]
