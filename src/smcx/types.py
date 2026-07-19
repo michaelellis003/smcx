@@ -90,6 +90,85 @@ class LogObservationFnWithInput(Protocol):
 
 
 @runtime_checkable
+class ProposalSampler(Protocol):
+    """Draw one particle from a guided proposal."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        state: Float[Array, " state_dim"],
+        emission: Float[Array, " emission_dim"],
+        /,
+    ) -> Float[Array, " state_dim"]: ...
+
+
+@runtime_checkable
+class ProposalSamplerWithInput(Protocol):
+    """Draw one particle from an input-conditioned proposal."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        state: Float[Array, " state_dim"],
+        emission: Float[Array, " emission_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Float[Array, " state_dim"]: ...
+
+
+@runtime_checkable
+class LogProposalFn(Protocol):
+    """Evaluate one guided proposal log-density."""
+
+    def __call__(
+        self,
+        emission: Float[Array, " emission_dim"],
+        new_state: Float[Array, " state_dim"],
+        old_state: Float[Array, " state_dim"],
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
+class LogProposalFnWithInput(Protocol):
+    """Evaluate an input-conditioned proposal log-density."""
+
+    def __call__(
+        self,
+        emission: Float[Array, " emission_dim"],
+        new_state: Float[Array, " state_dim"],
+        old_state: Float[Array, " state_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
+class LogTransitionFn(Protocol):
+    """Evaluate one transition log-density."""
+
+    def __call__(
+        self,
+        new_state: Float[Array, " state_dim"],
+        old_state: Float[Array, " state_dim"],
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
+class LogTransitionFnWithInput(Protocol):
+    """Evaluate an input-conditioned transition log-density."""
+
+    def __call__(
+        self,
+        new_state: Float[Array, " state_dim"],
+        old_state: Float[Array, " state_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
 class ResamplingFn(Protocol):
     """Draw ancestor indices from normalized particle weights."""
 

@@ -91,6 +91,63 @@ class TestGuidedReducesToBootstrap:
             guided.filtered_particles, boot.filtered_particles, rtol=1e-6
         )
 
+    def test_input_aware_prior_proposal_matches_bootstrap(self):
+        inputs = jnp.array([1.0, 2.0, 3.0])
+        emissions = jnp.array([[2.0], [5.0], [9.0]])
+
+        def initial_sampler(key, n, input_t):
+            del key
+            return jnp.full((n, 1), input_t[0])
+
+        def transition_sampler(key, state, input_t):
+            del key
+            return state + input_t
+
+        def proposal_sampler(key, state, emission, input_t):
+            del key, emission
+            return state + input_t
+
+        def log_proposal_fn(emission, new_state, old_state, input_t):
+            del emission, new_state, old_state
+            return 0.0 * input_t[0]
+
+        def log_transition_fn(new_state, old_state, input_t):
+            del new_state, old_state
+            return 0.0 * input_t[0]
+
+        def log_observation_fn(emission, state, input_t):
+            error = emission[0] - state[0] - input_t[0]
+            return -0.5 * error**2
+
+        key = jr.key(7)
+        guided = smcx.guided_filter(
+            key,
+            initial_sampler,
+            proposal_sampler,
+            log_proposal_fn,
+            log_transition_fn,
+            log_observation_fn,
+            emissions,
+            4,
+            resampling_threshold=0.0,
+            inputs=inputs,
+        )
+        bootstrap = smcx.bootstrap_filter(
+            key,
+            initial_sampler,
+            transition_sampler,
+            log_observation_fn,
+            emissions,
+            4,
+            resampling_threshold=0.0,
+            inputs=inputs,
+        )
+
+        assert jnp.array_equal(
+            guided.filtered_particles, bootstrap.filtered_particles
+        )
+        assert guided.marginal_loglik == bootstrap.marginal_loglik
+
 
 class TestOptimalProposalVarianceReduction:
     """The locally optimal proposal reduces log-ML variance."""
