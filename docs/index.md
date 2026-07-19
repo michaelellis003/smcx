@@ -73,6 +73,16 @@ log-weights, the per-step effective sample size, and a running
 marginal log-likelihood. `smcx.diagnose(posterior)` summarizes
 filter health in one call.
 
+The bootstrap, auxiliary, and guided filters, plus `simulate`, can carry
+a nonempty latent-state PyTree. Every particle-cloud leaf has leading
+axis `N`, every history leaf has leading axes `(T, N)`, and one ancestor
+selection is applied jointly across all leaves. Trajectory reconstruction
+and posterior prediction preserve that structure. Euclidean summaries
+such as `weighted_mean`, `tail_ess`, and `diagnose` require a dense state
+history; select or project a leaf before using them on a structured
+posterior. See the
+[structured-state quickstart](guides/quickstart.md#carry-a-structured-latent-state).
+
 Beyond filtering, `smcx.temper` targets a static posterior with
 adaptive tempered SMC, and `smcx.smc2` nests particle filters inside
 an SMC sampler for full state-and-parameter inference.

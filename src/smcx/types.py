@@ -8,13 +8,25 @@ Matches the conventions used by Dynamax (``dynamax.types``).
 
 from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
 
-from jaxtyping import Array, Float, Int32, PRNGKeyArray
+from jaxtyping import Array, Float, Int32, PRNGKeyArray, PyTree, Shaped
 
 PRNGKeyT = PRNGKeyArray
 """JAX PRNG key (handles both old and new JAX key formats)."""
 
 Scalar = float | Float[Array, ""]
 """Python float or scalar JAX array with float dtype."""
+
+StateTree: TypeAlias = PyTree[Shaped[Array, "..."]]
+"""One latent state represented by a nonempty JAX PyTree of arrays."""
+
+ParticleCloud: TypeAlias = PyTree[Shaped[Array, "num_particles ..."]]
+"""Latent-state PyTree with a leading particle axis on every leaf."""
+
+ParticleHistory: TypeAlias = PyTree[Shaped[Array, "ntime num_particles ..."]]
+"""Latent-state PyTree with leading time and particle axes."""
+
+StateHistory: TypeAlias = PyTree[Shaped[Array, "ntime ..."]]
+"""Single-trajectory state PyTree with a leading time axis."""
 
 # Static checkers see the accepted rank-one/rank-two contract. At runtime,
 # beartype must admit any rank so the public plain-Python validator can raise
@@ -33,12 +45,34 @@ class InitialSampler(Protocol):
 
     def __call__(
         self, key: PRNGKeyT, num_particles: int, /
-    ) -> Float[Array, "num_particles state_dim"]: ...
+    ) -> ParticleCloud: ...
 
 
 @runtime_checkable
 class InitialSamplerWithInput(Protocol):
     """Draw an input-conditioned initial particle cloud."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        num_particles: int,
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> ParticleCloud: ...
+
+
+@runtime_checkable
+class DenseInitialSampler(Protocol):
+    """Draw a dense initial cloud for Euclidean parameter algorithms."""
+
+    def __call__(
+        self, key: PRNGKeyT, num_particles: int, /
+    ) -> Float[Array, "num_particles state_dim"]: ...
+
+
+@runtime_checkable
+class DenseInitialSamplerWithInput(Protocol):
+    """Draw an input-conditioned dense initial particle cloud."""
 
     def __call__(
         self,
@@ -62,9 +96,7 @@ class ParamInitialSampler(Protocol):
 class TransitionSampler(Protocol):
     """Draw one particle from the transition distribution."""
 
-    def __call__(
-        self, key: PRNGKeyT, state: Float[Array, " state_dim"], /
-    ) -> Float[Array, " state_dim"]: ...
+    def __call__(self, key: PRNGKeyT, state: StateTree, /) -> StateTree: ...
 
 
 @runtime_checkable
@@ -74,17 +106,17 @@ class TransitionSamplerWithInput(Protocol):
     def __call__(
         self,
         key: PRNGKeyT,
-        state: Float[Array, " state_dim"],
+        state: StateTree,
         input_t: Float[Array, " input_dim"],
         /,
-    ) -> Float[Array, " state_dim"]: ...
+    ) -> StateTree: ...
 
 
 @runtime_checkable
 class SingleInitialSampler(Protocol):
     """Draw one initial state for forward simulation."""
 
-    def __call__(self, key: PRNGKeyT, /) -> Float[Array, " state_dim"]: ...
+    def __call__(self, key: PRNGKeyT, /) -> StateTree: ...
 
 
 @runtime_checkable
@@ -96,7 +128,7 @@ class SingleInitialSamplerWithInput(Protocol):
         key: PRNGKeyT,
         input_t: Float[Array, " input_dim"],
         /,
-    ) -> Float[Array, " state_dim"]: ...
+    ) -> StateTree: ...
 
 
 @runtime_checkable
@@ -104,7 +136,7 @@ class EmissionSampler(Protocol):
     """Draw one emission conditional on a state."""
 
     def __call__(
-        self, key: PRNGKeyT, state: Float[Array, " state_dim"], /
+        self, key: PRNGKeyT, state: StateTree, /
     ) -> Float[Array, " emission_dim"]: ...
 
 
@@ -115,7 +147,7 @@ class EmissionSamplerWithInput(Protocol):
     def __call__(
         self,
         key: PRNGKeyT,
-        state: Float[Array, " state_dim"],
+        state: StateTree,
         input_t: Float[Array, " input_dim"],
         /,
     ) -> Float[Array, " emission_dim"]: ...
@@ -128,7 +160,7 @@ class LogObservationFn(Protocol):
     def __call__(
         self,
         emission: Float[Array, " emission_dim"],
-        state: Float[Array, " state_dim"],
+        state: StateTree,
         /,
     ) -> Scalar: ...
 
@@ -140,7 +172,7 @@ class LogObservationFnWithInput(Protocol):
     def __call__(
         self,
         emission: Float[Array, " emission_dim"],
-        state: Float[Array, " state_dim"],
+        state: StateTree,
         input_t: Float[Array, " input_dim"],
         /,
     ) -> Scalar: ...
@@ -153,10 +185,10 @@ class ProposalSampler(Protocol):
     def __call__(
         self,
         key: PRNGKeyT,
-        state: Float[Array, " state_dim"],
+        state: StateTree,
         emission: Float[Array, " emission_dim"],
         /,
-    ) -> Float[Array, " state_dim"]: ...
+    ) -> StateTree: ...
 
 
 @runtime_checkable
@@ -166,11 +198,11 @@ class ProposalSamplerWithInput(Protocol):
     def __call__(
         self,
         key: PRNGKeyT,
-        state: Float[Array, " state_dim"],
+        state: StateTree,
         emission: Float[Array, " emission_dim"],
         input_t: Float[Array, " input_dim"],
         /,
-    ) -> Float[Array, " state_dim"]: ...
+    ) -> StateTree: ...
 
 
 @runtime_checkable
@@ -180,8 +212,8 @@ class LogProposalFn(Protocol):
     def __call__(
         self,
         emission: Float[Array, " emission_dim"],
-        new_state: Float[Array, " state_dim"],
-        old_state: Float[Array, " state_dim"],
+        new_state: StateTree,
+        old_state: StateTree,
         /,
     ) -> Scalar: ...
 
@@ -193,8 +225,8 @@ class LogProposalFnWithInput(Protocol):
     def __call__(
         self,
         emission: Float[Array, " emission_dim"],
-        new_state: Float[Array, " state_dim"],
-        old_state: Float[Array, " state_dim"],
+        new_state: StateTree,
+        old_state: StateTree,
         input_t: Float[Array, " input_dim"],
         /,
     ) -> Scalar: ...
@@ -206,8 +238,8 @@ class LogTransitionFn(Protocol):
 
     def __call__(
         self,
-        new_state: Float[Array, " state_dim"],
-        old_state: Float[Array, " state_dim"],
+        new_state: StateTree,
+        old_state: StateTree,
         /,
     ) -> Scalar: ...
 
@@ -218,8 +250,8 @@ class LogTransitionFnWithInput(Protocol):
 
     def __call__(
         self,
-        new_state: Float[Array, " state_dim"],
-        old_state: Float[Array, " state_dim"],
+        new_state: StateTree,
+        old_state: StateTree,
         input_t: Float[Array, " input_dim"],
         /,
     ) -> Scalar: ...

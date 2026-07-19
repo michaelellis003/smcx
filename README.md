@@ -101,10 +101,20 @@ smcx.diagnose(post)  # ESS / diversity / Pareto-k health summary
 
 Callbacks are per-particle; smcx vmaps them internally. Everything
 takes an explicit PRNG key, and posteriors are NamedTuples — ordinary
-JAX pytrees. The four filters and `simulate` accept a keyword-only
-`inputs` sequence for controlled dynamics and covariate-driven
-observations; input-aware callbacks receive the aligned `input_t` as
-their final argument.
+JAX PyTrees. The bootstrap, auxiliary, and guided filters, plus
+`simulate`, also accept a nonempty PyTree as the latent state. Every
+particle-cloud leaf has leading axis `N`; every stored-history leaf has
+leading axes `(T, N)`, and all leaves share the same resampling ancestry.
+Liu–West, tempered SMC, and SMC² retain dense Euclidean parameter and
+latent-state arrays.
+
+All four filters and `simulate` accept a keyword-only `inputs` sequence
+for controlled dynamics and covariate-driven observations; input-aware
+callbacks receive the aligned `input_t` as their final argument.
+Trajectory reconstruction and posterior prediction preserve structured
+states. Euclidean summaries such as `weighted_mean`, `tail_ess`, and
+`diagnose` require a dense state history, so select or project a leaf
+before calling them on a structured posterior.
 
 smcx is deliberately just the inference engine: it defines no model
 classes and no distributions. Models enter as JAX callables — your

@@ -3,7 +3,7 @@
 
 # Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
 # Apache-2.0. Modified: local ESS/resampling and validation, typed callback
-# protocols, exogenous inputs, and optional history storage.
+# protocols, exogenous inputs, structured state, and optional history storage.
 
 r"""Bootstrap (SIR) particle filter.
 
@@ -30,9 +30,13 @@ from jaxtyping import Array, Float
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
+    _gather_particles,
     _init_standard,
+    _particle_time_axis,
     _prepend,
+    _prepend_particle_history,
     _raise_if_degenerate,
+    _validate_state_tree,
 )
 from smcx.containers import ParticleFilterPosterior, ParticleState
 from smcx.resampling import systematic
@@ -69,12 +73,13 @@ def bootstrap_filter(
     Args:
         key: JAX PRNG key.
         initial_sampler: Function ``(key, num_particles[, input_0]) ->
-            particles`` that draws from the initial state distribution
-            :math:`p(z_1)`.
+            particles`` that draws from :math:`p(z_1)`. ``particles`` may
+            be a dense array or a nonempty PyTree whose array leaves all
+            have leading size ``num_particles``.
         transition_sampler: Function ``(key, state[, input_t]) -> state``
-            that draws from the transition distribution
-            :math:`p(z_t \mid z_{t-1})`.  Will be ``vmap``-ped over the
-            particle dimension internally.
+            drawing from :math:`p(z_t \mid z_{t-1})`. It receives one
+            particle PyTree and must preserve its structure, leaf shapes,
+            and dtypes. smcx ``vmap``-s it internally.
         log_observation_fn: Function
             ``(emission, state[, input_t]) -> log_prob`` that evaluates the
             observation log-density :math:`\log p(y_t \mid z_t)`.
@@ -101,12 +106,15 @@ def bootstrap_filter(
 
     Returns:
         :class:`~smcx.containers.ParticleFilterPosterior` containing
-        filtered particles, log weights, ancestor indices, the
-        marginal log-likelihood estimate, and ESS trace.
+        filtered particles, log weights, ancestor indices, the marginal
+        log-likelihood estimate, and ESS trace. Structured particle
+        histories preserve the state PyTree and add ``(T, N)`` to every
+        leaf.
 
     Raises:
-        ValueError: ``inputs`` is not rank one or two, or its leading
-            dimension does not match ``emissions``.
+        ValueError: Inputs are malformed, the initial state tree is empty
+            or has a wrong leading axis, or a transition changes the state
+            structure, leaf shape, or dtype.
     """
     inputs_arr = (
         None
@@ -124,6 +132,7 @@ def bootstrap_filter(
         ess_0,
         identity_ancestors,
         init_state,
+        state_signature,
     ) = (
         _init_standard(
             init_key,
@@ -169,20 +178,38 @@ def bootstrap_filter(
             num_particles,
             identity_ancestors,
         )
-        resampled_particles = state.particles[ancestors]
+        resampled_particles = _gather_particles(state.particles, ancestors)
 
         # 2. Propagate through transition
         keys = jr.split(k2, num_particles)
         if input_t is None:
             transition_fn = cast(TransitionSampler, transition_sampler)
-            propagated = vmap(transition_fn)(keys, resampled_particles)
+
+            def _propagate(key_i, state_i):
+                next_state = transition_fn(key_i, state_i)
+                _validate_state_tree(
+                    next_state,
+                    state_signature,
+                    name="transition_sampler output",
+                )
+                return next_state
+
+            propagated = vmap(_propagate)(keys, resampled_particles)
         else:
             transition_fn_u = cast(
                 TransitionSamplerWithInput, transition_sampler
             )
-            propagated = vmap(transition_fn_u, in_axes=(0, 0, None))(
-                keys, resampled_particles, input_t
-            )
+
+            def _propagate_with_input(key_i, state_i):
+                next_state = transition_fn_u(key_i, state_i, input_t)
+                _validate_state_tree(
+                    next_state,
+                    state_signature,
+                    name="transition_sampler output",
+                )
+                return next_state
+
+            propagated = vmap(_propagate_with_input)(keys, resampled_particles)
 
         # 3. Weight by observation likelihood
         if input_t is None:
@@ -252,7 +279,7 @@ def bootstrap_filter(
                 log_ev_inc_rest,
             ),
         ) = lax.scan(_step, init_carry, scan_inputs)
-        all_particles = _prepend(particles_0, particles_rest)
+        all_particles = _prepend_particle_history(particles_0, particles_rest)
         all_log_w = _prepend(log_w_0, log_w_rest)
         all_ancestors = _prepend(identity_ancestors, ancestors_rest)
     else:
@@ -260,7 +287,7 @@ def bootstrap_filter(
             (final_state, final_ancestors),
             (ess_rest, log_ev_inc_rest),
         ) = lax.scan(_step, init_carry, scan_inputs)
-        all_particles = final_state.particles[None]
+        all_particles = _particle_time_axis(final_state.particles)
         all_log_w = final_state.log_weights[None]
         all_ancestors = final_ancestors[None]
     ess_0_arr: Array = jnp.asarray(ess_0)

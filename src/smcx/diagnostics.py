@@ -37,7 +37,9 @@ Scoring rules:
 
 - :func:`crps` — Continuous Ranked Probability Score
 
-All functions are pure, stateless, operate on arrays from
+All functions are pure and stateless. Genealogy and predictive
+operations preserve structured latent-state PyTrees; Euclidean summaries
+require a dense ``(T, N, D)`` particle history. They operate on outputs from
 :class:`~smcx.containers.ParticleFilterPosterior` or
 :class:`~smcx.containers.LiuWestPosterior`, and are
 JIT-compatible.
@@ -47,14 +49,28 @@ import math
 from collections.abc import Callable
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax, vmap
+from jax import lax, tree, vmap
+from jax.core import Tracer
 from jaxtyping import Array, Float, Int
 
-from smcx._utils import _weighted_quantile_1d
+from smcx._utils import (
+    _gather_particles,
+    _validate_particle_cloud,
+    _validate_state_tree,
+    _weighted_quantile_1d,
+)
 from smcx.containers import LiuWestPosterior, ParticleFilterResult
-from smcx.types import PRNGKeyT, Scalar
+from smcx.types import (
+    EmissionSampler,
+    ParticleCloud,
+    ParticleHistory,
+    PRNGKeyT,
+    Scalar,
+    TransitionSampler,
+)
 from smcx.weights import normalize
 
 _PRIOR_STRENGTH = 10
@@ -65,6 +81,25 @@ _PRIOR_K = 0.5
 
 _EXC_FLOOR = 1e-100
 """Exceedance floor below which the tail is treated as degenerate."""
+
+
+def _require_dense_particle_history(
+    posterior: ParticleFilterResult,
+    *,
+    diagnostic: str,
+) -> Float[Array, "ntime num_particles state_dim"]:
+    """Return dense particles or explain the structured-state boundary."""
+    particles = posterior.filtered_particles
+    is_array = isinstance(particles, (jax.Array, Tracer))
+    is_float = is_array and jnp.issubdtype(particles.dtype, jnp.floating)
+    if not is_array or particles.ndim != 3 or not is_float:
+        raise TypeError(
+            f"{diagnostic} requires posterior.filtered_particles to be a "
+            "dense array with floating dtype and shape (T, N, D); select or "
+            "project a structured-state leaf before using this Euclidean "
+            "diagnostic"
+        )
+    return particles
 
 
 def _weighted_mean_field(
@@ -123,11 +158,14 @@ def weighted_mean(
 
     Returns:
         Weighted means, shape ``(ntime, state_dim)``.
+
+    Raises:
+        TypeError: The posterior has structured rather than dense particles.
     """
-    return _weighted_mean_field(
-        posterior.filtered_log_weights,
-        posterior.filtered_particles,
+    particles = _require_dense_particle_history(
+        posterior, diagnostic="weighted_mean"
     )
+    return _weighted_mean_field(posterior.filtered_log_weights, particles)
 
 
 def weighted_variance(
@@ -143,9 +181,15 @@ def weighted_variance(
 
     Returns:
         Weighted variances, shape ``(ntime, state_dim)``.
+
+    Raises:
+        TypeError: The posterior has structured rather than dense particles.
     """
-    means = weighted_mean(posterior)
-    deviations = posterior.filtered_particles - means[:, None, :]
+    particles = _require_dense_particle_history(
+        posterior, diagnostic="weighted_variance"
+    )
+    means = _weighted_mean_field(posterior.filtered_log_weights, particles)
+    deviations = particles - means[:, None, :]
     return _weighted_mean_field(
         posterior.filtered_log_weights,
         deviations**2,
@@ -168,11 +212,15 @@ def weighted_quantile(
 
     Returns:
         Weighted quantiles, shape ``(ntime, num_quantiles, state_dim)``.
+
+    Raises:
+        TypeError: The posterior has structured rather than dense particles.
     """
+    particles = _require_dense_particle_history(
+        posterior, diagnostic="weighted_quantile"
+    )
     return _weighted_quantile_field(
-        posterior.filtered_log_weights,
-        posterior.filtered_particles,
-        q,
+        posterior.filtered_log_weights, particles, q
     )
 
 
@@ -242,7 +290,7 @@ def particle_diversity(
 
 def reconstruct_trajectories(
     posterior: ParticleFilterResult,
-) -> Float[Array, "ntime num_particles state_dim"]:
+) -> ParticleHistory:
     r"""Trace each surviving particle's full path through the genealogy.
 
     The filter's per-step particle clouds approximate the filtering
@@ -260,7 +308,8 @@ def reconstruct_trajectories(
             (``store_history=True``, the default).
 
     Returns:
-        Trajectories, shape ``(ntime, num_particles, state_dim)``.
+        A latent-state PyTree matching ``filtered_particles``. Every
+        leaf has shape ``(ntime, num_particles, ...)``.
     """
     ancestors = posterior.ancestors
     num_particles = ancestors.shape[1]
@@ -273,8 +322,10 @@ def reconstruct_trajectories(
     # Walking t = T-1, ..., 1 yields the selector for t-1 at each step.
     last, selectors = lax.scan(_back, final_idx, ancestors[1:], reverse=True)
     selectors = jnp.concatenate([last[None], selectors], axis=0)
-    return jnp.take_along_axis(
-        posterior.filtered_particles, selectors[:, :, None], axis=1
+    times = jnp.arange(ancestors.shape[0])[:, None]
+    return tree.map(
+        lambda leaf: leaf[times, selectors],
+        posterior.filtered_particles,
     )
 
 
@@ -472,8 +523,8 @@ def param_weighted_quantile(
 def posterior_predictive_sample(
     key: PRNGKeyT,
     posterior: ParticleFilterResult,
-    transition_sampler: Callable,
-    emission_sampler: Callable,
+    transition_sampler: TransitionSampler,
+    emission_sampler: EmissionSampler,
     num_samples: int | None = None,
 ) -> Float[Array, "ntime num_samples emission_dim"]:
     r"""Draw one-step-ahead posterior predictive samples.
@@ -492,14 +543,20 @@ def posterior_predictive_sample(
     Args:
         key: JAX PRNG key.
         posterior: Particle filter posterior output.
-        transition_sampler: Function ``(key, state) -> state``.
-        emission_sampler: Function ``(key, state) -> emission``.
+        transition_sampler: Function ``(key, state) -> state``. ``state``
+            may be a latent-state PyTree.
+        emission_sampler: Function ``(key, state) -> emission`` accepting
+            the same state PyTree.
         num_samples: Number of predictive draws per time step.
             Defaults to the number of particles.
 
     Returns:
         Predictive samples, shape
         ``(ntime, num_samples, emission_dim)``.
+
+    Raises:
+        ValueError: The posterior state is malformed or the transition
+            changes its PyTree structure, leaf shape, or dtype.
     """
     ntime, n_particles = posterior.filtered_log_weights.shape
     if num_samples is None:
@@ -507,7 +564,7 @@ def posterior_predictive_sample(
 
     def _sample_one_step(
         log_weights_t: Float[Array, " num_particles"],
-        particles_t: Float[Array, "num_particles state_dim"],
+        particles_t: ParticleCloud,
         step_key: PRNGKeyT,
     ) -> Float[Array, "num_samples emission_dim"]:
         """Draw predictive samples at one time step."""
@@ -515,10 +572,25 @@ def posterior_predictive_sample(
         weights = jnp.exp(log_weights_t - jnp.max(log_weights_t))
         weights = weights / jnp.sum(weights)
         indices = jr.choice(k1, n_particles, shape=(num_samples,), p=weights)
-        resampled = particles_t[indices]
+        resampled = _gather_particles(particles_t, indices)
         # Propagate through transition
+        state_signature = _validate_particle_cloud(
+            particles_t,
+            n_particles,
+            name="posterior.filtered_particles time slice",
+        )
+
+        def _transition(key_i, state_i):
+            next_state = transition_sampler(key_i, state_i)
+            _validate_state_tree(
+                next_state,
+                state_signature,
+                name="transition_sampler output",
+            )
+            return next_state
+
         trans_keys = jr.split(k2, num_samples)
-        propagated = vmap(transition_sampler)(trans_keys, resampled)
+        propagated = vmap(_transition)(trans_keys, resampled)
         # Draw emissions
         emit_keys = jr.split(k3, num_samples)
         return vmap(emission_sampler)(emit_keys, propagated)
@@ -755,9 +827,15 @@ def tail_ess(
 
     Returns:
         Per-step minimum tail-ESS, shape ``(ntime,)``.
+
+    Raises:
+        TypeError: The posterior has structured rather than dense particles.
     """
     qs = jnp.array([q, 1.0 - q])
-    ntime, _, dim = posterior.filtered_particles.shape
+    particles = _require_dense_particle_history(
+        posterior, diagnostic="tail_ess"
+    )
+    ntime, _, dim = particles.shape
 
     def n_eff(tw):
         s2 = jnp.sum(tw * tw)
@@ -774,7 +852,7 @@ def tail_ess(
         w = w / jnp.maximum(jnp.sum(w), 1e-30)
         per_dim = []
         for d in range(dim):
-            vals = posterior.filtered_particles[t, :, d]
+            vals = particles[t, :, d]
             order = jnp.argsort(vals)
             v_sorted = vals[order]
             w_sorted = w[order]
@@ -854,8 +932,12 @@ def diagnose(
         - ``ess_below_threshold``: count of steps where
             ESS < ``ess_threshold * N``
         - ``warnings``: list of diagnostic warning strings
+
+    Raises:
+        TypeError: The posterior has structured rather than dense particles.
     """
-    n = posterior.filtered_particles.shape[1]
+    _require_dense_particle_history(posterior, diagnostic="diagnose")
+    n = posterior.filtered_log_weights.shape[1]
     ess_vals = posterior.ess
     diversity = particle_diversity(posterior)
     k_hat = pareto_k_diagnostic(posterior)

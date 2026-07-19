@@ -27,9 +27,13 @@ from jaxtyping import Array, Float
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
+    _gather_particles,
     _init_standard,
+    _particle_time_axis,
     _prepend,
+    _prepend_particle_history,
     _raise_if_degenerate,
+    _validate_state_tree,
 )
 from smcx.containers import ParticleFilterPosterior, ParticleState
 from smcx.resampling import systematic
@@ -72,11 +76,14 @@ def guided_filter(
     Args:
         key: JAX PRNG key.
         initial_sampler: ``(key, num_particles[, input_0]) -> particles``
-            drawing from :math:`p(z_1)`.
+            drawing from :math:`p(z_1)`. ``particles`` may be a dense
+            array or a nonempty PyTree whose array leaves all have leading
+            size ``num_particles``.
         proposal_sampler: Per-particle
             ``(key, z_prev, y_t[, input_t]) -> z_t``
-            drawing from the proposal
-            :math:`q(z_t \mid z_{t-1}, y_t)`.
+            drawing from :math:`q(z_t \mid z_{t-1}, y_t)`. It receives
+            one particle PyTree and must preserve its structure, leaf
+            shapes, and dtypes. smcx ``vmap``-s it internally.
         log_proposal_fn: Per-particle
             ``(y_t, z_t, z_prev[, input_t]) -> scalar`` log proposal
             density.
@@ -101,13 +108,16 @@ def guided_filter(
             while ``ess``/``log_evidence_increments`` stay full.
 
     Returns:
-        :class:`~smcx.containers.ParticleFilterPosterior`.
+        :class:`~smcx.containers.ParticleFilterPosterior`. Structured
+        particle histories preserve the state PyTree and add ``(T, N)``
+        to every leaf.
 
     Raises:
         DegenerateWeightsError: All weights collapsed (eager execution
             only; under ``jax.jit`` the ``-inf`` marginal propagates).
-        ValueError: ``inputs`` is not rank one or two, or its leading
-            dimension does not match ``emissions``.
+        ValueError: Inputs are malformed, the initial state tree is empty
+            or has a wrong leading axis, or a proposal changes the state
+            structure, leaf shape, or dtype.
     """
     inputs_arr = (
         None
@@ -125,6 +135,7 @@ def guided_filter(
         ess_0,
         identity_ancestors,
         init_state,
+        state_signature,
     ) = (
         _init_standard(
             init_key,
@@ -169,20 +180,36 @@ def guided_filter(
             num_particles,
             identity_ancestors,
         )
-        parents = state.particles[ancestors]
+        parents = _gather_particles(state.particles, ancestors)
 
         # 2. Propagate through the proposal (sees y_t).
         keys = jr.split(k2, num_particles)
         if input_t is None:
             proposal_fn = cast(ProposalSampler, proposal_sampler)
-            propagated = vmap(lambda k, z: proposal_fn(k, z, y_t))(
-                keys, parents
-            )
+
+            def _propose(key_i, state_i):
+                next_state = proposal_fn(key_i, state_i, y_t)
+                _validate_state_tree(
+                    next_state,
+                    state_signature,
+                    name="proposal_sampler output",
+                )
+                return next_state
+
+            propagated = vmap(_propose)(keys, parents)
         else:
             proposal_fn_u = cast(ProposalSamplerWithInput, proposal_sampler)
-            propagated = vmap(proposal_fn_u, in_axes=(0, 0, None, None))(
-                keys, parents, y_t, input_t
-            )
+
+            def _propose_with_input(key_i, state_i):
+                next_state = proposal_fn_u(key_i, state_i, y_t, input_t)
+                _validate_state_tree(
+                    next_state,
+                    state_signature,
+                    name="proposal_sampler output",
+                )
+                return next_state
+
+            propagated = vmap(_propose_with_input)(keys, parents)
 
         # 3. General guided weight: log g + log f - log q.
         if input_t is None:
@@ -259,7 +286,7 @@ def guided_filter(
                 log_ev_inc_rest,
             ),
         ) = lax.scan(_step, init_carry, scan_inputs)
-        all_particles = _prepend(particles_0, particles_rest)
+        all_particles = _prepend_particle_history(particles_0, particles_rest)
         all_log_w = _prepend(log_w_0, log_w_rest)
         all_ancestors = _prepend(identity_ancestors, ancestors_rest)
     else:
@@ -267,7 +294,7 @@ def guided_filter(
             (final_state, final_ancestors),
             (ess_rest, log_ev_inc_rest),
         ) = lax.scan(_step, init_carry, scan_inputs)
-        all_particles = final_state.particles[None]
+        all_particles = _particle_time_axis(final_state.particles)
         all_log_w = final_state.log_weights[None]
         all_ancestors = final_ancestors[None]
     all_ess = _prepend(jnp.asarray(ess_0), ess_rest)

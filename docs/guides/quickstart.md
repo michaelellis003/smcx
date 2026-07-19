@@ -18,12 +18,15 @@ $$
 with $\rho = 0.95$, $\sigma_q = 0.3$, and $\sigma_r = 0.7$, so the
 observation noise dominates the process noise and filtering has real
 work to do. A model in smcx is a handful of closures, written
-*per particle*: each takes one state vector and smcx `vmap`s it over
-the particle cloud internally. Samplers take an explicit PRNG key and
-return arrays; the observation model returns a log-density.
+*per particle*: each takes one state array or PyTree and smcx `vmap`s it
+over the particle cloud internally. Samplers take an explicit PRNG key;
+the observation model returns a log-density.
 
 ```python
 import math
+from typing import NamedTuple
+
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
@@ -96,6 +99,78 @@ print("filter RMSE:", round(rmse, 3), "vs obs-only RMSE:", round(r_sd, 3))
 The filtered RMSE comes out near 0.37, roughly half the observation
 noise $\sigma_r = 0.7$ — the filter is extracting signal, not echoing
 the data.
+
+## Carry a structured latent state
+
+The bootstrap, auxiliary, and guided filters can carry any nonempty JAX
+PyTree of arrays. This is useful when a particle contains several values
+with different shapes—for example, a nonlinear state together with the
+conditional mean and covariance from a Kalman update. The initial
+sampler adds the same leading particle axis to every leaf; callbacks see
+one particle with that axis removed.
+
+```python
+class CompositeState(NamedTuple):
+    signal: jax.Array
+    conditional_mean: jax.Array
+    conditional_covariance: jax.Array
+
+
+def structured_initial(key, n):
+    signal = jr.normal(key, (n, 1))
+    return CompositeState(
+        signal=signal,
+        conditional_mean=jnp.zeros((n, 2)),
+        conditional_covariance=jnp.broadcast_to(jnp.eye(2), (n, 2, 2)),
+    )
+
+
+def structured_transition(key, state):
+    signal = rho * state.signal + q_sd * jr.normal(key, state.signal.shape)
+    mean = 0.9 * state.conditional_mean + 0.1 * signal
+    return CompositeState(signal, mean, state.conditional_covariance)
+
+
+def structured_log_observation(y, state):
+    z = (y[0] - state.signal[0]) / r_sd
+    return -0.5 * z * z - math.log(r_sd * math.sqrt(2 * math.pi))
+
+
+structured = smcx.bootstrap_filter(
+    jr.key(2),
+    structured_initial,
+    structured_transition,
+    structured_log_observation,
+    observations,
+    num_particles=10_000,
+)
+
+print(structured.filtered_particles.signal.shape)  # (100, 10000, 1)
+print(structured.filtered_particles.conditional_covariance.shape)
+# (100, 10000, 2, 2)
+```
+
+The tree structure, leaf event shapes, and dtypes stay fixed for the
+whole run. smcx applies each resampling decision jointly to every leaf,
+so the signal and its conditional moments cannot lose particle identity.
+`smcx.reconstruct_trajectories(structured)` returns the same tree with
+the same leaf shapes.
+
+Diagnostics that need Euclidean state arithmetic intentionally accept a
+dense `(T, N, D)` history. Select or project the state you want to
+summarize and reuse the posterior metadata:
+
+```python
+signal_posterior = structured._replace(
+    filtered_particles=structured.filtered_particles.signal
+)
+signal_means = smcx.weighted_mean(signal_posterior)
+```
+
+Liu–West, tempered SMC, and SMC² remain dense because their parameter
+proposals require an explicit Euclidean geometry. Equinox modules and
+other registered PyTree classes work at the callable boundary, but smcx
+does not require Equinox or define model classes of its own.
 
 ## Add time-varying inputs
 
