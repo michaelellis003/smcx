@@ -10,6 +10,7 @@ moments of a linear Gaussian SSM, and JIT compatibility.
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import pytest
 
 from smcx.simulate import simulate
 from tests.conftest import _mvn_sample
@@ -138,3 +139,26 @@ class TestSimulateInputs:
 
         assert jnp.array_equal(states[:, 0], jnp.array([1.0, 3.0, 7.0]))
         assert jnp.array_equal(emissions[:, 0], jnp.array([11.0, 23.0, 47.0]))
+
+    def test_inputs_must_match_num_timesteps(self):
+        def initial_sampler(key, input_t):
+            del key
+            return input_t
+
+        def transition_sampler(key, state, input_t):
+            del key, input_t
+            return state
+
+        def emission_sampler(key, state, input_t):
+            del key, input_t
+            return state
+
+        with pytest.raises(ValueError, match="leading dimension T=3"):
+            simulate(
+                jr.key(0),
+                initial_sampler,
+                transition_sampler,
+                emission_sampler,
+                num_timesteps=3,
+                inputs=jnp.ones(2),
+            )

@@ -387,3 +387,52 @@ class TestBootstrapInputs:
         one_result = run(jnp.ones((4, 1)))
         assert jnp.array_equal(zero_result, jnp.array(0.0))
         assert jnp.array_equal(one_result, jnp.array(4.0))
+
+    def test_ignored_inputs_preserve_key_stream_and_numerics(self):
+        emissions = jnp.linspace(-0.5, 0.5, 5)[:, None]
+
+        def initial_sampler(key, n):
+            return jr.normal(key, (n, 1))
+
+        def transition_sampler(key, state):
+            return 0.8 * state + 0.3 * jr.normal(key, state.shape)
+
+        def log_observation_fn(emission, state):
+            return -0.5 * (emission[0] - state[0]) ** 2
+
+        def initial_sampler_u(key, n, input_t):
+            del input_t
+            return initial_sampler(key, n)
+
+        def transition_sampler_u(key, state, input_t):
+            del input_t
+            return transition_sampler(key, state)
+
+        def log_observation_fn_u(emission, state, input_t):
+            del input_t
+            return log_observation_fn(emission, state)
+
+        legacy = bootstrap_filter(
+            jr.key(11),
+            initial_sampler,
+            transition_sampler,
+            log_observation_fn,
+            emissions,
+            32,
+        )
+        input_aware = bootstrap_filter(
+            jr.key(11),
+            initial_sampler_u,
+            transition_sampler_u,
+            log_observation_fn_u,
+            emissions,
+            32,
+            inputs=jnp.zeros((5, 2)),
+        )
+
+        for legacy_field, input_field in zip(
+            jax.tree_util.tree_leaves(legacy),
+            jax.tree_util.tree_leaves(input_aware),
+            strict=True,
+        ):
+            assert jnp.array_equal(legacy_field, input_field)
