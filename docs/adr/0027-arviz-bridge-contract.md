@@ -68,7 +68,7 @@ present, through the public ``InferenceData.add_groups`` API. The return
 value is the installed generation's native ``InferenceData`` or
 ``DataTree`` object.
 
-ArViZ will be declared as the optional ``smcx[arviz]`` extra with a
+ArviZ will be declared as the optional ``smcx[arviz]`` extra with a
 minimum of 0.23.4 and imported only inside ``to_arviz``. A missing extra
 raises ``ImportError`` with an instruction to install ``smcx[arviz]``;
 ``import smcx`` never imports ArviZ.
@@ -87,6 +87,15 @@ The groups follow these rules:
   with the source particles and selected by the same resampling indices.
   The caller owns any codec and supplies already-decoded posterior values;
   smcx defines no codec.
+
+``sample_stats`` uses a singleton ``draw`` axis for these run-level
+quantities. Filter weights have dimensions
+``(chain, 1, particle, time)`` and tempered weights have dimensions
+``(chain, 1, particle)``. Time and stage traces use
+``(chain, 1, time)`` or ``(chain, 1, stage)``. Thus ``log_weights``
+preserves the raw source cloud on an explicit ``particle`` axis; it is
+not gathered by the posterior resampling indices and remains independent
+of ``num_draws``.
 
 A dense state is named ``theta`` unless overridden. Structured PyTree
 leaves use their tree paths joined with ``.``. ``var_names`` maps those
