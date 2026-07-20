@@ -1438,9 +1438,10 @@ def test_validation_failure_preserves_timing_and_continues_matrix(
 def test_worker_runs_registered_untimed_correctness_replicates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    platform = jax.default_backend()
     cell = next(
         cell
-        for cell in plan_cells("smoke", platforms=("cpu",), seed=3)
+        for cell in plan_cells("smoke", platforms=(platform,), seed=3)
         if cell.workload == "auxiliary_lgssm"
     )._replace(correctness_replicates=3)
     _set_attested_worker_environment(monkeypatch, cell.platform)
@@ -1470,15 +1471,17 @@ def test_worker_runs_registered_untimed_correctness_replicates(
 def test_validation_worker_returns_only_replicated_oracle_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    platform = jax.default_backend()
     cell = next(
         cell
-        for cell in plan_cells("smoke", platforms=("cpu",), seed=3)
+        for cell in plan_cells("smoke", platforms=(platform,), seed=3)
         if cell.workload == "auxiliary_lgssm"
     )._replace(correctness_replicates=3)
     _set_attested_worker_environment(monkeypatch, cell.platform)
     result = run_validation(cell)
     assert result["correctness_level"] == "oracle_accuracy"
-    assert result["dispatch_mode"] == "asynchronous"
+    expected_dispatch = "asynchronous" if platform == "cpu" else "safe"
+    assert result["dispatch_mode"] == expected_dispatch
     assert result["replicated"]["replicates"] == 3
     assert "steady_times_s" not in result
     assert "pre_timing" not in result["environment"]

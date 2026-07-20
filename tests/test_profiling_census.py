@@ -14,10 +14,10 @@ from benchmarks.profiling.common import plan_cells
 from benchmarks.profiling.run import raw_filename
 
 
-def _smoke_cell(workload: str):
+def _smoke_cell(workload: str, platform: str = "cpu"):
     return next(
         cell
-        for cell in plan_cells("smoke", platforms=("cpu",), seed=20260719)
+        for cell in plan_cells("smoke", platforms=(platform,), seed=20260719)
         if cell.workload == workload
     )
 
@@ -39,11 +39,12 @@ def _eligible_record(cell) -> dict:
 
 
 def test_census_counts_stablehlo_operations_for_outer_jit() -> None:
+    platform = jax.default_backend()
     x64_before = jax.config.read("jax_enable_x64")
-    census = build_census(_smoke_cell("bootstrap_lgssm"))
+    census = build_census(_smoke_cell("bootstrap_lgssm", platform))
     assert jax.config.read("jax_enable_x64") is x64_before
     assert census["workload"] == "bootstrap_lgssm"
-    assert census["platform"] == "cpu"
+    assert census["platform"] == platform
     assert census["total_operations"] > 0
     assert census["operation_counts"]["while"] >= 1
     assert len(census["stablehlo_sha256"]) == 64

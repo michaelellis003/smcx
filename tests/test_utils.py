@@ -173,6 +173,10 @@ def test_conditional_resample_preserves_fixed_key_output(
     np.testing.assert_array_equal(ancestors, expected_ancestors)
 
 
+@pytest.mark.skipif(
+    jax.default_backend() == "mps",
+    reason="jax-mps does not lower jax.debug.callback",
+)
 def test_conditional_resample_skips_normalize_without_resampling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -215,6 +219,10 @@ def test_conditional_resample_skips_normalize_without_resampling(
 
 
 @pytest.mark.parametrize("algorithm", ["bootstrap", "guided"])
+@pytest.mark.skipif(
+    jax.default_backend() == "mps",
+    reason="jax-mps does not lower jax.debug.callback",
+)
 def test_standard_filter_computes_ess_once_per_timestep(
     algorithm: str,
     monkeypatch: pytest.MonkeyPatch,

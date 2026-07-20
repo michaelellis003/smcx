@@ -225,6 +225,10 @@ class TestStructure:
 class TestInnerKernelReductions:
     """Inner kernels reuse row reductions already needed for weights."""
 
+    @pytest.mark.skipif(
+        jax.default_backend() == "mps",
+        reason="jax-mps does not lower jax.debug.callback",
+    )
     def test_public_run_evaluates_each_inner_row_lse_once(
         self,
         monkeypatch: pytest.MonkeyPatch,
