@@ -24,7 +24,7 @@ from typing import cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import jit, lax, tree, vmap
+from jax import lax, tree, vmap
 from jaxtyping import Array, Float
 
 from smcx._utils import (
@@ -214,9 +214,6 @@ def _bootstrap_step(
     return new_checkpoint, info
 
 
-_compiled_bootstrap_step = jit(_bootstrap_step, static_argnums=(2, 3, 5, 6, 8))
-
-
 def bootstrap_step(
     step_key: PRNGKeyT,
     checkpoint: BootstrapCheckpoint,
@@ -248,17 +245,24 @@ def bootstrap_step(
         DegenerateWeightsError: Every updated importance weight collapses.
     """
     state_signature = _validate_checkpoint(checkpoint)
-    new_checkpoint, info = _compiled_bootstrap_step(
-        step_key,
-        checkpoint,
-        transition_sampler,
-        log_observation_fn,
-        emission_t,
-        resampling_fn,
-        resampling_threshold,
-        input_t,
-        state_signature,
+
+    def body(carry, args):
+        return _bootstrap_step(
+            args[0],
+            carry,
+            transition_sampler,
+            log_observation_fn,
+            args[1],
+            resampling_fn,
+            resampling_threshold,
+            input_t,
+            state_signature,
+        )
+
+    new_checkpoint, batched_info = lax.scan(
+        body, checkpoint, (step_key[None], emission_t[None])
     )
+    info = tree.map(lambda leaf: leaf[0], batched_info)
     total = new_checkpoint.state.log_marginal_likelihood
     _raise_if_degenerate(total + new_checkpoint.log_evidence_compensation)
     return new_checkpoint, info
