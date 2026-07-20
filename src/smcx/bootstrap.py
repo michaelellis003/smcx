@@ -119,8 +119,7 @@ def bootstrap_init(
         input_t: Optional ``inputs[0]`` passed to both callbacks.
 
     Returns:
-        Checkpoint with normalized weights and its time-zero diagnostics.
-        The ancestors are identity indices and ``resampled`` is false.
+        Normalized checkpoint plus identity, non-resampled time-zero details.
 
     Raises:
         ValueError: The sampled particle cloud is structurally invalid.
