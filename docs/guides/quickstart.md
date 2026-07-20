@@ -104,8 +104,10 @@ the data.
 
 Use a checkpoint when observations arrive incrementally. Initialization
 consumes the first observation; every later observation has its own explicit
-key, so changing chunk boundaries cannot reorder randomness. Here the same
-series is processed in two chunks:
+key, so changing chunk boundaries cannot reorder randomness. With the same
+ordered keys, repeated steps and any chunking are exactly equal on supported
+CPU and physical M-series Metal configurations. Here the same series is
+processed in two chunks:
 
 ```python
 step_root, init_key = jr.split(key_filt)
