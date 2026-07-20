@@ -335,9 +335,21 @@ def bootstrap_update(
         else (step_keys, emissions_chunk, inputs_arr)
     )
     zero = jnp.zeros_like(jnp.asarray(checkpoint.state.log_marginal_likelihood))
+    retained = jnp.arange(
+        checkpoint.state.log_weights.shape[0], dtype=jnp.int32
+    )
+    if store_history:
+        # Carry PyTree histories to avoid jax-mps scan-output aliasing.
+        retained = tree.map(
+            lambda value: jnp.empty((num_steps, *value.shape), value.dtype),
+            checkpoint.state.particles,
+        )
+        scan_inputs = (jnp.arange(num_steps, dtype=jnp.int32), *scan_inputs)
 
     def _advance(current, args):
-        current_checkpoint, chunk_sum, chunk_correction = current
+        current_checkpoint, chunk_sum, chunk_correction, retained = current
+        if store_history:
+            index, args = args[0], args[1:]
         if inputs_arr is None:
             step_key, emission_t = args
             input_t = None
@@ -357,50 +369,37 @@ def bootstrap_update(
         chunk_sum, chunk_correction = _neumaier_add(
             chunk_sum, chunk_correction, info.log_evidence_increment
         )
-        # Scalar-first output order avoids jax-mps carry/history aliasing.
-        history = (
-            info.ess,
-            info.log_evidence_increment,
-            info.ancestors,
-            next_checkpoint.state.log_weights,
-            next_checkpoint.state.particles,
-        )
-        return (next_checkpoint, chunk_sum, chunk_correction), history
-
-    if store_history:
-        (
-            (final_checkpoint, chunk_sum, chunk_correction),
-            (ess, increments, ancestors, log_weights, particles),
-        ) = lax.scan(_advance, (checkpoint, zero, zero), scan_inputs)
-    else:
-
-        def _advance_final_only(current, args):
-            checkpoint_carry, chunk_sum, chunk_correction, _ = current
-            (next_checkpoint, chunk_sum, chunk_correction), outputs = _advance(
-                (checkpoint_carry, chunk_sum, chunk_correction), args
+        if store_history:
+            retained = tree.map(
+                lambda h, value: h.at[index].set(value),
+                retained,
+                next_checkpoint.state.particles,
             )
-            ess_t, increment_t, ancestors_t, _, _ = outputs
-            return (
-                next_checkpoint,
-                chunk_sum,
-                chunk_correction,
-                ancestors_t,
-            ), (ess_t, increment_t)
+            outputs = (
+                next_checkpoint.state.log_weights,
+                info.ancestors,
+                info.ess,
+                info.log_evidence_increment,
+            )
+        else:
+            retained = info.ancestors
+            outputs = (info.ess, info.log_evidence_increment)
+        return (next_checkpoint, chunk_sum, chunk_correction, retained), outputs
 
-        identity = jnp.arange(
-            checkpoint.state.log_weights.shape[0], dtype=jnp.int32
-        )
-        (
-            (final_checkpoint, chunk_sum, chunk_correction, ancestors),
-            (ess, increments),
-        ) = lax.scan(
-            _advance_final_only,
-            (checkpoint, zero, zero, identity),
-            scan_inputs,
-        )
+    carry, outputs = lax.scan(
+        _advance,
+        (checkpoint, zero, zero, retained),
+        scan_inputs,
+    )
+    final_checkpoint, chunk_sum, chunk_correction, retained = carry
+    if store_history:
+        particles = retained
+        log_weights, ancestors, ess, increments = outputs
+    else:
+        ess, increments = outputs
         particles = _particle_time_axis(final_checkpoint.state.particles)
         log_weights = final_checkpoint.state.log_weights[None]
-        ancestors = ancestors[None]
+        ancestors = retained[None]
 
     cumulative = (
         final_checkpoint.state.log_marginal_likelihood
