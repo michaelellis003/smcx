@@ -5,6 +5,7 @@
 
 import subprocess
 import sys
+from unittest.mock import Mock
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -121,14 +122,17 @@ def test_optional_import_is_lazy_and_missing_extra_is_actionable(monkeypatch):
         reporting.to_arviz(_filter(), key=jr.key(4))
 
 
-def test_generation_dispatch_uses_resolved_constructor():
+def test_generation_dispatch_uses_resolved_constructor(monkeypatch):
     import arviz
 
-    result = to_arviz(_filter(), key=jr.key(5))
-    expected = (
-        "InferenceData" if arviz.__version__.startswith("0.") else "DataTree"
-    )
-    assert type(result).__name__ == expected
+    to_arviz(_filter(), key=jr.key(5))
+    module = sys.modules[
+        "arviz" if arviz.__version__.startswith("0.") else "arviz_base"
+    ]
+    constructor = Mock(wraps=module.from_dict)
+    monkeypatch.setattr(module, "from_dict", constructor)
+    to_arviz(_filter(), key=jr.key(5))
+    constructor.assert_called_once()
 
 
 def test_unconstrained_draws_follow_the_posterior_resampling_indices():
