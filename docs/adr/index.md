@@ -35,3 +35,4 @@ documents when an ADR is (and isn't) required.
 | [0026](0026-jax-mps-scan-history-floor.md) | jax-mps 0.10.10 floor for scan history | accepted |
 | [0027](0027-arviz-bridge-contract.md) | ArviZ bridge exports seeded equal-weight reporting data | proposed |
 | [0028](0028-streaming-filter-checkpoints.md) | Streaming bootstrap-filter checkpoints | proposed |
+| [0029](0029-common-space-static-posterior-updating.md) | Common-space static posterior updating | proposed |
