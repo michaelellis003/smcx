@@ -3,9 +3,13 @@
 
 """Tests for the optional ArviZ reporting bridge."""
 
+import subprocess
+import sys
+
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
+import pytest
 
 from smcx.containers import ParticleFilterPosterior
 
@@ -126,3 +130,20 @@ def test_filter_metadata_and_observations_land_in_standard_groups():
     np.testing.assert_array_equal(
         _group(result, "observed_data")["emissions"], [[1.0], [2.0]]
     )
+
+
+def test_optional_import_is_lazy_and_missing_extra_is_actionable(monkeypatch):
+    code = (
+        "import sys, smcx; assert 'arviz' not in sys.modules; "
+        "assert callable(smcx.to_arviz)"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
+
+    from smcx import reporting
+
+    def missing_arviz(name):
+        raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+    monkeypatch.setattr(reporting.importlib, "import_module", missing_arviz)
+    with pytest.raises(ImportError, match=r"smcx\[arviz\]"):
+        reporting.to_arviz(_filter(), key=jr.key(4))
