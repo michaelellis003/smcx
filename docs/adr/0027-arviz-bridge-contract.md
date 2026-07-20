@@ -1,6 +1,6 @@
 # 0027. ArviZ bridge exports seeded equal-weight reporting data
 
-Date: 2026-07-20 | Status: proposed | Supersedes: — | Superseded-by: —
+Date: 2026-07-20 | Status: accepted | Supersedes: — | Superseded-by: —
 
 ## Context
 

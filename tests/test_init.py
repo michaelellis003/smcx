@@ -55,6 +55,7 @@ def test_public_api_exports_all_expected_names(package):
         "systematic",
         "temper",
         "tail_ess",
+        "to_arviz",
         "weighted_mean",
         "weighted_quantile",
         "weighted_variance",

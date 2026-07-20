@@ -38,6 +38,7 @@ from smcx.diagnostics import (
 from smcx.exceptions import DegenerateWeightsError
 from smcx.guided import guided_filter
 from smcx.liu_west import liu_west_filter
+from smcx.reporting import to_arviz
 from smcx.resampling import (
     multinomial,
     residual,
@@ -92,6 +93,7 @@ __all__ = [
     "systematic",
     "tail_ess",
     "temper",
+    "to_arviz",
     "weighted_mean",
     "weighted_quantile",
     "weighted_variance",
