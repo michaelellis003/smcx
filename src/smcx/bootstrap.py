@@ -357,18 +357,20 @@ def bootstrap_update(
         chunk_sum, chunk_correction = _neumaier_add(
             chunk_sum, chunk_correction, info.log_evidence_increment
         )
-        return (next_checkpoint, chunk_sum, chunk_correction), (
-            next_checkpoint.state.particles,
-            next_checkpoint.state.log_weights,
-            info.ancestors,
+        # Scalar-first output order avoids jax-mps carry/history aliasing.
+        history = (
             info.ess,
             info.log_evidence_increment,
+            info.ancestors,
+            next_checkpoint.state.log_weights,
+            next_checkpoint.state.particles,
         )
+        return (next_checkpoint, chunk_sum, chunk_correction), history
 
     if store_history:
         (
             (final_checkpoint, chunk_sum, chunk_correction),
-            (particles, log_weights, ancestors, ess, increments),
+            (ess, increments, ancestors, log_weights, particles),
         ) = lax.scan(_advance, (checkpoint, zero, zero), scan_inputs)
     else:
 
@@ -377,7 +379,7 @@ def bootstrap_update(
             (next_checkpoint, chunk_sum, chunk_correction), outputs = _advance(
                 (checkpoint_carry, chunk_sum, chunk_correction), args
             )
-            _, _, ancestors_t, ess_t, increment_t = outputs
+            ess_t, increment_t, ancestors_t, _, _ = outputs
             return (
                 next_checkpoint,
                 chunk_sum,

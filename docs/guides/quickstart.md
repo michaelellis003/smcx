@@ -103,11 +103,9 @@ the data.
 ## Filter a stream in chunks
 
 Use a checkpoint when observations arrive incrementally. Initialization
-consumes the first observation; every later observation has its own explicit
-key, so changing chunk boundaries cannot reorder randomness. With the same
-ordered keys, repeated steps and any chunking are exactly equal on supported
-CPU and physical M-series Metal configurations. Here the same series is
-processed in two chunks:
+consumes the first observation. Explicit per-observation keys keep chunk
+boundaries from reordering randomness. Identical keys make repeated steps and
+any chunking exactly equal on supported CPU and physical M-series Metal:
 
 ```python
 step_root, init_key = jr.split(key_filt)
@@ -135,12 +133,10 @@ checkpoint, late = smcx.bootstrap_update(
 )
 ```
 
-`early` and `late` contain only their chunk histories and conditional
-log-evidence. The checkpoint retains the live particles, normalized weights,
-ESS, and compensated cumulative evidence. Use `bootstrap_step` with one key
-and observation for event-at-a-time processing. Input-aware models pass
-`input_t=inputs[0]` to initialization and the aligned input slice to each
-update.
+`early` and `late` contain only chunk histories and conditional log-evidence;
+the checkpoint retains live particles, normalized weights, ESS, and
+compensated cumulative evidence. Use `bootstrap_step` for event-at-a-time
+processing. Input-aware models pass aligned input slices to each operation.
 
 ## Carry a structured latent state
 
