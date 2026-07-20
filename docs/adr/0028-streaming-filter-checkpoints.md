@@ -26,8 +26,8 @@ the Python function and keys match.
 - Wrap `ParticleState` in a bootstrap-specific checkpoint — adds one narrow
   public type while preserving the existing container and algorithm-specific
   continuation boundaries.
-- Run every path as a host loop over the same separately jitted step — gives a
-  mechanism for a backend-independent bitwise contract, but replaces one
+- Run every path as a host loop over the same separately jitted step — gives
+  path invariance within one compiler/backend configuration, but replaces one
   compiled time loop with one dispatch per observation.
 - Lower one shared pure step inside `lax.scan` and gate equivalence on each
   supported platform — retains the existing compiled-loop architecture, but
