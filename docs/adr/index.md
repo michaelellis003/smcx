@@ -36,3 +36,4 @@ documents when an ADR is (and isn't) required.
 | [0027](0027-arviz-bridge-contract.md) | ArviZ bridge exports seeded equal-weight reporting data | proposed |
 | [0028](0028-streaming-filter-checkpoints.md) | Streaming bootstrap-filter checkpoints | proposed |
 | [0029](0029-common-space-static-posterior-updating.md) | Common-space static posterior updating | proposed |
+| [0030](0030-native-conditionally-linear-gaussian-rbpf.md) | Native square-root conditionally linear-Gaussian RBPF | proposed |
