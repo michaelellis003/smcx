@@ -1,6 +1,6 @@
 # 0028. Streaming bootstrap-filter checkpoints
 
-Date: 2026-07-20 | Status: proposed | Supersedes: — | Superseded-by: —
+Date: 2026-07-20 | Status: accepted | Supersedes: — | Superseded-by: —
 
 ## Context
 

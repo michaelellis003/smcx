@@ -34,6 +34,6 @@ documents when an ADR is (and isn't) required.
 | [0025](0025-monotone-multinomial-prefix-rounding.md) | Monotone float32 multinomial prefix rounding | accepted |
 | [0026](0026-jax-mps-scan-history-floor.md) | jax-mps 0.10.10 floor for scan history | accepted |
 | [0027](0027-arviz-bridge-contract.md) | ArviZ bridge exports seeded equal-weight reporting data | accepted |
-| [0028](0028-streaming-filter-checkpoints.md) | Streaming bootstrap-filter checkpoints | proposed |
+| [0028](0028-streaming-filter-checkpoints.md) | Streaming bootstrap-filter checkpoints | accepted |
 | [0029](0029-common-space-static-posterior-updating.md) | Common-space static posterior updating | proposed |
 | [0030](0030-native-conditionally-linear-gaussian-rbpf.md) | Native square-root conditionally linear-Gaussian RBPF | proposed |

@@ -9,7 +9,7 @@ registered as JAX PyTrees by default.
 
 from typing import NamedTuple, Protocol, runtime_checkable
 
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Bool, Float, Int
 
 from smcx.types import ParticleCloud, ParticleHistory, Scalar
 
@@ -77,6 +77,23 @@ class ParticleState(NamedTuple):
     particles: ParticleCloud
     log_weights: Float[Array, " num_particles"]
     log_marginal_likelihood: Scalar
+
+
+class BootstrapCheckpoint(NamedTuple):
+    """Resumable state and ESS; evidence is its sum plus its correction."""
+
+    state: ParticleState
+    ess: Float[Array, ""]
+    log_evidence_compensation: Float[Array, ""]
+
+
+class BootstrapStepInfo(NamedTuple):
+    """Ancestors, ESS, resampling flag, and conditional evidence increment."""
+
+    ancestors: Int[Array, " num_particles"]
+    ess: Float[Array, ""]
+    resampled: Bool[Array, ""]
+    log_evidence_increment: Float[Array, ""]
 
 
 class ParticleFilterPosterior(NamedTuple):

@@ -18,6 +18,8 @@ def test_version_is_accessible():
 def test_public_api_exports_all_expected_names(package):
     """Test that __all__ contains exactly the expected public API."""
     expected = [
+        "BootstrapCheckpoint",
+        "BootstrapStepInfo",
         "DegenerateWeightsError",
         "LiuWestPosterior",
         "ParticleFilterPosterior",
@@ -28,6 +30,8 @@ def test_public_api_exports_all_expected_names(package):
         "__version__",
         "auxiliary_filter",
         "bootstrap_filter",
+        "bootstrap_init",
+        "bootstrap_step",
         "guided_filter",
         "crps",
         "cumulative_log_score",
