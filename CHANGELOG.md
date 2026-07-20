@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.3.1 (2026-07-20)
+
+### Performance Improvements
+
+- Reduce filter memory after all-algorithm profiling
+  ([#19](https://github.com/michaelellis003/smcx/pull/19),
+  [`e8875b7`](https://github.com/michaelellis003/smcx/commit/e8875b7b03c4e77fac1c8c4305ae234067e683f1))
+
+
 ## v1.3.0 (2026-07-19)
 
 ### Features
