@@ -15,6 +15,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
+from jax.tree_util import keystr
 from jaxtyping import Array
 
 from smcx.containers import ParticleFilterPosterior, TemperedPosterior
@@ -24,6 +25,32 @@ from smcx.types import PRNGKeyT
 _Posterior = ParticleFilterPosterior | TemperedPosterior
 
 
+def _stack_particle_leaves(
+    runs: Sequence[ParticleFilterPosterior],
+) -> tuple[tuple[str, ...], tuple[Array, ...]]:
+    """Stack corresponding particle-history leaves across runs."""
+    path_leaves, structure = jax.tree.flatten_with_path(
+        runs[0].filtered_particles
+    )
+    paths = tuple(
+        keystr(path, simple=True, separator=".") or "theta"
+        for path, _ in path_leaves
+    )
+    leaves_by_run = []
+    for run in runs:
+        leaves, run_structure = jax.tree.flatten(run.filtered_particles)
+        if run_structure != structure:
+            raise ValueError(
+                "posterior runs must have matching PyTree structures"
+            )
+        leaves_by_run.append(leaves)
+    stacked = tuple(
+        jnp.stack([cast(Array, leaves[index]) for leaves in leaves_by_run])
+        for index in range(len(paths))
+    )
+    return paths, stacked
+
+
 def _construct_arviz(
     groups: dict[str, dict[str, np.ndarray]],
     dimensions: dict[str, list[str]],
@@ -31,7 +58,7 @@ def _construct_arviz(
 ) -> Any:
     """Construct the installed ArviZ generation's native result."""
     try:
-        arviz = importlib.import_module("arviz")
+        arviz: Any = importlib.import_module("arviz")
     except ModuleNotFoundError as error:
         if error.name != "arviz":
             raise
@@ -41,7 +68,7 @@ def _construct_arviz(
 
     major = int(arviz.__version__.split(".", maxsplit=1)[0])
     if major >= 1:
-        arviz_base = importlib.import_module("arviz_base")
+        arviz_base: Any = importlib.import_module("arviz_base")
         return arviz_base.from_dict(
             groups,
             dims=dimensions,
@@ -89,8 +116,9 @@ def to_arviz(
     ):
         raise TypeError("posteriors must be a supported smcx posterior")
 
-    particles = jnp.stack([cast(Array, run.filtered_particles) for run in runs])
-    log_weights = jnp.stack([run.filtered_log_weights for run in runs])
+    filter_runs = cast(tuple[ParticleFilterPosterior, ...], runs)
+    paths, particle_leaves = _stack_particle_leaves(filter_runs)
+    log_weights = jnp.stack([run.filtered_log_weights for run in filter_runs])
     num_chains, ntime, num_particles = log_weights.shape
     draws = num_particles if num_draws is None else num_draws
     if draws <= 0:
@@ -102,29 +130,35 @@ def to_arviz(
         jnp.exp(log_weights.reshape(-1, num_particles)),
         draws,
     ).reshape(num_chains, ntime, draws)
-    selected = jax.vmap(jax.vmap(lambda cloud, index: cloud[index]))(
-        particles,
-        indices,
-    )
-    selected = jnp.swapaxes(selected, 1, 2)
+    posterior_group = {}
+    dimensions = {}
+    for path, particles in zip(paths, particle_leaves, strict=True):
+        selected = jax.vmap(jax.vmap(lambda cloud, index: cloud[index]))(
+            particles,
+            indices,
+        )
+        selected = jnp.swapaxes(selected, 1, 2)
+        name = path if var_names is None else var_names.get(path, path)
+        event_rank = particles.ndim - 3
+        event_dims = (
+            [f"{name}_dim_{axis}" for axis in range(event_rank)]
+            if dims is None or name not in dims
+            else list(dims[name])
+        )
+        if len(event_dims) != event_rank:
+            raise ValueError(
+                f"dims[{name!r}] must name {event_rank} event axes"
+            )
+        posterior_group[name] = np.asarray(jax.device_get(selected))
+        dimensions[name] = ["time", *event_dims]
 
-    name = "theta" if var_names is None else var_names.get("theta", "theta")
-    event_rank = particles.ndim - 3
-    event_dims = (
-        [f"{name}_dim_{axis}" for axis in range(event_rank)]
-        if dims is None or name not in dims
-        else list(dims[name])
-    )
     groups = {
-        "posterior": {name: np.asarray(jax.device_get(selected))},
+        "posterior": posterior_group,
         "sample_stats": {
             "log_weights": np.asarray(
                 jax.device_get(jnp.swapaxes(log_weights, 1, 2)[:, None])
             )
         },
     }
-    dimensions = {
-        name: ["time", *event_dims],
-        "log_weights": ["particle", "time"],
-    }
+    dimensions["log_weights"] = ["particle", "time"]
     return _construct_arviz(groups, dimensions, {})
