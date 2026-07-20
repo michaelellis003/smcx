@@ -168,11 +168,15 @@ def test_update_is_invariant_to_three_unequal_chunks(
     whole_checkpoint, whole = _update(
         keys, initial, EMISSIONS[1:], resampling_threshold=threshold
     )
-    stepped = initial
+    whole = jax.device_get(whole)
+    stepped, records = initial, []
     for step_key, emission in zip(keys, EMISSIONS[1:], strict=True):
-        stepped, _ = _advance(
+        stepped, info = _advance(
             step_key, stepped, emission, resampling_threshold=threshold
         )
+        records.append(_record(stepped, info))
+    actual = jax.tree.map(lambda *xs: np.stack(xs), *records)
+    _assert_tree_equal(actual, whole[1:])
     _assert_tree_equal(stepped, whole_checkpoint)
     checkpoint, chunks = initial, []
     for start, stop in ((0, 1), (1, 3), (3, 6)):
