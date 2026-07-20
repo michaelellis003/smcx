@@ -145,3 +145,9 @@ def test_unconstrained_draws_follow_the_posterior_resampling_indices():
     constrained = _group(result, "posterior")["theta"].values
     unconstrained = _group(result, "unconstrained_posterior")["theta"].values
     np.testing.assert_array_equal(unconstrained, -constrained)
+    with pytest.raises(ValueError, match="particle axes"):
+        to_arviz(
+            _filter(),
+            key=jr.key(0),
+            unconstrained=-_filter().filtered_particles[:, :-1],
+        )
