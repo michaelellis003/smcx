@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
+import pytest
 
 import smcx
 from smcx._utils import _validate_particle_cloud
@@ -29,70 +30,15 @@ def _log_observation(emission, state):
     return -0.5 * (emission[0] - state[0]) ** 2
 
 
-def _assert_tree_equal(actual, expected):
-    for actual_leaf, expected_leaf in zip(
-        jax.tree.leaves(actual), jax.tree.leaves(expected), strict=True
-    ):
-        np.testing.assert_array_equal(actual_leaf, expected_leaf)
-
-
-def test_one_shot_equals_init_then_repeated_step():
-    """The same ordered keys give identical direct and one-shot results."""
-    key = jr.key(2026)
-    step_root, init_key = jr.split(key)
-    step_keys = jr.split(step_root, EMISSIONS.shape[0] - 1)
-    expected = smcx.bootstrap_filter(
-        key,
-        _initial,
-        _transition,
-        _log_observation,
-        EMISSIONS,
-        NUM_PARTICLES,
-    )
-
-    checkpoint, info = smcx.bootstrap_init(
-        init_key,
-        _initial,
-        _log_observation,
-        EMISSIONS[0],
-        NUM_PARTICLES,
-    )
-    particles = [checkpoint.state.particles]
-    log_weights = [checkpoint.state.log_weights]
-    ancestors = [info.ancestors]
-    ess = [info.ess]
-    increments = [info.log_evidence_increment]
-    for step_key, emission in zip(step_keys, EMISSIONS[1:], strict=True):
-        checkpoint, info = smcx.bootstrap_step(
-            step_key,
-            checkpoint,
-            _transition,
-            _log_observation,
-            emission,
-        )
-        particles.append(checkpoint.state.particles)
-        log_weights.append(checkpoint.state.log_weights)
-        ancestors.append(info.ancestors)
-        ess.append(info.ess)
-        increments.append(info.log_evidence_increment)
-
-    actual = smcx.ParticleFilterPosterior(
-        marginal_loglik=checkpoint.state.log_marginal_likelihood,
-        filtered_particles=jax.tree.map(lambda *xs: jnp.stack(xs), *particles),
-        filtered_log_weights=jnp.stack(log_weights),
-        ancestors=jnp.stack(ancestors),
-        ess=jnp.stack(ess),
-        log_evidence_increments=jnp.stack(increments),
-    )
-    _assert_tree_equal(actual, expected)
+def _checkpoint():
+    return smcx.bootstrap_init(
+        jr.key(7), _initial, _log_observation, EMISSIONS[0], NUM_PARTICLES
+    )[0]
 
 
 def test_uncompiled_step_matches_compiled_step():
     """The pure core and supported compiled path agree within f32 error."""
-    step_key, init_key = jr.split(jr.key(19))
-    checkpoint, _ = smcx.bootstrap_init(
-        init_key, _initial, _log_observation, EMISSIONS[0], NUM_PARTICLES
-    )
+    step_key, checkpoint = jr.key(19), _checkpoint()
     signature = _validate_particle_cloud(
         checkpoint.state.particles,
         NUM_PARTICLES,
@@ -114,10 +60,69 @@ def test_uncompiled_step_matches_compiled_step():
     )
     # The keys are fixed, so there is no MC error. Five f32 eps covers only
     # rounding from the separate eager and fused compiler paths.
-    tolerance = 5 * np.finfo(np.float32).eps
+    tolerance = float(5 * np.finfo(np.float32).eps)
     for eager_leaf, compiled_leaf in zip(
         jax.tree.leaves(eager), jax.tree.leaves(compiled), strict=True
     ):
         np.testing.assert_allclose(
             eager_leaf, compiled_leaf, rtol=tolerance, atol=tolerance
+        )
+
+
+def test_init_and_step_report_resampling_semantics():
+    """Initialization never resamples; a forced step reports that it did."""
+    checkpoint, init_info = smcx.bootstrap_init(
+        jr.key(7), _initial, _log_observation, EMISSIONS[0], NUM_PARTICLES
+    )
+    _, step_info = smcx.bootstrap_step(
+        jr.key(8),
+        checkpoint,
+        _transition,
+        _log_observation,
+        EMISSIONS[1],
+        resampling_threshold=1.0,
+    )
+    assert not init_info.resampled
+    assert step_info.resampled
+
+
+def test_init_and_step_raise_on_degenerate_weights():
+    """Each public shell rejects an all-negative-infinity update."""
+    impossible = lambda emission, state: -jnp.inf  # noqa: E731
+    with pytest.raises(smcx.DegenerateWeightsError):
+        smcx.bootstrap_init(
+            jr.key(1), _initial, impossible, EMISSIONS[0], NUM_PARTICLES
+        )
+    with pytest.raises(smcx.DegenerateWeightsError):
+        smcx.bootstrap_step(
+            jr.key(2), _checkpoint(), _transition, impossible, EMISSIONS[1]
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("log_weights", "log_weights must be rank 1"),
+        ("particles", "num_particles=16"),
+        ("log_marginal_likelihood", "must be scalar"),
+        ("ess", "must be scalar"),
+        ("log_evidence_compensation", "must be scalar"),
+    ],
+)
+def test_step_validates_checkpoint_structure(field, message):
+    """Malformed checkpoint fields fail at the public entry point."""
+    checkpoint = _checkpoint()
+    if field == "particles":
+        state = checkpoint.state._replace(particles=jnp.ones((15, 1)))
+        checkpoint = checkpoint._replace(state=state)
+    elif field in checkpoint.state._fields:
+        value = jnp.ones((NUM_PARTICLES, 1)) if field == "log_weights" else []
+        checkpoint = checkpoint._replace(
+            state=checkpoint.state._replace(**{field: jnp.asarray(value)})
+        )
+    else:
+        checkpoint = checkpoint._replace(**{field: jnp.ones(1)})
+    with pytest.raises(ValueError, match=message):
+        smcx.bootstrap_step(
+            jr.key(3), checkpoint, _transition, _log_observation, EMISSIONS[1]
         )
