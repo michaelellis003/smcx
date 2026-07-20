@@ -53,7 +53,9 @@ The `ParticleState.log_marginal_likelihood` field remains the leading sum in
 the ordered accumulator. The compensated cumulative evidence is that value
 plus the checkpoint correction. Keeping the correction outside
 `ParticleState` avoids changing its public arity and preserves the leading
-sum used by the legacy one-shot result.
+sum used by the legacy one-shot result. The feature change will correct the
+`ParticleState` docstring to identify its log weights as normalized; it will
+not change that container's fields.
 
 `BootstrapStepInfo` will contain the ancestor indices, post-weighting ESS,
 whether resampling occurred, and the conditional log-evidence increment for
