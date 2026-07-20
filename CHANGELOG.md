@@ -2,6 +2,21 @@
 
 <!-- version list -->
 
+## v1.5.0 (2026-07-20)
+
+### Features
+
+- **bootstrap**: Add resumable init and step
+  ([#37](https://github.com/michaelellis003/smcx/pull/37),
+  [`4788478`](https://github.com/michaelellis003/smcx/commit/4788478cf0695370805458459137049577d26814))
+
+### Testing
+
+- **bootstrap**: Freeze checkpoint compatibility
+  ([#36](https://github.com/michaelellis003/smcx/pull/36),
+  [`37ca409`](https://github.com/michaelellis003/smcx/commit/37ca409a171970bae44c174b1e4d5d37cc748de5))
+
+
 ## v1.4.0 (2026-07-20)
 
 ### Chores
