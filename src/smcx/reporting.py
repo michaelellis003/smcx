@@ -26,30 +26,57 @@ from smcx.types import PRNGKeyT
 _Posterior = ParticleFilterPosterior | TemperedPosterior
 
 
-def _stack_particle_leaves(
-    runs: Sequence[ParticleFilterPosterior],
-) -> tuple[tuple[str, ...], tuple[Array, ...]]:
-    """Stack corresponding particle-history leaves across runs."""
-    path_leaves, structure = jax.tree.flatten_with_path(
-        runs[0].filtered_particles
-    )
+def _resampled_group(
+    values: Sequence[object],
+    indices: Array,
+    var_names: Mapping[str, str] | None,
+    dims: Mapping[str, Sequence[str]] | None,
+    *,
+    timed: bool,
+) -> tuple[dict[str, np.ndarray], dict[str, list[str]]]:
+    """Resample aligned PyTree leaves into one named ArviZ group."""
+    path_leaves, structure = jax.tree.flatten_with_path(values[0])
     paths = tuple(
         keystr(path, simple=True, separator=".") or "theta"
         for path, _ in path_leaves
     )
     leaves_by_run = []
-    for run in runs:
-        leaves, run_structure = jax.tree.flatten(run.filtered_particles)
+    for value in values:
+        leaves, run_structure = jax.tree.flatten(value)
         if run_structure != structure:
             raise ValueError(
                 "posterior runs must have matching PyTree structures"
             )
         leaves_by_run.append(leaves)
-    stacked = tuple(
-        jnp.stack([cast(Array, leaves[index]) for leaves in leaves_by_run])
-        for index in range(len(paths))
-    )
-    return paths, stacked
+    group = {}
+    dimensions = {}
+    for index, path in enumerate(paths):
+        particles = jnp.stack([
+            cast(Array, leaves[index]) for leaves in leaves_by_run
+        ])
+        if timed:
+            selected = jax.vmap(
+                jax.vmap(lambda cloud, ancestors: cloud[ancestors])
+            )(particles, indices)
+            selected = jnp.swapaxes(selected, 1, 2)
+        else:
+            selected = jax.vmap(lambda cloud, ancestors: cloud[ancestors])(
+                particles, indices
+            )
+        name = path if var_names is None else var_names.get(path, path)
+        event_rank = particles.ndim - (3 if timed else 2)
+        event_dims = (
+            [f"{name}_dim_{axis}" for axis in range(event_rank)]
+            if dims is None or name not in dims
+            else list(dims[name])
+        )
+        if len(event_dims) != event_rank:
+            raise ValueError(
+                f"dims[{name!r}] must name {event_rank} event axes"
+            )
+        group[name] = np.asarray(jax.device_get(selected))
+        dimensions[name] = ["time", *event_dims] if timed else event_dims
+    return group, dimensions
 
 
 def _construct_arviz(
@@ -76,12 +103,22 @@ def _construct_arviz(
             attrs=attrs,
         )
 
-    legacy_attrs = {f"{group}_attrs": values for group, values in attrs.items()}
-    return arviz.from_dict(
-        **groups,
+    extension = groups.get("unconstrained_posterior")
+    supported = {
+        name: values
+        for name, values in groups.items()
+        if name != "unconstrained_posterior"
+    }
+    result = arviz.from_dict(
+        **supported,
         dims=dimensions,
-        **legacy_attrs,
+        **{f"{name}_attrs": values for name, values in attrs.items()},
     )
+    if extension is not None:
+        result.add_groups(
+            {"unconstrained_posterior": extension}, dims=dimensions
+        )
+    return result
 
 
 def to_arviz(
@@ -118,7 +155,6 @@ def to_arviz(
         raise TypeError("posteriors must be a supported smcx posterior")
 
     filter_runs = cast(tuple[ParticleFilterPosterior, ...], runs)
-    paths, particle_leaves = _stack_particle_leaves(filter_runs)
     log_weights = jnp.stack([run.filtered_log_weights for run in filter_runs])
     num_chains, ntime, num_particles = log_weights.shape
     draws = num_particles if num_draws is None else num_draws
@@ -131,27 +167,13 @@ def to_arviz(
         jnp.exp(log_weights.reshape(-1, num_particles)),
         draws,
     ).reshape(num_chains, ntime, draws)
-    posterior_group = {}
-    dimensions = {}
-    for path, particles in zip(paths, particle_leaves, strict=True):
-        selected = jax.vmap(jax.vmap(lambda cloud, index: cloud[index]))(
-            particles,
-            indices,
-        )
-        selected = jnp.swapaxes(selected, 1, 2)
-        name = path if var_names is None else var_names.get(path, path)
-        event_rank = particles.ndim - 3
-        event_dims = (
-            [f"{name}_dim_{axis}" for axis in range(event_rank)]
-            if dims is None or name not in dims
-            else list(dims[name])
-        )
-        if len(event_dims) != event_rank:
-            raise ValueError(
-                f"dims[{name!r}] must name {event_rank} event axes"
-            )
-        posterior_group[name] = np.asarray(jax.device_get(selected))
-        dimensions[name] = ["time", *event_dims]
+    posterior_group, dimensions = _resampled_group(
+        [run.filtered_particles for run in filter_runs],
+        indices,
+        var_names,
+        dims,
+        timed=True,
+    )
 
     stats = {
         "log_weights": jnp.swapaxes(log_weights, 1, 2)[:, None],
@@ -170,6 +192,18 @@ def to_arviz(
             for name, value in stats.items()
         },
     }
+    if unconstrained is not None:
+        u_values = (
+            (unconstrained,)
+            if num_chains == 1
+            else tuple(cast(Sequence[object], unconstrained))
+        )
+        if len(u_values) != num_chains:
+            raise ValueError("unconstrained must provide one value per run")
+        groups["unconstrained_posterior"], u_dims = _resampled_group(
+            u_values, indices, var_names, dims, timed=True
+        )
+        dimensions.update(u_dims)
     if emissions is not None:
         groups["observed_data"] = {
             "emissions": np.asarray(jax.device_get(emissions))

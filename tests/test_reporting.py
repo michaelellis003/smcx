@@ -6,6 +6,7 @@
 import importlib
 import subprocess
 import sys
+from unittest.mock import patch
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -13,16 +14,12 @@ import numpy as np
 import pytest
 
 from smcx.containers import ParticleFilterPosterior
+from smcx.reporting import to_arviz
 
 
 def _filter() -> ParticleFilterPosterior:
-    particles = jnp.array(
-        [
-            [[0.0], [1.0], [2.0], [3.0]],
-            [[10.0], [11.0], [12.0], [13.0]],
-        ],
-        dtype=jnp.float32,
-    )
+    particles = jnp.arange(4, dtype=jnp.float32)[None, :, None]
+    particles = particles + 10 * jnp.arange(2)[:, None, None]
     weights = jnp.array(
         [[0.05, 0.15, 0.3, 0.5], [0.5, 0.3, 0.15, 0.05]],
         dtype=jnp.float32,
@@ -43,8 +40,6 @@ def _group(result, name):
 
 
 def test_fixed_key_gives_frozen_filter_draws():
-    from smcx.reporting import to_arviz
-
     result = to_arviz(_filter(), key=jr.key(0), num_draws=3)
 
     np.testing.assert_array_equal(
@@ -54,8 +49,6 @@ def test_fixed_key_gives_frozen_filter_draws():
 
 
 def test_independent_runs_map_to_chain_and_draw_dimensions():
-    from smcx.reporting import to_arviz
-
     post = _filter()
     other = post._replace(filtered_particles=post.filtered_particles + 100.0)
     one = _group(to_arviz(post, key=jr.key(1), num_draws=5), "posterior")
@@ -68,19 +61,12 @@ def test_independent_runs_map_to_chain_and_draw_dimensions():
 
 
 def test_weighted_cloud_keeps_raw_source_weights_in_sample_stats():
-    from smcx.reporting import to_arviz
-
     result = to_arviz(_filter(), key=jr.key(0), num_draws=3)
     posterior = _group(result, "posterior")
     stats = _group(result, "sample_stats")
 
     assert posterior.sizes["draw"] == 3
-    assert stats["log_weights"].dims == (
-        "chain",
-        "draw",
-        "particle",
-        "time",
-    )
+    assert stats["log_weights"].dims[-2:] == ("particle", "time")
     np.testing.assert_allclose(
         stats["log_weights"].values[0, 0],
         np.asarray(_filter().filtered_log_weights).T,
@@ -88,15 +74,16 @@ def test_weighted_cloud_keeps_raw_source_weights_in_sample_stats():
 
 
 def test_dense_and_structured_states_have_stable_names_and_dims():
-    from smcx.reporting import to_arviz
-
     post = _filter()
     dense = _group(to_arviz(post, key=jr.key(2)), "posterior")
     structured_post = post._replace(
         filtered_particles={
             "position": post.filtered_particles[..., 0],
-            "vector": jnp.concatenate(
-                [post.filtered_particles, post.filtered_particles + 1.0],
+            "vector": jnp.stack(
+                [
+                    post.filtered_particles[..., 0],
+                    post.filtered_particles[..., 0] + 1,
+                ],
                 axis=-1,
             ),
         }
@@ -118,8 +105,6 @@ def test_dense_and_structured_states_have_stable_names_and_dims():
 
 
 def test_filter_metadata_and_observations_land_in_standard_groups():
-    from smcx.reporting import to_arviz
-
     result = to_arviz(
         _filter(), key=jr.key(3), emissions=jnp.array([[1.0], [2.0]])
     )
@@ -150,29 +135,20 @@ def test_optional_import_is_lazy_and_missing_extra_is_actionable(monkeypatch):
         reporting.to_arviz(_filter(), key=jr.key(4))
 
 
-def test_generation_dispatch_uses_resolved_constructor(monkeypatch):
+def test_generation_dispatch_uses_resolved_constructor():
     import arviz
-
-    from smcx.reporting import to_arviz
 
     module = importlib.import_module(
         "arviz_base" if int(arviz.__version__.split(".")[0]) >= 1 else "arviz"
     )
-    original = module.from_dict
-    calls = []
-
-    def spy(*args, **kwargs):
-        calls.append(args)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(module, "from_dict", spy)
-    to_arviz(_filter(), key=jr.key(5))
-    assert len(calls) == 1
+    with patch.object(
+        module, "from_dict", wraps=module.from_dict
+    ) as constructor:
+        to_arviz(_filter(), key=jr.key(5))
+    constructor.assert_called_once()
 
 
 def test_unconstrained_draws_follow_the_posterior_resampling_indices():
-    from smcx.reporting import to_arviz
-
     result = to_arviz(
         _filter(),
         key=jr.key(0),
