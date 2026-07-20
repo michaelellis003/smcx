@@ -115,6 +115,16 @@ def to_arviz(
         if dims is None or name not in dims
         else list(dims[name])
     )
-    groups = {"posterior": {name: np.asarray(jax.device_get(selected))}}
-    dimensions = {name: ["time", *event_dims]}
+    groups = {
+        "posterior": {name: np.asarray(jax.device_get(selected))},
+        "sample_stats": {
+            "log_weights": np.asarray(
+                jax.device_get(jnp.swapaxes(log_weights, 1, 2)[:, None])
+            )
+        },
+    }
+    dimensions = {
+        name: ["time", *event_dims],
+        "log_weights": ["particle", "time"],
+    }
     return _construct_arviz(groups, dimensions, {})
