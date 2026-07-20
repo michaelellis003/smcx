@@ -2,6 +2,42 @@
 
 <!-- version list -->
 
+## v1.4.0 (2026-07-20)
+
+### Chores
+
+- **deps**: Add ArviZ reporting extra ([#34](https://github.com/michaelellis003/smcx/pull/34),
+  [`0dcfc12`](https://github.com/michaelellis003/smcx/commit/0dcfc125d67e2b5006798a87bde49e33997cc284))
+
+### Documentation
+
+- Repair planning state ([#20](https://github.com/michaelellis003/smcx/pull/20),
+  [`d11022d`](https://github.com/michaelellis003/smcx/commit/d11022d6a219ebaa025a4c4e159797cfdb97b64c))
+
+- **adr**: Define ArviZ bridge contract ([#28](https://github.com/michaelellis003/smcx/pull/28),
+  [`291b7c6`](https://github.com/michaelellis003/smcx/commit/291b7c6052e9e049c24cd707597138058e4cdd7b))
+
+- **adr**: Define native RBPF contract ([#33](https://github.com/michaelellis003/smcx/pull/33),
+  [`90b19ce`](https://github.com/michaelellis003/smcx/commit/90b19cea875bc3f6b2473faab42c50300f07584b))
+
+- **adr**: Define streaming filter checkpoints
+  ([#23](https://github.com/michaelellis003/smcx/pull/23),
+  [`4e906d0`](https://github.com/michaelellis003/smcx/commit/4e906d0c1263497d7b37c9bb22d41195afc9fbf6))
+
+- **adr**: Specify static posterior updating
+  ([#32](https://github.com/michaelellis003/smcx/pull/32),
+  [`fb72808`](https://github.com/michaelellis003/smcx/commit/fb72808495c6fc4a57366a370ce7f3b9f406d5b6))
+
+- **guides**: Add custom model authoring guide
+  ([#24](https://github.com/michaelellis003/smcx/pull/24),
+  [`c7e19dc`](https://github.com/michaelellis003/smcx/commit/c7e19dceb405b268f662a7f4d03ca4c32c4ee9b9))
+
+### Features
+
+- **to-arviz**: Add ArviZ reporting bridge ([#35](https://github.com/michaelellis003/smcx/pull/35),
+  [`f6755b7`](https://github.com/michaelellis003/smcx/commit/f6755b728815cf66dd907c3d96bd6452ee50f8d7))
+
+
 ## v1.3.1 (2026-07-20)
 
 ### Performance Improvements
