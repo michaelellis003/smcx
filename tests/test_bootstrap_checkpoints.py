@@ -9,6 +9,9 @@ import jax.random as jr
 import numpy as np
 
 import smcx
+from smcx._utils import _validate_particle_cloud
+from smcx.bootstrap import _bootstrap_step
+from smcx.resampling import systematic
 
 EMISSIONS = jnp.array([[0.2], [-0.4], [0.7], [0.1], [-0.2]])
 NUM_PARTICLES = 16
@@ -82,3 +85,39 @@ def test_one_shot_equals_init_then_repeated_step():
         log_evidence_increments=jnp.stack(increments),
     )
     _assert_tree_equal(actual, expected)
+
+
+def test_uncompiled_step_matches_compiled_step():
+    """The pure core and supported compiled path agree within f32 error."""
+    step_key, init_key = jr.split(jr.key(19))
+    checkpoint, _ = smcx.bootstrap_init(
+        init_key, _initial, _log_observation, EMISSIONS[0], NUM_PARTICLES
+    )
+    signature = _validate_particle_cloud(
+        checkpoint.state.particles,
+        NUM_PARTICLES,
+        name="checkpoint particles",
+    )
+    eager = _bootstrap_step(
+        step_key,
+        checkpoint,
+        _transition,
+        _log_observation,
+        EMISSIONS[1],
+        systematic,
+        0.5,
+        None,
+        signature,
+    )
+    compiled = smcx.bootstrap_step(
+        step_key, checkpoint, _transition, _log_observation, EMISSIONS[1]
+    )
+    # The keys are fixed, so there is no MC error. Five f32 eps covers only
+    # rounding from the separate eager and fused compiler paths.
+    tolerance = 5 * np.finfo(np.float32).eps
+    for eager_leaf, compiled_leaf in zip(
+        jax.tree.leaves(eager), jax.tree.leaves(compiled), strict=True
+    ):
+        np.testing.assert_allclose(
+            eager_leaf, compiled_leaf, rtol=tolerance, atol=tolerance
+        )
