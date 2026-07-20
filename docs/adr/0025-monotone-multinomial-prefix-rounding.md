@@ -1,6 +1,6 @@
 # 0025. Monotone float32 multinomial prefix rounding
 
-Date: 2026-07-19 | Status: proposed | Supersedes: — | Superseded-by: —
+Date: 2026-07-19 | Status: accepted | Supersedes: — | Superseded-by: —
 
 ## Context
 
