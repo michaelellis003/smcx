@@ -80,16 +80,7 @@ class ParticleState(NamedTuple):
 
 
 class BootstrapCheckpoint(NamedTuple):
-    """Live state required to resume a bootstrap filter.
-
-    Attributes:
-        state: Current particles, normalized log weights, and leading
-            cumulative log-evidence sum.
-        ess: Current effective sample size used by the next resampling
-            decision.
-        log_evidence_compensation: Neumaier correction. The cumulative
-            estimate is ``state.log_marginal_likelihood`` plus this value.
-    """
+    """Resumable state and ESS; evidence is its sum plus its correction."""
 
     state: ParticleState
     ess: Float[Array, ""]
@@ -97,7 +88,7 @@ class BootstrapCheckpoint(NamedTuple):
 
 
 class BootstrapStepInfo(NamedTuple):
-    """Diagnostics emitted by one bootstrap-filter observation update."""
+    """Ancestors, ESS, resampling flag, and conditional evidence increment."""
 
     ancestors: Int[Array, " num_particles"]
     ess: Float[Array, ""]

@@ -3,6 +3,8 @@
 
 """Tests for resumable bootstrap filtering (ADR-0028)."""
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -35,30 +37,15 @@ def _checkpoint():
     )[0]
 
 
-def _advance(
-    key,
-    checkpoint,
-    emission=EMISSIONS[1],
-    observation=_log_observation,
-    **kwargs,
-):
+def _advance(key, checkpoint, emission=EMISSIONS[1], **kwargs):
+    observation = kwargs.pop("observation", _log_observation)
     return smcx.bootstrap_step(
         key, checkpoint, _transition, observation, emission, **kwargs
     )
 
 
-def _assert_tree_equal(actual, expected):
-    jax.tree.map(np.testing.assert_array_equal, actual, expected)
-
-
 def _record(checkpoint, info):
-    return (
-        checkpoint.state.particles,
-        checkpoint.state.log_weights,
-        info.ancestors,
-        info.ess,
-        info.log_evidence_increment,
-    )
+    return (*checkpoint.state[:2], *info[:2], info[-1])
 
 
 def test_one_shot_equals_init_then_repeated_step():
@@ -81,14 +68,7 @@ def test_one_shot_equals_init_then_repeated_step():
         checkpoint, info = _advance(step_key, checkpoint, emission)
         records.append(_record(checkpoint, info))
     actual = jax.tree.map(lambda *xs: jnp.stack(xs), *records)
-    target = (
-        expected.filtered_particles,
-        expected.filtered_log_weights,
-        expected.ancestors,
-        expected.ess,
-        expected.log_evidence_increments,
-    )
-    _assert_tree_equal(actual, target)
+    jax.tree.map(np.testing.assert_array_equal, actual, expected[1:])
     np.testing.assert_array_equal(
         checkpoint.state.log_marginal_likelihood, expected.marginal_loglik
     )
@@ -111,15 +91,12 @@ def test_uncompiled_step_matches_compiled_step():
         _validate_checkpoint(checkpoint),
     )
     compiled = _advance(step_key, checkpoint)
-    # The keys are fixed, so there is no MC error. Five f32 eps covers only
-    # rounding from the separate eager and fused compiler paths.
+    # Fixed keys remove MC error; five f32 eps covers compiler rounding.
     tolerance = float(5 * np.finfo(np.float32).eps)
-    for eager_leaf, compiled_leaf in zip(
-        jax.tree.leaves(eager), jax.tree.leaves(compiled), strict=True
-    ):
-        np.testing.assert_allclose(
-            eager_leaf, compiled_leaf, rtol=tolerance, atol=tolerance
-        )
+    assert_close = partial(
+        np.testing.assert_allclose, rtol=tolerance, atol=tolerance
+    )
+    jax.tree.map(assert_close, eager, compiled)
 
 
 def test_init_and_step_raise_on_degenerate_weights():
@@ -140,6 +117,7 @@ def test_init_and_step_raise_on_degenerate_weights():
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
+        ("log_weights", jnp.array(0.0), "log_weights must be rank 1"),
         ("log_weights", jnp.ones((16, 1)), "log_weights must be rank 1"),
         ("log_weights", jnp.ones(0), "at least one particle"),
         ("log_weights", jnp.ones(16, dtype=jnp.int32), "floating"),
@@ -156,10 +134,7 @@ def test_init_and_step_raise_on_degenerate_weights():
 def test_step_validates_checkpoint_structure(field, value, message):
     """Malformed checkpoint fields fail at the public entry point."""
     checkpoint = _checkpoint()
-    if field == "particles":
-        state = checkpoint.state._replace(particles=value)
-        checkpoint = checkpoint._replace(state=state)
-    elif field in checkpoint.state._fields:
+    if field in checkpoint.state._fields:
         checkpoint = checkpoint._replace(
             state=checkpoint.state._replace(**{field: value})
         )
