@@ -3,6 +3,7 @@
 
 """Tests for the optional ArviZ reporting bridge."""
 
+import importlib
 import subprocess
 import sys
 
@@ -147,3 +148,37 @@ def test_optional_import_is_lazy_and_missing_extra_is_actionable(monkeypatch):
     monkeypatch.setattr(reporting.importlib, "import_module", missing_arviz)
     with pytest.raises(ImportError, match=r"smcx\[arviz\]"):
         reporting.to_arviz(_filter(), key=jr.key(4))
+
+
+def test_generation_dispatch_uses_resolved_constructor(monkeypatch):
+    import arviz
+
+    from smcx.reporting import to_arviz
+
+    module = importlib.import_module(
+        "arviz_base" if int(arviz.__version__.split(".")[0]) >= 1 else "arviz"
+    )
+    original = module.from_dict
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "from_dict", spy)
+    to_arviz(_filter(), key=jr.key(5))
+    assert len(calls) == 1
+
+
+def test_unconstrained_draws_follow_the_posterior_resampling_indices():
+    from smcx.reporting import to_arviz
+
+    result = to_arviz(
+        _filter(),
+        key=jr.key(0),
+        num_draws=3,
+        unconstrained=-_filter().filtered_particles,
+    )
+    constrained = _group(result, "posterior")["theta"].values
+    unconstrained = _group(result, "unconstrained_posterior")["theta"].values
+    np.testing.assert_array_equal(unconstrained, -constrained)
