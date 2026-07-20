@@ -110,3 +110,19 @@ def test_dense_and_structured_states_have_stable_names_and_dims():
     assert set(structured.data_vars) == {"x", "vector"}
     assert structured["x"].dims == ("chain", "draw", "time")
     assert structured["vector"].dims[-1] == "axis"
+
+
+def test_filter_metadata_and_observations_land_in_standard_groups():
+    from smcx.reporting import to_arviz
+
+    result = to_arviz(
+        _filter(), key=jr.key(3), emissions=jnp.array([[1.0], [2.0]])
+    )
+    stats = _group(result, "sample_stats")
+
+    assert stats["ess"].dims == ("chain", "draw", "time")
+    assert {"pareto_k", "log_evidence_increments"} <= set(stats.data_vars)
+    assert _group(result, "posterior").attrs["marginal_loglik"] == [1.25]
+    np.testing.assert_array_equal(
+        _group(result, "observed_data")["emissions"], [[1.0], [2.0]]
+    )
