@@ -168,6 +168,12 @@ def test_update_is_invariant_to_three_unequal_chunks(
     whole_checkpoint, whole = _update(
         keys, initial, EMISSIONS[1:], resampling_threshold=threshold
     )
+    stepped = initial
+    for step_key, emission in zip(keys, EMISSIONS[1:], strict=True):
+        stepped, _ = _advance(
+            step_key, stepped, emission, resampling_threshold=threshold
+        )
+    _assert_tree_equal(stepped, whole_checkpoint)
     checkpoint, chunks = initial, []
     for start, stop in ((0, 1), (1, 3), (3, 6)):
         checkpoint, chunk = _update(
