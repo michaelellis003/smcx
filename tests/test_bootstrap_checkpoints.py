@@ -18,6 +18,7 @@ from smcx.resampling import systematic
 
 EMISSIONS = jnp.array([[0.2], [-0.4], [0.7], [0.1], [-0.2], [0.3], [-0.6]])
 NUM_PARTICLES = 16
+BAD_KEY_DATA = jnp.ones((1, 3), dtype=jnp.uint32)
 
 
 def _initial(key, num_particles):
@@ -299,9 +300,21 @@ def test_update_final_only_matches_full_history():
     )
 
 
+def test_update_accepts_legacy_key_data_batch():
+    """Typed and legacy batches with identical key data agree exactly."""
+    checkpoint = _checkpoint()
+    typed = _update(jr.split(jr.key(5), 2), checkpoint, EMISSIONS[1:3])
+    legacy = _update(jr.split(jr.PRNGKey(5), 2), checkpoint, EMISSIONS[1:3])
+    _assert_tree_equal(typed, legacy)
+
+
 @pytest.mark.parametrize(
     ("keys", "emissions", "inputs", "message"),
     [
+        (jr.key(1), EMISSIONS[1:2], None, "batched PRNG key"),
+        (jr.PRNGKey(1), EMISSIONS[1:2], None, "batched PRNG key"),
+        (jnp.ones(1), EMISSIONS[1:2], None, "batched PRNG key"),
+        (BAD_KEY_DATA, EMISSIONS[1:2], None, "batched PRNG key"),
         (jr.split(jr.key(1), 0), EMISSIONS[1:1], None, "at least one"),
         (jr.split(jr.key(1), 1), EMISSIONS[1:3], None, "same leading"),
         (jr.split(jr.key(1), 2), EMISSIONS[1:3], jnp.ones((1, 1)), "leading"),
