@@ -68,6 +68,7 @@ nav:
   - Home: index.md
   - Guides:
       - Quickstart: guides/quickstart.md
+      - ArviZ reporting: guides/arviz.md
       - Custom Models: guides/custom-models.md
       - Stochastic Volatility: guides/stochastic-volatility.md
   - Examples:
