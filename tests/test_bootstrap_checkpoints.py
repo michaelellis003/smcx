@@ -97,6 +97,16 @@ def test_init_and_step_raise_on_degenerate_weights():
         smcx.bootstrap_step(
             jr.key(2), _checkpoint(), _transition, impossible, EMISSIONS[1]
         )
+    checkpoint = _checkpoint()
+    state = checkpoint.state._replace(log_marginal_likelihood=jnp.nan)
+    with pytest.raises(smcx.DegenerateWeightsError):
+        smcx.bootstrap_step(
+            jr.key(2),
+            checkpoint._replace(state=state),
+            _transition,
+            _log_observation,
+            EMISSIONS[1],
+        )
 
 
 @pytest.mark.parametrize(
