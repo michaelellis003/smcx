@@ -69,7 +69,7 @@ class ParticleState(NamedTuple):
     Attributes:
         particles: Latent-state PyTree with every leaf shaped
             ``(num_particles, ...)``.
-        log_weights: Unnormalized log importance weights,
+        log_weights: Normalized log importance weights,
             shape ``(num_particles,)``.
         log_marginal_likelihood: Running log marginal likelihood estimate.
     """
