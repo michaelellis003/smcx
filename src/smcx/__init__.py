@@ -7,7 +7,12 @@ from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _version
 
 from smcx.auxiliary import auxiliary_filter
-from smcx.bootstrap import bootstrap_filter, bootstrap_init, bootstrap_step
+from smcx.bootstrap import (
+    bootstrap_filter,
+    bootstrap_init,
+    bootstrap_step,
+    bootstrap_update,
+)
 from smcx.containers import (
     BootstrapCheckpoint,
     BootstrapStepInfo,
@@ -72,6 +77,7 @@ __all__ = [
     "bootstrap_filter",
     "bootstrap_init",
     "bootstrap_step",
+    "bootstrap_update",
     "crps",
     "cumulative_log_score",
     "diagnose",

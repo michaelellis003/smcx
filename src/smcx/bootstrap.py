@@ -25,7 +25,7 @@ from typing import cast
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, tree, vmap
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Shaped
 
 from smcx._utils import (
     _canonicalize_inputs,
@@ -266,6 +266,146 @@ def bootstrap_step(
     total = new_checkpoint.state.log_marginal_likelihood
     _raise_if_degenerate(total + new_checkpoint.log_evidence_compensation)
     return new_checkpoint, info
+
+
+def bootstrap_update(
+    step_keys: Shaped[Array, "nkeys ..."],
+    checkpoint: BootstrapCheckpoint,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
+    emissions_chunk: Float[Array, "ntime emission_dim"],
+    resampling_fn: ResamplingFn = systematic,
+    resampling_threshold: float = 0.5,
+    *,
+    inputs: InputSequence | None = None,
+    store_history: bool = True,
+) -> tuple[BootstrapCheckpoint, ParticleFilterPosterior]:
+    """Advance a checkpoint over an explicitly keyed observation chunk.
+
+    The chunk begins after the checkpoint's observation. ``inputs[i]``
+    reaches both the transition into ``emissions_chunk[i]`` and its log
+    density. Returned evidence is conditional for this chunk; cumulative
+    evidence remains the checkpoint's leading sum plus its correction.
+
+    Args:
+        step_keys: One explicit PRNG key per chunk observation.
+        checkpoint: State returned by initialization or an earlier update.
+        transition_sampler: Transition callback, optionally input-aware.
+        log_observation_fn: Observation log-density callback.
+        emissions_chunk: Consecutive observations after the checkpoint.
+        resampling_fn: Particle resampling algorithm.
+        resampling_threshold: ESS resampling threshold as a particle fraction.
+        inputs: Optional inputs aligned one-for-one with the chunk.
+        store_history: Whether to retain every chunk particle cloud.
+
+    Returns:
+        Updated checkpoint and this chunk's posterior. With
+        ``store_history=False``, particle, weight, and ancestor arrays have
+        time-axis length one; ESS and evidence-increment arrays remain full.
+
+    Raises:
+        ValueError: The checkpoint, chunk, keys, inputs, or transition output
+            is malformed.
+        DegenerateWeightsError: Cumulative importance weights collapse.
+    """
+    num_steps = emissions_chunk.shape[0]
+    if num_steps == 0:
+        raise ValueError(
+            "emissions_chunk must contain at least one observation"
+        )
+    if step_keys.shape[0] != num_steps:
+        raise ValueError(
+            "step_keys and emissions_chunk must have the same leading "
+            f"dimension; got {step_keys.shape[0]} and {num_steps}"
+        )
+    inputs_arr = (
+        None if inputs is None else _canonicalize_inputs(inputs, num_steps)
+    )
+    state_signature = _validate_checkpoint(checkpoint)
+    scan_inputs = (
+        (step_keys, emissions_chunk)
+        if inputs_arr is None
+        else (step_keys, emissions_chunk, inputs_arr)
+    )
+    zero = jnp.zeros_like(jnp.asarray(checkpoint.state.log_marginal_likelihood))
+
+    def _advance(current, args):
+        current_checkpoint, chunk_sum, chunk_correction = current
+        if inputs_arr is None:
+            step_key, emission_t = args
+            input_t = None
+        else:
+            step_key, emission_t, input_t = args
+        next_checkpoint, info = _bootstrap_step(
+            step_key,
+            current_checkpoint,
+            transition_sampler,
+            log_observation_fn,
+            emission_t,
+            resampling_fn,
+            resampling_threshold,
+            input_t,
+            state_signature,
+        )
+        chunk_sum, chunk_correction = _neumaier_add(
+            chunk_sum, chunk_correction, info.log_evidence_increment
+        )
+        return (next_checkpoint, chunk_sum, chunk_correction), (
+            next_checkpoint.state.particles,
+            next_checkpoint.state.log_weights,
+            info.ancestors,
+            info.ess,
+            info.log_evidence_increment,
+        )
+
+    if store_history:
+        (
+            (final_checkpoint, chunk_sum, chunk_correction),
+            (particles, log_weights, ancestors, ess, increments),
+        ) = lax.scan(_advance, (checkpoint, zero, zero), scan_inputs)
+    else:
+
+        def _advance_final_only(current, args):
+            checkpoint_carry, chunk_sum, chunk_correction, _ = current
+            (next_checkpoint, chunk_sum, chunk_correction), outputs = _advance(
+                (checkpoint_carry, chunk_sum, chunk_correction), args
+            )
+            _, _, ancestors_t, ess_t, increment_t = outputs
+            return (
+                next_checkpoint,
+                chunk_sum,
+                chunk_correction,
+                ancestors_t,
+            ), (ess_t, increment_t)
+
+        identity = jnp.arange(
+            checkpoint.state.log_weights.shape[0], dtype=jnp.int32
+        )
+        (
+            (final_checkpoint, chunk_sum, chunk_correction, ancestors),
+            (ess, increments),
+        ) = lax.scan(
+            _advance_final_only,
+            (checkpoint, zero, zero, identity),
+            scan_inputs,
+        )
+        particles = _particle_time_axis(final_checkpoint.state.particles)
+        log_weights = final_checkpoint.state.log_weights[None]
+        ancestors = ancestors[None]
+
+    cumulative = (
+        final_checkpoint.state.log_marginal_likelihood
+        + final_checkpoint.log_evidence_compensation
+    )
+    _raise_if_degenerate(cumulative)
+    return final_checkpoint, ParticleFilterPosterior(
+        marginal_loglik=chunk_sum + chunk_correction,
+        filtered_particles=particles,
+        filtered_log_weights=log_weights,
+        ancestors=ancestors,
+        ess=ess,
+        log_evidence_increments=increments,
+    )
 
 
 def bootstrap_filter(
