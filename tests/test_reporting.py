@@ -80,3 +80,33 @@ def test_weighted_cloud_keeps_raw_source_weights_in_sample_stats():
         stats["log_weights"].values[0, 0],
         np.asarray(_filter().filtered_log_weights).T,
     )
+
+
+def test_dense_and_structured_states_have_stable_names_and_dims():
+    from smcx.reporting import to_arviz
+
+    post = _filter()
+    dense = _group(to_arviz(post, key=jr.key(2)), "posterior")
+    structured_post = post._replace(
+        filtered_particles={
+            "position": post.filtered_particles[..., 0],
+            "vector": jnp.concatenate(
+                [post.filtered_particles, post.filtered_particles + 1.0],
+                axis=-1,
+            ),
+        }
+    )
+    structured = _group(
+        to_arviz(
+            structured_post,
+            key=jr.key(2),
+            var_names={"position": "x"},
+            dims={"vector": ("axis",)},
+        ),
+        "posterior",
+    )
+
+    assert dense["theta"].dims == ("chain", "draw", "time", "theta_dim_0")
+    assert set(structured.data_vars) == {"x", "vector"}
+    assert structured["x"].dims == ("chain", "draw", "time")
+    assert structured["vector"].dims[-1] == "axis"
