@@ -80,30 +80,36 @@ def to_arviz(
     Returns:
         ``InferenceData`` on ArviZ 0.x or ``DataTree`` on ArviZ 1.x.
     """
-    if not isinstance(posteriors, ParticleFilterPosterior):
+    if isinstance(posteriors, ParticleFilterPosterior):
+        runs = (posteriors,)
+    else:
+        runs = tuple(posteriors)
+    if not runs or not all(
+        isinstance(run, ParticleFilterPosterior) for run in runs
+    ):
         raise TypeError("posteriors must be a supported smcx posterior")
 
-    particles = cast(Array, posteriors.filtered_particles)
-    log_weights = posteriors.filtered_log_weights
-    ntime, num_particles = log_weights.shape
+    particles = jnp.stack([cast(Array, run.filtered_particles) for run in runs])
+    log_weights = jnp.stack([run.filtered_log_weights for run in runs])
+    num_chains, ntime, num_particles = log_weights.shape
     draws = num_particles if num_draws is None else num_draws
     if draws <= 0:
         raise ValueError("num_draws must be positive")
 
-    step_keys = jr.split(key, ntime)
+    step_keys = jr.split(key, num_chains * ntime)
     indices = jax.vmap(systematic, in_axes=(0, 0, None))(
         step_keys,
-        jnp.exp(log_weights),
+        jnp.exp(log_weights.reshape(-1, num_particles)),
         draws,
-    )
-    selected = jax.vmap(lambda cloud, index: cloud[index])(
+    ).reshape(num_chains, ntime, draws)
+    selected = jax.vmap(jax.vmap(lambda cloud, index: cloud[index]))(
         particles,
         indices,
     )
-    selected = jnp.swapaxes(selected, 0, 1)[None]
+    selected = jnp.swapaxes(selected, 1, 2)
 
     name = "theta" if var_names is None else var_names.get("theta", "theta")
-    event_rank = particles.ndim - 2
+    event_rank = particles.ndim - 3
     event_dims = (
         [f"{name}_dim_{axis}" for axis in range(event_rank)]
         if dims is None or name not in dims
