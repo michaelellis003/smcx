@@ -23,7 +23,7 @@ not jittable; the batched inner kernels are jitted.
 """
 
 import math
-from typing import Protocol, cast, runtime_checkable
+from typing import cast
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -46,43 +46,6 @@ from smcx.types import (
 from smcx.weights import ess as compute_ess
 
 _RWM_SCALE = 2.38
-
-
-@runtime_checkable
-class _InnerInitKernel(Protocol):
-    """Initialize every parameter particle's inner state filter."""
-
-    def __call__(
-        self,
-        key: PRNGKeyT,
-        params: Float[Array, "num_theta param_dim"],
-        emission: Float[Array, " emission_dim"],
-        /,
-    ) -> tuple[
-        Float[Array, "num_theta num_x state_dim"],
-        Float[Array, "num_theta num_x"],
-        Float[Array, " num_theta"],
-    ]: ...
-
-
-@runtime_checkable
-class _InnerStepKernel(Protocol):
-    """Advance every parameter particle's inner state filter."""
-
-    def __call__(
-        self,
-        resampling_key: PRNGKeyT,
-        transition_key: PRNGKeyT,
-        particles: Float[Array, "num_theta num_x state_dim"],
-        log_weights: Float[Array, "num_theta num_x"],
-        params: Float[Array, "num_theta param_dim"],
-        emission: Float[Array, " emission_dim"],
-        /,
-    ) -> tuple[
-        Float[Array, "num_theta num_x state_dim"],
-        Float[Array, "num_theta num_x"],
-        Float[Array, " num_theta"],
-    ]: ...
 
 
 def _lse_rows(x: Array) -> Array:
@@ -129,72 +92,6 @@ def _batched_inner_resample(
         return jnp.clip(idx, 0, n_x - 1).astype(jnp.int32)
 
     return vmap(_row)(cdf, positions)
-
-
-def _build_inner_kernels(
-    initial_sampler: ParamInitialStateSampler,
-    transition_sampler: ParamTransitionSampler,
-    log_observation_fn: ParamLogObservationFn,
-    num_theta: int,
-    num_x: int,
-) -> tuple[_InnerInitKernel, _InnerStepKernel]:
-    """Build jitted inner kernels for fixed callbacks and static sizes."""
-    log_n_x = math.log(num_x)
-
-    @jit
-    def inner_init(
-        k0: PRNGKeyT,
-        th: Float[Array, "num_theta param_dim"],
-        y0: Float[Array, " emission_dim"],
-    ) -> tuple[
-        Float[Array, "num_theta num_x state_dim"],
-        Float[Array, "num_theta num_x"],
-        Float[Array, " num_theta"],
-    ]:
-        k_init = jr.split(k0, num_theta)
-        inner = vmap(lambda k, p: initial_sampler(k, num_x, p))(k_init, th)
-        flat = inner.reshape(-1, inner.shape[-1])
-        th_flat = jnp.repeat(th, num_x, axis=0)
-        flat_log_g = cast(
-            Float[Array, " flat_particle"],
-            vmap(lambda s, p: log_observation_fn(y0, s, p))(flat, th_flat),
-        )
-        log_g = flat_log_g.reshape(num_theta, num_x)
-        inner_log_w, log_g_lse = _normalize_rows(log_g)
-        return inner, inner_log_w, log_g_lse - log_n_x
-
-    @jit
-    def inner_step(
-        kr: PRNGKeyT,
-        kt: PRNGKeyT,
-        inner: Float[Array, "num_theta num_x state_dim"],
-        inner_log_w: Float[Array, "num_theta num_x"],
-        th: Float[Array, "num_theta param_dim"],
-        y_t: Float[Array, " emission_dim"],
-    ) -> tuple[
-        Float[Array, "num_theta num_x state_dim"],
-        Float[Array, "num_theta num_x"],
-        Float[Array, " num_theta"],
-    ]:
-        idx = _batched_inner_resample(kr, jnp.exp(inner_log_w), num_x)
-        parents = jnp.take_along_axis(inner, idx[:, :, None], axis=1)
-        keys_flat = jr.split(kt, num_theta * num_x)
-        flat = parents.reshape(-1, parents.shape[-1])
-        th_flat = jnp.repeat(th, num_x, axis=0)
-        moved = vmap(lambda k, s, p: transition_sampler(k, s, p))(
-            keys_flat, flat, th_flat
-        ).reshape(num_theta, num_x, -1)
-        flat_log_g = cast(
-            Float[Array, " flat_particle"],
-            vmap(lambda s, p: log_observation_fn(y_t, s, p))(
-                moved.reshape(-1, moved.shape[-1]), th_flat
-            ),
-        )
-        log_g = flat_log_g.reshape(num_theta, num_x)
-        inner_log_w, log_g_lse = _normalize_rows(log_g)
-        return moved, inner_log_w, log_g_lse - log_n_x
-
-    return inner_init, inner_step
 
 
 def smc2(
@@ -258,15 +155,61 @@ def smc2(
     d_theta = theta.shape[-1]
     scale2 = _RWM_SCALE**2 / d_theta
     batch_prior = vmap(log_prior_fn)
+    log_n_x = math.log(num_x)
 
     # --- batched inner kernels (flatten -> single vmap) ---------------
-    inner_init, inner_step = _build_inner_kernels(
-        initial_sampler,
-        transition_sampler,
-        log_observation_fn,
-        num_theta,
-        num_x,
-    )
+    @jit
+    def inner_init(
+        k0: PRNGKeyT,
+        th: Float[Array, "num_theta param_dim"],
+        y0: Float[Array, " emission_dim"],
+    ) -> tuple[
+        Float[Array, "num_theta num_x state_dim"],
+        Float[Array, "num_theta num_x"],
+        Float[Array, " num_theta"],
+    ]:
+        k_init = jr.split(k0, num_theta)
+        inner = vmap(lambda k, p: initial_sampler(k, num_x, p))(k_init, th)
+        flat = inner.reshape(-1, inner.shape[-1])
+        th_flat = jnp.repeat(th, num_x, axis=0)
+        flat_log_g = cast(
+            Float[Array, " flat_particle"],
+            vmap(lambda s, p: log_observation_fn(y0, s, p))(flat, th_flat),
+        )
+        log_g = flat_log_g.reshape(num_theta, num_x)
+        inner_log_w, log_g_lse = _normalize_rows(log_g)
+        return inner, inner_log_w, log_g_lse - log_n_x
+
+    @jit
+    def inner_step(
+        kr: PRNGKeyT,
+        kt: PRNGKeyT,
+        inner: Float[Array, "num_theta num_x state_dim"],
+        inner_log_w: Float[Array, "num_theta num_x"],
+        th: Float[Array, "num_theta param_dim"],
+        y_t: Float[Array, " emission_dim"],
+    ) -> tuple[
+        Float[Array, "num_theta num_x state_dim"],
+        Float[Array, "num_theta num_x"],
+        Float[Array, " num_theta"],
+    ]:
+        idx = _batched_inner_resample(kr, jnp.exp(inner_log_w), num_x)
+        parents = jnp.take_along_axis(inner, idx[:, :, None], axis=1)
+        keys_flat = jr.split(kt, num_theta * num_x)
+        flat = parents.reshape(-1, parents.shape[-1])
+        th_flat = jnp.repeat(th, num_x, axis=0)
+        moved = vmap(lambda k, s, p: transition_sampler(k, s, p))(
+            keys_flat, flat, th_flat
+        ).reshape(num_theta, num_x, -1)
+        flat_log_g = cast(
+            Float[Array, " flat_particle"],
+            vmap(lambda s, p: log_observation_fn(y_t, s, p))(
+                moved.reshape(-1, moved.shape[-1]), th_flat
+            ),
+        )
+        log_g = flat_log_g.reshape(num_theta, num_x)
+        inner_log_w, log_g_lse = _normalize_rows(log_g)
+        return moved, inner_log_w, log_g_lse - log_n_x
 
     def inner_forward(fwd_key, th, upto):
         """Fresh inner filter over emissions[0:upto]; resolved logZ."""

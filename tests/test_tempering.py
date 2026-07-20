@@ -74,7 +74,7 @@ def _run(seed, n=4000, **kw):
     return smcx.temper(jr.key(seed), init, log_prior, log_lik, n, **kw)
 
 
-def _small_factory_model():
+def _small_tempering_model():
     observation = jnp.array([0.25], dtype=jnp.float64)
 
     def init(_key, n):
@@ -170,7 +170,7 @@ class TestMechanics:
         assert np.array_equal(np.array(a.particles), np.array(b.particles))
 
     def test_distinct_hash_equal_likelihood_uses_second_behavior(self):
-        init, log_prior, _ = _small_factory_model()
+        init, log_prior, _ = _small_tempering_model()
 
         def shifted_log_likelihood(center, value):
             return -0.5 * jnp.sum((value - center) ** 2 / 0.2)
@@ -233,8 +233,8 @@ class TestMechanics:
         jax.default_backend() != "cpu",
         reason="frozen CPU/x64 arithmetic contract",
     )
-    def test_rwm_factory_preserves_frozen_fixed_key_output(self):
-        init, log_prior, log_lik = _small_factory_model()
+    def test_rwm_sweep_preserves_frozen_fixed_key_output(self):
+        init, log_prior, log_lik = _small_tempering_model()
         posterior = smcx.temper(
             jr.key(314159),
             init,
@@ -274,6 +274,15 @@ class TestMechanics:
         np.testing.assert_array_equal(
             np.asarray(posterior.acceptance_rates),
             np.array([0.4000000134110451]),
+        )
+
+    def test_default_mutation_budget_caveat_is_documented(self):
+        docstring = smcx.temper.__doc__
+        assert docstring is not None
+        normalized_docstring = " ".join(docstring.split())
+        assert (
+            "The default five sweeps are a mutation budget, not an accuracy "
+            "guarantee" in normalized_docstring
         )
 
     def test_degenerate_likelihood_raises(self):

@@ -127,7 +127,7 @@ def _run(seed, n_theta=64, n_x=128, ess_threshold=0.0, **kw):
     )
 
 
-def _small_factory_model():
+def _small_model():
     emissions = jnp.array([[0.25], [-0.4], [0.1]], dtype=jnp.float64)
 
     def param_init(key, n_theta):
@@ -225,18 +225,16 @@ class TestStructure:
 class TestInnerKernelReductions:
     """Inner kernels reuse row reductions already needed for weights."""
 
-    @pytest.mark.parametrize("kernel_name", ["inner_init", "inner_step"])
-    def test_each_kernel_evaluates_row_lse_once(
+    def test_public_run_evaluates_each_inner_row_lse_once(
         self,
-        kernel_name: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         smc2_module = importlib.import_module("smcx.smc2")
         original_lse_rows = smc2_module._lse_rows
-        lse_calls: list[None] = []
+        lse_shapes: list[tuple[int, ...]] = []
 
-        def record_call(_value: object) -> None:
-            lse_calls.append(None)
+        def record_call(value: object) -> None:
+            lse_shapes.append(np.asarray(value).shape)
 
         def observed_lse_rows(values: jax.Array) -> jax.Array:
             jax.debug.callback(record_call, values)
@@ -244,42 +242,29 @@ class TestInnerKernelReductions:
 
         monkeypatch.setattr(smc2_module, "_lse_rows", observed_lse_rows)
         (
-            _,
-            _,
+            param_init,
+            log_prior,
             inner_sampler,
             transition_sampler,
             log_observation_fn,
             emissions,
-        ) = _small_factory_model()
-        inner_init, inner_step = smc2_module._build_inner_kernels(
+        ) = _small_model()
+        posterior = smcx.smc2(
+            jr.key(20),
+            param_init,
+            log_prior,
             inner_sampler,
             transition_sampler,
             log_observation_fn,
+            emissions,
             3,
             4,
+            ess_threshold=0.0,
         )
-        params = jnp.array([[0.7], [0.8], [0.9]], dtype=jnp.float64)
-        if kernel_name == "inner_init":
-            result = inner_init(jr.key(20), params, emissions[0])
-        else:
-            particles = jnp.broadcast_to(params[:, None, :], (3, 4, 1))
-            log_weights = jnp.full(
-                (3, 4),
-                -math.log(4),
-                dtype=jnp.float64,
-            )
-            result = inner_step(
-                jr.key(21),
-                jr.key(22),
-                particles,
-                log_weights,
-                params,
-                emissions[1],
-            )
-        jax.block_until_ready(result)
+        jax.block_until_ready(posterior)
         jax.effects_barrier()
 
-        assert len(lse_calls) == 1
+        assert lse_shapes.count((3, 4)) == emissions.shape[0]
 
 
 class TestCallbackFreshness:
@@ -293,7 +278,7 @@ class TestCallbackFreshness:
             inner_trans,
             _,
             emissions,
-        ) = _small_factory_model()
+        ) = _small_model()
 
         class MutableObservation:
             def __init__(self, variance):
@@ -352,14 +337,14 @@ class TestCallbackFreshness:
             )
 
 
-class TestInnerKernelFactory:
-    """The typed inner JIT factory preserves exact public behavior."""
+class TestFixedKeyRegression:
+    """Invocation-local inner JIT kernels preserve exact behavior."""
 
     @pytest.mark.skipif(
         jax.default_backend() != "cpu",
         reason="frozen CPU/x64 arithmetic contract",
     )
-    def test_inner_factory_preserves_frozen_fixed_key_output(self):
+    def test_preserves_frozen_fixed_key_output(self):
         (
             param_init,
             log_prior,
@@ -367,7 +352,7 @@ class TestInnerKernelFactory:
             inner_trans,
             inner_logobs,
             emissions,
-        ) = _small_factory_model()
+        ) = _small_model()
         posterior = smcx.smc2(
             jr.key(314159),
             param_init,
@@ -438,7 +423,7 @@ class TestInnerKernelFactory:
         jax.default_backend() != "cpu",
         reason="frozen CPU/x64 arithmetic contract",
     )
-    def test_inner_factory_preserves_frozen_rejuvenation_output(self):
+    def test_preserves_frozen_rejuvenation_output(self):
         (
             param_init,
             log_prior,
@@ -446,7 +431,7 @@ class TestInnerKernelFactory:
             inner_trans,
             inner_logobs,
             emissions,
-        ) = _small_factory_model()
+        ) = _small_model()
         posterior = smcx.smc2(
             jr.key(271828),
             param_init,

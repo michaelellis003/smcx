@@ -22,7 +22,6 @@ The adaptive schedule is host-driven (bisection reads ESS values), so
 """
 
 import math
-from typing import Protocol, runtime_checkable
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -44,27 +43,6 @@ from smcx.weights import log_normalize
 
 _BISECT_ITERS = 60
 _RWM_SCALE = 2.38
-
-
-@runtime_checkable
-class _RWMSweep(Protocol):
-    """Execute one fixed-count, vectorized RWM mutation stage."""
-
-    def __call__(
-        self,
-        key: PRNGKeyT,
-        particles: Float[Array, "num_particles state_dim"],
-        loglik: Float[Array, " num_particles"],
-        logprior: Float[Array, " num_particles"],
-        phi_arr: Float[Array, ""],
-        l_prop: Float[Array, "state_dim state_dim"],
-        /,
-    ) -> tuple[
-        Float[Array, "num_particles state_dim"],
-        Float[Array, " num_particles"],
-        Float[Array, " num_particles"],
-        Float[Array, ""],
-    ]: ...
 
 
 def _weighted_cov_f64(particles: Array, weights: Array) -> np.ndarray:
@@ -103,51 +81,6 @@ def _chol_with_jitter(cov: np.ndarray) -> jnp.ndarray:
     )
 
 
-def _build_rwm_sweep(
-    log_prior_fn: StaticLogDensity,
-    log_likelihood_fn: StaticLogDensity,
-    n: int,
-    dim: int,
-    num_mcmc_steps: int,
-) -> _RWMSweep:
-    """Build one jitted RWM sweep for fixed callbacks and static sizes."""
-    batch_lik = vmap(log_likelihood_fn)
-    batch_prior = vmap(log_prior_fn)
-
-    @jit
-    def _rwm_sweep(
-        key: PRNGKeyT,
-        particles: Float[Array, "num_particles state_dim"],
-        loglik: Float[Array, " num_particles"],
-        logprior: Float[Array, " num_particles"],
-        phi_arr: Float[Array, ""],
-        l_prop: Float[Array, "state_dim state_dim"],
-    ) -> tuple[
-        Float[Array, "num_particles state_dim"],
-        Float[Array, " num_particles"],
-        Float[Array, " num_particles"],
-        Float[Array, ""],
-    ]:
-        """Run fixed-count RWM sweeps with branchless acceptance."""
-        acc = jnp.zeros(())
-        for _ in range(num_mcmc_steps):
-            kz, ku, key = jr.split(key, 3)
-            z = jr.normal(kz, (n, dim))
-            prop = particles + z @ l_prop.T
-            lp = batch_prior(prop)
-            ll = batch_lik(prop)
-            log_alpha = (lp + phi_arr * ll) - (logprior + phi_arr * loglik)
-            u = jr.uniform(ku, (n,))
-            accept = jnp.log(jnp.maximum(u, 1e-300)) < log_alpha
-            particles = jnp.where(accept[:, None], prop, particles)
-            loglik = jnp.where(accept, ll, loglik)
-            logprior = jnp.where(accept, lp, logprior)
-            acc = acc + jnp.mean(accept)
-        return particles, loglik, logprior, acc / num_mcmc_steps
-
-    return _rwm_sweep
-
-
 def temper(
     key: PRNGKeyT,
     initial_sampler: DenseInitialSampler,
@@ -171,7 +104,9 @@ def temper(
         log_likelihood_fn: Per-particle ``(state) -> scalar``
             log-likelihood; vmapped internally.
         num_particles: Number of particles N.
-        num_mcmc_steps: RWM sweeps per temperature stage.
+        num_mcmc_steps: RWM sweeps per temperature stage. The default
+            five sweeps are a mutation budget, not an accuracy guarantee;
+            higher-dimensional or poorly mixed targets may need more.
         target_ess: The bisection solves ``ESS = target_ess * N``
             for each stage's temperature increment.
         resampling_fn: ADR-0004 contract resampler (applied at every
@@ -207,13 +142,37 @@ def temper(
         batch_prior(particles)
     )
     log_w = jnp.full((n,), -log_n)  # normalized (LSE == 0)
-    rwm_sweep = _build_rwm_sweep(
-        log_prior_fn,
-        log_likelihood_fn,
-        n,
-        dim,
-        num_mcmc_steps,
-    )
+
+    @jit
+    def rwm_sweep(
+        key: PRNGKeyT,
+        particles: Float[Array, "num_particles state_dim"],
+        loglik: Float[Array, " num_particles"],
+        logprior: Float[Array, " num_particles"],
+        phi_arr: Float[Array, ""],
+        l_prop: Float[Array, "state_dim state_dim"],
+    ) -> tuple[
+        Float[Array, "num_particles state_dim"],
+        Float[Array, " num_particles"],
+        Float[Array, " num_particles"],
+        Float[Array, ""],
+    ]:
+        """Run fixed-count RWM sweeps with branchless acceptance."""
+        acc = jnp.zeros(())
+        for _ in range(num_mcmc_steps):
+            kz, ku, key = jr.split(key, 3)
+            z = jr.normal(kz, (n, dim))
+            prop = particles + z @ l_prop.T
+            lp = batch_prior(prop)
+            ll = batch_lik(prop)
+            log_alpha = (lp + phi_arr * ll) - (logprior + phi_arr * loglik)
+            u = jr.uniform(ku, (n,))
+            accept = jnp.log(jnp.maximum(u, 1e-300)) < log_alpha
+            particles = jnp.where(accept[:, None], prop, particles)
+            loglik = jnp.where(accept, ll, loglik)
+            logprior = jnp.where(accept, lp, logprior)
+            acc = acc + jnp.mean(accept)
+        return particles, loglik, logprior, acc / num_mcmc_steps
 
     def ess_at(phi_new: float, phi: float) -> float:
         return float(compute_ess(log_w + (phi_new - phi) * loglik))
