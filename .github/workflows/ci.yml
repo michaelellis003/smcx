@@ -130,6 +130,9 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
+        with:
+          # macos-latest may ship a newer, untested system Python.
+          python-version: "3.13"
 
       - name: Run tests
         run: uv run pytest -v --durations=0 -m 'not integration'
@@ -149,6 +152,9 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
+        with:
+          # Match the highest version in the supported test matrix.
+          python-version: "3.13"
 
       - name: Probe Metal availability
         id: metal

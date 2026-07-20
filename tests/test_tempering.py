@@ -231,7 +231,7 @@ class TestMechanics:
 
     @pytest.mark.skipif(
         jax.default_backend() != "cpu",
-        reason="frozen CPU/x64 arithmetic contract",
+        reason="frozen CPU/f64 arithmetic contract",
     )
     def test_rwm_sweep_preserves_frozen_fixed_key_output(self):
         init, log_prior, log_lik = _small_tempering_model()
@@ -245,7 +245,12 @@ class TestMechanics:
             target_ess=0.6,
         )
 
-        np.testing.assert_array_equal(
+        # Linux/x64 and macOS/arm64 CPU lowerings differed by at most
+        # 6.7e-16 in this frozen f64 fixture.  The 1e-15 absolute budget is
+        # less than five binary64 eps at unit scale: it admits only backend
+        # rounding while still rejecting meaningful numerical drift.
+        frozen_atol = 1e-15
+        np.testing.assert_allclose(
             np.asarray(posterior.particles),
             np.array([
                 [1.5109879397100636],
@@ -254,26 +259,38 @@ class TestMechanics:
                 [0.3108199100404425],
                 [-0.4867093863813025],
             ]),
+            rtol=0.0,
+            atol=frozen_atol,
         )
-        np.testing.assert_array_equal(
+        np.testing.assert_allclose(
             np.asarray(posterior.log_weights),
             np.full(5, -1.6094379124341003),
+            rtol=0.0,
+            atol=frozen_atol,
         )
-        np.testing.assert_array_equal(
+        np.testing.assert_allclose(
             np.asarray(posterior.marginal_loglik),
             np.asarray(-0.33449690533561793),
+            rtol=0.0,
+            atol=frozen_atol,
         )
-        np.testing.assert_array_equal(
+        np.testing.assert_allclose(
             np.asarray(posterior.temperatures),
             np.array([1.0]),
+            rtol=0.0,
+            atol=frozen_atol,
         )
-        np.testing.assert_array_equal(
+        np.testing.assert_allclose(
             np.asarray(posterior.ess),
             np.array([4.5218752201463674]),
+            rtol=0.0,
+            atol=frozen_atol,
         )
-        np.testing.assert_array_equal(
+        np.testing.assert_allclose(
             np.asarray(posterior.acceptance_rates),
             np.array([0.4000000134110451]),
+            rtol=0.0,
+            atol=frozen_atol,
         )
 
     def test_default_mutation_budget_caveat_is_documented(self):
