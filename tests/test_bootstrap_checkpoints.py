@@ -221,12 +221,13 @@ def test_update_aligns_inputs_for_structured_state():
         del key
         return {
             "position": jnp.full((num_particles, 1), input_t[0]),
-            "auxiliary": jnp.zeros((num_particles, 2)),
+            "regime": jnp.arange(num_particles, dtype=jnp.int32),
         }
 
     def transition(key, state, input_t):
         del key
-        return jax.tree.map(lambda value: value + input_t, state)
+        position = state["position"] + input_t
+        return {"position": position, "regime": state["regime"]}
 
     def log_observation(emission, state, input_t):
         del emission, state
@@ -247,7 +248,7 @@ def test_update_aligns_inputs_for_structured_state():
     assert jnp.array_equal(
         posterior.filtered_particles["position"][:, :, 0], expected
     )
-    assert checkpoint.state.particles["auxiliary"].shape == (4, 2)
+    assert checkpoint.state.particles["regime"].dtype == jnp.int32
 
 
 def test_checkpoint_preserves_compensated_evidence_across_chunks():
