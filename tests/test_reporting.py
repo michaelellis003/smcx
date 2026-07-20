@@ -46,3 +46,17 @@ def test_fixed_key_gives_frozen_filter_draws():
         _group(result, "posterior")["theta"].values[0, :, :, 0],
         np.array([[2.0, 10.0], [3.0, 10.0], [3.0, 11.0]]),
     )
+
+
+def test_independent_runs_map_to_chain_and_draw_dimensions():
+    from smcx.reporting import to_arviz
+
+    post = _filter()
+    other = post._replace(filtered_particles=post.filtered_particles + 100.0)
+    one = _group(to_arviz(post, key=jr.key(1), num_draws=5), "posterior")
+    two = _group(
+        to_arviz([post, other], key=jr.key(1), num_draws=5), "posterior"
+    )
+
+    assert one["theta"].shape == (1, 5, 2, 1)
+    assert two["theta"].shape == (2, 5, 2, 1)
