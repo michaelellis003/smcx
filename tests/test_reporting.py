@@ -60,3 +60,23 @@ def test_independent_runs_map_to_chain_and_draw_dimensions():
 
     assert one["theta"].shape == (1, 5, 2, 1)
     assert two["theta"].shape == (2, 5, 2, 1)
+
+
+def test_weighted_cloud_keeps_raw_source_weights_in_sample_stats():
+    from smcx.reporting import to_arviz
+
+    result = to_arviz(_filter(), key=jr.key(0), num_draws=3)
+    posterior = _group(result, "posterior")
+    stats = _group(result, "sample_stats")
+
+    assert posterior.sizes["draw"] == 3
+    assert stats["log_weights"].dims == (
+        "chain",
+        "draw",
+        "particle",
+        "time",
+    )
+    np.testing.assert_allclose(
+        stats["log_weights"].values[0, 0],
+        np.asarray(_filter().filtered_log_weights).T,
+    )
