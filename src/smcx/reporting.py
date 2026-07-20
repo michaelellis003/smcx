@@ -36,6 +36,7 @@ def _stack(values: Sequence[object], name: str) -> Array:
 def _resampled_group(
     values: Sequence[object],
     indices: Array,
+    num_particles: int,
     var_names: Mapping[str, str] | None,
     dims: Mapping[str, Sequence[str]] | None,
     *,
@@ -43,6 +44,10 @@ def _resampled_group(
 ) -> tuple[dict[str, np.ndarray], dict[str, list[str]]]:
     """Resample aligned PyTree leaves into one named ArviZ group."""
     stacked = jax.tree.map(lambda *leaves: jnp.stack(leaves), *values)
+    expected = (*indices.shape[:-1], num_particles)
+    leaves = jax.tree.leaves(stacked)
+    if any(leaf.shape[: len(expected)] != expected for leaf in leaves):
+        raise ValueError("particle axes must match posterior weights")
     path_leaves, _ = jax.tree.flatten_with_path(stacked)
     group = {}
     dimensions = {}
@@ -54,15 +59,10 @@ def _resampled_group(
         path_name = keystr(path, simple=True, separator=".") or "theta"
         name = (var_names or {}).get(path_name, path_name)
         event_rank = particles.ndim - (3 if timed else 2)
-        event_dims = list(
-            (dims or {}).get(
-                name, [f"{name}_dim_{axis}" for axis in range(event_rank)]
-            )
-        )
+        default = [f"{name}_dim_{axis}" for axis in range(event_rank)]
+        event_dims = list((dims or {}).get(name, default))
         if len(event_dims) != event_rank:
-            raise ValueError(
-                f"dims[{name!r}] must name {event_rank} event axes"
-            )
+            raise ValueError(f"dims[{name!r}] needs {event_rank} event axes")
         group[name] = _host(selected)
         dimensions[name] = ["time", *event_dims] if timed else event_dims
     return group, dimensions
@@ -88,16 +88,14 @@ def _construct_arviz(
         return arviz_base.from_dict(groups, dims=dimensions, attrs=attrs)
 
     supported = dict(groups)
-    extension = supported.pop("unconstrained_posterior", None)
+    u_group = supported.pop("unconstrained_posterior", None)
     result = arviz.from_dict(
         **supported,
         dims=dimensions,
         **{f"{name}_attrs": values for name, values in attrs.items()},
     )
-    if extension is not None:
-        result.add_groups(
-            {"unconstrained_posterior": extension}, dims=dimensions
-        )
+    if u_group is not None:
+        result.add_groups({"unconstrained_posterior": u_group}, dims=dimensions)
     return result
 
 
@@ -113,6 +111,8 @@ def to_arviz(
 ) -> Any:
     """Convert an smcx posterior to the installed ArviZ generation.
 
+    Filter draws are per-time filtering marginals, not trajectories.
+
     Args:
         posteriors: One supported posterior or independent runs.
         key: Explicit key for equal-weight resampling.
@@ -124,19 +124,14 @@ def to_arviz(
 
     Returns:
         ``InferenceData`` on ArviZ 0.x or ``DataTree`` on ArviZ 1.x.
-
-    Note:
-        Filter draws are per-time filtering marginals, not trajectories.
     """
     if isinstance(posteriors, (ParticleFilterPosterior, TemperedPosterior)):
         runs = (posteriors,)
     else:
         runs = tuple(posteriors)
-    allowed = (ParticleFilterPosterior, TemperedPosterior)
-    if (
-        not runs
-        or not isinstance(runs[0], allowed)
-        or any(type(run) is not type(runs[0]) for run in runs)
+    kind = type(runs[0]) if runs else None
+    if kind not in (ParticleFilterPosterior, TemperedPosterior) or any(
+        type(run) is not kind for run in runs
     ):
         raise TypeError("posteriors must be a supported smcx posterior")
 
@@ -196,7 +191,7 @@ def to_arviz(
         timed = False
 
     posterior_group, dimensions = _resampled_group(
-        values, indices, var_names, dims, timed=timed
+        values, indices, num_particles, var_names, dims, timed=timed
     )
     groups = {
         "posterior": posterior_group,
@@ -206,12 +201,12 @@ def to_arviz(
         u_values = (
             (unconstrained,)
             if num_chains == 1
-            else tuple(cast(Sequence[object], unconstrained))
+            else tuple(cast(Any, unconstrained))
         )
         if len(u_values) != num_chains:
             raise ValueError("unconstrained must provide one value per run")
         groups["unconstrained_posterior"], u_dims = _resampled_group(
-            u_values, indices, var_names, dims, timed=timed
+            u_values, indices, num_particles, var_names, dims, timed=timed
         )
         dimensions.update(u_dims)
     if emissions is not None:

@@ -53,6 +53,7 @@ def test_independent_runs_map_to_chain_and_draw_dimensions():
     )
     assert one["theta"].shape == (1, 5, 2, 1)
     assert two["theta"].shape == (2, 5, 2, 1)
+    assert np.all(two["theta"].values[1] >= 100)
 
 
 def test_weighted_cloud_keeps_raw_source_weights_in_sample_stats():
@@ -76,12 +77,11 @@ def test_dense_and_structured_states_have_stable_names_and_dims():
         ess=jnp.array([4.0, 4.0]),
         acceptance_rates=jnp.array([0.0, 0.8]),
     )
-    dense = _group(to_arviz(tempered, key=jr.key(2)), "posterior")
-    structured_post = post._replace(
-        filtered_particles={
-            "position": jnp.repeat(post.filtered_particles, 2, axis=-1),
-        }
-    )
+    dense_result = to_arviz(tempered, key=jr.key(2), num_draws=3)
+    dense = _group(dense_result, "posterior")
+    dense_stats = _group(dense_result, "sample_stats")
+    tree = {"position": jnp.repeat(post.filtered_particles, 2, axis=-1)}
+    structured_post = post._replace(filtered_particles=tree)
     structured = _group(
         to_arviz(
             structured_post,
@@ -91,7 +91,9 @@ def test_dense_and_structured_states_have_stable_names_and_dims():
         ),
         "posterior",
     )
-    assert "theta" in dense
+    assert dense["theta"].shape == (1, 3, 1)
+    assert dense_stats["log_weights"].dims[-1] == "particle"
+    assert dense_stats["temperatures"].dims[-1] == "stage"
     assert structured["x"].dims == ("chain", "draw", "time", "axis")
 
 
@@ -125,10 +127,8 @@ def test_optional_import_is_lazy_and_missing_extra_is_actionable(monkeypatch):
 def test_generation_dispatch_uses_resolved_constructor(monkeypatch):
     import arviz
 
-    to_arviz(_filter(), key=jr.key(5))
-    module = sys.modules[
-        "arviz" if arviz.__version__.startswith("0.") else "arviz_base"
-    ]
+    legacy = arviz.__version__.startswith("0.")
+    module = arviz if legacy else __import__("arviz_base")
     constructor = Mock(wraps=module.from_dict)
     monkeypatch.setattr(module, "from_dict", constructor)
     to_arviz(_filter(), key=jr.key(5))
@@ -145,9 +145,6 @@ def test_unconstrained_draws_follow_the_posterior_resampling_indices():
     constrained = _group(result, "posterior")["theta"].values
     unconstrained = _group(result, "unconstrained_posterior")["theta"].values
     np.testing.assert_array_equal(unconstrained, -constrained)
+    bad_u = -_filter().filtered_particles[:, :-1]
     with pytest.raises(ValueError, match="particle axes"):
-        to_arviz(
-            _filter(),
-            key=jr.key(0),
-            unconstrained=-_filter().filtered_particles[:, :-1],
-        )
+        to_arviz(_filter(), key=jr.key(0), unconstrained=bad_u)
