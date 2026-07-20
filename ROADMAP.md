@@ -1,6 +1,6 @@
 # Roadmap
 
-*Last updated: 2026-07-19. Directional, not a promise; solo-maintained.
+*Last updated: 2026-07-20. Directional, not a promise; solo-maintained.
 Themes here, tracking in GitHub issues. Decisions: `docs/adr/`.
 Non-goals at the bottom are a standing scope guard.*
 
@@ -22,15 +22,15 @@ the small carry-overs the 2026-07 library review surfaced.
       jax-mps across linear/nonlinear, parameter-learning, tempering,
       SMC², resampling, dense/PyTree representation, and optional Dynamax
       callback workloads; use the measured bottlenecks to prioritize fixes.~~
-- [ ] Correct the Pareto-k warning text: weight variance is infinite
+- [x] ~~Correct the Pareto-k warning text: weight variance is infinite
       for all k ≥ 0.5; 0.7 is the practical-reliability threshold
-      (PSIS rate results), not the infinite-variance boundary.
-- [ ] `reconstruct_trajectories`: genealogy tracing through the
+      (PSIS rate results), not the infinite-variance boundary.~~
+- [x] ~~`reconstruct_trajectories`: genealogy tracing through the
       stored ancestor arrays (TFP and `particles` both ship this;
-      we store the ancestry and offer nothing to walk it).
-- [ ] Single-run log-ML variance estimators (Chan & Lai 2013,
+      we store the ancestry and offer nothing to walk it).~~
+- [x] ~~Single-run log-ML variance estimators (Chan & Lai 2013,
       Lee & Whiteley 2018): Monte Carlo variance from one run's
-      genealogy instead of `replicated_log_ml`'s R repeat runs.
+      genealogy instead of `replicated_log_ml`'s R repeat runs.~~
 - [x] ~~Exogenous-inputs channel (ADR-0022): explicit per-step
       covariates for controlled and covariate-driven models across
       all filters and simulation.~~
@@ -41,13 +41,29 @@ the small carry-overs the 2026-07 library review surfaced.
       reporting bridge — independent runs as chains, weighted clouds
       resampled to draws — so ArviZ owns plots, R-hat, and posterior
       exploration and smcx never grows a reporting layer.
-- [ ] Dynamax interop recipe: a documented `from_dynamax` pattern
-      plus a worked Rao-Blackwellized particle filter example
-      (per-particle Kalman statistics in the state, Dynamax KF
-      update in the callbacks) — the recipe answers dynamax #112 and
-      #271, where blackjax was found unsuitable for state-space
-      filtering. Adapters produce callables; no model classes
-      (ADR-0019).
+- [ ] Native conditionally linear-Gaussian Rao--Blackwellized particle
+      filter: smcx owns the particle system, Kalman algebra, evidence,
+      genealogy, and diagnostics. Model callbacks provide transition and
+      emission parameters. This is a new algorithm and requires an ADR.
+- [ ] Dynamax interop recipes: algorithm-specific, optional adapters from
+      documented model APIs to smcx callables, including a worked adapter
+      from a supported conditionally linear-Gaussian model to the native
+      RBPF. Dynamax supplies models, never filtering or Kalman updates;
+      there is no universal `from_dynamax` model abstraction (ADR-0019).
+- [ ] Bring-your-own-model authoring guide: keep the existing
+      capability-specific callback Protocols as the abstract interface;
+      show plain-JAX and optional Equinox callback factories without a model
+      base class, distribution interface, or Equinox runtime dependency.
+- [ ] Functional filter checkpoints: public `init`/`step`/chunk-update state,
+      bootstrap first, so new observations can extend a resident particle
+      cloud with explicit per-step keys and correct conditional evidence.
+      This is a public API decision and requires an ADR.
+- [ ] Common-space static posterior updates: import equal- or nonuniform-
+      weight draws from NumPyro, PyMC, BlackJAX, or another source; reweight
+      by a new-data likelihood and, only with an evaluable old target, bridge
+      and rejuvenate. Keep this separate from latent-filter and SMC2 resume
+      state; define conditional-evidence and approximation semantics in an
+      ADR before implementation.
 
 ## Next — smoothing and sampler upgrades
 
@@ -60,8 +76,10 @@ the small carry-overs the 2026-07 library review surfaced.
       threshold at zero cost to current users.
 - [ ] Waste-free SMC for `temper` (Dau & Chopin 2022; blackjax and
       `particles` both carry it).
-- [ ] UKF-proposal particle filter recipe (dynamax #272 shape):
-      Dynamax UKF step as `guided_filter`'s proposal.
+- [ ] UKF-proposal particle filter: smcx owns proposal construction and
+      importance correction; optional model adapters provide transition
+      and emission functions. Numerical choices require an ADR before
+      implementation.
 - [x] ~~jax-mps CI leg: `SMCX_TEST_PLATFORM=mps` as a scheduled or
       best-effort job on macOS runners (they expose a paravirtual
       Metal device).~~
@@ -85,11 +103,9 @@ the small carry-overs the 2026-07 library review surfaced.
 - Iterated filtering (IF2/MOP) for maximum-likelihood estimation —
   pypomp's territory; a scope expansion that needs its own ADR
   discussion before any code.
-- **jax-mps tracking (standing)**: re-run the CPU-vs-Metal benchmark
-  against jax-mps 0.10.10 (#219/#220 shipped;
-  searchsorted contribution queued on their #203 mechanism
-  decision), and contribute optimizations upstream when the gap is
-  theirs to close. Performance claims about Apple silicon stay
+- **jax-mps tracking (standing)**: follow their #203 searchsorted
+  mechanism decision and contribute optimizations upstream when the gap
+  is theirs to close. Performance claims about Apple silicon stay
   measured, never assumed.
 
 ## Non-goals
