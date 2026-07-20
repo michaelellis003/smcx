@@ -16,6 +16,7 @@ from smcx.resampling import systematic
 
 EMISSIONS = jnp.array([[0.2], [-0.4], [0.7], [0.1], [-0.2]])
 NUM_PARTICLES = 16
+STEP_KEY = jr.key(2)
 
 
 def _initial(key, num_particles):
@@ -34,6 +35,12 @@ def _checkpoint():
     return smcx.bootstrap_init(
         jr.key(7), _initial, _log_observation, EMISSIONS[0], NUM_PARTICLES
     )[0]
+
+
+def _advance(checkpoint, observation=_log_observation, key=STEP_KEY, **kwargs):
+    return smcx.bootstrap_step(
+        key, checkpoint, _transition, observation, EMISSIONS[1], **kwargs
+    )
 
 
 def test_uncompiled_step_matches_compiled_step():
@@ -55,9 +62,7 @@ def test_uncompiled_step_matches_compiled_step():
         None,
         signature,
     )
-    compiled = smcx.bootstrap_step(
-        step_key, checkpoint, _transition, _log_observation, EMISSIONS[1]
-    )
+    compiled = _advance(checkpoint, key=step_key)
     # The keys are fixed, so there is no MC error. Five f32 eps covers only
     # rounding from the separate eager and fused compiler paths.
     tolerance = float(5 * np.finfo(np.float32).eps)
@@ -74,14 +79,7 @@ def test_init_and_step_report_resampling_semantics():
     checkpoint, init_info = smcx.bootstrap_init(
         jr.key(7), _initial, _log_observation, EMISSIONS[0], NUM_PARTICLES
     )
-    _, step_info = smcx.bootstrap_step(
-        jr.key(8),
-        checkpoint,
-        _transition,
-        _log_observation,
-        EMISSIONS[1],
-        resampling_threshold=1.0,
-    )
+    _, step_info = _advance(checkpoint, key=jr.key(8), resampling_threshold=1.0)
     assert not init_info.resampled
     assert step_info.resampled
 
@@ -94,19 +92,11 @@ def test_init_and_step_raise_on_degenerate_weights():
             jr.key(1), _initial, impossible, EMISSIONS[0], NUM_PARTICLES
         )
     with pytest.raises(smcx.DegenerateWeightsError):
-        smcx.bootstrap_step(
-            jr.key(2), _checkpoint(), _transition, impossible, EMISSIONS[1]
-        )
+        _advance(_checkpoint(), impossible)
     checkpoint = _checkpoint()
     state = checkpoint.state._replace(log_marginal_likelihood=jnp.nan)
     with pytest.raises(smcx.DegenerateWeightsError):
-        smcx.bootstrap_step(
-            jr.key(2),
-            checkpoint._replace(state=state),
-            _transition,
-            _log_observation,
-            EMISSIONS[1],
-        )
+        _advance(checkpoint._replace(state=state))
 
 
 @pytest.mark.parametrize(
@@ -133,6 +123,4 @@ def test_step_validates_checkpoint_structure(field, message):
     else:
         checkpoint = checkpoint._replace(**{field: jnp.ones(1)})
     with pytest.raises(ValueError, match=message):
-        smcx.bootstrap_step(
-            jr.key(3), checkpoint, _transition, _log_observation, EMISSIONS[1]
-        )
+        _advance(checkpoint)

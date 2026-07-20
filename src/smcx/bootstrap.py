@@ -205,7 +205,11 @@ def _bootstrap_step(
     log_obs = vmap(_observe)(propagated)
     log_w_unnorm = jnp.where(do_resample, log_obs, state.log_weights + log_obs)
     log_w_norm, log_sum = log_normalize(log_w_unnorm)
-    log_ev_inc = log_sum - jnp.where(do_resample, math.log(num_particles), 0.0)
+    log_ev_inc = jnp.where(
+        do_resample,
+        log_sum - jnp.asarray(math.log(num_particles)),
+        log_sum,
+    )
     log_ev_sum, correction = _neumaier_add(
         jnp.asarray(state.log_marginal_likelihood),
         checkpoint.log_evidence_compensation,
@@ -261,7 +265,7 @@ def bootstrap_step(
         DegenerateWeightsError: Every updated importance weight collapses.
     """
     state_signature = _validate_checkpoint(checkpoint)
-    updated = _compiled_bootstrap_step(
+    new_checkpoint, info = _compiled_bootstrap_step(
         step_key,
         checkpoint,
         transition_sampler,
@@ -272,8 +276,9 @@ def bootstrap_step(
         input_t,
         state_signature,
     )
-    _raise_if_degenerate(updated[1].log_evidence_increment)
-    return updated
+    total = new_checkpoint.state.log_marginal_likelihood
+    _raise_if_degenerate(total + new_checkpoint.log_evidence_compensation)
+    return new_checkpoint, info
 
 
 def bootstrap_filter(
