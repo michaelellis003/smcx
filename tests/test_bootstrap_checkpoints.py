@@ -3,6 +3,7 @@
 
 """Tests for resumable bootstrap filtering (ADR-0028)."""
 
+import math
 from functools import partial
 
 import jax
@@ -15,7 +16,7 @@ import smcx
 from smcx.bootstrap import _bootstrap_step, _validate_checkpoint
 from smcx.resampling import systematic
 
-EMISSIONS = jnp.array([[0.2], [-0.4], [0.7], [0.1], [-0.2]])
+EMISSIONS = jnp.array([[0.2], [-0.4], [0.7], [0.1], [-0.2], [0.3], [-0.6]])
 NUM_PARTICLES = 16
 
 
@@ -74,6 +75,16 @@ def test_one_shot_equals_init_then_repeated_step():
     )
     _, forced = _advance(jr.key(8), _checkpoint(), resampling_threshold=1.0)
     assert forced.resampled
+
+
+def _update(keys, checkpoint, emissions, **kwargs):
+    return smcx.bootstrap_update(
+        keys, checkpoint, _transition, _log_observation, emissions, **kwargs
+    )
+
+
+def _assert_tree_equal(actual, expected):
+    jax.tree.map(np.testing.assert_array_equal, actual, expected)
 
 
 def test_uncompiled_step_matches_compiled_step():
@@ -142,3 +153,168 @@ def test_step_validates_checkpoint_structure(field, value, message):
         checkpoint = checkpoint._replace(**{field: value})
     with pytest.raises(ValueError, match=message):
         _advance(jr.key(3), checkpoint)
+
+
+@pytest.mark.parametrize(
+    ("threshold", "expect_resampling"), [(0.0, False), (1.0, True)]
+)
+def test_update_is_invariant_to_three_unequal_chunks(
+    threshold, expect_resampling
+):
+    """Ordered keys preserve histories and conditional evidence by chunk."""
+    keys = jr.split(jr.key(17), EMISSIONS.shape[0] - 1)
+    initial = _checkpoint()
+    whole_checkpoint, whole = _update(
+        keys, initial, EMISSIONS[1:], resampling_threshold=threshold
+    )
+    checkpoint, chunks = initial, []
+    for start, stop in ((0, 1), (1, 3), (3, 6)):
+        checkpoint, chunk = _update(
+            keys[start:stop],
+            checkpoint,
+            EMISSIONS[start + 1 : stop + 1],
+            resampling_threshold=threshold,
+        )
+        chunks.append(chunk)
+
+    _assert_tree_equal(checkpoint, whole_checkpoint)
+    for field in (
+        "filtered_particles",
+        "filtered_log_weights",
+        "ancestors",
+        "ess",
+        "log_evidence_increments",
+    ):
+        joined = jax.tree.map(
+            lambda *xs: jnp.concatenate(xs),
+            *(getattr(chunk, field) for chunk in chunks),
+        )
+        _assert_tree_equal(joined, getattr(whole, field))
+    tolerance = float(5 * np.finfo(np.float32).eps)
+    np.testing.assert_allclose(
+        math.fsum(float(chunk.marginal_loglik) for chunk in chunks),
+        whole.marginal_loglik,
+        rtol=tolerance,
+        atol=tolerance,
+    )
+    resampled = jnp.any(whole.ancestors != jnp.arange(NUM_PARTICLES))
+    assert bool(resampled) is expect_resampling
+
+
+def test_update_aligns_inputs_for_structured_state():
+    """Each chunk input reaches the matching PyTree transition and weight."""
+    inputs = jnp.array([[1.0], [2.0], [3.0]])
+    emissions = jnp.zeros((3, 1))
+
+    def initial(key, num_particles, input_t):
+        del key
+        return {
+            "position": jnp.full((num_particles, 1), input_t[0]),
+            "auxiliary": jnp.zeros((num_particles, 2)),
+        }
+
+    def transition(key, state, input_t):
+        del key
+        return jax.tree.map(lambda value: value + input_t, state)
+
+    def log_observation(emission, state, input_t):
+        del emission, state
+        return -0.5 * input_t[0] ** 2
+
+    checkpoint, _ = smcx.bootstrap_init(
+        jr.key(3), initial, log_observation, emissions[0], 4, input_t=inputs[0]
+    )
+    checkpoint, posterior = smcx.bootstrap_update(
+        jr.split(jr.key(4), 2),
+        checkpoint,
+        transition,
+        log_observation,
+        emissions[1:],
+        inputs=inputs[1:],
+    )
+    expected = jnp.broadcast_to(jnp.array([3.0, 6.0])[:, None], (2, 4))
+    assert jnp.array_equal(
+        posterior.filtered_particles["position"][:, :, 0], expected
+    )
+    assert checkpoint.state.particles["auxiliary"].shape == (4, 2)
+
+
+def test_checkpoint_preserves_compensated_evidence_across_chunks():
+    """Large and small increments retain their correction when chunked."""
+    large = -1e16 if jax.config.read("jax_enable_x64") else -1e8
+    emissions = jnp.array([[large], [-1.0], [-2.0], [-3.0]])
+
+    def transition(key, state):
+        del key
+        return state
+
+    def log_observation(emission, state):
+        del state
+        return emission[0]
+
+    keys = jr.split(jr.key(31), 3)
+    initial, initial_info = smcx.bootstrap_init(
+        jr.key(32), _initial, log_observation, emissions[0], 4
+    )
+    whole_checkpoint, whole = smcx.bootstrap_update(
+        keys, initial, transition, log_observation, emissions[1:]
+    )
+    checkpoint = initial
+    for start, stop in ((0, 1), (1, 3)):
+        checkpoint, _ = smcx.bootstrap_update(
+            keys[start:stop],
+            checkpoint,
+            transition,
+            log_observation,
+            emissions[start + 1 : stop + 1],
+        )
+    _assert_tree_equal(checkpoint, whole_checkpoint)
+    assert whole_checkpoint.log_evidence_compensation != 0
+    increments = [
+        float(initial_info.log_evidence_increment),
+        *map(float, whole.log_evidence_increments),
+    ]
+    actual = (
+        whole_checkpoint.state.log_marginal_likelihood
+        + whole_checkpoint.log_evidence_compensation
+    )
+    assert actual == jnp.asarray(math.fsum(increments), dtype=actual.dtype)
+
+
+def test_update_final_only_matches_full_history():
+    """Final-only chunks keep scalar traces and the same live state."""
+    keys = jr.split(jr.key(41), EMISSIONS.shape[0] - 1)
+    initial = _checkpoint()
+    full_checkpoint, full = _update(keys, initial, EMISSIONS[1:])
+    final_checkpoint, final = _update(
+        keys, initial, EMISSIONS[1:], store_history=False
+    )
+    _assert_tree_equal(final_checkpoint, full_checkpoint)
+    for field in ("filtered_particles", "filtered_log_weights", "ancestors"):
+        expected = jax.tree.map(lambda value: value[-1:], getattr(full, field))
+        _assert_tree_equal(getattr(final, field), expected)
+    _assert_tree_equal(final.ess, full.ess)
+    _assert_tree_equal(
+        final.log_evidence_increments, full.log_evidence_increments
+    )
+
+
+@pytest.mark.parametrize(
+    ("keys", "emissions", "inputs", "message"),
+    [
+        (jr.split(jr.key(1), 0), EMISSIONS[1:1], None, "at least one"),
+        (jr.split(jr.key(1), 1), EMISSIONS[1:3], None, "same leading"),
+        (jr.split(jr.key(1), 2), EMISSIONS[1:3], jnp.ones((1, 1)), "leading"),
+    ],
+)
+def test_update_validates_chunk_alignment(keys, emissions, inputs, message):
+    """Documented chunk alignment errors fail at the public shell."""
+    with pytest.raises(ValueError, match=message):
+        _update(keys, _checkpoint(), emissions, inputs=inputs)
+
+
+def test_update_validates_checkpoint_structure():
+    """Chunk updates share the single-step checkpoint validation."""
+    checkpoint = _checkpoint()._replace(ess=jnp.ones(1))
+    with pytest.raises(ValueError, match="ess must be scalar"):
+        _update(jr.split(jr.key(1), 1), checkpoint, EMISSIONS[1:2])
