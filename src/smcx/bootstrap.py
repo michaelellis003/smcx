@@ -269,7 +269,7 @@ def bootstrap_step(
 
 
 def bootstrap_update(
-    step_keys: Shaped[Array, "nkeys ..."],
+    step_keys: Shaped[Array, "..."],
     checkpoint: BootstrapCheckpoint,
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
@@ -313,10 +313,17 @@ def bootstrap_update(
         raise ValueError(
             "emissions_chunk must contain at least one observation"
         )
-    if step_keys.shape[0] != num_steps:
+    key_error = "step_keys must be a batched PRNG key array"
+    try:
+        key_data = jr.key_data(step_keys)
+    except (TypeError, ValueError) as error:
+        raise ValueError(key_error) from error
+    if key_data.ndim != 2:
+        raise ValueError(key_error)
+    if key_data.shape[0] != num_steps:
         raise ValueError(
             "step_keys and emissions_chunk must have the same leading "
-            f"dimension; got {step_keys.shape[0]} and {num_steps}"
+            f"dimension; got {key_data.shape[0]} and {num_steps}"
         )
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_steps)
