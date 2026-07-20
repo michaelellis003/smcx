@@ -166,6 +166,34 @@ class TestContract:
 
         np.testing.assert_array_equal(ancestors, np.arange(64))
 
+    def test_multinomial_large_output_remains_nondecreasing(self) -> None:
+        """Parallel f32 prefix rounding must not invert ordered queries."""
+        num_particles = 100_000
+        weights = jnp.exp(
+            -jnp.linspace(
+                0.0,
+                5.0,
+                num_particles,
+                dtype=jnp.float32,
+            )
+        )
+        weights = weights / jnp.sum(weights)
+        # The fifth committed validation key exposed a one-index inversion at
+        # N=100,000. This is a deterministic public ordering contract, so the
+        # failing key is retained rather than re-rolled.
+        key = jr.split(jr.key(20260720), 8)[4]
+        with jax.enable_x64(False):
+            draw = jax.jit(
+                lambda draw_key, draw_weights: multinomial(
+                    draw_key,
+                    draw_weights,
+                    num_particles,
+                )
+            )
+            ancestors = np.asarray(draw(key, weights))
+
+        assert np.all(np.diff(ancestors.astype(np.int64)) >= 0)
+
     def test_residual_guarantees_the_deterministic_floor(self) -> None:
         # Dyadic weights are exact in f32, so backend-specific reduction
         # rounding cannot move an expected count across an integer boundary.

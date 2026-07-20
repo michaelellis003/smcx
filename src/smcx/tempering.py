@@ -22,7 +22,6 @@ The adaptive schedule is host-driven (bisection reads ESS values), so
 """
 
 import math
-from collections.abc import Callable
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -33,7 +32,12 @@ from jaxtyping import Array, Float
 from smcx.containers import TemperedPosterior
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import systematic
-from smcx.types import PRNGKeyT
+from smcx.types import (
+    DenseInitialSampler,
+    PRNGKeyT,
+    ResamplingFn,
+    StaticLogDensity,
+)
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
 
@@ -79,13 +83,13 @@ def _chol_with_jitter(cov: np.ndarray) -> jnp.ndarray:
 
 def temper(
     key: PRNGKeyT,
-    initial_sampler: Callable,
-    log_prior_fn: Callable,
-    log_likelihood_fn: Callable,
+    initial_sampler: DenseInitialSampler,
+    log_prior_fn: StaticLogDensity,
+    log_likelihood_fn: StaticLogDensity,
     num_particles: int,
     num_mcmc_steps: int = 5,
     target_ess: float = 0.5,
-    resampling_fn: Callable = systematic,
+    resampling_fn: ResamplingFn = systematic,
     *,
     max_stages: int = 1000,
 ) -> TemperedPosterior:
@@ -100,7 +104,9 @@ def temper(
         log_likelihood_fn: Per-particle ``(state) -> scalar``
             log-likelihood; vmapped internally.
         num_particles: Number of particles N.
-        num_mcmc_steps: RWM sweeps per temperature stage.
+        num_mcmc_steps: RWM sweeps per temperature stage. The default
+            five sweeps are a mutation budget, not an accuracy guarantee;
+            higher-dimensional or poorly mixed targets may need more.
         target_ess: The bisection solves ``ESS = target_ess * N``
             for each stage's temperature increment.
         resampling_fn: ADR-0004 contract resampler (applied at every
@@ -131,13 +137,27 @@ def temper(
     batch_lik = vmap(log_likelihood_fn)
     batch_prior = vmap(log_prior_fn)
 
-    loglik = batch_lik(particles)
-    logprior = batch_prior(particles)
+    loglik: Float[Array, " num_particles"] = jnp.asarray(batch_lik(particles))
+    logprior: Float[Array, " num_particles"] = jnp.asarray(
+        batch_prior(particles)
+    )
     log_w = jnp.full((n,), -log_n)  # normalized (LSE == 0)
 
     @jit
-    def _rwm_sweep(key, particles, loglik, logprior, phi_arr, l_prop):
-        """num_mcmc_steps RWM sweeps, branchless acceptance."""
+    def rwm_sweep(
+        key: PRNGKeyT,
+        particles: Float[Array, "num_particles state_dim"],
+        loglik: Float[Array, " num_particles"],
+        logprior: Float[Array, " num_particles"],
+        phi_arr: Float[Array, ""],
+        l_prop: Float[Array, "state_dim state_dim"],
+    ) -> tuple[
+        Float[Array, "num_particles state_dim"],
+        Float[Array, " num_particles"],
+        Float[Array, " num_particles"],
+        Float[Array, ""],
+    ]:
+        """Run fixed-count RWM sweeps with branchless acceptance."""
         acc = jnp.zeros(())
         for _ in range(num_mcmc_steps):
             kz, ku, key = jr.split(key, 3)
@@ -209,7 +229,7 @@ def temper(
         particles = particles[idx]
         loglik = loglik[idx]
         logprior = logprior[idx]
-        particles, loglik, logprior, acc = _rwm_sweep(
+        particles, loglik, logprior, acc = rwm_sweep(
             km,
             particles,
             loglik,

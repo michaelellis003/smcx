@@ -159,10 +159,10 @@ def guided_filter(
 
     # --- Scan body for t = 1, ..., T-1 -------------------------------------
     def _step(
-        carry: tuple[ParticleState, Array],
+        carry: tuple[ParticleState, Array, Array],
         args: tuple[Array, ...],
     ):
-        state, _prev_ancestors = carry
+        state, current_ess, _prev_ancestors = carry
         if inputs_arr is None:
             step_key, y_t = args
             input_t = None
@@ -175,6 +175,7 @@ def guided_filter(
         do_resample, ancestors = _conditional_resample(
             k1,
             state.log_weights,
+            current_ess,
             resampling_fn,
             threshold,
             num_particles,
@@ -257,7 +258,7 @@ def guided_filter(
         )
         ess_t: Array = jnp.asarray(compute_ess(log_w_norm))
         if store_history:
-            return (new_state, ancestors), (
+            return (new_state, ess_t, ancestors), (
                 propagated,
                 log_w_norm,
                 ancestors,
@@ -266,7 +267,7 @@ def guided_filter(
             )
         # Final-only mode (ADR-0011): ancestors ride the carry (O(N));
         # the scan stacks just the scalar traces.
-        return (new_state, ancestors), (ess_t, log_ev_inc)
+        return (new_state, ess_t, ancestors), (ess_t, log_ev_inc)
 
     step_keys = jr.split(key, emissions.shape[0] - 1)
     scan_inputs = (
@@ -274,10 +275,10 @@ def guided_filter(
         if inputs_arr is None
         else (step_keys, emissions[1:], inputs_arr[1:])
     )
-    init_carry = (init_state, identity_ancestors)
+    init_carry = (init_state, ess_0, identity_ancestors)
     if store_history:
         (
-            (final_state, _),
+            (final_state, _, _),
             (
                 particles_rest,
                 log_w_rest,
@@ -291,7 +292,7 @@ def guided_filter(
         all_ancestors = _prepend(identity_ancestors, ancestors_rest)
     else:
         (
-            (final_state, final_ancestors),
+            (final_state, _, final_ancestors),
             (ess_rest, log_ev_inc_rest),
         ) = lax.scan(_step, init_carry, scan_inputs)
         all_particles = _particle_time_axis(final_state.particles)

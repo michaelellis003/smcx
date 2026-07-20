@@ -23,7 +23,7 @@ not jittable; the batched inner kernels are jitted.
 """
 
 import math
-from collections.abc import Callable
+from typing import cast
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -34,7 +34,15 @@ from smcx.containers import SMC2Posterior
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import _BELOW_ONE, _TINY, systematic
 from smcx.tempering import _chol_with_jitter, _weighted_cov_f64
-from smcx.types import PRNGKeyT
+from smcx.types import (
+    ParamInitialSampler,
+    ParamInitialStateSampler,
+    ParamLogObservationFn,
+    ParamTransitionSampler,
+    PRNGKeyT,
+    ResamplingFn,
+    StaticLogDensity,
+)
 from smcx.weights import ess as compute_ess
 
 _RWM_SCALE = 2.38
@@ -88,18 +96,18 @@ def _batched_inner_resample(
 
 def smc2(
     key: PRNGKeyT,
-    param_initial_sampler: Callable,
-    log_prior_fn: Callable,
-    initial_sampler: Callable,
-    transition_sampler: Callable,
-    log_observation_fn: Callable,
+    param_initial_sampler: ParamInitialSampler,
+    log_prior_fn: StaticLogDensity,
+    initial_sampler: ParamInitialStateSampler,
+    transition_sampler: ParamTransitionSampler,
+    log_observation_fn: ParamLogObservationFn,
     emissions: Float[Array, "ntime emission_dim"],
     num_theta: int,
     num_x: int,
     *,
     ess_threshold: float = 0.5,
     num_pmmh_steps: int = 1,
-    resampling_fn: Callable = systematic,
+    resampling_fn: ResamplingFn = systematic,
     store_history: bool = True,
 ) -> SMC2Posterior:
     r"""Run SMC² for joint state-and-parameter inference (ADR-0014).
@@ -140,7 +148,6 @@ def smc2(
     if emissions.ndim == 1:
         emissions = emissions[:, None]
     n_time = emissions.shape[0]
-    log_n_x = math.log(num_x)
     log_n_theta = math.log(num_theta)
 
     k_theta, k_loop = jr.split(key)
@@ -148,22 +155,44 @@ def smc2(
     d_theta = theta.shape[-1]
     scale2 = _RWM_SCALE**2 / d_theta
     batch_prior = vmap(log_prior_fn)
+    log_n_x = math.log(num_x)
 
     # --- batched inner kernels (flatten -> single vmap) ---------------
     @jit
-    def inner_init(k0, th, y0):
+    def inner_init(
+        k0: PRNGKeyT,
+        th: Float[Array, "num_theta param_dim"],
+        y0: Float[Array, " emission_dim"],
+    ) -> tuple[
+        Float[Array, "num_theta num_x state_dim"],
+        Float[Array, "num_theta num_x"],
+        Float[Array, " num_theta"],
+    ]:
         k_init = jr.split(k0, num_theta)
         inner = vmap(lambda k, p: initial_sampler(k, num_x, p))(k_init, th)
         flat = inner.reshape(-1, inner.shape[-1])
         th_flat = jnp.repeat(th, num_x, axis=0)
-        log_g = vmap(lambda s, p: log_observation_fn(y0, s, p))(
-            flat, th_flat
-        ).reshape(num_theta, num_x)
-        inner_log_w, _ = _normalize_rows(log_g)
-        return inner, inner_log_w, _lse_rows(log_g) - log_n_x
+        flat_log_g = cast(
+            Float[Array, " flat_particle"],
+            vmap(lambda s, p: log_observation_fn(y0, s, p))(flat, th_flat),
+        )
+        log_g = flat_log_g.reshape(num_theta, num_x)
+        inner_log_w, log_g_lse = _normalize_rows(log_g)
+        return inner, inner_log_w, log_g_lse - log_n_x
 
     @jit
-    def inner_step(kr, kt, inner, inner_log_w, th, y_t):
+    def inner_step(
+        kr: PRNGKeyT,
+        kt: PRNGKeyT,
+        inner: Float[Array, "num_theta num_x state_dim"],
+        inner_log_w: Float[Array, "num_theta num_x"],
+        th: Float[Array, "num_theta param_dim"],
+        y_t: Float[Array, " emission_dim"],
+    ) -> tuple[
+        Float[Array, "num_theta num_x state_dim"],
+        Float[Array, "num_theta num_x"],
+        Float[Array, " num_theta"],
+    ]:
         idx = _batched_inner_resample(kr, jnp.exp(inner_log_w), num_x)
         parents = jnp.take_along_axis(inner, idx[:, :, None], axis=1)
         keys_flat = jr.split(kt, num_theta * num_x)
@@ -172,11 +201,15 @@ def smc2(
         moved = vmap(lambda k, s, p: transition_sampler(k, s, p))(
             keys_flat, flat, th_flat
         ).reshape(num_theta, num_x, -1)
-        log_g = vmap(lambda s, p: log_observation_fn(y_t, s, p))(
-            moved.reshape(-1, moved.shape[-1]), th_flat
-        ).reshape(num_theta, num_x)
-        inner_log_w, _ = _normalize_rows(log_g)
-        return moved, inner_log_w, _lse_rows(log_g) - log_n_x
+        flat_log_g = cast(
+            Float[Array, " flat_particle"],
+            vmap(lambda s, p: log_observation_fn(y_t, s, p))(
+                moved.reshape(-1, moved.shape[-1]), th_flat
+            ),
+        )
+        log_g = flat_log_g.reshape(num_theta, num_x)
+        inner_log_w, log_g_lse = _normalize_rows(log_g)
+        return moved, inner_log_w, log_g_lse - log_n_x
 
     def inner_forward(fwd_key, th, upto):
         """Fresh inner filter over emissions[0:upto]; resolved logZ."""

@@ -333,6 +333,7 @@ def _init_standard(
 def _conditional_resample(
     key: PRNGKeyT,
     log_weights: Float[Array, " num_particles"],
+    current_ess: Float[Array, ""],
     resampling_fn: ResamplingFn,
     threshold: float,
     num_particles: int,
@@ -340,12 +341,13 @@ def _conditional_resample(
 ) -> tuple[Array, Int[Array, " num_particles"]]:
     """Conditionally resample particles based on ESS.
 
-    Computes the effective sample size of the given log weights
-    and resamples only when ESS falls below the threshold.
+    Resamples only when the precomputed effective sample size falls
+    below the threshold.
 
     Args:
         key: PRNG key for resampling.
         log_weights: Normalised log weights (logsumexp = 0).
+        current_ess: Effective sample size of ``log_weights``.
         resampling_fn: Blackjax-compatible resampling function.
         threshold: Absolute ESS threshold (e.g. ``0.5 * N``).
         num_particles: Number of particles N.
@@ -356,12 +358,10 @@ def _conditional_resample(
         is a boolean scalar and *ancestors* are the resampled (or
         identity) indices.
     """
-    cur_ess = compute_ess(log_weights)
-    w_norm = normalize(log_weights)
-    do_resample: Array = jnp.asarray(cur_ess < threshold)
+    do_resample: Array = jnp.asarray(current_ess < threshold)
     ancestors = lax.cond(
         do_resample,
-        lambda: resampling_fn(key, w_norm, num_particles),
+        lambda: resampling_fn(key, normalize(log_weights), num_particles),
         lambda: identity,
     )
     return do_resample, ancestors

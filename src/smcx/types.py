@@ -93,6 +93,30 @@ class ParamInitialSampler(Protocol):
 
 
 @runtime_checkable
+class ParamInitialStateSampler(Protocol):
+    """Draw a parameter-conditioned initial state-particle cloud."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        num_particles: int,
+        params: Float[Array, " param_dim"],
+        /,
+    ) -> Float[Array, "num_particles state_dim"]: ...
+
+
+@runtime_checkable
+class StaticLogDensity(Protocol):
+    """Evaluate one dense static-target log-density."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
 class TransitionSampler(Protocol):
     """Draw one particle from the transition distribution."""
 

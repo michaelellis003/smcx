@@ -53,7 +53,7 @@ build-backend = "uv_build"
 metal = [
     # jax-mps only ships macOS-arm64 wheels; the marker keeps the
     # extra resolvable (as a no-op) on other platforms, e.g. Linux CI.
-    "jax-mps>=0.10.9,<0.11; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "jax-mps>=0.10.10,<0.11; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
 [dependency-groups]

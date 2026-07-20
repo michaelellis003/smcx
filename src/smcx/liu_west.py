@@ -282,12 +282,14 @@ def liu_west_filter(
                 ),
             )
         log_first_norm, log_first_sum = log_normalize(log_weights + log_aux)
+        first_ess: Array = jnp.asarray(compute_ess(log_first_norm))
 
         # 2. Conditionally resample
         threshold = resampling_threshold * num_particles
         do_resample, ancestors = _conditional_resample(
             k1,
             log_first_norm,
+            first_ess,
             resampling_fn,
             threshold,
             num_particles,

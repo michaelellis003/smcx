@@ -38,8 +38,10 @@ Algorithm: Chopin, Jacob, and Papaspiliopoulos (2013),
 https://doi.org/10.1111/j.1467-9868.2012.01046.x
 """
 
+import importlib
 import math
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
@@ -125,6 +127,39 @@ def _run(seed, n_theta=64, n_x=128, ess_threshold=0.0, **kw):
     )
 
 
+def _small_model():
+    emissions = jnp.array([[0.25], [-0.4], [0.1]], dtype=jnp.float64)
+
+    def param_init(key, n_theta):
+        return 0.7 + 0.2 * jr.uniform(key, (n_theta, 1), dtype=jnp.float64)
+
+    def log_prior(theta):
+        return -0.5 * jnp.sum(theta**2)
+
+    def inner_init(key, n_x, theta):
+        return theta[0] + 0.3 * jr.normal(key, (n_x, 1), dtype=jnp.float64)
+
+    def inner_trans(key, state, theta):
+        return theta[0] * state + 0.2 * jr.normal(
+            key, state.shape, dtype=jnp.float64
+        )
+
+    def inner_logobs(y, state, theta):
+        del theta
+        return -0.5 * (
+            jnp.log(2.0 * jnp.pi * 0.4) + (y[0] - state[0]) ** 2 / 0.4
+        )
+
+    return (
+        param_init,
+        log_prior,
+        inner_init,
+        inner_trans,
+        inner_logobs,
+        emissions,
+    )
+
+
 class TestStructure:
     """Shapes, invariants, determinism, degeneracy."""
 
@@ -185,6 +220,287 @@ class TestStructure:
                 32,
                 ess_threshold=0.0,
             )
+
+
+class TestInnerKernelReductions:
+    """Inner kernels reuse row reductions already needed for weights."""
+
+    @pytest.mark.skipif(
+        jax.default_backend() == "mps",
+        reason="jax-mps does not lower jax.debug.callback",
+    )
+    def test_public_run_evaluates_each_inner_row_lse_once(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        smc2_module = importlib.import_module("smcx.smc2")
+        original_lse_rows = smc2_module._lse_rows
+        lse_shapes: list[tuple[int, ...]] = []
+
+        def record_call(value: object) -> None:
+            lse_shapes.append(np.asarray(value).shape)
+
+        def observed_lse_rows(values: jax.Array) -> jax.Array:
+            jax.debug.callback(record_call, values)
+            return original_lse_rows(values)
+
+        monkeypatch.setattr(smc2_module, "_lse_rows", observed_lse_rows)
+        (
+            param_init,
+            log_prior,
+            inner_sampler,
+            transition_sampler,
+            log_observation_fn,
+            emissions,
+        ) = _small_model()
+        posterior = smcx.smc2(
+            jr.key(20),
+            param_init,
+            log_prior,
+            inner_sampler,
+            transition_sampler,
+            log_observation_fn,
+            emissions,
+            3,
+            4,
+            ess_threshold=0.0,
+        )
+        jax.block_until_ready(posterior)
+        jax.effects_barrier()
+
+        assert lse_shapes.count((3, 4)) == emissions.shape[0]
+
+
+class TestCallbackFreshness:
+    """Public calls observe current callback-object behavior."""
+
+    def test_mutated_observation_callback_matches_fresh_equivalent(self):
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            _,
+            emissions,
+        ) = _small_model()
+
+        class MutableObservation:
+            def __init__(self, variance):
+                self.variance = variance
+
+            def __call__(self, emission, state, theta):
+                del theta
+                return -0.5 * (
+                    jnp.log(2.0 * jnp.pi * self.variance)
+                    + (emission[0] - state[0]) ** 2 / self.variance
+                )
+
+        observation = MutableObservation(0.2)
+        smcx.smc2(
+            jr.key(40),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            observation,
+            emissions,
+            3,
+            4,
+            ess_threshold=0.0,
+        )
+        observation.variance = 0.9
+        actual = smcx.smc2(
+            jr.key(41),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            observation,
+            emissions,
+            3,
+            4,
+            ess_threshold=0.0,
+        )
+        expected = smcx.smc2(
+            jr.key(41),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            MutableObservation(0.9),
+            emissions,
+            3,
+            4,
+            ess_threshold=0.0,
+        )
+
+        for expected_value, actual_value in zip(expected, actual, strict=True):
+            np.testing.assert_array_equal(
+                np.asarray(actual_value),
+                np.asarray(expected_value),
+            )
+
+
+class TestFixedKeyRegression:
+    """Invocation-local inner JIT kernels preserve exact behavior."""
+
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu",
+        reason="frozen CPU/x64 arithmetic contract",
+    )
+    def test_preserves_frozen_fixed_key_output(self):
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+        ) = _small_model()
+        posterior = smcx.smc2(
+            jr.key(314159),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+            3,
+            4,
+            ess_threshold=0.0,
+        )
+
+        np.testing.assert_array_equal(
+            np.asarray(posterior.marginal_loglik),
+            np.asarray(-3.421747990559213),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.filtered_params),
+            np.array([
+                [
+                    [0.8690271497469142],
+                    [0.892344905318535],
+                    [0.7275650823743653],
+                ],
+                [
+                    [0.8690271497469142],
+                    [0.892344905318535],
+                    [0.7275650823743653],
+                ],
+                [
+                    [0.8690271497469142],
+                    [0.892344905318535],
+                    [0.7275650823743653],
+                ],
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.filtered_log_weights),
+            np.array([
+                [-1.1037195976548424, -0.9457871459341566, -1.2729977505620504],
+                [-1.1812879768008746, -0.9261661263302763, -1.2138632483444947],
+                [-1.4378978303439447, -0.7854789880395324, -1.1819752775167212],
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.ess),
+            np.array([
+                2.948017030946551,
+                2.9473711233956394,
+                2.7912284636963074,
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.log_evidence_increments),
+            np.array([
+                -0.9132325220568566,
+                -1.8150181135800527,
+                -0.6934973549223041,
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.acceptance_rates),
+            np.zeros(3),
+        )
+
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu",
+        reason="frozen CPU/x64 arithmetic contract",
+    )
+    def test_preserves_frozen_rejuvenation_output(self):
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+        ) = _small_model()
+        posterior = smcx.smc2(
+            jr.key(271828),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+            3,
+            4,
+            ess_threshold=1.1,
+            num_pmmh_steps=2,
+        )
+
+        np.testing.assert_array_equal(
+            np.asarray(posterior.marginal_loglik),
+            np.asarray(-3.0331045486577697),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.filtered_params),
+            np.array([
+                [
+                    [0.7586950197518261],
+                    [0.8187408484682641],
+                    [0.7589583281677461],
+                ],
+                [
+                    [0.8105932981742988],
+                    [0.6976200744967381],
+                    [0.7609658911048357],
+                ],
+                [
+                    [0.8249431380290069],
+                    [0.4310136770781425],
+                    [0.7311638511464534],
+                ],
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.filtered_log_weights),
+            np.full((3, 3), -1.0986122886681098),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.ess),
+            np.array([3.0, 3.0, 3.0]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.log_evidence_increments),
+            np.array([
+                -0.8723455471462007,
+                -1.4975149224137319,
+                -0.6632440790978372,
+            ]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.acceptance_rates),
+            np.array([
+                0.8333333432674408,
+                1.0,
+                0.6666666865348816,
+            ]),
+        )
+        # A threshold above one forces rejuvenation at every time, while
+        # positive acceptance records prove that each PMMH loop did work.
+        assert np.all(np.asarray(posterior.acceptance_rates) > 0.0)
 
 
 class TestNumericalReference:

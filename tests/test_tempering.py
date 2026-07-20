@@ -30,6 +30,7 @@ https://doi.org/10.1111/j.1467-9868.2006.00553.x
 
 import math
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
@@ -71,6 +72,21 @@ def _model():
 def _run(seed, n=4000, **kw):
     init, log_prior, log_lik = _model()
     return smcx.temper(jr.key(seed), init, log_prior, log_lik, n, **kw)
+
+
+def _small_tempering_model():
+    observation = jnp.array([0.25], dtype=jnp.float64)
+
+    def init(_key, n):
+        return jnp.linspace(-1.0, 1.0, n, dtype=jnp.float64)[:, None]
+
+    def log_prior(x):
+        return -0.5 * jnp.sum(x**2)
+
+    def log_lik(x):
+        return -0.5 * jnp.sum((observation - x) ** 2 / 0.7)
+
+    return init, log_prior, log_lik
 
 
 class TestEvidence:
@@ -152,6 +168,139 @@ class TestMechanics:
             np.array(a.marginal_loglik), np.array(b.marginal_loglik)
         )
         assert np.array_equal(np.array(a.particles), np.array(b.particles))
+
+    def test_distinct_hash_equal_likelihood_uses_second_behavior(self):
+        init, log_prior, _ = _small_tempering_model()
+
+        def shifted_log_likelihood(center, value):
+            return -0.5 * jnp.sum((value - center) ** 2 / 0.2)
+
+        class HashEqualLikelihood:
+            def __init__(self, center):
+                self.center = center
+
+            def __hash__(self):
+                return 1
+
+            def __eq__(self, other):
+                return isinstance(other, HashEqualLikelihood)
+
+            def __call__(self, value):
+                return shifted_log_likelihood(self.center, value)
+
+        class FreshLikelihood:
+            def __init__(self, center):
+                self.center = center
+
+            def __call__(self, value):
+                return shifted_log_likelihood(self.center, value)
+
+        smcx.temper(
+            jr.key(30),
+            init,
+            log_prior,
+            HashEqualLikelihood(-1.0),
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.6,
+        )
+        actual = smcx.temper(
+            jr.key(31),
+            init,
+            log_prior,
+            HashEqualLikelihood(1.0),
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.6,
+        )
+        expected = smcx.temper(
+            jr.key(31),
+            init,
+            log_prior,
+            FreshLikelihood(1.0),
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.6,
+        )
+
+        for expected_value, actual_value in zip(expected, actual, strict=True):
+            np.testing.assert_array_equal(
+                np.asarray(actual_value),
+                np.asarray(expected_value),
+            )
+
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu",
+        reason="frozen CPU/f64 arithmetic contract",
+    )
+    def test_rwm_sweep_preserves_frozen_fixed_key_output(self):
+        init, log_prior, log_lik = _small_tempering_model()
+        posterior = smcx.temper(
+            jr.key(314159),
+            init,
+            log_prior,
+            log_lik,
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.6,
+        )
+
+        # Linux/x64 and macOS/arm64 CPU lowerings differed by at most
+        # 6.7e-16 in this frozen f64 fixture.  The 1e-15 absolute budget is
+        # less than five binary64 eps at unit scale: it admits only backend
+        # rounding while still rejecting meaningful numerical drift.
+        frozen_atol = 1e-15
+        np.testing.assert_allclose(
+            np.asarray(posterior.particles),
+            np.array([
+                [1.5109879397100636],
+                [0.8820825513186982],
+                [0.0],
+                [0.3108199100404425],
+                [-0.4867093863813025],
+            ]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.log_weights),
+            np.full(5, -1.6094379124341003),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.marginal_loglik),
+            np.asarray(-0.33449690533561793),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.temperatures),
+            np.array([1.0]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.ess),
+            np.array([4.5218752201463674]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.acceptance_rates),
+            np.array([0.4000000134110451]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+
+    def test_default_mutation_budget_caveat_is_documented(self):
+        docstring = smcx.temper.__doc__
+        assert docstring is not None
+        normalized_docstring = " ".join(docstring.split())
+        assert (
+            "The default five sweeps are a mutation budget, not an accuracy "
+            "guarantee" in normalized_docstring
+        )
 
     def test_degenerate_likelihood_raises(self):
         init, log_prior, _ = _model()
