@@ -102,9 +102,9 @@ the original eight keys and added 56 deterministic keys. All six cells then
 passed, and their worst absolute standardized error fell from `5.12--7.40`
 to `0.81--1.86`.
 
-Future registered resampler validation therefore uses 64 replicates. Its key
-schedule preserves `split(key(20260720), 8)` exactly and extends it with a
-tagged, prefix-stable `fold_in` sequence. At 64 replicates,
+The first prospective validation revision therefore used 64 replicates. Its
+key schedule preserved `split(key(20260720), 8)` exactly and extended it with
+a tagged, prefix-stable `fold_in` sequence. At 64 replicates,
 `P(|t_63| > 5)=4.857e-6`; the Bonferroni sum over 2,304 coordinates is
 `0.0112`. These are validation-design diagnostics under a replicate-normal
 approximation, not an independence claim. The original six cell timings are
@@ -397,7 +397,7 @@ backend memory ratio. Within-scope history and size trends remain useful.
 2. **Profile million-particle MPS resampling next.** The `494--502 MiB`
    allocator peak and multinomial's late crossover justify an isolated
    primitive/allocator trace. Preserve the resampling API and distributional
-   gates; the R=64 result gives no reason to rewrite a correct kernel.
+   gates; the fixed-prefix result gives no reason to rewrite a correct kernel.
 3. **Instrument SMC2 host phases without changing results.** Separate inner
    filters, ESS transfers, rejuvenation, and PMMH synchronization. The small
    forward win, large forward loss, and forced `3.608x` loss are not explained
@@ -435,8 +435,9 @@ correctness gate, and report matched before/after measurements.
   every user callback or state dimension.
 - Adaptive algorithms are compared only with observable matched work. Hidden
   counts and mismatched counts are explicitly withheld.
-- StableHLO counts would be compiler-IR census data, not FLOPs. No new trace
-  was used to turn these macro observations into a source-line attribution.
+- StableHLO counts would be compiler-IR census data, not FLOPs. The later
+  matched optimization campaign added that census and is reported separately;
+  no trace was used here to turn macro observations into source attribution.
 - Descriptive crossovers outside measured sizes are hypotheses.
 
 ## Sources, attribution, and licenses
@@ -510,6 +511,9 @@ uv run python -m benchmarks.profiling.run \
   --output-dir /tmp/smcx-profiling-representation-20260719-651666b-01010
 ```
 
-Current registered resampler validation uses 64 replicates, so a present-day
-rerun has a larger validation-call count than the immutable baseline and
-scaling manifests summarized above.
+The later matched baseline exposed one more finite-replication rejection at
+`R=64`. The complete fixed prefix passed at `R=128`, `R=256`, and `R=512`, so
+the protocol prospectively raised every resampler cell to `R=128`. See
+[`2026-07-19-matched-optimization-profile.md`](2026-07-19-matched-optimization-profile.md).
+A present-day rerun therefore has a larger validation-call count than the
+immutable baseline and scaling manifests summarized above.
