@@ -42,12 +42,7 @@ def _resampled_group(
     timed: bool,
 ) -> tuple[dict[str, np.ndarray], dict[str, list[str]]]:
     """Resample aligned PyTree leaves into one named ArviZ group."""
-    try:
-        stacked = jax.tree.map(lambda *leaves: jnp.stack(leaves), *values)
-    except ValueError as error:
-        raise ValueError(
-            "posterior runs must have matching PyTree leaves"
-        ) from error
+    stacked = jax.tree.map(lambda *leaves: jnp.stack(leaves), *values)
     path_leaves, _ = jax.tree.flatten_with_path(stacked)
     group = {}
     dimensions = {}
@@ -129,6 +124,9 @@ def to_arviz(
 
     Returns:
         ``InferenceData`` on ArviZ 0.x or ``DataTree`` on ArviZ 1.x.
+
+    Note:
+        Filter draws are per-time filtering marginals, not trajectories.
     """
     if isinstance(posteriors, (ParticleFilterPosterior, TemperedPosterior)):
         runs = (posteriors,)

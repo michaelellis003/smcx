@@ -18,14 +18,12 @@ from smcx.reporting import to_arviz
 def _filter() -> ParticleFilterPosterior:
     particles = jnp.arange(4, dtype=jnp.float32)[None, :, None]
     particles = particles + 10 * jnp.arange(2)[:, None, None]
-    weights = jnp.array(
-        [[0.05, 0.15, 0.3, 0.5], [0.5, 0.3, 0.15, 0.05]],
-        dtype=jnp.float32,
-    )
     return ParticleFilterPosterior(
         marginal_loglik=jnp.asarray(1.25),
         filtered_particles=particles,
-        filtered_log_weights=jnp.log(weights),
+        filtered_log_weights=jnp.log(
+            jnp.array([[0.05, 0.15, 0.3, 0.5], [0.5, 0.3, 0.15, 0.05]])
+        ),
         ancestors=jnp.tile(jnp.arange(4), (2, 1)),
         ess=jnp.array([2.74, 2.74]),
         log_evidence_increments=jnp.array([0.5, 0.75]),
@@ -58,9 +56,8 @@ def test_independent_runs_map_to_chain_and_draw_dimensions():
 
 def test_weighted_cloud_keeps_raw_source_weights_in_sample_stats():
     result = to_arviz(_filter(), key=jr.key(0), num_draws=3)
-    posterior = _group(result, "posterior")
     stats = _group(result, "sample_stats")
-    assert posterior.sizes["draw"] == 3
+    assert _group(result, "posterior").sizes["draw"] == 3
     assert stats["log_weights"].dims[-2:] == ("particle", "time")
     np.testing.assert_allclose(
         stats["log_weights"].values[0, 0],
