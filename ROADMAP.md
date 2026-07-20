@@ -37,10 +37,10 @@ the small carry-overs the 2026-07 library review surfaced.
 - [x] ~~Structured latent-state PyTrees (ADR-0024) in the bootstrap,
       auxiliary, and guided filters plus simulation, including joint
       genealogy and posterior-predictive operations.~~
-- [ ] `to_arviz()` InferenceData export (ADR-0020): the single
+- [x] ~~`to_arviz()` InferenceData export (ADR-0027): the single
       reporting bridge — independent runs as chains, weighted clouds
       resampled to draws — so ArviZ owns plots, R-hat, and posterior
-      exploration and smcx never grows a reporting layer.
+      exploration and smcx never grows a reporting layer.~~
 - [ ] Native conditionally linear-Gaussian Rao--Blackwellized particle
       filter: smcx owns the particle system, Kalman algebra, evidence,
       genealogy, and diagnostics. Model callbacks provide transition and
