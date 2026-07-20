@@ -19,6 +19,7 @@ from jax.tree_util import keystr
 from jaxtyping import Array
 
 from smcx.containers import ParticleFilterPosterior, TemperedPosterior
+from smcx.diagnostics import pareto_k_diagnostic
 from smcx.resampling import systematic
 from smcx.types import PRNGKeyT
 
@@ -152,13 +153,36 @@ def to_arviz(
         posterior_group[name] = np.asarray(jax.device_get(selected))
         dimensions[name] = ["time", *event_dims]
 
+    stats = {
+        "log_weights": jnp.swapaxes(log_weights, 1, 2)[:, None],
+        "ess": jnp.stack([run.ess for run in filter_runs])[:, None],
+        "pareto_k": jnp.stack([
+            pareto_k_diagnostic(run) for run in filter_runs
+        ])[:, None],
+        "log_evidence_increments": jnp.stack([
+            run.log_evidence_increments for run in filter_runs
+        ])[:, None],
+    }
     groups = {
         "posterior": posterior_group,
         "sample_stats": {
-            "log_weights": np.asarray(
-                jax.device_get(jnp.swapaxes(log_weights, 1, 2)[:, None])
-            )
+            name: np.asarray(jax.device_get(value))
+            for name, value in stats.items()
         },
     }
+    if emissions is not None:
+        groups["observed_data"] = {
+            "emissions": np.asarray(jax.device_get(emissions))
+        }
     dimensions["log_weights"] = ["particle", "time"]
-    return _construct_arviz(groups, dimensions, {})
+    dimensions.update({
+        name: ["time"] for name in stats if name != "log_weights"
+    })
+    evidence = np.asarray(
+        jax.device_get(jnp.stack([run.marginal_loglik for run in filter_runs]))
+    ).tolist()
+    return _construct_arviz(
+        groups,
+        dimensions,
+        {"posterior": {"marginal_loglik": evidence}},
+    )
