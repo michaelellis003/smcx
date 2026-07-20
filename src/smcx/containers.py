@@ -87,8 +87,8 @@ class BootstrapCheckpoint(NamedTuple):
             cumulative log-evidence sum.
         ess: Current effective sample size used by the next resampling
             decision.
-        log_evidence_compensation: Neumaier correction for the cumulative
-            log-evidence sum.
+        log_evidence_compensation: Neumaier correction. The cumulative
+            estimate is ``state.log_marginal_likelihood`` plus this value.
     """
 
     state: ParticleState

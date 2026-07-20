@@ -62,7 +62,9 @@ from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
 
 
-def _neumaier_add(total: Array, correction: Array, value: Array):
+def _neumaier_add(
+    total: Array, correction: Array, value: Array
+) -> tuple[Array, Array]:
     """Add one value while retaining a Neumaier correction."""
     updated = total + value
     correction = correction + jnp.where(
@@ -71,6 +73,30 @@ def _neumaier_add(total: Array, correction: Array, value: Array):
         (value - updated) + total,
     )
     return updated, correction
+
+
+def _validate_checkpoint(checkpoint: BootstrapCheckpoint) -> _TreeSignature:
+    """Validate the structural checkpoint invariants at the host shell."""
+    log_weights = jnp.asarray(checkpoint.state.log_weights)
+    if log_weights.ndim != 1:
+        raise ValueError(
+            "checkpoint log_weights must be rank 1; "
+            f"got shape {log_weights.shape}"
+        )
+    signature = _validate_particle_cloud(
+        checkpoint.state.particles,
+        log_weights.shape[0],
+        name="checkpoint particles",
+    )
+    scalars = (
+        ("log_marginal_likelihood", checkpoint.state.log_marginal_likelihood),
+        ("ess", checkpoint.ess),
+        ("log_evidence_compensation", checkpoint.log_evidence_compensation),
+    )
+    for name, value in scalars:
+        if jnp.asarray(value).ndim != 0:
+            raise ValueError(f"checkpoint {name} must be scalar")
+    return signature
 
 
 def bootstrap_init(
@@ -82,17 +108,26 @@ def bootstrap_init(
     *,
     input_t: Float[Array, " input_dim"] | None = None,
 ) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
-    """Initialize a resumable bootstrap filter at the first observation."""
+    """Initialize a resumable bootstrap filter at observation zero.
+
+    Args:
+        init_key: Explicit key for sampling the initial particle cloud.
+        initial_sampler: Initial-state callback, optionally input-aware.
+        log_observation_fn: Observation log-density callback.
+        first_emission: Observation ``y[0]``.
+        num_particles: Number of particles.
+        input_t: Optional ``inputs[0]`` passed to both callbacks.
+
+    Returns:
+        Checkpoint with normalized weights and its time-zero diagnostics.
+        The ancestors are identity indices and ``resampled`` is false.
+
+    Raises:
+        ValueError: The sampled particle cloud is structurally invalid.
+        DegenerateWeightsError: Every initial importance weight collapses.
+    """
     log_n = jnp.asarray(math.log(num_particles))
-    (
-        _,
-        _,
-        log_ev_0,
-        ess_0,
-        identity,
-        state,
-        _,
-    ) = _init_standard(
+    initialized = _init_standard(
         init_key,
         initial_sampler,
         log_observation_fn,
@@ -101,17 +136,12 @@ def bootstrap_init(
         log_n,
         input_t,
     )
+    _, _, log_ev_0, ess_0, identity, state, _ = initialized
+    _raise_if_degenerate(log_ev_0)
     ess_arr = jnp.asarray(ess_0)
-    checkpoint = BootstrapCheckpoint(
-        state=state,
-        ess=ess_arr,
-        log_evidence_compensation=jnp.zeros_like(log_ev_0),
-    )
+    checkpoint = BootstrapCheckpoint(state, ess_arr, jnp.zeros_like(log_ev_0))
     info = BootstrapStepInfo(
-        ancestors=identity,
-        ess=ess_arr,
-        resampled=jnp.asarray(False),
-        log_evidence_increment=jnp.asarray(log_ev_0),
+        identity, ess_arr, jnp.asarray(False), jnp.asarray(log_ev_0)
     )
     return checkpoint, info
 
@@ -146,50 +176,36 @@ def _bootstrap_step(
 
     if input_t is None:
         transition_fn = cast(TransitionSampler, transition_sampler)
+        observation_fn = cast(LogObservationFn, log_observation_fn)
 
         def _propagate(key_i, state_i):
-            next_state = transition_fn(key_i, state_i)
-            _validate_state_tree(
-                next_state,
-                state_signature,
-                name="transition_sampler output",
-            )
-            return next_state
+            return transition_fn(key_i, state_i)
 
-        propagated = vmap(_propagate)(particle_keys, resampled_particles)
-        observation_fn = cast(LogObservationFn, log_observation_fn)
-        log_obs = vmap(lambda z: observation_fn(emission_t, z))(propagated)
+        def _observe(state_i):
+            return observation_fn(emission_t, state_i)
+
     else:
         transition_fn_u = cast(TransitionSamplerWithInput, transition_sampler)
-
-        def _propagate_with_input(key_i, state_i):
-            next_state = transition_fn_u(key_i, state_i, input_t)
-            _validate_state_tree(
-                next_state,
-                state_signature,
-                name="transition_sampler output",
-            )
-            return next_state
-
-        propagated = vmap(_propagate_with_input)(
-            particle_keys, resampled_particles
-        )
         observation_fn_u = cast(LogObservationFnWithInput, log_observation_fn)
-        log_obs = vmap(lambda z: observation_fn_u(emission_t, z, input_t))(
-            propagated
-        )
 
-    log_w_unnorm = jnp.where(
-        do_resample,
-        log_obs,
-        state.log_weights + log_obs,
-    )
+        def _propagate(key_i, state_i):
+            return transition_fn_u(key_i, state_i, input_t)
+
+        def _observe(state_i):
+            return observation_fn_u(emission_t, state_i, input_t)
+
+    def _validated_propagate(key_i, state_i):
+        next_state = _propagate(key_i, state_i)
+        _validate_state_tree(
+            next_state, state_signature, name="transition_sampler output"
+        )
+        return next_state
+
+    propagated = vmap(_validated_propagate)(particle_keys, resampled_particles)
+    log_obs = vmap(_observe)(propagated)
+    log_w_unnorm = jnp.where(do_resample, log_obs, state.log_weights + log_obs)
     log_w_norm, log_sum = log_normalize(log_w_unnorm)
-    log_ev_inc = jnp.where(
-        do_resample,
-        log_sum - jnp.asarray(math.log(num_particles)),
-        log_sum,
-    )
+    log_ev_inc = log_sum - jnp.where(do_resample, math.log(num_particles), 0.0)
     log_ev_sum, correction = _neumaier_add(
         jnp.asarray(state.log_marginal_likelihood),
         checkpoint.log_evidence_compensation,
@@ -197,15 +213,10 @@ def _bootstrap_step(
     )
     ess_t = jnp.asarray(compute_ess(log_w_norm))
     new_checkpoint = BootstrapCheckpoint(
-        state=ParticleState(propagated, log_w_norm, log_ev_sum),
-        ess=ess_t,
-        log_evidence_compensation=correction,
+        ParticleState(propagated, log_w_norm, log_ev_sum), ess_t, correction
     )
     return new_checkpoint, BootstrapStepInfo(
-        ancestors=ancestors,
-        ess=ess_t,
-        resampled=do_resample,
-        log_evidence_increment=log_ev_inc,
+        ancestors, ess_t, do_resample, log_ev_inc
     )
 
 
@@ -226,14 +237,31 @@ def bootstrap_step(
     *,
     input_t: Float[Array, " input_dim"] | None = None,
 ) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
-    """Advance a resumable bootstrap filter by one observation."""
-    num_particles = checkpoint.state.log_weights.shape[0]
-    state_signature = _validate_particle_cloud(
-        checkpoint.state.particles,
-        num_particles,
-        name="checkpoint particles",
-    )
-    return _compiled_bootstrap_step(
+    """Advance a resumable bootstrap filter by one observation.
+
+    ``input_t`` is aligned with both the transition into this observation
+    and its log density. Checkpoint weights stay normalized; cumulative
+    log evidence is the checkpoint's leading sum plus its correction.
+
+    Args:
+        step_key: Explicit key for resampling and propagation.
+        checkpoint: State returned by initialization or a prior step.
+        transition_sampler: Transition callback, optionally input-aware.
+        log_observation_fn: Observation log-density callback.
+        emission_t: Current observation ``y[t]``.
+        resampling_fn: Particle resampling algorithm.
+        resampling_threshold: ESS resampling threshold as a particle fraction.
+        input_t: Optional current input ``inputs[t]``.
+
+    Returns:
+        Updated checkpoint and current-step diagnostics.
+
+    Raises:
+        ValueError: The checkpoint or propagated state is malformed.
+        DegenerateWeightsError: Every updated importance weight collapses.
+    """
+    state_signature = _validate_checkpoint(checkpoint)
+    updated = _compiled_bootstrap_step(
         step_key,
         checkpoint,
         transition_sampler,
@@ -244,6 +272,8 @@ def bootstrap_step(
         input_t,
         state_signature,
     )
+    _raise_if_degenerate(updated[1].log_evidence_increment)
+    return updated
 
 
 def bootstrap_filter(
