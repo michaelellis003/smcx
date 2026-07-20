@@ -24,7 +24,7 @@ from typing import cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax, vmap
+from jax import jit, lax, vmap
 from jaxtyping import Array, Float
 
 from smcx._utils import (
@@ -36,9 +36,16 @@ from smcx._utils import (
     _prepend,
     _prepend_particle_history,
     _raise_if_degenerate,
+    _TreeSignature,
+    _validate_particle_cloud,
     _validate_state_tree,
 )
-from smcx.containers import ParticleFilterPosterior, ParticleState
+from smcx.containers import (
+    BootstrapCheckpoint,
+    BootstrapStepInfo,
+    ParticleFilterPosterior,
+    ParticleState,
+)
 from smcx.resampling import systematic
 from smcx.types import (
     InitialSampler,
@@ -53,6 +60,190 @@ from smcx.types import (
 )
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
+
+
+def _neumaier_add(total: Array, correction: Array, value: Array):
+    """Add one value while retaining a Neumaier correction."""
+    updated = total + value
+    correction = correction + jnp.where(
+        jnp.abs(total) >= jnp.abs(value),
+        (total - updated) + value,
+        (value - updated) + total,
+    )
+    return updated, correction
+
+
+def bootstrap_init(
+    init_key: PRNGKeyT,
+    initial_sampler: InitialSampler | InitialSamplerWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
+    first_emission: Float[Array, " emission_dim"],
+    num_particles: int,
+    *,
+    input_t: Float[Array, " input_dim"] | None = None,
+) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
+    """Initialize a resumable bootstrap filter at the first observation."""
+    log_n = jnp.asarray(math.log(num_particles))
+    (
+        _,
+        _,
+        log_ev_0,
+        ess_0,
+        identity,
+        state,
+        _,
+    ) = _init_standard(
+        init_key,
+        initial_sampler,
+        log_observation_fn,
+        first_emission,
+        num_particles,
+        log_n,
+        input_t,
+    )
+    ess_arr = jnp.asarray(ess_0)
+    checkpoint = BootstrapCheckpoint(
+        state=state,
+        ess=ess_arr,
+        log_evidence_compensation=jnp.zeros_like(log_ev_0),
+    )
+    info = BootstrapStepInfo(
+        ancestors=identity,
+        ess=ess_arr,
+        resampled=jnp.asarray(False),
+        log_evidence_increment=jnp.asarray(log_ev_0),
+    )
+    return checkpoint, info
+
+
+def _bootstrap_step(
+    step_key: PRNGKeyT,
+    checkpoint: BootstrapCheckpoint,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
+    emission_t: Float[Array, " emission_dim"],
+    resampling_fn: ResamplingFn,
+    resampling_threshold: float,
+    input_t: Float[Array, " input_dim"] | None,
+    state_signature: _TreeSignature,
+) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
+    """Apply one pure bootstrap-filter update."""
+    state = checkpoint.state
+    num_particles = state.log_weights.shape[0]
+    identity = jnp.arange(num_particles, dtype=jnp.int32)
+    resample_key, transition_key = jr.split(step_key)
+    do_resample, ancestors = _conditional_resample(
+        resample_key,
+        state.log_weights,
+        checkpoint.ess,
+        resampling_fn,
+        resampling_threshold * num_particles,
+        num_particles,
+        identity,
+    )
+    resampled_particles = _gather_particles(state.particles, ancestors)
+    particle_keys = jr.split(transition_key, num_particles)
+
+    if input_t is None:
+        transition_fn = cast(TransitionSampler, transition_sampler)
+
+        def _propagate(key_i, state_i):
+            next_state = transition_fn(key_i, state_i)
+            _validate_state_tree(
+                next_state,
+                state_signature,
+                name="transition_sampler output",
+            )
+            return next_state
+
+        propagated = vmap(_propagate)(particle_keys, resampled_particles)
+        observation_fn = cast(LogObservationFn, log_observation_fn)
+        log_obs = vmap(lambda z: observation_fn(emission_t, z))(propagated)
+    else:
+        transition_fn_u = cast(TransitionSamplerWithInput, transition_sampler)
+
+        def _propagate_with_input(key_i, state_i):
+            next_state = transition_fn_u(key_i, state_i, input_t)
+            _validate_state_tree(
+                next_state,
+                state_signature,
+                name="transition_sampler output",
+            )
+            return next_state
+
+        propagated = vmap(_propagate_with_input)(
+            particle_keys, resampled_particles
+        )
+        observation_fn_u = cast(LogObservationFnWithInput, log_observation_fn)
+        log_obs = vmap(lambda z: observation_fn_u(emission_t, z, input_t))(
+            propagated
+        )
+
+    log_w_unnorm = jnp.where(
+        do_resample,
+        log_obs,
+        state.log_weights + log_obs,
+    )
+    log_w_norm, log_sum = log_normalize(log_w_unnorm)
+    log_ev_inc = jnp.where(
+        do_resample,
+        log_sum - jnp.asarray(math.log(num_particles)),
+        log_sum,
+    )
+    log_ev_sum, correction = _neumaier_add(
+        jnp.asarray(state.log_marginal_likelihood),
+        checkpoint.log_evidence_compensation,
+        log_ev_inc,
+    )
+    ess_t = jnp.asarray(compute_ess(log_w_norm))
+    new_checkpoint = BootstrapCheckpoint(
+        state=ParticleState(propagated, log_w_norm, log_ev_sum),
+        ess=ess_t,
+        log_evidence_compensation=correction,
+    )
+    return new_checkpoint, BootstrapStepInfo(
+        ancestors=ancestors,
+        ess=ess_t,
+        resampled=do_resample,
+        log_evidence_increment=log_ev_inc,
+    )
+
+
+_compiled_bootstrap_step = jit(
+    _bootstrap_step,
+    static_argnums=(2, 3, 5, 6, 8),
+)
+
+
+def bootstrap_step(
+    step_key: PRNGKeyT,
+    checkpoint: BootstrapCheckpoint,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
+    emission_t: Float[Array, " emission_dim"],
+    resampling_fn: ResamplingFn = systematic,
+    resampling_threshold: float = 0.5,
+    *,
+    input_t: Float[Array, " input_dim"] | None = None,
+) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
+    """Advance a resumable bootstrap filter by one observation."""
+    num_particles = checkpoint.state.log_weights.shape[0]
+    state_signature = _validate_particle_cloud(
+        checkpoint.state.particles,
+        num_particles,
+        name="checkpoint particles",
+    )
+    return _compiled_bootstrap_step(
+        step_key,
+        checkpoint,
+        transition_sampler,
+        log_observation_fn,
+        emission_t,
+        resampling_fn,
+        resampling_threshold,
+        input_t,
+        state_signature,
+    )
 
 
 def bootstrap_filter(

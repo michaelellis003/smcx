@@ -7,8 +7,10 @@ from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _version
 
 from smcx.auxiliary import auxiliary_filter
-from smcx.bootstrap import bootstrap_filter
+from smcx.bootstrap import bootstrap_filter, bootstrap_init, bootstrap_step
 from smcx.containers import (
+    BootstrapCheckpoint,
+    BootstrapStepInfo,
     LiuWestPosterior,
     ParticleFilterPosterior,
     ParticleFilterResult,
@@ -56,6 +58,8 @@ except _PackageNotFoundError:
     __version__ = "0.0.0"
 
 __all__ = [
+    "BootstrapCheckpoint",
+    "BootstrapStepInfo",
     "DegenerateWeightsError",
     "LiuWestPosterior",
     "ParticleFilterPosterior",
@@ -66,6 +70,8 @@ __all__ = [
     "__version__",
     "auxiliary_filter",
     "bootstrap_filter",
+    "bootstrap_init",
+    "bootstrap_step",
     "crps",
     "cumulative_log_score",
     "diagnose",
