@@ -5,6 +5,7 @@
 
 import math
 from collections.abc import Sequence
+from numbers import Integral
 from typing import NamedTuple
 
 import numpy as np
@@ -237,9 +238,13 @@ def analyze_accuracy(
     evidence_ratios = np.asarray([
         estimate.evidence_ratio for estimate in estimates
     ])
-    pair_evaluations = np.asarray([
-        estimate.pair_evaluations for estimate in estimates
-    ])
+    pair_counts = tuple(estimate.pair_evaluations for estimate in estimates)
+    if any(
+        isinstance(count, bool) or not isinstance(count, Integral) or count <= 0
+        for count in pair_counts
+    ):
+        raise ValueError("pair_evaluations must be positive integers")
+    pair_evaluations = np.asarray(pair_counts, dtype=np.float64)
     if steady_block_median_seconds is None:
         median_steady_seconds = None
     else:
