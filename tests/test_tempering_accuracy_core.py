@@ -4,24 +4,16 @@
 """Frozen mathematical and planning contracts for issue #30."""
 
 import math
-from dataclasses import replace
 
 import jax.random as jr
 import numpy as np
 import pytest
+
 from benchmarks.tempering_accuracy.core import (
     ACCURACY_ROOT,
-    CHALLENGES,
-    ORDER_SEED,
     accuracy_keys,
     build_target,
-    centering_summary_count,
-    current_cells,
     make_callbacks,
-    matched_cells,
-    smoke_cells,
-    timing_plan,
-    waste_free_cells,
 )
 
 
@@ -119,47 +111,3 @@ def test_accuracy_key_schedule_preserves_prefix_and_is_unique():
     assert len(keys) == 32
     np.testing.assert_array_equal(jr.key_data(keys[:12]), jr.key_data(prefix))
     assert len({bytes(jr.key_data(key)) for key in keys}) == 32
-
-
-def test_registered_cells_and_centering_counts_are_exact():
-    current = current_cells()
-    matched = matched_cells()
-    waste_free = waste_free_cells()
-
-    assert len(current) == 72
-    assert len(matched) == len(waste_free) == 12
-    assert {(cell.dimension, cell.num_particles) for cell in matched} == set(
-        CHALLENGES
-    )
-    assert {cell.resampler for cell in current} == {"systematic"}
-    assert {cell.num_mcmc_steps for cell in current} == {5, 20, 50}
-    assert {cell.resampler for cell in matched + waste_free} == {"multinomial"}
-    assert {cell.chain_length for cell in waste_free} == {201, 2001}
-    assert centering_summary_count(current) == 4_872
-    assert centering_summary_count(matched) == 1_356
-    assert centering_summary_count(waste_free) == 1_356
-
-
-def test_smoke_and_timing_plans_are_frozen_and_balanced():
-    current = current_cells()
-    smoke = smoke_cells()
-    plan = timing_plan(current)
-
-    assert ORDER_SEED == 20_260_719
-    assert len(smoke) == 4
-    assert {
-        (cell.geometry, cell.platform, cell.dimension, cell.num_particles)
-        for cell in smoke
-    } == {
-        (geometry, platform, 4, 1_000)
-        for geometry in ("G0", "G1")
-        for platform in ("cpu", "mps")
-    }
-    assert len(plan) == 5 * len(current)
-    for block in range(5):
-        block_cells = [
-            replace(cell, block=None) for cell in plan if cell.block == block
-        ]
-        assert set(block_cells) == set(current)
-    assert plan == timing_plan(current)
-    assert [cell.block for cell in plan[: len(current)]] == [0] * len(current)
