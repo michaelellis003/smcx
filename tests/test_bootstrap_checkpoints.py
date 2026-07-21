@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 import smcx
+import smcx.bootstrap as bootstrap_module
 from smcx.bootstrap import _bootstrap_step, _validate_checkpoint
 from smcx.resampling import systematic
 
@@ -86,6 +87,39 @@ def _update(keys, checkpoint, emissions, **kwargs):
 
 def _assert_tree_equal(actual, expected):
     jax.tree.map(np.testing.assert_array_equal, actual, expected)
+
+
+def test_update_selects_execution_from_checkpoint_device(monkeypatch):
+    """MPS loops over public steps while CPU retains the chunk scan."""
+    checkpoint = _checkpoint()
+    platform = checkpoint.state.log_weights.device.platform
+    calls = 0
+    public_step = bootstrap_module.bootstrap_step
+
+    def counted_step(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return public_step(*args, **kwargs)
+
+    jax.block_until_ready(jr.split(jr.key(1), 2))
+    monkeypatch.setattr(
+        jax,
+        "default_backend",
+        lambda: "cpu" if platform == "mps" else "mps",
+    )
+    monkeypatch.setattr(bootstrap_module, "bootstrap_step", counted_step)
+    _update(jr.split(jr.key(2), 2), checkpoint, EMISSIONS[1:3])
+    assert calls == (2 if platform == "mps" else 0)
+
+
+def test_mps_update_rejects_outer_jit():
+    """An outer transform must not restage the temporary MPS host loop."""
+    checkpoint = _checkpoint()
+    if checkpoint.state.log_weights.device.platform != "mps":
+        pytest.skip("MPS containment contract")
+    keys = jr.split(jr.key(2), 2)
+    with pytest.raises(TypeError, match="cannot be called under JAX"):
+        jax.jit(lambda: _update(keys, checkpoint, EMISSIONS[1:3]))()
 
 
 def test_uncompiled_step_matches_compiled_step():
@@ -189,18 +223,10 @@ def test_update_is_invariant_to_three_unequal_chunks(
         chunks.append(chunk)
 
     _assert_tree_equal(checkpoint, whole_checkpoint)
-    for field in (
-        "filtered_particles",
-        "filtered_log_weights",
-        "ancestors",
-        "ess",
-        "log_evidence_increments",
-    ):
-        joined = jax.tree.map(
-            lambda *xs: jnp.concatenate(xs),
-            *(getattr(chunk, field) for chunk in chunks),
-        )
-        _assert_tree_equal(joined, getattr(whole, field))
+    joined = jax.tree.map(
+        lambda *xs: jnp.concatenate(xs), *(chunk[1:] for chunk in chunks)
+    )
+    _assert_tree_equal(joined, whole[1:])
     tolerance = float(5 * np.finfo(np.float32).eps)
     np.testing.assert_allclose(
         math.fsum(float(chunk.marginal_loglik) for chunk in chunks),
@@ -214,8 +240,8 @@ def test_update_is_invariant_to_three_unequal_chunks(
 
 def test_update_aligns_inputs_for_structured_state():
     """Each chunk input reaches the matching PyTree transition and weight."""
-    inputs = jnp.array([[1.0], [2.0], [3.0]])
-    emissions = jnp.zeros((3, 1))
+    inputs = jnp.array([[1.0], [2.0], [3.0], [4.0]])
+    emissions = jnp.zeros((4, 1))
 
     def initial(key, num_particles, input_t):
         del key
@@ -233,20 +259,42 @@ def test_update_aligns_inputs_for_structured_state():
         del emission, state
         return -0.5 * input_t[0] ** 2
 
-    checkpoint, _ = smcx.bootstrap_init(
+    initial, _ = smcx.bootstrap_init(
         jr.key(3), initial, log_observation, emissions[0], 4, input_t=inputs[0]
     )
-    checkpoint, posterior = smcx.bootstrap_update(
-        jr.split(jr.key(4), 2),
-        checkpoint,
+    keys = jr.split(jr.key(4), 3)
+    whole_checkpoint, whole = smcx.bootstrap_update(
+        keys,
+        initial,
         transition,
         log_observation,
         emissions[1:],
         inputs=inputs[1:],
     )
-    expected = jnp.broadcast_to(jnp.array([3.0, 6.0])[:, None], (2, 4))
+    checkpoint, early = smcx.bootstrap_update(
+        keys[:1],
+        initial,
+        transition,
+        log_observation,
+        emissions[1:2],
+        inputs=inputs[1:2],
+    )
+    checkpoint, late = smcx.bootstrap_update(
+        keys[1:],
+        checkpoint,
+        transition,
+        log_observation,
+        emissions[2:],
+        inputs=inputs[2:],
+    )
+    joined = jax.tree.map(
+        lambda x, y: jnp.concatenate((x, y)), early[1:], late[1:]
+    )
+    _assert_tree_equal(checkpoint, whole_checkpoint)
+    _assert_tree_equal(joined, whole[1:])
+    expected = jnp.broadcast_to(jnp.array([3.0, 6.0, 10.0])[:, None], (3, 4))
     assert jnp.array_equal(
-        posterior.filtered_particles["position"][:, :, 0], expected
+        whole.filtered_particles["position"][:, :, 0], expected
     )
     assert checkpoint.state.particles["regime"].dtype == jnp.int32
 
