@@ -57,29 +57,9 @@ def test_smoke_dispatches_public_temper_and_retains_complete_summary(
     cell = current_smoke_cells()[0]
     calls = []
 
-    def fake_temper(
-        key,
-        initial_sampler,
-        log_prior_fn,
-        log_likelihood_fn,
-        num_particles,
-        num_mcmc_steps=5,
-        target_ess=0.5,
-        resampling_fn=smcx.systematic,
-        *,
-        max_stages=1_000,
-    ):
-        calls.append((
-            key,
-            initial_sampler,
-            log_prior_fn,
-            log_likelihood_fn,
-            num_particles,
-            num_mcmc_steps,
-            target_ess,
-            resampling_fn,
-            max_stages,
-        ))
+    def fake_temper(*args, **kwargs):
+        calls.append((args, kwargs))
+        num_particles = args[4]
         dtype = jnp.float64
         return smcx.TemperedPosterior(
             particles=jnp.zeros((num_particles, cell.dimension), dtype=dtype),
@@ -98,9 +78,17 @@ def test_smoke_dispatches_public_temper_and_retains_complete_summary(
     assert payload["failure"] is None
     assert payload["timing"] is None
     assert len(calls) == len(payload["runs"]) == 1
-    call = calls[0]
-    assert call[4:] == (1_000, 5, 0.5, smcx.systematic, 1_000)
-    np.testing.assert_array_equal(call[0], jr.key(20_260_719))
+    args, kwargs = calls[0]
+    assert args[4] == 1_000
+    assert kwargs == {
+        "num_mcmc_steps": 5,
+        "target_ess": 0.5,
+        "resampling_fn": smcx.systematic,
+        "max_stages": 1_000,
+    }
+    np.testing.assert_array_equal(
+        jr.key_data(args[0]), jr.key_data(jr.key(20_260_719))
+    )
     record = payload["runs"][0]
     assert record["key_index"] is None
     assert record["posterior_mean"] == [0.0] * 4
