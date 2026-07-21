@@ -74,13 +74,28 @@ def test_callbacks_include_constants_and_match_dense_target(
         + logdet
         + residual @ _chol_solve(covariance, residual)
     )
+    expected_normalizer = -0.5 * (dimension * math.log(2 * math.pi) + logdet)
     tolerance = 2e-4 if dtype is np.float32 else 2e-12
 
     assert float(callbacks.log_prior(value)) == pytest.approx(
         -0.5 * (dimension * math.log(2 * math.pi) + value @ value),
         abs=tolerance,
     )
-    assert float(callbacks.log_likelihood(value)) == pytest.approx(
+    assert callbacks.log_prior(value).dtype == np.dtype(dtype)
+    actual_likelihood = float(callbacks.log_likelihood(value))
+    assert callbacks.log_likelihood(value).dtype == np.dtype(dtype)
+    actual_normalizer = float(
+        callbacks.log_likelihood(target.observation.astype(dtype))
+    )
+    assert actual_normalizer == pytest.approx(
+        expected_normalizer,
+        abs=tolerance,
+    )
+    assert -2 * (actual_likelihood - actual_normalizer) == pytest.approx(
+        residual @ _chol_solve(covariance, residual),
+        abs=2 * tolerance,
+    )
+    assert actual_likelihood == pytest.approx(
         expected_likelihood,
         abs=tolerance,
     )
@@ -109,10 +124,16 @@ def test_metal_target_rounds_defining_values_before_oracle():
 
 def test_accuracy_key_schedule_preserves_prefix_and_is_unique():
     keys = accuracy_keys()
-    prefix = jr.split(jr.key(ACCURACY_ROOT), 12)
+    root = jr.key(ACCURACY_ROOT)
+    prefix = jr.split(root, 12)
+    extension_root = jr.fold_in(root, 0x54414343)
+    extension = np.stack([
+        jr.key_data(jr.fold_in(extension_root, i)) for i in range(20)
+    ])
 
     assert len(keys) == 32
     np.testing.assert_array_equal(jr.key_data(keys[:12]), jr.key_data(prefix))
+    np.testing.assert_array_equal(jr.key_data(keys[12:]), extension)
     key_bytes = {
         np.asarray(jax.device_get(jr.key_data(key))).tobytes() for key in keys
     }
