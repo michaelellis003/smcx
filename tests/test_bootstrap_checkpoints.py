@@ -101,9 +101,6 @@ def test_update_selects_execution_from_checkpoint_device(monkeypatch):
     platform = checkpoint.state.log_weights.device.platform
     public_step = Mock(wraps=bootstrap_module.bootstrap_step)
     jax.block_until_ready(jr.split(jr.key(1), 2))
-    monkeypatch.setattr(
-        jax, "default_backend", lambda: {"cpu": "mps", "mps": "cpu"}[platform]
-    )
     monkeypatch.setattr(bootstrap_module, "bootstrap_step", public_step)
     keys = jr.split(jr.key(2), 2)
     _update(keys, checkpoint, EMISSIONS[1:3])
@@ -111,6 +108,19 @@ def test_update_selects_execution_from_checkpoint_device(monkeypatch):
     if platform == "mps":
         with pytest.raises(TypeError, match="cannot run under a JAX"):
             jax.jit(lambda: _update(keys, checkpoint, EMISSIONS[1:3]))()
+        try:
+            cpu = jax.devices("cpu")[0]
+        except RuntimeError:
+            return
+        with jax.default_device(cpu):
+            cpu_checkpoint = _checkpoint()
+        assert not cpu_checkpoint.state.log_weights.committed
+        public_step.reset_mock()
+        updated, _ = _update(keys, cpu_checkpoint, EMISSIONS[1:3])
+        assert public_step.call_count == 0
+        assert {leaf.device.platform for leaf in jax.tree.leaves(updated)} == {
+            "cpu"
+        }
 
 
 def test_uncompiled_step_matches_compiled_step():
