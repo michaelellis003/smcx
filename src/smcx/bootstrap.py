@@ -24,7 +24,7 @@ from typing import cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import core, lax, tree, vmap
+from jax import core, device_put, lax, tree, vmap
 from jaxtyping import Array, Float, Shaped
 
 from smcx._utils import (
@@ -282,9 +282,8 @@ def bootstrap_update(
 ) -> tuple[BootstrapCheckpoint, ParticleFilterPosterior]:
     """Advance a checkpoint over an explicitly keyed observation chunk.
 
-    Inputs align by index. Evidence is conditional for the chunk and
-    cumulative in the checkpoint. ADR-0031 uses an eager public-step loop on
-    MPS and a compiled scan elsewhere.
+    Inputs align by index. Chunk evidence is conditional. ADR-0031 uses an
+    eager public-step loop on MPS and a compiled scan elsewhere.
 
     Args:
         step_keys: One explicit PRNG key per chunk observation.
@@ -328,7 +327,11 @@ def bootstrap_update(
     log_weights_0 = jnp.asarray(checkpoint.state.log_weights)
     if isinstance(log_weights_0, core.Tracer):
         raise TypeError("bootstrap_update cannot run under a JAX transform")
-    platform = next(iter(log_weights_0.devices())).platform
+    device = next(iter(log_weights_0.devices()))
+    checkpoint = device_put(checkpoint, device)
+    if isinstance(checkpoint.state.log_weights, core.Tracer):
+        raise TypeError("bootstrap_update cannot run under a JAX transform")
+    platform = device.platform
     state_signature = _validate_checkpoint(checkpoint)
     scan_inputs = (step_keys, emissions_chunk)
     if inputs_arr is not None:

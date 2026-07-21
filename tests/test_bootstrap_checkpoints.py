@@ -118,9 +118,7 @@ def test_update_selects_execution_from_checkpoint_device(monkeypatch):
         public_step.reset_mock()
         updated, _ = _update(keys, cpu_checkpoint, EMISSIONS[1:3])
         assert public_step.call_count == 0
-        assert {leaf.device.platform for leaf in jax.tree.leaves(updated)} == {
-            "cpu"
-        }
+        assert {x.device.platform for x in jax.tree.leaves(updated)} == {"cpu"}
 
 
 def test_uncompiled_step_matches_compiled_step():
