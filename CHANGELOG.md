@@ -2,6 +2,21 @@
 
 <!-- version list -->
 
+## v1.6.0 (2026-07-21)
+
+### Documentation
+
+- **adr**: Define Metal scan-history containment
+  ([#39](https://github.com/michaelellis003/smcx/pull/39),
+  [`335f9ce`](https://github.com/michaelellis003/smcx/commit/335f9cecde145c5e5b3d89590e3a3c02f44a30dd))
+
+### Features
+
+- **bootstrap**: Add chunked checkpoint updates
+  ([#40](https://github.com/michaelellis003/smcx/pull/40),
+  [`f66852c`](https://github.com/michaelellis003/smcx/commit/f66852ccb89b8a3599db81cfd7f3dff6c895f1e2))
+
+
 ## v1.5.0 (2026-07-20)
 
 ### Features
