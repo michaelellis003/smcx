@@ -13,6 +13,7 @@ from benchmarks.tempering_accuracy.core import GaussianTarget
 
 _REPLICATES = 32
 _FLOORS = {"cpu_f64": 1e-10, "mps_f32": 5e-5}
+_T_31_975 = 2.0395134464
 
 
 class ReplicateEstimate(NamedTuple):
@@ -40,6 +41,23 @@ class CenteringGate(NamedTuple):
     passed: bool
 
 
+class LossSummary(NamedTuple):
+    """One accuracy loss with separate uncertainty and work normalizers."""
+
+    family: str
+    replicate_losses: tuple[float, ...]
+    mse: float
+    rmse: float
+    mse_standard_error: float
+    rmse_standard_error: float
+    mse_interval_low: float
+    mse_interval_high: float
+    median_steady_seconds: float | None
+    median_pair_evaluations: float
+    fixed_key_time_normalized_loss: float | None
+    evaluation_normalized_loss: float
+
+
 class AccuracyAnalysis(NamedTuple):
     """Hard-gate result for one mathematical campaign cell."""
 
@@ -47,6 +65,9 @@ class AccuracyAnalysis(NamedTuple):
     covariance_gates: tuple[CenteringGate, ...]
     evidence_gate: CenteringGate
     evidence_resolution_width: float
+    mean_loss: LossSummary
+    covariance_loss: LossSummary
+    evidence_loss: LossSummary
     status: str
     correctness_eligible: bool
 
@@ -129,10 +150,81 @@ def _centering_gate(
     )
 
 
+def _loss_summary(
+    family: str,
+    losses: np.ndarray,
+    pair_evaluations: np.ndarray,
+    median_steady_seconds: float | None,
+) -> LossSummary:
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        mse = float(np.mean(losses))
+        rmse = float(np.sqrt(mse))
+        mse_standard_error = float(
+            np.std(losses, ddof=1) / math.sqrt(_REPLICATES)
+        )
+        if rmse == 0:
+            mse_standard_error = 0.0
+            rmse_standard_error = 0.0
+        else:
+            rmse_standard_error = mse_standard_error / (2 * rmse)
+        interval_radius = _T_31_975 * mse_standard_error
+        interval_low = max(0.0, mse - interval_radius)
+        interval_high = mse + interval_radius
+        median_pairs = float(np.median(pair_evaluations))
+        time_normalized = (
+            None
+            if median_steady_seconds is None
+            else mse * median_steady_seconds
+        )
+        evaluation_normalized = mse * median_pairs
+    return LossSummary(
+        family,
+        tuple(float(value) for value in losses),
+        mse,
+        rmse,
+        mse_standard_error,
+        rmse_standard_error,
+        interval_low,
+        interval_high,
+        median_steady_seconds,
+        median_pairs,
+        time_normalized,
+        evaluation_normalized,
+    )
+
+
+def _loss_is_finite(summary: LossSummary) -> bool:
+    scalars = (
+        summary.mse,
+        summary.rmse,
+        summary.mse_standard_error,
+        summary.rmse_standard_error,
+        summary.mse_interval_low,
+        summary.mse_interval_high,
+        summary.median_pair_evaluations,
+        summary.evaluation_normalized_loss,
+    )
+    timed = (
+        ()
+        if summary.median_steady_seconds is None
+        else (
+            summary.median_steady_seconds,
+            summary.fixed_key_time_normalized_loss,
+        )
+    )
+    return bool(
+        np.all(np.isfinite(summary.replicate_losses))
+        and all(value is not None and math.isfinite(value) for value in timed)
+        and all(math.isfinite(value) for value in scalars)
+    )
+
+
 def analyze_accuracy(
     estimates: Sequence[ReplicateEstimate],
     target: GaussianTarget,
     lane: str,
+    *,
+    steady_block_median_seconds: Sequence[float] | None = None,
 ) -> AccuracyAnalysis:
     """Apply structural, finite, six-SE, and evidence-resolution gates."""
     if len(estimates) != _REPLICATES:
@@ -145,6 +237,40 @@ def analyze_accuracy(
     evidence_ratios = np.asarray([
         estimate.evidence_ratio for estimate in estimates
     ])
+    pair_evaluations = np.asarray([
+        estimate.pair_evaluations for estimate in estimates
+    ])
+    if steady_block_median_seconds is None:
+        median_steady_seconds = None
+    else:
+        steady = np.asarray(steady_block_median_seconds, dtype=np.float64)
+        if steady.shape != (5,) or not np.all(np.isfinite(steady)):
+            raise ValueError(
+                "steady_block_median_seconds must contain five finite values"
+            )
+        if np.any(steady <= 0):
+            raise ValueError("steady_block_median_seconds must be positive")
+        median_steady_seconds = float(np.median(steady))
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        mean_losses = np.mean(
+            (means - target.posterior_mean) ** 2
+            / np.diag(target.posterior_covariance),
+            axis=1,
+        )
+        covariance_delta = covariances - target.posterior_covariance
+        covariance_losses = np.sum(covariance_delta**2, axis=(1, 2)) / np.sum(
+            target.posterior_covariance**2
+        )
+        evidence_losses = (evidence_ratios - 1) ** 2
+    mean_loss = _loss_summary(
+        "mean", mean_losses, pair_evaluations, median_steady_seconds
+    )
+    covariance_loss = _loss_summary(
+        "covariance", covariance_losses, pair_evaluations, median_steady_seconds
+    )
+    evidence_loss = _loss_summary(
+        "evidence", evidence_losses, pair_evaluations, median_steady_seconds
+    )
     frequencies, directions = dct_directions(target.dimension)
     projected = np.einsum("qi,rij,qj->rq", directions, covariances, directions)
     projected_oracle = np.einsum(
@@ -174,12 +300,14 @@ def analyze_accuracy(
             6 * float(np.std(evidence_ratios, ddof=1)) / math.sqrt(_REPLICATES)
         )
     gates = (*mean_gates, *covariance_gates, evidence_gate)
+    losses = (mean_loss, covariance_loss, evidence_loss)
     finite = bool(
         np.all(np.isfinite(means))
         and np.all(np.isfinite(covariances))
         and np.all(np.isfinite(evidence_ratios))
         and math.isfinite(evidence_resolution_width)
         and all(np.all(np.isfinite(gate[2:8])) for gate in gates)
+        and all(_loss_is_finite(loss) for loss in losses)
     )
     if not all(estimate.structural_passed for estimate in estimates):
         status = "failed_structural"
@@ -196,6 +324,9 @@ def analyze_accuracy(
         covariance_gates,
         evidence_gate,
         evidence_resolution_width,
+        mean_loss,
+        covariance_loss,
+        evidence_loss,
         status,
         status == "eligible",
     )

@@ -216,7 +216,7 @@ def test_loss_summaries_freeze_uncertainty_and_efficiency_formulas():
         estimates,
         target,
         "cpu_f64",
-        steady_block_seconds=(0.5, 0.1, 0.3, 0.2, 0.4),
+        steady_block_median_seconds=(0.5, 0.1, 0.3, 0.2, 0.4),
     )
 
     expected_losses = {
