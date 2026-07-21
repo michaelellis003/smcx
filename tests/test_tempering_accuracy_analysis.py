@@ -300,6 +300,25 @@ def test_derived_loss_overflow_is_failed_nonfinite():
     assert not analysis.correctness_eligible
 
 
+def test_efficiency_overflow_does_not_change_correctness_status():
+    target = build_target("G0", 4, np.float64)
+    signs = np.tile([-1.0, 1.0], 16)
+    offsets = signs[:, None] * 2 * np.sqrt(np.diag(target.posterior_covariance))
+    target, estimates = _estimates(mean_offsets=offsets)
+    untimed = analyze_accuracy(estimates, target, "cpu_f64")
+
+    timed = analyze_accuracy(
+        estimates,
+        target,
+        "cpu_f64",
+        steady_block_median_seconds=(1e308,) * 5,
+    )
+
+    assert untimed.status == "eligible"
+    assert timed.status == untimed.status
+    assert math.isinf(timed.mean_loss.fixed_key_time_normalized_loss)
+
+
 @pytest.mark.parametrize(
     "seconds",
     (
