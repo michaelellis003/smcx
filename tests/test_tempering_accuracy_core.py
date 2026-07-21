@@ -6,6 +6,7 @@
 import math
 
 import jax
+import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 import pytest
@@ -61,7 +62,7 @@ def test_target_oracle_matches_direct_gaussian_identities(
 def test_callbacks_include_constants_and_match_dense_target(
     geometry, dimension, dtype
 ):
-    if dtype is np.float64 and not jax.config.x64_enabled:
+    if dtype is np.float64 and not jax.config.read("jax_enable_x64"):
         pytest.skip("CPU-f64 callback contract requires JAX x64")
     target = build_target(geometry, dimension, dtype)
     callbacks = make_callbacks(target)
@@ -77,16 +78,22 @@ def test_callbacks_include_constants_and_match_dense_target(
     expected_normalizer = -0.5 * (dimension * math.log(2 * math.pi) + logdet)
     tolerance = 2e-4 if dtype is np.float32 else 2e-12
 
-    assert float(callbacks.log_prior(value)) == pytest.approx(
+    actual_prior = callbacks.log_prior(value)
+    assert isinstance(actual_prior, jax.Array)
+    assert float(actual_prior) == pytest.approx(
         -0.5 * (dimension * math.log(2 * math.pi) + value @ value),
         abs=tolerance,
     )
-    assert callbacks.log_prior(value).dtype == np.dtype(dtype)
-    actual_likelihood = float(callbacks.log_likelihood(value))
-    assert callbacks.log_likelihood(value).dtype == np.dtype(dtype)
-    actual_normalizer = float(
-        callbacks.log_likelihood(target.observation.astype(dtype))
+    assert actual_prior.dtype == np.dtype(dtype)
+    likelihood_result = callbacks.log_likelihood(value)
+    assert isinstance(likelihood_result, jax.Array)
+    actual_likelihood = float(likelihood_result)
+    assert likelihood_result.dtype == np.dtype(dtype)
+    normalizer_result = callbacks.log_likelihood(
+        jnp.asarray(target.observation, dtype=dtype)
     )
+    assert isinstance(normalizer_result, jax.Array)
+    actual_normalizer = float(normalizer_result)
     assert actual_normalizer == pytest.approx(
         expected_normalizer,
         abs=tolerance,
