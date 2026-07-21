@@ -89,8 +89,7 @@ def test_replicate_summary_uses_ddof_one_and_evidence_ratio():
     np.testing.assert_allclose(estimate.mean, [2.0, 3.0, 4.0, 5.0])
     np.testing.assert_allclose(estimate.covariance, np.full((4, 4), 4.0))
     assert estimate.evidence_ratio == pytest.approx(1.25)
-    assert estimate.stages == 7
-    assert estimate.pair_evaluations == 123
+    assert (estimate.stages, estimate.pair_evaluations) == (7, 123)
 
     overflow = summarize_replicate(
         particles,

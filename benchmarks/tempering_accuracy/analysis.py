@@ -106,7 +106,15 @@ def _centering_gate(
     estimator_se = standard_deviation / math.sqrt(_REPLICATES)
     tolerance = max(6 * estimator_se, floor)
     error = estimate - oracle
-    finite = bool(np.all(np.isfinite(values)) and math.isfinite(oracle))
+    finite = bool(
+        np.all(np.isfinite(values))
+        and math.isfinite(oracle)
+        and math.isfinite(estimate)
+        and math.isfinite(error)
+        and math.isfinite(standard_deviation)
+        and math.isfinite(estimator_se)
+        and math.isfinite(tolerance)
+    )
     passed = finite and bool(abs(error) <= np.nextafter(tolerance, math.inf))
     return CenteringGate(
         family,
@@ -165,10 +173,13 @@ def analyze_accuracy(
         evidence_resolution_width = (
             6 * float(np.std(evidence_ratios, ddof=1)) / math.sqrt(_REPLICATES)
         )
+    gates = (*mean_gates, *covariance_gates, evidence_gate)
     finite = bool(
         np.all(np.isfinite(means))
         and np.all(np.isfinite(covariances))
         and np.all(np.isfinite(evidence_ratios))
+        and math.isfinite(evidence_resolution_width)
+        and all(np.all(np.isfinite(gate[2:8])) for gate in gates)
     )
     if not all(estimate.structural_passed for estimate in estimates):
         status = "failed_structural"
@@ -176,9 +187,7 @@ def analyze_accuracy(
         status = "failed_nonfinite"
     elif evidence_resolution_width > 0.10:
         status = "indeterminate_evidence"
-    elif not all(
-        gate.passed for gate in (*mean_gates, *covariance_gates, evidence_gate)
-    ):
+    elif not all(gate.passed for gate in gates):
         status = "failed_accuracy"
     else:
         status = "eligible"
