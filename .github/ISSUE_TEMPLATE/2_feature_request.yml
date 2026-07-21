@@ -1,37 +1,18 @@
-name: Feature Request
-description: Suggest a new feature or improvement.
-labels: ["enhancement"]
+name: Feature or design proposal
+description: Propose a user-facing capability or numerical design change.
+labels: ['enhancement']
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Thanks for suggesting a feature! Please describe it below.
   - type: textarea
-    id: description
+    id: problem
     attributes:
-      label: Description
-      description: A clear description of the feature you'd like.
+      label: Problem
+      description: What concrete user or numerical problem should this solve?
     validations:
       required: true
   - type: textarea
-    id: motivation
+    id: context
     attributes:
-      label: Motivation
-      description: Why is this feature needed? What problem does it solve?
-    validations:
-      required: true
-  - type: textarea
-    id: acceptance-criteria
-    attributes:
-      label: Acceptance Criteria
-      description: |
-        Define done using Given/When/Then format.
-      placeholder: |
-        Given <precondition>
-        When <action>
-        Then <expected outcome>
-  - type: textarea
-    id: alternatives
-    attributes:
-      label: Alternatives Considered
-      description: Any alternative solutions or workarounds you've considered.
+      label: Context
+      description: >-
+        Add relevant evidence, prior art, constraints, or a narrow proposed
+        outcome when useful.
