@@ -1,19 +1,18 @@
-# Licensing, attribution, and upstream strategy
+# Licensing and attribution
 
 *Snapshot: 2026-07-19. Licenses verified against actual LICENSE files
 / CRAN fields, not memory. Re-check when a new reference project is
-added or before porting any code. Binding rules extracted into
-`AGENTS.md`; attribution artifacts: `NOTICE`, `CITATION.cff`.*
+added or before porting any code.*
 
 ## License table
 
 | Project | License | What smcx takes | Obligation |
 |---|---|---|---|
-| mlx | MIT (© 2023 Apple Inc.) | runtime dependency | none; courtesy credit |
+| mlx | MIT (© 2023 Apple Inc.) | transitive Metal runtime through jax-mps | dependency/API use: none; no source copied or translated |
 | jax-mps | Apache-2.0 (no NOTICE upstream) | optional Metal runtime dependency; public PJRT backend only | dependency/API use: none; no source copied or translated |
 | numpy | BSD-3 | dependency; `np.searchsorted` test oracle | none |
-| smcjax | Apache-2.0 (same author) | code translation (diagnostics), API contract, fixtures | NOTICE line + ported-file headers (hygiene) |
-| blackjax | Apache-2.0 (no NOTICE upstream) | resampling contract (idea); possible port source | idea: none; if ported: Apache §4 headers + NOTICE line |
+| smcjax | Apache-2.0 (same author) | code translation (diagnostics), API contract, fixtures | ported-file provenance headers |
+| blackjax | Apache-2.0 (no NOTICE upstream) | resampling contract (idea); possible port source | idea: none; Apache §4 applies if code is ported |
 | particles (Chopin) | MIT | design ideas (FK core) | none; cite book + repo |
 | dynamax | MIT | design ideas (containers); optional notebook dependency; public LGSSM APIs called by the profiling adapter, with no code copied or translated | dependency/API use: none; cite the exact release, commit, public methods, and upstream license |
 | tensorflow-probability | Apache-2.0 | design ideas (criterion/trace fns) | none |
@@ -42,10 +41,7 @@ added or before porting any code. Binding rules extracted into
    - Apache-2.0 → Apache-2.0: §4 — ship the license, prominent change
      notices on modified files, retain source-form notices, carry
      upstream NOTICE contents (BlackJAX/ArviZ have no NOTICE).
-   - ASF policy reserves NOTICE for legally required attributions;
-     this repo additionally sanctions voluntary ported-code
-     provenance lines (per AGENTS.md — the smcjax line is one).
-     Design credits go in docs, never NOTICE.
+     Design credits go in documentation rather than license files.
 3. **Test-strategy borrowing** (cases, properties, tolerances,
    thresholds): §102(b) ideas — no obligation; comment crediting the
    source of the test design. Copying test *code* is ordinary copying.
@@ -78,33 +74,3 @@ added or before porting any code. Binding rules extracted into
   translated, or vendored. The adapter docstring carries immutable links to
   the MIT-licensed API source and license; the campaign records the installed
   distribution version and `uv.lock` digest.
-
-## Upstream assessment (verified July 2026)
-
-MLX: no CLA; conservative maintainers; **standing July 2026
-moratorium** on PRs adding unary/binary primitives pending the SIMD
-rework (draft PR #3019).
-
-| Item | Verified state | Action |
-|---|---|---|
-| lgamma/digamma | PR #3181 closed by maintainer ("maintenance costs… few requests"); issue #2050 open; #3330 floats a future `mx.special` submodule | **Vendor + track.** No new PR (moratorium). Add a supportive use-case comment on #3330 with our 1.3e-6 f32 accuracy data. Revisit after #3019 lands and `mx.special` materializes |
-| searchsorted | PR #2817 closed as an **abandoned draft — not rejected on merits**; issue #1255 open with maintainer on record: "I'm open to adding a little binary search implementation… it's open" | **Vendor now, PR later.** After the kill test proves the workload, offer a clean benchmarked PR referencing the #1255 invitation; ask first whether it can be a composed op given the moratorium |
-| `categorical(num_samples=M)` O(N·M) memory | **Unreported upstream** (no existing issue found) | **File a performance issue now** with our measured data (400 MB at 1e4², attempted 4 TB at 1e6²; 499 MB/9.4 ms inverse-CDF workaround). Creates the public record ADR-0004 can cite |
-| gamma/beta/dirichlet samplers | never requested upstream | nothing for v0; optionally mention under #3330 |
-| scan/while_loop | issue #1441 unanswered; `mx.while_loop` PR declined on principle | wait/do nothing — Python-loop-over-compiled-step is the sanctioned pattern |
-| numpy | no gaps | nothing |
-| smcjax | own project | **Open coordinated-change issues now**, priority: (1) `simulate` initial-sampler fix, (2) pluggable `resampling_criterion`, (3) guided filter — the three smcx already implements/fixes — then Model-bundle, smoothing hooks, ArviZ bridge, store_history, dtype parameterization |
-
-## Policy (adopted in AGENTS.md)
-
-- **Contribute-first** only when a maintainer has signaled openness on
-  the record, the change is self-contained with tests/benchmarks, and
-  smcx doesn't block on the merge. Never block the kill test on
-  upstream.
-- **Vendor-with-tracking-issue** is the default for critical-path
-  gaps: in-library implementation + one smcx tracking issue per
-  vendored capability linking the upstream issue; re-check on every
-  mlx floor bump; delete vendored code the release after upstream
-  ships it.
-- **File issues, not PRs, for behavior/performance defects.**
-- **Wait** where maintainers rejected the direction on principle.

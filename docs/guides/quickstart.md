@@ -386,4 +386,4 @@ one function name.
   unknown static parameter and learns it online.
 - Every function used here — `bootstrap_filter`, `guided_filter`,
   `simulate`, `diagnose`, `weighted_mean`, `replicated_log_ml` — has
-  a full contract in the [API reference](../api/).
+  a full contract in the [API reference](../api/smcx/index.md).

@@ -104,7 +104,7 @@ thin wrappers around a model library such as
   — a full Bayesian workflow on S&P 500 returns: prior predictive
   checks, NUTS warm-start, Liu-West filtering, SBC, forecasting
   with proper scoring rules, and a float32 precision study.
-- [API reference](api/) — every public function, generated from the
+- [API reference](api/smcx/index.md) — every public function, generated from the
   source docstrings.
 
 ## Developing smcx
