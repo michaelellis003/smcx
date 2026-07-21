@@ -196,3 +196,59 @@ def test_analysis_requires_exactly_32_replicates():
 
     with pytest.raises(ValueError, match="exactly 32"):
         analyze_accuracy(estimates[:-1], target, "cpu_f64")
+
+
+def test_loss_summaries_freeze_uncertainty_and_efficiency_formulas():
+    target = build_target("G0", 4, np.float64)
+    signed = np.linspace(-1e-4, 1e-4, 32)
+    offsets = np.zeros((32, 4))
+    offsets[:, 0] = signed * math.sqrt(target.posterior_covariance[0, 0])
+    covariances = np.asarray([
+        (1 + value) * target.posterior_covariance for value in signed
+    ])
+    target, estimates = _estimates(
+        mean_offsets=offsets,
+        covariances=covariances,
+        evidence_ratios=1 + signed,
+    )
+
+    analysis = analyze_accuracy(
+        estimates,
+        target,
+        "cpu_f64",
+        steady_block_seconds=(0.5, 0.1, 0.3, 0.2, 0.4),
+    )
+
+    expected_losses = {
+        "mean": signed**2 / target.dimension,
+        "covariance": signed**2,
+        "evidence": signed**2,
+    }
+    for summary in (
+        analysis.mean_loss,
+        analysis.covariance_loss,
+        analysis.evidence_loss,
+    ):
+        losses = expected_losses[summary.family]
+        mse = float(np.mean(losses))
+        mse_se = float(np.std(losses, ddof=1) / math.sqrt(32))
+        rmse = math.sqrt(mse)
+        np.testing.assert_allclose(summary.replicate_losses, losses)
+        assert summary.mse == pytest.approx(mse)
+        assert summary.rmse == pytest.approx(rmse)
+        assert summary.mse_standard_error == pytest.approx(mse_se)
+        assert summary.rmse_standard_error == pytest.approx(mse_se / (2 * rmse))
+        assert summary.mse_interval_low == pytest.approx(
+            max(0.0, mse - 2.0395134464 * mse_se)
+        )
+        assert summary.mse_interval_high == pytest.approx(
+            mse + 2.0395134464 * mse_se
+        )
+        assert summary.median_steady_seconds == pytest.approx(0.3)
+        assert summary.median_pair_evaluations == pytest.approx(1_015.5)
+        assert summary.fixed_key_time_normalized_loss == pytest.approx(
+            mse * 0.3
+        )
+        assert summary.evaluation_normalized_loss == pytest.approx(
+            mse * 1_015.5
+        )
