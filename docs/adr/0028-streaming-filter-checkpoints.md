@@ -1,6 +1,7 @@
 # 0028. Streaming bootstrap-filter checkpoints
 
-Date: 2026-07-20 | Status: accepted | Supersedes: — | Superseded-by: —
+Date: 2026-07-20 | Status: accepted | Supersedes: — | Superseded-by: 0031
+(MPS `bootstrap_update` execution only)
 
 ## Context
 

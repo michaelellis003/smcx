@@ -24,8 +24,8 @@ from typing import cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax, tree, vmap
-from jaxtyping import Array, Float
+from jax import core, device_put, lax, tree, vmap
+from jaxtyping import Array, Float, Shaped
 
 from smcx._utils import (
     _canonicalize_inputs,
@@ -266,6 +266,170 @@ def bootstrap_step(
     total = new_checkpoint.state.log_marginal_likelihood
     _raise_if_degenerate(total + new_checkpoint.log_evidence_compensation)
     return new_checkpoint, info
+
+
+def bootstrap_update(
+    step_keys: Shaped[Array, "..."],
+    checkpoint: BootstrapCheckpoint,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
+    emissions_chunk: Float[Array, "ntime emission_dim"],
+    resampling_fn: ResamplingFn = systematic,
+    resampling_threshold: float = 0.5,
+    *,
+    inputs: InputSequence | None = None,
+    store_history: bool = True,
+) -> tuple[BootstrapCheckpoint, ParticleFilterPosterior]:
+    """Advance a checkpoint over an explicitly keyed observation chunk.
+
+    Inputs align by index. Chunk evidence is conditional. ADR-0031 uses an
+    eager public-step loop on MPS and a compiled scan elsewhere.
+
+    Args:
+        step_keys: One explicit PRNG key per chunk observation.
+        checkpoint: State returned by initialization or an earlier update.
+        transition_sampler: Transition callback, optionally input-aware.
+        log_observation_fn: Observation log-density callback.
+        emissions_chunk: Consecutive observations after the checkpoint.
+        resampling_fn: Particle resampling algorithm.
+        resampling_threshold: ESS resampling threshold as a particle fraction.
+        inputs: Optional inputs aligned one-for-one with the chunk.
+        store_history: Whether to retain every chunk particle cloud.
+
+    Returns:
+        Updated checkpoint and chunk posterior. With ``store_history=False``,
+        particle, weight, and ancestor histories have time-axis length one.
+
+    Raises:
+        TypeError: The host shell is called with traced checkpoint arrays.
+        ValueError: The checkpoint, chunk, keys, inputs, or transition output
+            is malformed.
+        DegenerateWeightsError: Cumulative importance weights collapse.
+    """
+    num_steps = emissions_chunk.shape[0]
+    if num_steps == 0:
+        raise ValueError("emissions_chunk must contain at least one row")
+    key_error = "step_keys must be a batched PRNG key array"
+    try:
+        key_data = jr.key_data(step_keys)
+    except (TypeError, ValueError) as error:
+        raise ValueError(key_error) from error
+    if key_data.ndim != 2:
+        raise ValueError(key_error)
+    if key_data.shape[0] != num_steps:
+        raise ValueError(
+            "step_keys and emissions_chunk must have the same leading "
+            f"dimension; got {key_data.shape[0]} and {num_steps}"
+        )
+    inputs_arr = (
+        None if inputs is None else _canonicalize_inputs(inputs, num_steps)
+    )
+    log_weights_0 = jnp.asarray(checkpoint.state.log_weights)
+    if isinstance(log_weights_0, core.Tracer):
+        raise TypeError("bootstrap_update cannot run under a JAX transform")
+    device = next(iter(log_weights_0.devices()))
+    checkpoint = device_put(checkpoint, device)
+    if isinstance(checkpoint.state.log_weights, core.Tracer):
+        raise TypeError("bootstrap_update cannot run under a JAX transform")
+    platform = device.platform
+    state_signature = _validate_checkpoint(checkpoint)
+    scan_inputs = (step_keys, emissions_chunk)
+    if inputs_arr is not None:
+        scan_inputs = (*scan_inputs, inputs_arr)
+    zero = jnp.zeros_like(jnp.asarray(checkpoint.state.log_marginal_likelihood))
+    retained = jnp.arange(log_weights_0.shape[0], dtype=jnp.int32)
+
+    def _record(next_checkpoint, info):
+        traces = info.ess, info.log_evidence_increment
+        if store_history:
+            return (
+                next_checkpoint.state.particles,
+                next_checkpoint.state.log_weights,
+                info.ancestors,
+                *traces,
+            )
+        return traces
+
+    def _advance(current, args):
+        current_checkpoint, chunk_sum, chunk_correction, _retained = current
+        if inputs_arr is None:
+            step_key, emission_t = args
+            input_t = None
+        else:
+            step_key, emission_t, input_t = args
+        next_checkpoint, info = _bootstrap_step(
+            step_key,
+            current_checkpoint,
+            transition_sampler,
+            log_observation_fn,
+            emission_t,
+            resampling_fn,
+            resampling_threshold,
+            input_t,
+            state_signature,
+        )
+        chunk_sum, chunk_correction = _neumaier_add(
+            chunk_sum, chunk_correction, info.log_evidence_increment
+        )
+        return (
+            (next_checkpoint, chunk_sum, chunk_correction, info.ancestors),
+            _record(next_checkpoint, info),
+        )
+
+    if platform == "mps":
+        # ADR-0031: remove under smcx#38 after a fixed jax-mps release.
+        current, chunk_sum, chunk_correction = checkpoint, zero, zero
+        records = []
+        for index in range(num_steps):
+            input_t = None if inputs_arr is None else inputs_arr[index]
+            current, info = bootstrap_step(
+                step_keys[index],
+                current,
+                transition_sampler,
+                log_observation_fn,
+                emissions_chunk[index],
+                resampling_fn,
+                resampling_threshold,
+                input_t=input_t,
+            )
+            if isinstance(current.state.log_weights, core.Tracer):
+                raise TypeError(
+                    "bootstrap_update cannot run under a JAX transform"
+                )
+            chunk_sum, chunk_correction = _neumaier_add(
+                chunk_sum, chunk_correction, info.log_evidence_increment
+            )
+            retained = info.ancestors
+            records.append(_record(current, info))
+        carry = current, chunk_sum, chunk_correction, retained
+        outputs = tree.map(lambda *values: jnp.stack(values), *records)
+    else:
+        carry, outputs = lax.scan(
+            _advance,
+            (checkpoint, zero, zero, retained),
+            scan_inputs,
+        )
+    final_checkpoint, chunk_sum, chunk_correction, retained = carry
+    if store_history:
+        particles, log_weights, ancestors, ess, increments = outputs
+    else:
+        ess, increments = outputs
+        particles = _particle_time_axis(final_checkpoint.state.particles)
+        log_weights = final_checkpoint.state.log_weights[None]
+        ancestors = retained[None]
+
+    _raise_if_degenerate(
+        final_checkpoint.state.log_marginal_likelihood
+        + final_checkpoint.log_evidence_compensation
+    )
+    return final_checkpoint, ParticleFilterPosterior(
+        marginal_loglik=chunk_sum + chunk_correction,
+        filtered_particles=particles,
+        filtered_log_weights=log_weights,
+        ancestors=ancestors,
+        ess=ess,
+        log_evidence_increments=increments,
+    )
 
 
 def bootstrap_filter(

@@ -1,6 +1,6 @@
 # 0031. MPS host-loop containment for bootstrap chunk updates
 
-Date: 2026-07-21 | Status: proposed | Supersedes: 0026/0028 (MPS
+Date: 2026-07-21 | Status: accepted | Supersedes: 0026/0028 (MPS
 `bootstrap_update` execution only) | Superseded-by: —
 
 ## Context

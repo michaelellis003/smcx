@@ -100,6 +100,31 @@ The filtered RMSE comes out near 0.37, roughly half the observation
 noise $\sigma_r = 0.7$ — the filter is extracting signal, not echoing
 the data.
 
+## Filter a stream in chunks
+
+Initialization consumes the first observation. Supply one explicit key for
+each later observation; identical keys make repeated steps and any chunking
+exactly equal on supported CPU and physical M-series Metal:
+
+```python
+step_root, init_key = jr.split(key_filt)
+step_keys = jr.split(step_root, observations.shape[0] - 1)
+checkpoint, _ = smcx.bootstrap_init(
+    init_key, initial_sampler, log_observation_fn, observations[0], 10_000
+)
+checkpoint, chunk = smcx.bootstrap_update(
+    step_keys[:49],
+    checkpoint,
+    transition_sampler,
+    log_observation_fn,
+    observations[1:50],
+)
+```
+
+`chunk` holds only its histories and conditional evidence; pass the returned
+checkpoint into the next update. Until smcx #38 closes, MPS applies one step
+per observation and an outer `jax.jit` is unsupported (ADR-0031).
+
 ## Carry a structured latent state
 
 The bootstrap, auxiliary, and guided filters can carry any nonempty JAX

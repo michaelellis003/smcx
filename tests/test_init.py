@@ -32,6 +32,7 @@ def test_public_api_exports_all_expected_names(package):
         "bootstrap_filter",
         "bootstrap_init",
         "bootstrap_step",
+        "bootstrap_update",
         "guided_filter",
         "crps",
         "cumulative_log_score",

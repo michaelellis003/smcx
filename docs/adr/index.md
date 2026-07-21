@@ -37,4 +37,4 @@ documents when an ADR is (and isn't) required.
 | [0028](0028-streaming-filter-checkpoints.md) | Streaming bootstrap-filter checkpoints | accepted |
 | [0029](0029-common-space-static-posterior-updating.md) | Common-space static posterior updating | proposed |
 | [0030](0030-native-conditionally-linear-gaussian-rbpf.md) | Native square-root conditionally linear-Gaussian RBPF | proposed |
-| [0031](0031-mps-bootstrap-update-containment.md) | MPS host-loop containment for bootstrap chunk updates | proposed |
+| [0031](0031-mps-bootstrap-update-containment.md) | MPS host-loop containment for bootstrap chunk updates | accepted |
