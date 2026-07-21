@@ -3,8 +3,16 @@
 
 """Frozen standard-worker contracts for issue #30."""
 
+import json
+import math
+
+import jax.numpy as jnp
+import jax.random as jr
+import numpy as np
 import pytest
 
+import benchmarks.tempering_accuracy.worker as worker
+import smcx
 from benchmarks.tempering_accuracy.plan import (
     current_cells,
     current_smoke_cells,
@@ -41,3 +49,66 @@ def test_invalid_requests_become_retained_failure_payloads(worker_request):
     assert payload["failure"]["exception_type"] == "ValueError"
     assert payload["timing"] is None
     assert payload["runs"] == []
+
+
+def test_smoke_dispatches_public_temper_and_retains_complete_summary(
+    monkeypatch,
+):
+    cell = current_smoke_cells()[0]
+    calls = []
+
+    def fake_temper(
+        key,
+        initial_sampler,
+        log_prior_fn,
+        log_likelihood_fn,
+        num_particles,
+        num_mcmc_steps=5,
+        target_ess=0.5,
+        resampling_fn=smcx.systematic,
+        *,
+        max_stages=1_000,
+    ):
+        calls.append((
+            key,
+            initial_sampler,
+            log_prior_fn,
+            log_likelihood_fn,
+            num_particles,
+            num_mcmc_steps,
+            target_ess,
+            resampling_fn,
+            max_stages,
+        ))
+        dtype = jnp.float64
+        return smcx.TemperedPosterior(
+            particles=jnp.zeros((num_particles, cell.dimension), dtype=dtype),
+            log_weights=jnp.full(
+                (num_particles,), -math.log(num_particles), dtype=dtype
+            ),
+            marginal_loglik=jnp.asarray(-3.0, dtype=dtype),
+            temperatures=jnp.asarray([0.4, 1.0], dtype=dtype),
+            ess=jnp.asarray([500.0, 700.0], dtype=dtype),
+            acceptance_rates=jnp.asarray([0.2, 0.3], dtype=dtype),
+        )
+
+    monkeypatch.setattr(worker.smcx, "temper", fake_temper)
+    payload = execute_request(WorkerRequest(_MANIFEST, "smoke", cell, None))
+
+    assert payload["failure"] is None
+    assert payload["timing"] is None
+    assert len(calls) == len(payload["runs"]) == 1
+    call = calls[0]
+    assert call[4:] == (1_000, 5, 0.5, smcx.systematic, 1_000)
+    np.testing.assert_array_equal(call[0], jr.key(20_260_719))
+    record = payload["runs"][0]
+    assert record["key_index"] is None
+    assert record["posterior_mean"] == [0.0] * 4
+    assert record["posterior_covariance"] == np.zeros((4, 4)).tolist()
+    assert record["log_evidence"] == pytest.approx(-3.0)
+    assert record["temperatures"] == [0.4, 1.0]
+    assert record["reweighting_ess"] == [500.0, 700.0]
+    assert record["acceptance_rates"] == [0.2, 0.3]
+    assert record["work"]["total_pairs"] == 11_000
+    assert record["structural"]["passed"]
+    json.dumps(payload, allow_nan=False)
