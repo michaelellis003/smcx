@@ -194,7 +194,7 @@ def _loss_summary(
     )
 
 
-def _loss_is_finite(summary: LossSummary) -> bool:
+def _accuracy_loss_is_finite(summary: LossSummary) -> bool:
     scalars = (
         summary.mse,
         summary.rmse,
@@ -202,20 +202,9 @@ def _loss_is_finite(summary: LossSummary) -> bool:
         summary.rmse_standard_error,
         summary.mse_interval_low,
         summary.mse_interval_high,
-        summary.median_pair_evaluations,
-        summary.evaluation_normalized_loss,
-    )
-    timed = (
-        ()
-        if summary.median_steady_seconds is None
-        else (
-            summary.median_steady_seconds,
-            summary.fixed_key_time_normalized_loss,
-        )
     )
     return bool(
         np.all(np.isfinite(summary.replicate_losses))
-        and all(value is not None and math.isfinite(value) for value in timed)
         and all(math.isfinite(value) for value in scalars)
     )
 
@@ -312,7 +301,7 @@ def analyze_accuracy(
         and np.all(np.isfinite(evidence_ratios))
         and math.isfinite(evidence_resolution_width)
         and all(np.all(np.isfinite(gate[2:8])) for gate in gates)
-        and all(_loss_is_finite(loss) for loss in losses)
+        and all(_accuracy_loss_is_finite(loss) for loss in losses)
     )
     if not all(estimate.structural_passed for estimate in estimates):
         status = "failed_structural"

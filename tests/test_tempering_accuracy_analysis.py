@@ -316,7 +316,9 @@ def test_efficiency_overflow_does_not_change_correctness_status():
 
     assert untimed.status == "eligible"
     assert timed.status == untimed.status
-    assert math.isinf(timed.mean_loss.fixed_key_time_normalized_loss)
+    normalized = timed.mean_loss.fixed_key_time_normalized_loss
+    assert normalized is not None
+    assert math.isinf(normalized)
 
 
 @pytest.mark.parametrize(
