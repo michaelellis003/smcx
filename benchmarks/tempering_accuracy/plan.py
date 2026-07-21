@@ -133,6 +133,14 @@ def waste_free_cells() -> tuple[CampaignCell, ...]:
     return tuple(cells)
 
 
+def waste_free_smoke_cells() -> tuple[CampaignCell, ...]:
+    """Return the two lane executions of the waste-free smoke target."""
+    return tuple(
+        cell._replace(dimension=4, sweeps=5, chain_length=51)
+        for cell in waste_free_cells()[:2]
+    )
+
+
 def current_smoke_cells() -> tuple[CampaignCell, ...]:
     """Return the four registered current-RWM structural smoke cells."""
     return tuple(

@@ -3,6 +3,7 @@
 
 """Frozen campaign-plan contracts for issue #30."""
 
+import hashlib
 import itertools
 
 from benchmarks.tempering_accuracy.plan import (
@@ -15,6 +16,7 @@ from benchmarks.tempering_accuracy.plan import (
     retained_particles,
     timing_blocks,
     waste_free_cells,
+    waste_free_smoke_cells,
     work_count,
 )
 
@@ -49,6 +51,9 @@ def test_current_plan_is_exact_registered_cartesian_product():
 
 def test_comparator_plans_cover_the_exact_challenge_cells():
     challenge = {(32, 1_000), (128, 1_000), (128, 10_000)}
+    expected = set(
+        itertools.product(("G0", "G1"), challenge, ("cpu_f64", "mps_f32"))
+    )
 
     for cells, arm in (
         (matched_cells(), "matched_multinomial"),
@@ -56,10 +61,13 @@ def test_comparator_plans_cover_the_exact_challenge_cells():
     ):
         assert len(cells) == len(set(cells)) == 12
         assert {
-            (cell.dimension, cell.reference_particles) for cell in cells
-        } == (challenge)
-        assert {cell.geometry for cell in cells} == {"G0", "G1"}
-        assert {cell.lane for cell in cells} == {"cpu_f64", "mps_f32"}
+            (
+                cell.geometry,
+                (cell.dimension, cell.reference_particles),
+                cell.lane,
+            )
+            for cell in cells
+        } == expected
         assert {cell.arm for cell in cells} == {arm}
         assert {cell.resampler for cell in cells} == {"multinomial"}
         assert {cell.sweeps for cell in cells} == {20}
@@ -84,6 +92,11 @@ def test_current_smoke_crosses_geometry_and_lane_only():
         for lane in ("cpu_f64", "mps_f32")
     }
 
+    assert tuple(map(cell_id, waste_free_smoke_cells())) == (
+        "waste_free_multinomial-g0-d4-n1000-cpu_f64-multinomial-s5-m100-p51",
+        "waste_free_multinomial-g0-d4-n1000-mps_f32-multinomial-s5-m100-p51",
+    )
+
 
 def test_waste_free_plan_freezes_chain_sizes_and_matched_proposals():
     for cell in waste_free_cells():
@@ -92,25 +105,8 @@ def test_waste_free_plan_freezes_chain_sizes_and_matched_proposals():
         assert cell.chain_length == expected_length
         assert retained_particles(cell) == 100 * expected_length
 
-        matched = next(
-            candidate
-            for candidate in matched_cells()
-            if (
-                candidate.geometry,
-                candidate.dimension,
-                candidate.reference_particles,
-                candidate.lane,
-            )
-            == (
-                cell.geometry,
-                cell.dimension,
-                cell.reference_particles,
-                cell.lane,
-            )
-        )
-        assert (
-            work_count(cell, 1).proposal_pairs
-            == work_count(matched, 1).proposal_pairs
+        assert work_count(cell, 1).proposal_pairs == 20 * (
+            cell.reference_particles
         )
 
 
@@ -119,9 +115,7 @@ def test_work_count_includes_initialization_and_realized_stages():
     standard_count = work_count(standard, 3)
     assert standard_count.initial_pairs == 1_000
     assert standard_count.proposal_pairs == 15_000
-    assert standard_count.total_pairs == 16_000
-    assert standard_count.prior_components == 16_000
-    assert standard_count.likelihood_components == 16_000
+    assert standard_count[2:5] == (16_000,) * 3
     assert standard_count.resampling_events == 3
     assert standard_count.ancestor_draws == 3_000
     assert standard_count.retained_states_per_stage == 1_000
@@ -156,15 +150,14 @@ def test_timing_blocks_freeze_balanced_order_and_worker_count():
 
     assert len(blocks) == 5
     assert all(set(block) == set(cells) for block in blocks)
-    assert len(set(blocks)) == 5
     assert sum(map(len, blocks)) == 360
-    assert [cell_id(block[0]) for block in blocks] == [
-        "current_systematic-g0-d32-n1000-mps_f32-systematic-s20",
-        "current_systematic-g1-d128-n10000-mps_f32-systematic-s50",
-        "current_systematic-g1-d32-n10000-cpu_f64-systematic-s50",
-        "current_systematic-g1-d4-n10000-cpu_f64-systematic-s5",
-        "current_systematic-g0-d32-n10000-mps_f32-systematic-s20",
-    ]
+    assert all(
+        len({block[index] for block in blocks}) == 5 for index in range(72)
+    )
+    payload = "\n".join(cell_id(cell) for block in blocks for cell in block)
+    assert hashlib.sha256(payload.encode()).hexdigest() == (
+        "286ea5901bf34291a2c0b30eda309e0b95253cd5c5d3e75b5efdfe2072d4f63b"
+    )
 
 
 def test_cell_ids_are_stable_and_unique_across_all_arms():
