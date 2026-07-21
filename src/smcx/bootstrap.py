@@ -282,12 +282,9 @@ def bootstrap_update(
 ) -> tuple[BootstrapCheckpoint, ParticleFilterPosterior]:
     """Advance a checkpoint over an explicitly keyed observation chunk.
 
-    The chunk begins after the checkpoint's observation. ``inputs[i]``
-    reaches both the transition into ``emissions_chunk[i]`` and its log
-    density. Returned evidence is conditional for this chunk; cumulative
-    evidence remains the checkpoint's leading sum plus its correction. On
-    MPS, ADR-0031 temporarily applies the public step in an eager host loop;
-    other backends retain one compiled scan.
+    Inputs align by index. Evidence is conditional for the chunk and
+    cumulative in the checkpoint. ADR-0031 uses an eager public-step loop on
+    MPS and a compiled scan elsewhere.
 
     Args:
         step_keys: One explicit PRNG key per chunk observation.
@@ -301,9 +298,8 @@ def bootstrap_update(
         store_history: Whether to retain every chunk particle cloud.
 
     Returns:
-        Updated checkpoint and this chunk's posterior. With
-        ``store_history=False``, particle, weight, and ancestor arrays have
-        time-axis length one; ESS and evidence-increment arrays remain full.
+        Updated checkpoint and chunk posterior. With ``store_history=False``,
+        particle, weight, and ancestor histories have time-axis length one.
 
     Raises:
         TypeError: The host shell is called with traced checkpoint arrays.
@@ -313,9 +309,7 @@ def bootstrap_update(
     """
     num_steps = emissions_chunk.shape[0]
     if num_steps == 0:
-        raise ValueError(
-            "emissions_chunk must contain at least one observation"
-        )
+        raise ValueError("emissions_chunk must contain at least one row")
     key_error = "step_keys must be a batched PRNG key array"
     try:
         key_data = jr.key_data(step_keys)
@@ -332,33 +326,26 @@ def bootstrap_update(
         None if inputs is None else _canonicalize_inputs(inputs, num_steps)
     )
     log_weights_0 = jnp.asarray(checkpoint.state.log_weights)
-    transform_error = (
-        "bootstrap_update cannot be called under JAX transformations"
-    )
     if isinstance(log_weights_0, core.Tracer):
-        raise TypeError(transform_error)
-    use_host_loop = log_weights_0.device.platform == "mps"
+        raise TypeError("bootstrap_update cannot run under a JAX transform")
+    platform = next(iter(log_weights_0.devices())).platform
     state_signature = _validate_checkpoint(checkpoint)
-    scan_inputs = (
-        (step_keys, emissions_chunk)
-        if inputs_arr is None
-        else (step_keys, emissions_chunk, inputs_arr)
-    )
+    scan_inputs = (step_keys, emissions_chunk)
+    if inputs_arr is not None:
+        scan_inputs = (*scan_inputs, inputs_arr)
     zero = jnp.zeros_like(jnp.asarray(checkpoint.state.log_marginal_likelihood))
-    retained = jnp.arange(
-        checkpoint.state.log_weights.shape[0], dtype=jnp.int32
-    )
+    retained = jnp.arange(log_weights_0.shape[0], dtype=jnp.int32)
 
     def _record(next_checkpoint, info):
+        traces = info.ess, info.log_evidence_increment
         if store_history:
             return (
                 next_checkpoint.state.particles,
                 next_checkpoint.state.log_weights,
                 info.ancestors,
-                info.ess,
-                info.log_evidence_increment,
+                *traces,
             )
-        return info.ess, info.log_evidence_increment
+        return traces
 
     def _advance(current, args):
         current_checkpoint, chunk_sum, chunk_correction, _retained = current
@@ -386,8 +373,8 @@ def bootstrap_update(
             _record(next_checkpoint, info),
         )
 
-    if use_host_loop:
-        # Remove under smcx#38 after a released jax-mps wheel fixes MLX#3880.
+    if platform == "mps":
+        # ADR-0031: remove under smcx#38 after a fixed jax-mps release.
         current, chunk_sum, chunk_correction = checkpoint, zero, zero
         records = []
         for index in range(num_steps):
@@ -403,7 +390,9 @@ def bootstrap_update(
                 input_t=input_t,
             )
             if isinstance(current.state.log_weights, core.Tracer):
-                raise TypeError(transform_error)
+                raise TypeError(
+                    "bootstrap_update cannot run under a JAX transform"
+                )
             chunk_sum, chunk_correction = _neumaier_add(
                 chunk_sum, chunk_correction, info.log_evidence_increment
             )
@@ -426,11 +415,10 @@ def bootstrap_update(
         log_weights = final_checkpoint.state.log_weights[None]
         ancestors = retained[None]
 
-    cumulative = (
+    _raise_if_degenerate(
         final_checkpoint.state.log_marginal_likelihood
         + final_checkpoint.log_evidence_compensation
     )
-    _raise_if_degenerate(cumulative)
     return final_checkpoint, ParticleFilterPosterior(
         marginal_loglik=chunk_sum + chunk_correction,
         filtered_particles=particles,
