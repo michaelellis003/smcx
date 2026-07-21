@@ -92,6 +92,16 @@ def test_replicate_summary_uses_ddof_one_and_evidence_ratio():
     assert estimate.stages == 7
     assert estimate.pair_evaluations == 123
 
+    overflow = summarize_replicate(
+        particles,
+        target.log_evidence + 1_000,
+        target,
+        structural_passed=True,
+        stages=1,
+        pair_evaluations=1,
+    )
+    assert math.isinf(overflow.evidence_ratio)
+
 
 def test_exact_oracle_estimates_are_eligible_at_lane_floor():
     target, estimates = _estimates()
@@ -174,6 +184,12 @@ def test_nonfinite_and_structural_failures_are_retained_with_precedence():
     assert analyze_accuracy(estimates, target, "cpu_f64").status == (
         "failed_structural"
     )
+
+    offsets = np.full((32, 4), 1e308)
+    _, estimates = _estimates(mean_offsets=offsets)
+    analysis = analyze_accuracy(estimates, target, "cpu_f64")
+    assert analysis.status == "failed_nonfinite"
+    assert not analysis.mean_gates[0].passed
 
 
 def test_analysis_requires_exactly_32_replicates():
