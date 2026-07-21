@@ -7,13 +7,13 @@ import math
 
 import numpy as np
 import pytest
+
 from benchmarks.tempering_accuracy.analysis import (
     ReplicateEstimate,
     analyze_accuracy,
     dct_directions,
     summarize_replicate,
 )
-
 from benchmarks.tempering_accuracy.core import build_target
 
 
@@ -103,6 +103,20 @@ def test_exact_oracle_estimates_are_eligible_at_lane_floor():
     assert all(gate.passed for gate in analysis.covariance_gates)
     assert analysis.evidence_gate.passed
     assert analysis.evidence_resolution_width == pytest.approx(0.0)
+
+    target_32 = build_target("G0", 32, np.float64)
+    exact = ReplicateEstimate(
+        target_32.posterior_mean,
+        target_32.posterior_covariance,
+        1.0,
+        True,
+        1,
+        1,
+    )
+    gates = analyze_accuracy((exact,) * 32, target_32, "cpu_f64")
+    assert tuple(gate.index for gate in gates.covariance_gates) == tuple(
+        dct_directions(32)[0]
+    )
 
 
 @pytest.mark.parametrize(
