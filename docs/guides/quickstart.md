@@ -102,41 +102,28 @@ the data.
 
 ## Filter a stream in chunks
 
-Use a checkpoint when observations arrive incrementally. Initialization
-consumes the first observation. Explicit per-observation keys keep chunk
-boundaries from reordering randomness. Identical keys make repeated steps and
-any chunking exactly equal on supported CPU and physical M-series Metal:
+Initialization consumes the first observation. Supply one explicit key for
+each later observation; identical keys make repeated steps and any chunking
+exactly equal on supported CPU and physical M-series Metal:
 
 ```python
 step_root, init_key = jr.split(key_filt)
 step_keys = jr.split(step_root, observations.shape[0] - 1)
 checkpoint, _ = smcx.bootstrap_init(
-    init_key,
-    initial_sampler,
-    log_observation_fn,
-    observations[0],
-    num_particles=10_000,
+    init_key, initial_sampler, log_observation_fn, observations[0], 10_000
 )
-checkpoint, early = smcx.bootstrap_update(
+checkpoint, chunk = smcx.bootstrap_update(
     step_keys[:49],
     checkpoint,
     transition_sampler,
     log_observation_fn,
     observations[1:50],
 )
-checkpoint, late = smcx.bootstrap_update(
-    step_keys[49:],
-    checkpoint,
-    transition_sampler,
-    log_observation_fn,
-    observations[50:],
-)
 ```
 
-`early` and `late` contain only chunk histories and conditional log-evidence;
-the checkpoint retains live particles, normalized weights, ESS, and
-compensated cumulative evidence. Use `bootstrap_step` for event-at-a-time
-processing. Input-aware models pass aligned input slices to each operation.
+`chunk` holds only its histories and conditional evidence; pass the returned
+checkpoint into the next update. Until smcx #38 closes, MPS applies one step
+per observation and an outer `jax.jit` is unsupported (ADR-0031).
 
 ## Carry a structured latent state
 

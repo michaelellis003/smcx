@@ -1,6 +1,7 @@
 # 0026. jax-mps 0.10.10 floor for scan history
 
-Date: 2026-07-19 | Status: accepted | Supersedes: — | Superseded-by: —
+Date: 2026-07-19 | Status: accepted | Supersedes: — | Superseded-by: 0031
+(MPS `bootstrap_update` storage only)
 
 ## Context
 
