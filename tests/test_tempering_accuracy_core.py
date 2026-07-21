@@ -5,6 +5,7 @@
 
 import math
 
+import jax
 import jax.random as jr
 import numpy as np
 import pytest
@@ -60,6 +61,8 @@ def test_target_oracle_matches_direct_gaussian_identities(
 def test_callbacks_include_constants_and_match_dense_target(
     geometry, dimension, dtype
 ):
+    if dtype is np.float64 and not jax.config.x64_enabled:
+        pytest.skip("CPU-f64 callback contract requires JAX x64")
     target = build_target(geometry, dimension, dtype)
     callbacks = make_callbacks(target)
     value = np.linspace(-0.4, 0.6, dimension, dtype=dtype)
@@ -110,4 +113,7 @@ def test_accuracy_key_schedule_preserves_prefix_and_is_unique():
 
     assert len(keys) == 32
     np.testing.assert_array_equal(jr.key_data(keys[:12]), jr.key_data(prefix))
-    assert len({bytes(jr.key_data(key)) for key in keys}) == 32
+    key_bytes = {
+        np.asarray(jax.device_get(jr.key_data(key))).tobytes() for key in keys
+    }
+    assert len(key_bytes) == 32
