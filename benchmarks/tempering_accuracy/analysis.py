@@ -137,7 +137,7 @@ def analyze_accuracy(
     evidence_ratios = np.asarray([
         estimate.evidence_ratio for estimate in estimates
     ])
-    _, directions = dct_directions(target.dimension)
+    frequencies, directions = dct_directions(target.dimension)
     projected = np.einsum("qi,rij,qj->rq", directions, covariances, directions)
     projected_oracle = np.einsum(
         "qi,ij,qj->q", directions, target.posterior_covariance, directions
@@ -148,9 +148,15 @@ def analyze_accuracy(
     )
     covariance_gates = tuple(
         _centering_gate(
-            "projected_covariance", index, projected[:, index], oracle, floor
+            "projected_covariance",
+            int(frequency),
+            projected[:, ordinal],
+            oracle,
+            floor,
         )
-        for index, oracle in enumerate(projected_oracle)
+        for ordinal, (frequency, oracle) in enumerate(
+            zip(frequencies, projected_oracle, strict=True)
+        )
     )
     evidence_gate = _centering_gate(
         "evidence_ratio", 0, evidence_ratios, 1.0, floor
