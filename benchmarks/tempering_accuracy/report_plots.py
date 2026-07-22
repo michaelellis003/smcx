@@ -113,8 +113,10 @@ def _gate_ratio(accuracy: Mapping[str, Any], dimension: int) -> float | None:
             return None
         ratios.append(abs(error) / tolerance)
     resolution = _number(accuracy["evidence_resolution_width"])
-    if resolution is None or resolution < 0:
+    if resolution is None:
         return None
+    if resolution < 0:
+        raise _bad("has a negative resolution width")
     ratios.append(resolution / 0.10)
     return max(ratios)
 
@@ -276,8 +278,6 @@ def _cost_figure(rows: Sequence[_PlotCell], path: Path) -> None:
                         s=24 if particles == 1_000 else 58,
                         marker=markers[row.cell["dimension"]],
                         color=geometry_colors[row.cell["geometry"]],
-                        edgecolor="white",
-                        linewidth=0.5,
                     )
                 axis.set_xscale("log")
                 axis.set_yscale("symlog", linthresh=1e-6)
