@@ -66,6 +66,8 @@ def test_callbacks_include_constants_and_match_dense_target(
         pytest.skip("CPU-f64 callback contract requires JAX x64")
     target = build_target(geometry, dimension, dtype)
     callbacks = make_callbacks(target)
+    assert len(callbacks.device_inputs) == 5
+    jax.block_until_ready(callbacks.device_inputs)
     value = np.linspace(-0.4, 0.6, dimension, dtype=dtype)
     residual = target.observation - value.astype(np.float64)
     covariance = target.likelihood_covariance
