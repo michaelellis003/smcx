@@ -67,6 +67,7 @@ dev = [
     "mkdocs-literate-nav>=0.6.3",
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.3",
+    "matplotlib>=3.11.0",
     "nanobind>=2.13.0",
     "pre-commit>=4.5.1",
     "properdocs>=1.6.7",

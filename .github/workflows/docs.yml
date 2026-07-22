@@ -28,4 +28,6 @@ jobs:
           locked: 'false'
 
       - name: Deploy to GitHub Pages
+        env:
+          JAX_PLATFORMS: cpu
         run: uv run properdocs gh-deploy --strict --force
