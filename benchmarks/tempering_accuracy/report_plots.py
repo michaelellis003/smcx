@@ -205,8 +205,7 @@ def _gate_figure(rows: Sequence[_PlotCell], path: Path) -> None:
                             row_states.append(
                                 0
                                 if ratio is None
-                                else 1
-                                + int(plot_cell.cost is None or ratio > 1)
+                                else 1 + int(plot_cell.cost is None)
                             )
                             row_labels.append(
                                 "—" if ratio is None else f"{ratio:.2g}x"
@@ -300,7 +299,7 @@ def _cost_figure(rows: Sequence[_PlotCell], path: Path) -> None:
                     fontsize=7,
                 )
         figure.suptitle(
-            "Eligible accuracy against logical work (execution lanes separate)"
+            "Current systematic RWM: eligible accuracy against logical work"
         )
         figure.text(
             0.5,
