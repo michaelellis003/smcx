@@ -42,7 +42,12 @@ def _identity():
             "version": "3.13.9",
             "executable": "/python",
         },
-        "host": {"os": "Darwin", "machine": "arm64"},
+        "host": {
+            "os": "Darwin",
+            "machine": "arm64",
+            "cpu_model": "Apple M3 Pro",
+            "hardware_model": "Mac15,7",
+        },
     }
 
 
@@ -105,7 +110,6 @@ def _blocks(cell):
 
 def test_eligible_timing_summarizes_five_blocks_and_memory_scopes():
     report = analyze_timing(_MPS, _blocks(_MPS), _identity())
-
     assert report.status == "eligible"
     assert report.first and report.steady and report.process_rss
     assert report.first.values == (2.0, 4.0, 6.0, 8.0, 10.0)
@@ -120,7 +124,11 @@ def test_eligible_timing_summarizes_five_blocks_and_memory_scopes():
     (
         (("structural_failure", "execution_failure"), True, "failed_execution"),
         (("structural_failure",), True, "failed_structural"),
-        (("source_identity_drift",), False, "ineligible_identity"),
+        (
+            ("source_identity_changed_after_launch",),
+            False,
+            "ineligible_identity",
+        ),
         ((), True, "ineligible_identity"),
     ),
 )
@@ -161,11 +169,17 @@ def test_timing_runtime_contract_is_exact(case):
     )
 
 
-@pytest.mark.parametrize("boundary", ("pre_timing", "post_timing", "post_cell"))
+@pytest.mark.parametrize(
+    "boundary", ("pre_timing", "post_timing", "post_cell", "physical_host")
+)
 def test_metal_requires_all_three_power_and_thermal_boundaries(boundary):
     blocks = list(copy.deepcopy(_blocks(_MPS)))
-    blocks[0]["timing"]["environment"][boundary]["power_status"] = None
-    assert analyze_timing(_MPS, tuple(blocks), _identity()).status == (
+    identity = _identity()
+    if boundary == "physical_host":
+        identity["host"]["cpu_model"] = "VirtualApple"
+    else:
+        blocks[0]["timing"]["environment"][boundary]["power_status"] = None
+    assert analyze_timing(_MPS, tuple(blocks), identity).status == (
         "ineligible_environment"
     )
 
