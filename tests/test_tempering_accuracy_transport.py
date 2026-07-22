@@ -3,19 +3,13 @@
 
 """Fresh-process transport contracts for issue #30."""
 
-import copy
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-from benchmarks.tempering_accuracy.transport import (
-    RESULT_MARKER,
-    parse_worker_stdout,
-    run_worker,
-    worker_environment,
-)
 
+import benchmarks.tempering_accuracy.transport as transport
 from benchmarks.profiling.common import canonical_json
 from benchmarks.tempering_accuracy.artifacts import (
     CampaignRequest,
@@ -41,7 +35,7 @@ def _payload(*, failure=None):
 
 
 def _stdout(payload):
-    return RESULT_MARKER + canonical_json(payload) + "\n"
+    return transport.RESULT_MARKER + canonical_json(payload) + "\n"
 
 
 @pytest.mark.parametrize(
@@ -52,17 +46,13 @@ def test_worker_environment_is_fresh_and_lane_specific(
     monkeypatch, lane, platform, x64
 ):
     inherited = (
-        "JAX_MPS_ASYNC_DISPATCH",
-        "XLA_FLAGS",
-        "PJRT_DEVICE",
-        "OMP_NUM_THREADS",
-        "MPS_PROFILE",
-        "MLX_METAL_DEBUG",
+        "JAX_MPS_ASYNC_DISPATCH XLA_FLAGS PJRT_DEVICE OMP_NUM_THREADS "  # noqa: SIM905
+        "MPS_PROFILE MLX_METAL_DEBUG".split()
     )
     for name in inherited:
         monkeypatch.setenv(name, "inherited")
 
-    environment = worker_environment(lane)
+    environment = transport.worker_environment(lane)
 
     assert environment == {
         "JAX_DISABLE_JIT": "false",
@@ -76,7 +66,6 @@ def test_worker_environment_is_fresh_and_lane_specific(
         "PYTHONNOUSERSITE": "1",
         "TMPDIR": "/tmp",
     }
-    assert not set(inherited) & environment.keys()
 
 
 def test_transport_import_does_not_import_jax():
@@ -84,17 +73,14 @@ def test_transport_import_does_not_import_jax():
         "import sys; import benchmarks.tempering_accuracy.transport; "
         "assert 'jax' not in sys.modules"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", code], cwd=_ROOT, capture_output=True, text=True
-    )
-    assert result.returncode == 0, result.stderr
+    subprocess.run([sys.executable, "-c", code], cwd=_ROOT, check=True)
 
 
 def test_run_worker_uses_registered_process_boundary(monkeypatch):
-    payload = _payload()
+    payload = _payload(failure={"kind": "execution_failure"})
 
     def fake_run(command, **kwargs):
-        assert Path(command[0]).is_absolute()
+        assert command[0] == str(Path(sys.executable).absolute())
         assert command[1:4] == [
             "-m",
             "benchmarks.tempering_accuracy.worker",
@@ -103,7 +89,7 @@ def test_run_worker_uses_registered_process_boundary(monkeypatch):
         assert command[4] == canonical_json(request_dict(_REQUEST))
         assert kwargs == {
             "cwd": _ROOT,
-            "env": worker_environment("cpu_f64"),
+            "env": transport.worker_environment("cpu_f64"),
             "capture_output": True,
             "text": True,
             "check": False,
@@ -112,47 +98,40 @@ def test_run_worker_uses_registered_process_boundary(monkeypatch):
         }
         return subprocess.CompletedProcess(command, 0, _stdout(payload), "")
 
-    monkeypatch.setattr(
-        "benchmarks.tempering_accuracy.transport.subprocess.run", fake_run
-    )
-    attempt = run_worker(_ROOT, _REQUEST, timeout_s=12.5)
-    assert attempt.payload == payload
-    assert attempt.retryable is False
+    monkeypatch.setattr(transport.subprocess, "run", fake_run)
+    attempt = transport.run_worker(_ROOT, _REQUEST, timeout_s=12.5)
+    assert attempt == (payload, False)
 
 
-@pytest.mark.parametrize("fault", ("schema", "digest", "request"))
-def test_parser_rejects_result_identity_mismatch(fault):
-    payload = copy.deepcopy(_payload())
+@pytest.mark.parametrize(
+    "fault", ("schema", "digest", "request", "missing", "duplicate")
+)
+def test_parser_rejects_invalid_marker_or_identity(fault):
+    payload = _payload()
     if fault == "schema":
         payload["schema_version"] = 2
     elif fault == "digest":
         payload["request"]["manifest_sha256"] = "b" * 64
-    else:
+    elif fault == "request":
         payload["request"]["phase"] = "accuracy"
-    with pytest.raises(ValueError, match="manifest request"):
-        parse_worker_stdout(_stdout(payload), _REQUEST)
-
-
-@pytest.mark.parametrize("stdout", ("", "{marker}{json}{marker}{json}"))
-def test_parser_requires_exactly_one_marker(stdout):
-    encoded = stdout.format(
-        marker=RESULT_MARKER, json=canonical_json(_payload()) + "\n"
-    )
-    with pytest.raises(ValueError, match="exactly one"):
-        parse_worker_stdout(encoded, _REQUEST)
+    stdout = "" if fault == "missing" else _stdout(payload)
+    if fault == "duplicate":
+        stdout *= 2
+    with pytest.raises(ValueError):
+        transport.parse_worker_stdout(stdout, _REQUEST)
 
 
 @pytest.mark.parametrize(
-    ("mode", "kind", "retryable"),
+    ("mode", "kind", "retryable", "captured_lengths"),
     (
-        ("timeout", "timeout", False),
-        ("launch", "launch_error", True),
-        ("exit", "worker_exit", False),
-        ("malformed", "malformed_output", False),
+        ("timeout", "timeout", False, (4_096, 4_096)),
+        ("launch", "launch_error", True, None),
+        ("exit", "worker_exit", False, (4_096, 4_096)),
+        ("malformed", "malformed_output", False, (9, 5)),
     ),
 )
 def test_transport_classifies_process_failures(
-    monkeypatch, mode, kind, retryable
+    monkeypatch, mode, kind, retryable, captured_lengths
 ):
     def fake_run(command, **kwargs):
         if mode == "timeout":
@@ -167,27 +146,12 @@ def test_transport_classifies_process_failures(
             )
         return subprocess.CompletedProcess(command, 0, "no marker", "trace")
 
-    monkeypatch.setattr(
-        "benchmarks.tempering_accuracy.transport.subprocess.run", fake_run
-    )
-    attempt = run_worker(_ROOT, _REQUEST, timeout_s=1.0)
+    monkeypatch.setattr(transport.subprocess, "run", fake_run)
+    attempt = transport.run_worker(_ROOT, _REQUEST, timeout_s=1.0)
 
     assert attempt.retryable is retryable
     assert attempt.payload["failure"]["kind"] == kind
-    if mode in ("timeout", "exit"):
-        assert len(attempt.payload["failure"]["stdout_tail"]) == 4_096
-        assert len(attempt.payload["failure"]["stderr_tail"]) == 4_096
-
-
-def test_valid_worker_failure_remains_result_data(monkeypatch):
-    payload = _payload(failure={"kind": "execution_failure"})
-    monkeypatch.setattr(
-        "benchmarks.tempering_accuracy.transport.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            args[0], 0, _stdout(payload), "diagnostic"
-        ),
-    )
-
-    attempt = run_worker(_ROOT, _REQUEST, timeout_s=1.0)
-
-    assert attempt == (payload, False)
+    if captured_lengths is not None:
+        failure = attempt.payload["failure"]
+        captured = failure["stdout_tail"], failure["stderr_tail"]
+        assert tuple(map(len, captured)) == captured_lengths

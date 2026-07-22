@@ -252,6 +252,14 @@ def _validate_result(
         raise ValueError("result does not match its manifest request")
 
 
+def validate_worker_result(
+    value: Mapping[str, Any], request: WorkerRequest
+) -> None:
+    """Require a result to match one manifest-bound request exactly."""
+    planned = CampaignRequest(request.phase, request.cell, request.block)
+    _validate_result(value, planned, request.manifest_sha256)
+
+
 def load_raw_result(
     output_dir: Path, request: CampaignRequest, digest: str
 ) -> dict[str, Any] | None:

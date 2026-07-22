@@ -3,12 +3,14 @@
 
 """Fresh-process standard-arm worker for issue #30."""
 
+import argparse
 import math
 import os
 import resource
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from typing import Any, NamedTuple
 
 import jax
@@ -16,7 +18,11 @@ import jax.random as jr
 import numpy as np
 
 import smcx
-from benchmarks.tempering_accuracy.artifacts import WorkerRequest
+from benchmarks.profiling.common import canonical_json
+from benchmarks.tempering_accuracy.artifacts import (
+    SCHEMA_VERSION,
+    WorkerRequest,
+)
 from benchmarks.tempering_accuracy.core import (
     Callbacks,
     accuracy_keys,
@@ -31,9 +37,13 @@ from benchmarks.tempering_accuracy.plan import (
     matched_cells,
     work_count,
 )
+from benchmarks.tempering_accuracy.transport import (
+    RESULT_MARKER,
+    decode_worker_request,
+    runtime_controls,
+)
 from smcx.types import ResamplingFn
 
-SCHEMA_VERSION = 1
 _TIMING_KEY = 20_260_719
 _clock = time.perf_counter
 
@@ -204,14 +214,8 @@ def _timing_environment() -> dict[str, str | None]:
     }
 
 
-def _runtime_flags() -> dict[str, str | None]:
-    names = (
-        "JAX_PLATFORMS JAX_ENABLE_X64 JAX_COMPILATION_CACHE_DIR "
-        "JAX_DISABLE_JIT JAX_ENABLE_COMPILATION_CACHE JAX_MPS_ASYNC_DISPATCH "
-        "XLA_FLAGS OMP_NUM_THREADS OPENBLAS_NUM_THREADS "
-        "MKL_NUM_THREADS VECLIB_MAXIMUM_THREADS NUMEXPR_NUM_THREADS"
-    )
-    return {name: os.environ.get(name) for name in names.split()}
+def _runtime_flags() -> dict[str, str]:
+    return runtime_controls(os.environ)
 
 
 def _device_memory(device: Any) -> dict[str, Any] | None:
@@ -606,3 +610,16 @@ def execute_request(request: WorkerRequest) -> dict[str, Any]:
             "message": str(error),
         }
     return payload
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Execute one canonical request supplied by the parent process."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--request-json", required=True)
+    request = decode_worker_request(parser.parse_args(argv).request_json)
+    print(RESULT_MARKER + canonical_json(execute_request(request)))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

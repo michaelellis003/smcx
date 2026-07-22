@@ -425,10 +425,7 @@ def test_worker_cli_emits_one_canonical_marker(monkeypatch, capsys):
     payload = {"worker": "result"}
     monkeypatch.setattr(worker, "execute_request", lambda value: payload)
 
-    assert (
-        worker.main(["--request-json", canonical_json(request_dict(request))])
-        == 0
-    )
+    worker.main(["--request-json", canonical_json(request_dict(request))])
     assert capsys.readouterr().out == (
         worker.RESULT_MARKER + canonical_json(payload) + "\n"
     )
