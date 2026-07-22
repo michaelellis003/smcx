@@ -8,10 +8,11 @@ import subprocess
 import sys
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
-import benchmarks.tempering_accuracy.supervisor as supervisor
 import pytest
 
+import benchmarks.tempering_accuracy.supervisor as supervisor
 from benchmarks.tempering_accuracy.artifacts import (
     CampaignRequest,
     bind_request,
@@ -22,7 +23,7 @@ from benchmarks.tempering_accuracy.transport import WorkerAttempt
 
 _DIGEST = "a" * 64
 _ROOT = Path(__file__).resolve().parents[1]
-_IDENTITY = {
+_IDENTITY: dict[str, Any] = {
     "source": {
         "git_commit": "b" * 40,
         "git_dirty": False,
