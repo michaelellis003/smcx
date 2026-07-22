@@ -16,6 +16,7 @@ import jax.random as jr
 import numpy as np
 
 import smcx
+from benchmarks.tempering_accuracy.artifacts import WorkerRequest
 from benchmarks.tempering_accuracy.core import (
     Callbacks,
     accuracy_keys,
@@ -35,15 +36,6 @@ from smcx.types import ResamplingFn
 SCHEMA_VERSION = 1
 _TIMING_KEY = 20_260_719
 _clock = time.perf_counter
-
-
-class WorkerRequest(NamedTuple):
-    """One manifest-bound worker invocation."""
-
-    manifest_sha256: str
-    phase: str
-    cell: CampaignCell
-    block: int | None
 
 
 class StructuralChecks(NamedTuple):
