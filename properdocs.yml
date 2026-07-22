@@ -68,6 +68,7 @@ exclude_docs: |
   gen_ref_pages.py
   adr/
   design/
+  examples/
   research/
   conversation.md
   ecosystem-conversation.md
@@ -80,5 +81,4 @@ nav:
       - ArviZ reporting: guides/arviz.md
       - Custom models: guides/custom-models.md
       - Stochastic volatility: guides/stochastic-volatility.md
-      - Regime-switching HMM: examples/thesis_hmm_bayesian_workflow.ipynb
   - API reference: api/

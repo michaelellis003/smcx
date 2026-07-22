@@ -1,62 +1,60 @@
 # Contributing
 
-Thanks for your interest in smcx.
+Contributions are welcome. For a user-visible defect or substantial
+change, open an issue first to discuss the problem and scope.
 
 ## Setup
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/):
+smcx requires Python 3.11 or later and
+[`uv`](https://docs.astral.sh/uv/). Fork the repository, then install
+the development environment:
 
 ```bash
+git clone https://github.com/your-username/smcx.git
+cd smcx
 uv sync
 uv run pre-commit install
 ```
 
-The suite runs on CPU by default (float64). On Apple silicon with
-the `metal` extra installed, `SMCX_TEST_PLATFORM=mps uv run pytest`
-runs it on the GPU in float32.
+The test suite uses CPU and float64 by default. On Apple silicon, install
+the Metal backend with `uv sync --extra metal`; then
+`SMCX_TEST_PLATFORM=mps uv run pytest` runs the suite on the physical
+GPU in float32.
 
-## Development
+## Code changes
 
-- Tests first: new behavior arrives together with the test that
-  specifies it.
-- `uv run pytest -v --cov` runs the suite; coverage must stay above
-  the `fail_under` threshold in `pyproject.toml`.
-- `uv run pre-commit run --all-files` must pass before you push. It
-  runs Ruff lint and format (80 columns, single quotes, Google
-  docstrings), the ty type checker, and the license-header check.
-- Every `.py` file carries the Apache-2.0 header; `make license`
-  adds it for you.
+Write a failing test before changing behavior, then make the smallest
+implementation that passes it. Before opening a pull request, run:
 
-## Branching and pull requests
+```bash
+uv run pre-commit run --all-files
+uv run ty check
+uv run pytest --cov --cov-report=term-missing
+make docs
+```
 
-The repo runs trunk-based: `main` is the only long-lived branch and
-every change lands through a short-lived branch and a squash-merged
-PR.
+Coverage must remain above the threshold in `pyproject.toml`. Every
+Python file carries an Apache-2.0 header; `make license` adds it.
 
-- Branch from up-to-date `main`, named `<type>/<short-summary>`
-  where `<type>` is the Conventional Commit type your change will
-  carry (`fix/resampling-clamp`, `docs/quickstart-typo`).
-- Keep branches short-lived; rebase on `main` rather than merging
-  it in. Squash-merging keeps `main` linear either way.
-- For anything larger than a small fix, open an issue first so the
-  approach is agreed before you write code.
-- Keep PRs small — under roughly 400 changed lines.
-- PRs are squash-merged and the PR title becomes the commit
-  message, so the title must follow
-  [Conventional Commits](https://www.conventionalcommits.org/)
-  (`feat:`, `fix:`, `docs:`, ...). A CI check enforces this.
-  Versioning and releases are automated from these messages by
-  python-semantic-release.
-- CI (`ci-pass`) must be green before merge. Workflow runs on PRs
-  from new contributors wait for maintainer approval before they
-  start.
+## Documentation changes
 
-## Releases
+Build the site with `make docs`, or preview it at
+`http://localhost:8000` with:
 
-Releases are fully automated: python-semantic-release reads the
-commit types on `main`, so a merged `fix:` or `feat:` PR publishes
-to PyPI (patch or minor) within minutes of CI going green, and
-`docs:`/`test:`/`chore:` PRs release nothing. Your PR title is
-therefore a release decision — maintainers may adjust the type
-during review. Never edit version fields by hand; the release bot
-owns them.
+```bash
+make serve-docs
+```
+
+## Pull requests
+
+Branch from current `main` using `<type>/<issue-id>-<short-summary>`
+when an issue exists, or `<type>/<short-summary>` for small maintenance
+work. Rebase rather than merging `main`, and keep the change focused;
+pull requests should normally stay below 400 changed lines.
+
+The pull-request title becomes the squash commit and must follow
+[Conventional Commits](https://www.conventionalcommits.org/), for
+example `fix: handle empty observations` or `docs: clarify callbacks`.
+This is also a release decision: `fix` publishes a patch, `feat`
+publishes a minor release, and documentation, tests, and chores do not
+publish a package. CI must pass before merge.
