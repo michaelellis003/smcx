@@ -5,6 +5,7 @@
 
 import gzip
 import json
+from copy import deepcopy
 
 import numpy as np
 import pytest
@@ -244,3 +245,28 @@ def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
     assert summary.eligible_cost_cells == 0
     assert summary.unavailable_cost_cells == 72
     assert eligible_gate.read_bytes() != (tmp_path / "gates.png").read_bytes()
+
+
+def test_cost_plot_distinguishes_sweep_counts(tmp_path, monkeypatch):
+    evidence = _evidence()
+    source = evidence["cells"][0]
+    for index in (2, 4):
+        item = evidence["cells"][index]
+        item["status"] = "eligible"
+        item["accuracy"] = deepcopy(source["accuracy"])
+        item["work"] = deepcopy(source["work"])
+    observed = []
+
+    def capture(figure, path):
+        if path.name == "cost.png":
+            observed.extend(
+                collection.get_alpha()
+                for collection in figure.axes[0].collections
+            )
+
+    monkeypatch.setattr(
+        "benchmarks.tempering_accuracy.report_plots._save", capture
+    )
+    render_plots(evidence, tmp_path / "gates.png", tmp_path / "cost.png")
+
+    assert observed == [0.45, 0.7, 1.0]
