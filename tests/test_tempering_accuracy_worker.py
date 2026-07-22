@@ -264,6 +264,7 @@ def test_timing_retains_failed_call_without_retry(
     cell = _active_cell(current_cells())
     calls = []
     ticks = iter(float(index) for index in range(20))
+    states = iter(({"boundary": "pre"}, {"boundary": "failure"}))
 
     def fail_registered_call(*args, **kwargs):
         calls.append((args, kwargs))
@@ -274,9 +275,7 @@ def test_timing_retains_failed_call_without_retry(
     monkeypatch.setattr(worker.smcx, "temper", fail_registered_call)
     monkeypatch.setattr(worker, "_burn_backend", lambda: None, raising=False)
     monkeypatch.setattr(worker, "_clock", lambda: next(ticks), raising=False)
-    monkeypatch.setattr(
-        worker, "_timing_environment", lambda: {}, raising=False
-    )
+    monkeypatch.setattr(worker, "_timing_environment", lambda: next(states))
     monkeypatch.setattr(worker, "_max_rss_bytes", lambda: 123, raising=False)
     monkeypatch.setattr(worker, "_device_memory", lambda _: {}, raising=False)
     monkeypatch.setattr(worker, "_runtime_state", lambda: _valid_runtime(cell))
@@ -290,6 +289,60 @@ def test_timing_retains_failed_call_without_retry(
         "message": "registered timing failure",
         "failed_call": failed_call,
         "timing_prefix": timing_prefix,
+        "environment": {
+            "pre_timing": {"boundary": "pre"},
+            "post_timing": None,
+            "failure_boundary": {"boundary": "failure"},
+        },
+    }
+    assert payload["timing"] is None
+    assert payload["runs"] == []
+
+
+def test_timing_retains_completed_evidence_when_extraction_fails(monkeypatch):
+    cell = _active_cell(current_cells())
+    calls = []
+    ticks = iter(float(index) for index in range(16))
+    states = iter((
+        {"boundary": "pre"},
+        {"boundary": "post"},
+        {"boundary": "failure"},
+    ))
+
+    def fake_temper(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _fake_posterior(cell)
+
+    def fail_extraction(*args):
+        raise RuntimeError("post-timing extraction failed")
+
+    monkeypatch.setattr(worker.smcx, "temper", fake_temper)
+    monkeypatch.setattr(worker, "_burn_backend", lambda: None)
+    monkeypatch.setattr(worker, "_clock", lambda: next(ticks))
+    monkeypatch.setattr(worker, "_timing_environment", lambda: next(states))
+    monkeypatch.setattr(worker, "_max_rss_bytes", lambda: 123)
+    monkeypatch.setattr(worker, "_device_memory", lambda _: {})
+    monkeypatch.setattr(worker, "_runtime_state", lambda: _valid_runtime(cell))
+    monkeypatch.setattr(worker, "_record_posterior", fail_extraction)
+
+    payload = execute_request(WorkerRequest(_MANIFEST, "timing", cell, 0))
+
+    assert len(calls) == 8
+    assert payload["failure"] == {
+        "kind": "execution_failure",
+        "exception_type": "RuntimeError",
+        "message": "post-timing extraction failed",
+        "failed_stage": "post_timing_extraction",
+        "timing_prefix": {
+            "eligible": False,
+            "first_execution_s": 1.0,
+            "steady_times_s": [1.0] * 7,
+        },
+        "environment": {
+            "pre_timing": {"boundary": "pre"},
+            "post_timing": {"boundary": "post"},
+            "failure_boundary": {"boundary": "failure"},
+        },
     }
     assert payload["timing"] is None
     assert payload["runs"] == []
