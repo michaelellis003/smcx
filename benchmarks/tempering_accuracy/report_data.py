@@ -33,6 +33,7 @@ _MANIFEST_FIELDS = {
     "schema_version",
     "campaign",
     "order_seed",
+    "algorithm_contract",
     "plan_sha256",
     "requests",
     "exclusions",
@@ -105,6 +106,12 @@ def _load_manifest(output_dir: Path) -> tuple[dict[str, Any], str]:
         and manifest["schema_version"] == 1
         and manifest["campaign"] == "tempering_accuracy"
         and manifest["order_seed"] == ORDER_SEED
+        and manifest["algorithm_contract"]
+        == {
+            "proposal_covariance_source": "weighted_pre_resample_cloud",
+            "proposal_scale": "2.38^2 / dimension",
+            "target_ess": 0.5,
+        }
         and len(requests) == 508
         and plan_sha256 == _PLAN_SHA256 == manifest["plan_sha256"]
         and manifest["requests"] == expected
