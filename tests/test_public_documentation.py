@@ -8,37 +8,61 @@ from pathlib import Path
 
 import yaml
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_internal_roadmap_is_not_tracked() -> None:
-    tracked = subprocess.run(
-        ("git", "-C", str(ROOT), "ls-files", "--", "ROADMAP.md"),
+def _tracked(*paths: str) -> list[str]:
+    return subprocess.run(
+        ("git", "-C", str(ROOT), "ls-files", "--", *paths),
         check=True,
         capture_output=True,
         text=True,
     ).stdout.splitlines()
-    assert not tracked
+
+
+def test_internal_roadmap_is_not_tracked() -> None:
+    assert not _tracked("ROADMAP.md")
 
     ignored = (ROOT / ".gitignore").read_text().splitlines()
     assert "/ROADMAP.md" in ignored
 
 
+def test_internal_decision_index_is_not_tracked() -> None:
+    paths = (
+        "docs/adr/0030-native-conditionally-linear-gaussian-rbpf.md",
+        "docs/adr/0031-mps-bootstrap-update-containment.md",
+        "docs/adr/index.md",
+    )
+    assert not _tracked(*paths)
+
+
 def test_public_text_excludes_internal_decision_labels() -> None:
-    paths = [Path("docs/index.md"), *Path("docs/guides").glob("*.md")]
-    paths.extend(Path("docs/tutorials").glob("*.md"))
-    paths.extend(Path("src/smcx").glob("*.py"))
+    paths = [
+        ROOT / "README.md",
+        ROOT / "CONTRIBUTING.md",
+        ROOT / "pyproject.toml",
+    ]
+    paths.extend(
+        path
+        for path in (ROOT / "docs").rglob("*.md")
+        if "adr" not in path.parts
+    )
+    paths.extend((ROOT / "src" / "smcx").rglob("*.py"))
+    paths.extend((ROOT / "benchmarks").rglob("*.py"))
+    paths.extend((ROOT / "benchmarks").rglob("PROTOCOL.md"))
 
     for path in paths:
         assert "ADR-" not in path.read_text(), path
 
 
 def test_internal_licensing_inventory_is_not_published() -> None:
-    assert not Path("docs/research/licensing.md").exists()
+    assert not (ROOT / "docs/research/licensing.md").exists()
 
 
 def test_tutorials_execute_during_documentation_build() -> None:
-    config = yaml.safe_load(Path("properdocs.yml").read_text())
+    config = yaml.safe_load((ROOT / "properdocs.yml").read_text())
+    excluded = {line.strip() for line in config["exclude_docs"].splitlines()}
+    assert "adr/" in excluded
     jupyter = next(
         plugin["mkdocs-jupyter"]
         for plugin in config["plugins"]
@@ -50,6 +74,6 @@ def test_tutorials_execute_during_documentation_build() -> None:
     assert jupyter["allow_errors"] is False
     assert jupyter["cache"] is False
 
-    tutorial = Path("docs/tutorials/filtering.md")
+    tutorial = ROOT / "docs/tutorials/filtering.md"
     front_matter = yaml.safe_load(tutorial.read_text().split("---", 2)[1])
     assert front_matter["jupyter"]["kernelspec"]["language"] == "python"
