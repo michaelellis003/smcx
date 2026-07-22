@@ -12,12 +12,15 @@ from typing import Any, cast
 from benchmarks.profiling.common import _command_value
 from benchmarks.profiling.locking import HostCampaignLock
 from benchmarks.tempering_accuracy.artifacts import (
+    SCHEMA_VERSION,
+    _write_exclusive,
     bind_request,
     build_manifest,
     campaign_identity,
     campaign_requests,
     ensure_manifest,
     load_raw_result,
+    request_dict,
     write_raw_result,
 )
 from benchmarks.tempering_accuracy.transport import run_worker
@@ -33,10 +36,135 @@ _REQUIRED_PACKAGES = (
     "scipy",
     "smcx",
 )
+_CAPTURE_LIMIT = 4_096
 
 
 class CampaignError(RuntimeError):
     """Raised when registered campaign execution must stop."""
+
+
+class _RetryableError(RuntimeError):
+    """Carry bounded evidence for a launch that may be retried later."""
+
+    def __init__(self, failure: Mapping[str, Any]) -> None:
+        self.failure = dict(failure)
+
+
+def _bounded(value: Any) -> Any:
+    """Bound strings in retained supervisor evidence."""
+    if isinstance(value, str):
+        return value[-_CAPTURE_LIMIT:]
+    if isinstance(value, Mapping):
+        return {str(name): _bounded(item) for name, item in value.items()}
+    return value
+
+
+def _prelaunch_snapshot() -> dict[str, str | None]:
+    """Require and capture eligible Metal power and thermal state."""
+    snapshot = {
+        "power_status": _command_value(("pmset", "-g", "batt")),
+        "thermal_status": _command_value(("pmset", "-g", "therm")),
+    }
+    power = snapshot["power_status"] or ""
+    thermal = snapshot["thermal_status"] or ""
+    eligible = (
+        "Now drawing from 'AC Power'" in power
+        and "No thermal warning level" in thermal
+        and "No performance warning level" in thermal
+    )
+    if not eligible:
+        raise _RetryableError({
+            "kind": "metal_prelaunch_ineligible",
+            "prelaunch": _bounded(snapshot),
+        })
+    return cast(dict[str, str | None], _bounded(snapshot))
+
+
+def _identity_failure(
+    expected: Mapping[str, Any], kind: str
+) -> dict[str, Any] | None:
+    """Return bounded evidence when exact campaign identity changed."""
+    try:
+        observed = campaign_identity(_ROOT)
+    except Exception as error:
+        return {
+            "kind": kind,
+            "exception_type": type(error).__name__,
+            "message": _bounded(str(error)),
+        }
+    if observed == expected:
+        return None
+    return {
+        "kind": kind,
+        "expected_source_sha256": expected.get("source", {}).get("sha256"),
+        "observed_source_sha256": observed.get("source", {}).get("sha256"),
+    }
+
+
+def _write_attempt(
+    output_dir: Path,
+    request_index: int,
+    bound: Any,
+    failure: Mapping[str, Any],
+) -> None:
+    """Exclusively retain one manifest-bound retryable attempt."""
+    retry_index = 0
+    while True:
+        record = {
+            "schema_version": SCHEMA_VERSION,
+            "request_index": request_index,
+            "retry_index": retry_index,
+            "request": request_dict(bound),
+            "failure": _bounded(failure),
+        }
+        path = (
+            output_dir
+            / "attempts"
+            / f"{request_index:03d}-{retry_index:03d}.json"
+        )
+        try:
+            _write_exclusive(path, record)
+            return
+        except FileExistsError:
+            retry_index += 1
+
+
+def _raw_failure(
+    bound: Any,
+    failure: Mapping[str, Any],
+    prelaunch: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Build one immutable manifest-bound supervisor failure."""
+    evidence = dict(_bounded(failure))
+    if prelaunch is not None:
+        evidence["prelaunch"] = dict(prelaunch)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "request": request_dict(bound),
+        "failure": evidence,
+        "timing": None,
+        "runs": [],
+    }
+
+
+def _retain_prelaunch(
+    payload: Mapping[str, Any], snapshot: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """Attach a supervisor boundary snapshot to a worker payload."""
+    result = dict(payload)
+    if snapshot is None:
+        return result
+    if isinstance(result.get("timing"), Mapping):
+        timing = dict(result["timing"])
+        environment = dict(timing.get("environment", {}))
+        environment["supervisor_prelaunch"] = dict(snapshot)
+        timing["environment"] = environment
+        result["timing"] = timing
+    elif isinstance(result.get("failure"), Mapping):
+        failure = dict(result["failure"])
+        failure["prelaunch"] = dict(snapshot)
+        result["failure"] = failure
+    return result
 
 
 def _virtualization_status() -> str | None:
@@ -119,7 +247,13 @@ def run_campaign(
     """Run or resume the single frozen campaign in manifest order."""
     if not math.isfinite(timeout_s) or timeout_s <= 0:
         raise ValueError("timeout_s must be positive and finite")
-    output_dir = Path(output_dir)
+    output_dir = Path(output_dir).resolve()
+    if (
+        output_dir == _ROOT
+        or _ROOT in output_dir.parents
+        or output_dir in _ROOT.parents
+    ):
+        raise CampaignError("output_dir overlaps the attested source tree")
     with HostCampaignLock():
         try:
             identity = campaign_identity(_ROOT)
@@ -136,16 +270,47 @@ def run_campaign(
         completed, failed = _resume_prefix(output_dir, requests, digest)
         if failed:
             return 1
-        for request in requests[completed:]:
-            attempt = run_worker(
-                _ROOT,
-                bind_request(request, digest),
-                timeout_s=timeout_s,
-            )
-            if attempt.retryable:
+        for index, request in enumerate(requests[completed:], start=completed):
+            bound = bind_request(request, digest)
+            snapshot = None
+            try:
+                if request.phase == "timing" and request.cell.lane == "mps_f32":
+                    snapshot = _prelaunch_snapshot()
+                before = _identity_failure(
+                    identity, "campaign_identity_changed_before_launch"
+                )
+                if before is not None:
+                    raise _RetryableError(before)
+                try:
+                    attempt = run_worker(_ROOT, bound, timeout_s=timeout_s)
+                except OSError as error:
+                    raise _RetryableError({
+                        "kind": "launch_error",
+                        "exception_type": type(error).__name__,
+                        "message": str(error),
+                    }) from error
+            except _RetryableError as error:
+                _write_attempt(output_dir, index, bound, error.failure)
                 return 1
-            write_raw_result(output_dir, request, digest, attempt.payload)
-            if attempt.payload["failure"] is not None:
+            if attempt.retryable:
+                failure = attempt.payload.get("failure")
+                evidence = (
+                    failure
+                    if isinstance(failure, Mapping)
+                    else {"kind": "launch_error"}
+                )
+                _write_attempt(output_dir, index, bound, evidence)
+                return 1
+            after = _identity_failure(
+                identity, "source_identity_changed_after_launch"
+            )
+            payload = (
+                _raw_failure(bound, after, snapshot)
+                if after is not None
+                else _retain_prelaunch(attempt.payload, snapshot)
+            )
+            write_raw_result(output_dir, request, digest, payload)
+            if payload["failure"] is not None:
                 return 1
     return 0
 
