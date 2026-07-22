@@ -179,9 +179,9 @@ locating $\mu$ at the same time, in one forward pass.
 - Liu-West is labeled approximate for a reason (the shrinkage bias
   above). When the parameter posterior matters more than online
   operation, an offline SMC sampler over the parameter — smcx's
-  [`temper`](../api/) — trades the single pass for lower bias, and
-  [`smc2`](../api/) nests a full particle filter inside it for exact
-  pseudo-marginal parameter inference.
+  [`temper`](../api/smcx/index.md) — trades the single pass for lower bias,
+  and [`smc2`](../api/smcx/index.md) nests a full particle filter inside it
+  for exact pseudo-marginal parameter inference.
 - The parameter here is unconstrained, which suits the Gaussian
   jitter. For a bounded parameter such as $\phi \in (-1, 1)$, learn
   it on an unconstrained scale (for instance $\operatorname{arctanh}

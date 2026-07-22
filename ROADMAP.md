@@ -1,6 +1,6 @@
 # Roadmap
 
-*Last updated: 2026-07-20. Directional, not a promise; solo-maintained.
+*Last updated: 2026-07-21. Directional, not a promise; solo-maintained.
 Themes here, tracking in GitHub issues. Decisions: `docs/adr/`.
 Non-goals at the bottom are a standing scope guard.*
 
@@ -9,8 +9,8 @@ guided, auxiliary, Liu-West), adaptive tempered SMC, SMC², four
 resamplers, a diagnostics suite, O(N)-memory filtering via
 `store_history=False`, CPU/CUDA/TPU through stock JAX and
 Apple-silicon GPUs through the optional jax-mps backend. Everything
-below builds on that base. The v0 history (the MLX-era design,
-benchmarks, and the pivot) lives in the ADRs.
+below builds on that base. Dated benchmark reports and stable ADR
+references retain the earlier MLX-era history and the JAX pivot.
 
 ## Now — diagnostics depth and ecosystem interop
 
@@ -50,14 +50,17 @@ the small carry-overs the 2026-07 library review surfaced.
       from a supported conditionally linear-Gaussian model to the native
       RBPF. Dynamax supplies models, never filtering or Kalman updates;
       there is no universal `from_dynamax` model abstraction (ADR-0019).
-- [ ] Bring-your-own-model authoring guide: keep the existing
+- [x] ~~Bring-your-own-model authoring guide: keep the existing
       capability-specific callback Protocols as the abstract interface;
       show plain-JAX and optional Equinox callback factories without a model
-      base class, distribution interface, or Equinox runtime dependency.
-- [ ] Functional filter checkpoints: public `init`/`step`/chunk-update state,
+      base class, distribution interface, or Equinox runtime dependency.~~
+- [x] ~~Functional filter checkpoints: public `init`/`step`/chunk-update state,
       bootstrap first, so new observations can extend a resident particle
-      cloud with explicit per-step keys and correct conditional evidence.
-      This is a public API decision and requires an ADR.
+      cloud with explicit per-step keys and correct conditional evidence.~~
+- [ ] Tempering accuracy study (#30): measure the current cloud-adaptive RWM
+      kernel at 5, 20, and 50 sweeps before changing its implementation or
+      default budget. Reporting the required budget without changing code is
+      a valid result.
 - [ ] Common-space static posterior updates: import equal- or nonuniform-
       weight draws from NumPyro, PyMC, BlackJAX, or another source; reweight
       by a new-data likelihood and, only with an evaluable old target, bridge
@@ -83,9 +86,9 @@ the small carry-overs the 2026-07 library review surfaced.
 - [x] ~~jax-mps CI leg: `SMCX_TEST_PLATFORM=mps` as a scheduled or
       best-effort job on macOS runners (they expose a paravirtual
       Metal device).~~
-- [ ] Thesis-notebook Metal appendix against jax-mps 0.10.10, which
-      ships the scan-history fixes (#219/#220): large-N f32 filtering
-      on the GPU, f64 oracle checks staying on CPU.
+- [ ] Thesis-notebook Metal appendix after a released jax-mps/MLX pair
+      clears the scan-history reproducer and the containment-removal gate
+      in #38: large-N f32 filtering on GPU, with f64 oracle checks on CPU.
 
 ## Later — ideas, ordered by fit
 
@@ -103,10 +106,10 @@ the small carry-overs the 2026-07 library review surfaced.
 - Iterated filtering (IF2/MOP) for maximum-likelihood estimation —
   pypomp's territory; a scope expansion that needs its own ADR
   discussion before any code.
-- **jax-mps tracking (standing)**: follow their #203 searchsorted
-  mechanism decision and contribute optimizations upstream when the gap
-  is theirs to close. Performance claims about Apple silicon stay
-  measured, never assumed.
+- **jax-mps tracking (standing)**: follow their #203 searchsorted decision
+  and remove the temporary MPS checkpoint containment only after #38's
+  release gates pass. Performance claims about Apple silicon stay measured,
+  never assumed.
 
 ## Non-goals
 

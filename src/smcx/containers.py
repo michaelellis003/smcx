@@ -109,7 +109,7 @@ class ParticleFilterPosterior(NamedTuple):
         filtered_particles: Latent-state PyTree with every leaf shaped
             ``(ntime, num_particles, ...)``. A dense state remains one
             array of shape ``(ntime, num_particles, state_dim)``.
-        filtered_log_weights: Unnormalized log weights at each time step,
+        filtered_log_weights: Normalized log weights at each time step,
             shape ``(ntime, num_particles)``.
         ancestors: Resampled ancestor indices at each time step,
             shape ``(ntime, num_particles)``.
@@ -140,7 +140,7 @@ class LiuWestPosterior(NamedTuple):
             :math:`\log p(y_{1:T})`.
         filtered_particles: Particle values at each time step,
             shape ``(ntime, num_particles, state_dim)``.
-        filtered_log_weights: Unnormalized log weights at each step,
+        filtered_log_weights: Normalized log weights at each step,
             shape ``(ntime, num_particles)``.
         ancestors: Resampled ancestor indices at each time step,
             shape ``(ntime, num_particles)``.
@@ -169,8 +169,8 @@ class TemperedPosterior(NamedTuple):
     resample + pi-invariant moves), so ``log_weights`` is uniform —
     kept for interface symmetry and Rao-Blackwell reminders: compute
     summaries from weighted clouds when you have them.
-    ``marginal_loglik`` is the Neumaier-compensated log-evidence;
-    E[exp(marginal_loglik)] = Z (log Zhat itself is Jensen-biased).
+    ``marginal_loglik`` is the Neumaier-compensated log-evidence
+    estimate.
     """
 
     particles: Float[Array, "num_particles dim"]

@@ -182,7 +182,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# smcx: agent spec files (prompts, not documentation) and benchmark data
+# Local planning files and raw benchmark data
 specs/
 benchmarks/data/
 

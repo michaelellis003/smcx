@@ -49,7 +49,7 @@ the exact log-evidence.
 
 All three land on the exact log Z within Monte-Carlo error — smcx is
 correct, confirmed by an implementation that shares no code with it.
-All times are **medians of 5** (AGENTS.md), on both sides — each
+All times are **medians of 5**, on both sides — each
 `particles` run is 70–170 s. A first single-run pass read the 512
 cell 41 % high (95.8 s vs the 67.6 s median), which is why the
 external timings are medianed like everything else.

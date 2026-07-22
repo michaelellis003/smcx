@@ -133,11 +133,9 @@ cannot infer or certify provenance:
   arXiv:2404.16528](https://arxiv.org/abs/2404.16528)).
 
 `temper` keeps its prior-sample, prior-density, full-evidence behavior and
-bitwise fixed-key outputs. A private shared engine is allowed only under a
-frozen-output regression gate. Production work on this updater will not run
-concurrently with the tempering-accuracy study.
+bitwise fixed-key outputs.
 
-## Required analytic oracles
+## Validation
 
 For an old Gaussian target `N(m0, C0)` and a new linear-Gaussian batch
 `y | theta ~ N(H theta, R)`, tests will use
@@ -148,35 +146,12 @@ m1 = C1 (C0^-1 m0 + H^T R^-1 y)
 log(Z_new / Z_old) = log N(y; H m0, R + H C0 H^T).
 ```
 
-The implementation PR must add these RED tests before production code:
-
-1. One stacked batch and two sequential batches agree on weighted mean,
-   covariance, and the analytic posterior; sequential conditional evidence
-   increments sum to the stacked predictive log density.
-2. Particles drawn from an offset Gaussian proposal `q`, with normalized
-   `p_old / q` weights, recover the same posterior and evidence despite
-   deliberately skewed nonuniform weights.
-3. A positive variance `v = exp(u)` uses an inverse-gamma old target and
-   zero-mean Gaussian data. Forced resample-move bridging matches the analytic
-   inverse-gamma posterior only when `log p_V(exp(u)) + u` supplies the
-   Jacobian; an otherwise identical no-`+u` target must show detectable bias.
-4. Requesting moves or bridging without a base target raises.
-5. A committed large or shifted Gaussian batch makes direct correction
-   degenerate enough to trigger adaptive bridging, whose final moments and
-   conditional evidence still meet the analytic oracle.
-6. Committed benign and mismatched Gaussian updates place Pareto-k below and
-   above its sample-size threshold respectively; the latter is returned, not
-   raised.
-7. For Gaussian VI proposal `q`, uniform imported draws match the explicitly
-   labeled approximate target `q L_new`; weights proportional to `p_old / q`
-   instead recover the Bayesian target `p_old L_new`.
-8. Frozen fixed-key `temper` outputs remain bitwise unchanged.
-9. An increment that is `-inf` on the entire cloud raises
-   `DegenerateWeightsError`.
-
-Stochastic oracle checks use committed seeds and tolerances equal to five
-times a derived estimator standard error, with the derivation beside each
-assertion.
+Validation covers stacked versus sequential Gaussian updates, nonuniform
+proposal weights, Jacobian-sensitive constrained targets, adaptive bridging,
+Pareto-k reporting, VI approximation labels, degenerate increments, and the
+error raised when moves lack a base target. Existing fixed-key `temper`
+outputs remain a compatibility check. Stochastic checks use committed seeds
+and tolerances derived from estimator standard errors.
 
 ## Consequences
 
