@@ -14,6 +14,8 @@ import pytest
 
 import benchmarks.tempering_accuracy.worker as worker
 import smcx
+from benchmarks.profiling.common import canonical_json
+from benchmarks.tempering_accuracy.artifacts import request_dict
 from benchmarks.tempering_accuracy.core import accuracy_keys
 from benchmarks.tempering_accuracy.plan import (
     current_cells,
@@ -416,6 +418,17 @@ def test_runtime_flags_retain_registered_environment_values(monkeypatch):
         monkeypatch.setenv(name, value)
 
     assert worker._runtime_flags() == expected
+
+
+def test_worker_cli_emits_one_canonical_marker(monkeypatch, capsys):
+    request = WorkerRequest(_MANIFEST, "smoke", current_smoke_cells()[0], None)
+    payload = {"worker": "result"}
+    monkeypatch.setattr(worker, "execute_request", lambda value: payload)
+
+    worker.main(["--request-json", canonical_json(request_dict(request))])
+    assert capsys.readouterr().out == (
+        worker.RESULT_MARKER + canonical_json(payload) + "\n"
+    )
 
 
 def test_accuracy_runs_all_committed_keys_in_order_without_timing(monkeypatch):
