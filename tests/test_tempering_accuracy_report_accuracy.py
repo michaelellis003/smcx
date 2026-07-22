@@ -6,13 +6,13 @@
 import jax.random as jr
 import numpy as np
 import pytest
+
+from benchmarks.tempering_accuracy.core import accuracy_keys, build_target
+from benchmarks.tempering_accuracy.plan import current_cells, work_count
 from benchmarks.tempering_accuracy.report_accuracy import (
     aggregate_campaign,
     analyze_accuracy_cell,
 )
-
-from benchmarks.tempering_accuracy.core import accuracy_keys, build_target
-from benchmarks.tempering_accuracy.plan import current_cells, work_count
 from benchmarks.tempering_accuracy.report_data import CampaignData
 from benchmarks.tempering_accuracy.report_timing import Summary, TimingReport
 
@@ -33,7 +33,7 @@ _STRUCTURAL = {
 
 
 def _structural(passed=True):
-    result = dict.fromkeys(_STRUCTURAL, True)
+    result: dict[str, object] = dict.fromkeys(_STRUCTURAL, True)
     result.update(
         passed=passed,
         final_log_weight_lse_error=0.0,
