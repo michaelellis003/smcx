@@ -29,6 +29,7 @@ def test_internal_project_records_are_not_tracked() -> None:
 
 
 def test_public_text_excludes_internal_decision_labels() -> None:
+    tracked = {ROOT / path for path in _tracked()}
     paths = [
         ROOT / "README.md",
         ROOT / "CONTRIBUTING.md",
@@ -43,7 +44,7 @@ def test_public_text_excludes_internal_decision_labels() -> None:
     paths.extend((ROOT / "benchmarks").rglob("*.py"))
     paths.extend((ROOT / "benchmarks").rglob("PROTOCOL.md"))
 
-    for path in paths:
+    for path in sorted(tracked.intersection(paths)):
         assert "ADR-" not in path.read_text(), path
 
 
