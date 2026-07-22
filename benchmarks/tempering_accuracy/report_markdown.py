@@ -110,8 +110,13 @@ def _validate(evidence: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
     root = _map(evidence, _ROOT)
     if root["schema_version"] != 1 or type(root["schema_version"]) is not int:
         raise _bad("uses an unsupported schema")
-    for counts in _map(root["gate_counts"]).values():
-        counts = _map(counts)
+    _map(
+        root["execution"],
+        _fields("complete result_count not_run_after_stop"),
+    )
+    gates = _map(root["gate_counts"], _fields("centering evidence_resolution"))
+    for counts in gates.values():
+        counts = _map(counts, _fields("passed evaluated registered"))
         if any(type(counts.get(name)) is not int for name in counts):
             raise _bad("has invalid gate counts")
     registered = (*current_cells(), *matched_cells())
@@ -175,9 +180,7 @@ def _label(item: Mapping[str, Any]) -> tuple[str, ...]:
 
 def _link(value: str | None) -> str | None:
     if value is not None and (
-        not isinstance(value, str)
-        or not value
-        or any(character in value for character in "\r\n []()<>{}")
+        not value or any(character in value for character in "\r\n []()<>{}")
     ):
         raise ValueError("figure link is unsafe")
     return value
@@ -191,11 +194,7 @@ def render_markdown(
     cost_figure: str | None = None,
 ) -> str:
     """Render one validated evidence mapping without filesystem access."""
-    try:
-        parsed = date.fromisoformat(report_date)
-    except (TypeError, ValueError) as error:
-        raise ValueError("report date must be ISO 8601") from error
-    if parsed.isoformat() != report_date:
+    if date.fromisoformat(report_date).isoformat() != report_date:
         raise ValueError("report date must be ISO 8601")
     gate_figure, cost_figure = _link(gate_figure), _link(cost_figure)
     cells = _validate(evidence)
