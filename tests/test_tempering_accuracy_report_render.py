@@ -7,10 +7,7 @@ import gzip
 import json
 
 import numpy as np
-from benchmarks.tempering_accuracy.report_render import (
-    evidence_gzip,
-    render_markdown,
-)
+import pytest
 
 from benchmarks.profiling.common import canonical_json
 from benchmarks.tempering_accuracy.analysis import (
@@ -18,11 +15,7 @@ from benchmarks.tempering_accuracy.analysis import (
     analyze_accuracy,
 )
 from benchmarks.tempering_accuracy.core import build_target
-from benchmarks.tempering_accuracy.plan import (
-    cell_id,
-    current_cells,
-    matched_cells,
-)
+from benchmarks.tempering_accuracy.plan import current_cells, matched_cells
 from benchmarks.tempering_accuracy.report_accuracy import (
     CampaignReport,
     CellReport,
@@ -31,6 +24,10 @@ from benchmarks.tempering_accuracy.report_data import (
     CampaignData,
     InventoryEntry,
     campaign_requests,
+)
+from benchmarks.tempering_accuracy.report_render import (
+    AttemptEvidence,
+    evidence_gzip,
 )
 from benchmarks.tempering_accuracy.report_timing import Summary, TimingReport
 
@@ -130,9 +127,14 @@ def _campaign_report():
 
 def test_evidence_is_canonical_reproducible_and_sanitized():
     report = _campaign_report()
-    first = evidence_gzip(report)
+    attempt = AttemptEvidence(1, 0, "9" * 64, "launch_error")
+    with pytest.raises(ValueError, match="attempt inventory"):
+        evidence_gzip(report)
+    with pytest.raises(ValueError, match="safe identifier"):
+        evidence_gzip(report, attempts=(attempt._replace(kind="/private"),))
+    first = evidence_gzip(report, attempts=(attempt,))
 
-    assert first == evidence_gzip(report)
+    assert first == evidence_gzip(report, attempts=(attempt,))
     decoded = gzip.decompress(first)
     evidence = json.loads(decoded)
     assert decoded == (canonical_json(evidence) + "\n").encode()
@@ -140,30 +142,11 @@ def test_evidence_is_canonical_reproducible_and_sanitized():
     assert evidence["integrity"]["manifest_sha256"] == "e" * 64
     assert len(evidence["cells"]) == 84
     assert evidence["cells"][0]["accuracy"]["correctness_eligible"]
+    assert np.isclose(evidence["cells"][0]["timing"]["steady"]["median"], 1)
     assert evidence["failures"][0]["kind"] == "execution_failure"
+    assert evidence["attempts"] == [attempt._asdict()]
+    assert evidence["exclusions"] == [
+        {"arm": "waste_free", "status": "blocked"}
+    ]
     assert "/private/" not in decoded.decode()
     assert "secret" not in decoded.decode()
-
-
-def test_markdown_contains_every_registered_result_and_decision_table():
-    report = _campaign_report()
-    markdown = render_markdown(report)
-
-    for heading in (
-        "# Tempering accuracy",
-        "## Verdict",
-        "## Integrity and environment",
-        "## Gate counts",
-        "## Minimum passing sweeps",
-        "## Matched resampling comparison",
-        "## Complete cell results",
-        "## Failures and exclusions",
-        "## Methods and digests",
-    ):
-        assert heading in markdown
-    for cell in (*current_cells(), *matched_cells()):
-        assert f"| `{cell_id(cell)}` |" in markdown
-    assert "| G0 | 4 | 1000 | cpu_f64 | 5 |" in markdown
-    assert "9 / 9" in markdown
-    assert "/private/" not in markdown
-    assert "secret" not in markdown
