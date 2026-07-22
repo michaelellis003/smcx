@@ -282,8 +282,8 @@ def bootstrap_update(
 ) -> tuple[BootstrapCheckpoint, ParticleFilterPosterior]:
     """Advance a checkpoint over an explicitly keyed observation chunk.
 
-    Inputs align by index. Chunk evidence is conditional. ADR-0031 uses an
-    eager public-step loop on MPS and a compiled scan elsewhere.
+    Inputs align by index. Chunk evidence is conditional. MPS uses an eager
+    public-step loop; other platforms use a compiled scan.
 
     Args:
         step_keys: One explicit PRNG key per chunk observation.
@@ -377,7 +377,7 @@ def bootstrap_update(
         )
 
     if platform == "mps":
-        # ADR-0031: remove under smcx#38 after a fixed jax-mps release.
+        # Remove this containment under smcx#38 after a fixed jax-mps release.
         current, chunk_sum, chunk_correction = checkpoint, zero, zero
         records = []
         for index in range(num_steps):
@@ -475,7 +475,7 @@ def bootstrap_filter(
             reaches the initial sampler and observation callback;
             ``inputs[t]`` then reaches the transition into t and the
             observation at t.
-        store_history: When False (ADR-0011), the scan stacks no
+        store_history: When False, the scan stacks no
             per-step particle/weight/ancestor histories — the returned
             arrays cover only the final step (time axis length 1)
             while ``ess``/``log_evidence_increments`` stay full —

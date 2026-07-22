@@ -167,7 +167,7 @@ class LiuWestPosterior(NamedTuple):
 
 
 class TemperedPosterior(NamedTuple):
-    """Tempered-SMC output (ADR-0008 item 6).
+    """Tempered-SMC output.
 
     ``particles`` are equal-weight draws from the target (final
     resample + pi-invariant moves), so ``log_weights`` is uniform —
@@ -186,14 +186,14 @@ class TemperedPosterior(NamedTuple):
 
 
 class SMC2Posterior(NamedTuple):
-    """SMC² output (ADR-0014): a posterior over static parameters.
+    """SMC² posterior over static parameters.
 
     The outer layer is an SMC sampler over ``num_theta`` parameter
     particles; each carries an ``num_x``-particle inner filter whose
     unbiased likelihood estimate drives the outer weights.
     ``filtered_params`` is the parameter cloud and
     ``filtered_log_weights`` its normalized outer log-weights at each
-    step (final step only when ``store_history=False``, ADR-0011) —
+    step (final step only when ``store_history=False``) —
     the field name matches ``LiuWestPosterior`` so
     ``param_weighted_mean`` and ``param_weighted_quantile`` apply
     directly. ``marginal_loglik`` is the Neumaier-compensated SMC²

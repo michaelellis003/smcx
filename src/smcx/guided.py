@@ -95,14 +95,14 @@ def guided_filter(
             :math:`\log g`.
         emissions: Observations with leading time dimension.
         num_particles: Number of particles :math:`N`.
-        resampling_fn: ADR-0004 contract resampler
+        resampling_fn: Resampler with signature
             ``(key, weights, num_samples) -> indices``.
         resampling_threshold: Resample when
             ``ESS < resampling_threshold * N``.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)``. Input zero reaches initialization; each later
             input reaches every guided callback at that time step.
-        store_history: When False (ADR-0011), the scan stacks no
+        store_history: When False, the scan stacks no
             per-step particle/weight/ancestor histories — the returned
             arrays cover only the final step (time axis length 1)
             while ``ess``/``log_evidence_increments`` stay full.
@@ -265,8 +265,8 @@ def guided_filter(
                 ess_t,
                 log_ev_inc,
             )
-        # Final-only mode (ADR-0011): ancestors ride the carry (O(N));
-        # the scan stacks just the scalar traces.
+        # In final-only mode, ancestors ride the carry (O(N)) and the
+        # scan stacks just the scalar traces.
         return (new_state, ess_t, ancestors), (ess_t, log_ev_inc)
 
     step_keys = jr.split(key, emissions.shape[0] - 1)

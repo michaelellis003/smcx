@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Inverse-CDF resampling kernels (ADR-0004 contract, JAX port).
+"""Inverse-CDF resampling kernels.
 
 Every kernel takes ``(key, weights, num_samples)`` — probability-space
 weights, any positive scale — and returns ``int32`` ancestor indices in
@@ -9,8 +9,8 @@ weights, any positive scale — and returns ``int32`` ancestor indices in
 are nondecreasing; residual returns its deterministic block followed by
 iid remainder draws. Query grids are clamped strictly below 1 so a grid
 point that rounds to 1.0 in float32 cannot select past the final
-positive-weight slot (the ADR-0017 endpoint guard, inherited from
-smcx's former MLX implementation).
+positive-weight slot. This endpoint guard is inherited from smcx's
+former MLX implementation.
 """
 
 import jax

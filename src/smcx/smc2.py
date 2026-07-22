@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-r"""SMC² — nested parameter inference for state-space models (ADR-0014).
+r"""SMC² — nested parameter inference for state-space models.
 
 ``num_theta`` parameter particles form an outer SMC sampler; each
 carries an ``num_x``-particle inner bootstrap filter whose unbiased
@@ -16,8 +16,8 @@ The live state is the ``(num_theta, num_x, d_x)`` inner tensor plus
 the outer weights. All weights are log-domain, log-Z carries are
 Neumaier-compensated. The inner filter resamples every step (the
 simplest unbiased estimator); adaptive inner resampling and adaptive
-``num_x`` are deferred (ADR-0014). The PMMH move is an internal
-rejuvenation kernel, not a user-facing PMMH sampler (ADR-0014). The
+``num_x`` are not implemented. The PMMH move is an internal
+rejuvenation kernel, not a user-facing PMMH sampler. The
 outer schedule branches on host-side ESS reads, so ``smc2`` itself is
 not jittable; the batched inner kernels are jitted.
 """
@@ -110,7 +110,7 @@ def smc2(
     resampling_fn: ResamplingFn = systematic,
     store_history: bool = True,
 ) -> SMC2Posterior:
-    r"""Run SMC² for joint state-and-parameter inference (ADR-0014).
+    r"""Run SMC² for joint state-and-parameter inference.
 
     Args:
         key: JAX PRNG key.
@@ -127,15 +127,15 @@ def smc2(
         emissions: Observations ``(T, D)`` (or ``(T,)``,
             canonicalized).
         num_theta: Number of outer parameter particles.
-        num_x: Number of inner particles (fixed; ADR-0014).
+        num_x: Fixed number of inner particles.
         ess_threshold: Rejuvenate the parameter cloud when the outer
             ESS drops below ``ess_threshold * num_theta``. Set 0 to
             disable rejuvenation (a pure forward pass).
         num_pmmh_steps: PMMH moves applied per rejuvenation.
-        resampling_fn: ADR-0004 resampler for the OUTER theta cloud at
+        resampling_fn: Resampler for the outer parameter cloud at
             rejuvenation (the inner filters use a fixed vmapped
             systematic kernel).
-        store_history: ADR-0011 memory option; when False only the
+        store_history: When False, only the
             final parameter cloud is returned (time axis length 1).
 
     Returns:

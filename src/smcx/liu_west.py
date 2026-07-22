@@ -190,7 +190,7 @@ def liu_west_filter(
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)``. Inputs follow ``params`` in every callback;
             the parameter initializer remains input-independent.
-        store_history: When False (ADR-0011), only the final step's
+        store_history: When False, only the final step's
             particle/param/weight/ancestor arrays are returned (time
             axis length 1); ``ess``/``log_evidence_increments`` stay
             full.
@@ -373,8 +373,8 @@ def liu_west_filter(
                 ess_t,
                 log_ev_inc,
             )
-        # Final-only mode (ADR-0011): the lean scan stacks only the
-        # scalar traces; final arrays come from the carry.
+        # In final-only mode, the scan stacks only the scalar traces;
+        # final arrays come from the carry.
         return new_carry, (ess_t, log_ev_inc)
 
     init_carry = (particles_0, params_0, log_w_0, log_ev_0, identity_ancestors)

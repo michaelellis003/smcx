@@ -21,11 +21,8 @@ Each algorithm asks only for behavior it can use:
 | Guided | Initial cloud and proposal | Proposal, transition, and observation |
 | Tempered SMC | Initial cloud | Prior and likelihood |
 
-A generic model object cannot infer a useful look-ahead function, guided
-proposal, parameter transform, or conditional-Gaussian decomposition. Select
-the algorithm and construct its callbacks explicitly. Do not use `hasattr`,
-signature inspection, optional methods, or `NotImplementedError` to discover
-capabilities at runtime.
+Choose the algorithm first, then supply the callbacks shown in the table.
+smcx does not inspect a model object to discover optional capabilities.
 
 ## Bind a plain JAX model
 
@@ -102,9 +99,8 @@ posterior = smcx.bootstrap_filter(
 )
 ```
 
-The factory is ordinary application code, not a public callback-bundle type.
-An auxiliary or guided factory should return that algorithm's extra
-callbacks rather than attach optional methods to one universal object.
+The factory belongs to the application. An auxiliary or guided factory can
+return the extra callbacks required by that algorithm.
 
 ## Write input-aware callbacks explicitly
 
@@ -150,17 +146,16 @@ whose mutation kernels require Euclidean geometry still take dense parameter
 vectors; a user-owned codec can decode those vectors inside conditioned
 callbacks.
 
-Do not copy a fixed neural network into every latent particle. Closing over a
-fixed model is appropriate for one inference run. Frequently replacing
-closed-over parameter arrays may cause JAX to retrace or recompile the run;
-profile that usage before changing filter APIs to pass a dynamic model.
+Close over a fixed model rather than copying it into every latent particle.
+Replacing closed-over array values can make JAX retrace or recompile the
+filter, so pass frequently changing values through an explicit argument.
 
 ## Optional Equinox representation
 
-This static recipe targets `equinox==0.13.8`. Equinox remains outside every
-smcx dependency group. Its [Module documentation][equinox-module] defines
-modules as PyTrees whose methods have no special transformation semantics, so
-a fixed callable module can cross the same closure boundary.
+If an application already uses Equinox, a callable module can be captured by
+the same closures. This example targets `equinox==0.13.8`; Equinox is not an
+smcx dependency. See the Equinox [Module documentation][equinox-module] for
+its PyTree behavior.
 
 ```python
 import math
@@ -223,8 +218,7 @@ posterior = smcx.bootstrap_filter(
 )
 ```
 
-The factory has the same three signatures and returns the same posterior
-contract as the plain JAX version. smcx sees only those pure callables. It
-does not need an Equinox-aware model class, codec, or adapter.
+The factory exposes the same three callback signatures as the plain JAX
+version. No Equinox-specific adapter is needed.
 
 [equinox-module]: https://docs.kidger.site/equinox/api/module/module/
