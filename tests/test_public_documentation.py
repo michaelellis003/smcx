@@ -20,28 +20,12 @@ def _tracked(*paths: str) -> list[str]:
     ).stdout.splitlines()
 
 
-def test_internal_roadmap_is_not_tracked() -> None:
-    assert not _tracked("ROADMAP.md")
+def test_internal_project_records_are_not_tracked() -> None:
+    assert not _tracked("ROADMAP.md", "docs/adr")
 
     ignored = (ROOT / ".gitignore").read_text().splitlines()
     assert "/ROADMAP.md" in ignored
-
-
-def test_internal_decision_index_is_not_tracked() -> None:
-    paths = (
-        "docs/adr/0030-native-conditionally-linear-gaussian-rbpf.md",
-        "docs/adr/0031-mps-bootstrap-update-containment.md",
-        "docs/adr/index.md",
-    )
-    assert not _tracked(*paths)
-
-
-def test_reporting_and_checkpoint_records_are_not_tracked() -> None:
-    paths = (
-        "docs/adr/0027-arviz-bridge-contract.md",
-        "docs/adr/0028-streaming-filter-checkpoints.md",
-    )
-    assert not _tracked(*paths)
+    assert "docs/adr/" in ignored
 
 
 def test_public_text_excludes_internal_decision_labels() -> None:
