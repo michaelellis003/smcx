@@ -36,6 +36,14 @@ def test_internal_decision_index_is_not_tracked() -> None:
     assert not _tracked(*paths)
 
 
+def test_reporting_and_checkpoint_records_are_not_tracked() -> None:
+    paths = (
+        "docs/adr/0027-arviz-bridge-contract.md",
+        "docs/adr/0028-streaming-filter-checkpoints.md",
+    )
+    assert not _tracked(*paths)
+
+
 def test_public_text_excludes_internal_decision_labels() -> None:
     paths = [
         ROOT / "README.md",
