@@ -39,21 +39,11 @@ def test_requests_freeze_exact_order_and_balanced_blocks():
         "timing": 420,
         "accuracy": 84,
     }
-    assert Counter(request.cell.arm for request in requests) == {
-        "current_systematic": 436,
-        "matched_multinomial": 72,
-    }
     assert requests[424].phase == "accuracy"
     encoded = artifacts.canonical_json([
         artifacts.request_dict(request) for request in requests
     ])
     assert hashlib.sha256(encoded.encode()).hexdigest() == _PLAN_SHA256
-    timing = [request for request in requests if request.phase == "timing"]
-    for arm, size in (("current_systematic", 72), ("matched_multinomial", 12)):
-        observed = Counter(
-            request.block for request in timing if request.cell.arm == arm
-        )
-        assert observed == {block: size for block in range(5)}
 
 
 def test_manifest_hash_names_and_waste_free_exclusion(monkeypatch, tmp_path):
@@ -82,6 +72,35 @@ def test_campaign_identity_covers_source_lock_python_packages_and_host():
     assert "tfp-nightly" not in identity["packages"]
     lock = (root / "uv.lock").read_bytes()
     assert identity["lock"]["sha256"] == hashlib.sha256(lock).hexdigest()
+
+
+@pytest.mark.parametrize("missing", ("status", "commit"))
+def test_campaign_identity_fails_closed_without_git_identity(
+    monkeypatch, missing
+):
+    root = Path(__file__).resolve().parents[1]
+
+    def command_value(command, **kwargs):
+        kind = "status" if "status" in command else "commit"
+        return (
+            None if kind == missing else ("" if kind == "status" else "c" * 40)
+        )
+
+    monkeypatch.setattr(artifacts, "_command_value", command_value)
+    with pytest.raises(RuntimeError, match="git identity"):
+        artifacts.campaign_identity(root)
+
+
+@pytest.mark.parametrize(("index", "field"), ((0, "schema"), (4, "block")))
+def test_raw_result_identity_is_type_strict(tmp_path, index, field):
+    request = artifacts.campaign_requests()[index]
+    payload = _payload(request)
+    if field == "schema":
+        payload["schema_version"] = True
+    else:
+        payload["request"]["block"] = False
+    with pytest.raises(ValueError, match="manifest request"):
+        artifacts.write_raw_result(tmp_path, request, _DIGEST, payload)
 
 
 def test_manifest_and_raw_results_are_exclusive_and_resumable(
