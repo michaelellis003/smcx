@@ -39,13 +39,21 @@ def _payload(request, digest):
     }
 
 
-def test_load_campaign_accepts_only_a_canonical_contiguous_prefix(
-    monkeypatch, tmp_path
-):
+def _manifest(monkeypatch, tmp_path):
     monkeypatch.setattr(
         artifacts, "campaign_identity", lambda root: _identity()
     )
-    manifest = artifacts.build_manifest(tmp_path)
+    return artifacts.build_manifest(tmp_path)
+
+
+def _write_manifest(tmp_path, manifest):
+    (tmp_path / "manifest.json").write_text(canonical_json(manifest) + "\n")
+
+
+def test_load_campaign_accepts_only_a_canonical_contiguous_prefix(
+    monkeypatch, tmp_path
+):
+    manifest = _manifest(monkeypatch, tmp_path)
     digest = artifacts.ensure_manifest(tmp_path, manifest)
     requests = artifacts.campaign_requests()
     for request in requests[:2]:
@@ -67,4 +75,33 @@ def test_load_campaign_accepts_only_a_canonical_contiguous_prefix(
         tmp_path, request, digest, _payload(request, digest)
     )
     with pytest.raises(ValueError, match="contiguous prefix"):
+        load_campaign(tmp_path)
+
+
+def test_manifest_request_identity_is_type_strict(monkeypatch, tmp_path):
+    manifest = _manifest(monkeypatch, tmp_path)
+    manifest["requests"][4]["block"] = False
+    _write_manifest(tmp_path, manifest)
+
+    with pytest.raises(ValueError, match="registered campaign"):
+        load_campaign(tmp_path)
+
+
+def test_manifest_requires_exact_campaign_identity_keys(monkeypatch, tmp_path):
+    manifest = _manifest(monkeypatch, tmp_path)
+    manifest["campaign_identity"]["unexpected"] = None
+    _write_manifest(tmp_path, manifest)
+
+    with pytest.raises(ValueError, match="registered campaign"):
+        load_campaign(tmp_path)
+
+
+def test_load_campaign_rejects_an_unexpected_raw_file(monkeypatch, tmp_path):
+    manifest = _manifest(monkeypatch, tmp_path)
+    _write_manifest(tmp_path, manifest)
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "notes.txt").write_text("not campaign evidence")
+
+    with pytest.raises(ValueError, match="unexpected artifact"):
         load_campaign(tmp_path)
