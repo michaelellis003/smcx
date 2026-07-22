@@ -15,6 +15,7 @@ import numpy as np
 from benchmarks.profiling.common import canonical_json
 from benchmarks.tempering_accuracy.plan import (
     cell_id,
+    centering_summary_count,
     current_cells,
     matched_cells,
 )
@@ -132,6 +133,7 @@ def build_evidence(
     """Build the canonical, path-free public evidence document."""
     retained_attempts = _attempts(attempts)
     expected = (*current_cells(), *matched_cells())
+    registered_gates = sum(centering_summary_count(cell) for cell in expected)
     if tuple(item.cell for item in report.cells) != expected:
         raise ValueError("report cells do not match the registered campaign")
     campaign = report.campaign
@@ -186,14 +188,16 @@ def build_evidence(
         "gate_counts": {
             "centering": {
                 "passed": sum(gate.passed for gate in gates),
-                "total": len(gates),
+                "evaluated": len(gates),
+                "registered": registered_gates,
             },
             "evidence_resolution": {
                 "passed": sum(
                     analysis.evidence_resolution_width <= 0.10
                     for analysis in analyses
                 ),
-                "total": len(analyses),
+                "evaluated": len(analyses),
+                "registered": len(expected),
             },
         },
         "status_counts": dict(
