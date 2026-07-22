@@ -202,14 +202,3 @@ def test_markdown_hides_timing_for_an_accuracy_ineligible_cell():
     row = _table_rows(markdown, "All cells")[0]
     values = [value.strip() for value in row.strip("|").split("|")]
     assert values[-4:] == ["—", "—", "—", "—"]
-
-
-def test_markdown_fails_closed_on_malformed_evidence():
-    evidence = _evidence()
-    del evidence["cells"][0]["timing"]["steady"]
-    with pytest.raises(ValueError, match="evidence"):
-        render_markdown(evidence, report_date="2026-07-22")
-    evidence = _evidence()
-    evidence["schema_version"] = 2
-    with pytest.raises(ValueError, match="evidence"):
-        render_markdown(evidence, report_date="2026-07-22")

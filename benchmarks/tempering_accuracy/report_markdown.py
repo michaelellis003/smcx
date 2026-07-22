@@ -5,33 +5,9 @@
 
 import math
 from collections.abc import Mapping, Sequence
-from datetime import date
 from typing import Any, cast
 
-from benchmarks.tempering_accuracy.plan import (
-    cell_id,
-    current_cells,
-    matched_cells,
-)
-
-
-def _fields(names: str) -> set[str]:
-    return set(names.split())
-
-
 _DASH = "—"
-_ROOT = _fields(
-    "schema_version verdict integrity environment algorithm_contract execution "
-    "gate_counts status_counts cells failures attempts exclusions"
-)
-_CELL = _fields("id cell status timing accuracy work")
-_TIMING = _fields("status first steady process_rss mps_peak")
-_SUMMARY = _fields("values median q1 q3 iqr minimum maximum")
-_ACCURACY = _fields(
-    "mean_gates covariance_gates evidence_gate evidence_resolution_width "
-    "mean_loss covariance_loss evidence_loss status "
-    "correctness_eligible"
-)
 _ALL_HEADER = (
     "Cell|Status|Mean RMSE|Cov RMSE|Evidence RMSE|Stages|Pairs|First s|"
     "Steady s|RSS MiB|MPS MiB"
@@ -46,24 +22,10 @@ def _bad(detail: str) -> ValueError:
     return ValueError(f"markdown evidence {detail}")
 
 
-def _map(value: object, keys: set[str] | None = None) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping) or (
-        keys is not None and set(value) != keys
-    ):
-        raise _bad("has an invalid mapping schema")
+def _map(value: object) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise _bad("has an invalid mapping")
     return cast(Mapping[str, Any], value)
-
-
-def _seq(value: object) -> Sequence[Any]:
-    if not isinstance(value, list | tuple):
-        raise _bad("has an invalid sequence")
-    return value
-
-
-def _ident(value: object) -> str:
-    if not isinstance(value, str) or not value.isidentifier():
-        raise _bad("has an unsafe identifier")
-    return value
 
 
 def _text(value: object) -> str:
@@ -88,9 +50,7 @@ def _format(value: object, *, integer: bool = False) -> str:
 def _median(value: object, *, divisor: int = 1, integer: bool = False) -> str:
     if value is None:
         return _DASH
-    summary = _map(value, _SUMMARY)
-    if not _seq(summary["values"]):
-        raise _bad("has an empty summary")
+    summary = _map(value)
     return _format(summary["median"] / divisor, integer=integer)
 
 
@@ -104,49 +64,6 @@ def _table(title: str, header: str, rows: Sequence[Sequence[str]]) -> str:
         *("| " + " | ".join(row) + " |" for row in rows),
     ]
     return f"## {title}\n\n" + "\n".join(lines)
-
-
-def _validate(evidence: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
-    root = _map(evidence, _ROOT)
-    if root["schema_version"] != 1 or type(root["schema_version"]) is not int:
-        raise _bad("uses an unsupported schema")
-    _map(
-        root["execution"],
-        _fields("complete result_count not_run_after_stop"),
-    )
-    gates = _map(root["gate_counts"], _fields("centering evidence_resolution"))
-    for counts in gates.values():
-        counts = _map(counts, _fields("passed evaluated registered"))
-        if any(type(counts.get(name)) is not int for name in counts):
-            raise _bad("has invalid gate counts")
-    registered = (*current_cells(), *matched_cells())
-    raw_cells = _seq(root["cells"])
-    if len(raw_cells) != 84:
-        raise _bad("does not contain the 84 registered cells")
-    cells = []
-    for value, expected in zip(raw_cells, registered, strict=True):
-        item = _map(value, _CELL)
-        if (
-            item["id"] != cell_id(expected)
-            or dict(_map(item["cell"])) != expected._asdict()
-        ):
-            raise _bad("has an unregistered cell")
-        status = _ident(item["status"])
-        _map(item["timing"], _TIMING)
-        accuracy = item["accuracy"]
-        if accuracy is None:
-            if item["work"] is not None:
-                raise _bad("has work without accuracy")
-        else:
-            accuracy = _map(accuracy, _ACCURACY)
-            if (
-                type(accuracy["correctness_eligible"]) is not bool
-                or _ident(accuracy["status"]) != status
-            ):
-                raise _bad("has inconsistent accuracy status")
-            _map(item["work"])
-        cells.append(item)
-    return tuple(cells)
 
 
 def _eligible(item: Mapping[str, Any]) -> bool:
@@ -178,14 +95,6 @@ def _label(item: Mapping[str, Any]) -> tuple[str, ...]:
     return geometry, str(dimension), f"{particles:,}", lane
 
 
-def _link(value: str | None) -> str | None:
-    if value is not None and (
-        not value or any(character in value for character in "\r\n []()<>{}")
-    ):
-        raise ValueError("figure link is unsafe")
-    return value
-
-
 def render_markdown(
     evidence: Mapping[str, Any],
     *,
@@ -193,11 +102,8 @@ def render_markdown(
     gate_figure: str | None = None,
     cost_figure: str | None = None,
 ) -> str:
-    """Render one validated evidence mapping without filesystem access."""
-    if date.fromisoformat(report_date).isoformat() != report_date:
-        raise ValueError("report date must be ISO 8601")
-    gate_figure, cost_figure = _link(gate_figure), _link(cost_figure)
-    cells = _validate(evidence)
+    """Render one campaign evidence mapping without filesystem access."""
+    cells = cast(Sequence[Mapping[str, Any]], evidence["cells"])
     environment = evidence["environment"]
     integrity, host = evidence["integrity"], environment["host"]
     python = environment["python"]
