@@ -24,6 +24,8 @@ pip install "smcx[arviz]"
 
 - [Quickstart](guides/quickstart.md) builds and diagnoses a particle
   filter, then replaces its bootstrap proposal with a guided proposal.
+- [Filtering tutorial](tutorials/filtering.md) runs a complete example and
+  plots its filtering intervals and effective sample size.
 - [Custom models](guides/custom-models.md) explains the callback boundary,
   structured latent states, time-varying inputs, and an optional Equinox
   representation.

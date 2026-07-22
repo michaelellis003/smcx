@@ -46,8 +46,13 @@ plugins:
       nav_file: SUMMARY.md
       implicit_index: true
   - mkdocs-jupyter:
-      execute: false
+      include:
+        - tutorials/*.md
+      execute: true
+      allow_errors: false
+      kernel_name: python3
       include_source: true
+      cache: false
 
 # Markdown Extensions
 markdown_extensions:
@@ -75,6 +80,7 @@ exclude_docs: |
 nav:
   - Home: index.md
   - Getting started: guides/quickstart.md
+  - Tutorial: tutorials/filtering.md
   - Guides:
       - ArviZ reporting: guides/arviz.md
       - Custom models: guides/custom-models.md

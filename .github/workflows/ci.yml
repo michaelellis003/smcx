@@ -217,6 +217,11 @@ jobs:
       - name: Setup uv
         uses: ./.github/actions/setup-uv
 
+      - name: Build documentation
+        env:
+          JAX_PLATFORMS: cpu
+        run: uv run properdocs build --strict
+
       - name: Build sdist and wheel
         run: uv build
 
