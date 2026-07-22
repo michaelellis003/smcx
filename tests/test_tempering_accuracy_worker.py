@@ -348,6 +348,34 @@ def test_timing_retains_completed_evidence_when_extraction_fails(monkeypatch):
     assert payload["runs"] == []
 
 
+def test_timing_nonfinite_duration_failure_is_json_safe(monkeypatch):
+    cell = _active_cell(current_cells())
+    calls = []
+    ticks = iter((0.0, math.nan, *(float(index) for index in range(2, 16))))
+    states = iter((
+        {"boundary": "pre"},
+        {"boundary": "post"},
+        {"boundary": "failure"},
+    ))
+
+    def fake_temper(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _fake_posterior(cell)
+
+    monkeypatch.setattr(worker.smcx, "temper", fake_temper)
+    monkeypatch.setattr(worker, "_burn_backend", lambda: None)
+    monkeypatch.setattr(worker, "_clock", lambda: next(ticks))
+    monkeypatch.setattr(worker, "_timing_environment", lambda: next(states))
+    monkeypatch.setattr(worker, "_max_rss_bytes", lambda: 123)
+    monkeypatch.setattr(worker, "_runtime_state", lambda: _valid_runtime(cell))
+
+    payload = execute_request(WorkerRequest(_MANIFEST, "timing", cell, 0))
+
+    assert len(calls) == 8
+    assert payload["failure"]["timing_prefix"]["first_execution_s"] is None
+    json.dumps(payload, allow_nan=False)
+
+
 def test_system_value_returns_none_after_timeout(monkeypatch):
     def timeout(*args, **kwargs):
         assert kwargs["timeout"] == pytest.approx(5.0)
