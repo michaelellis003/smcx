@@ -4,6 +4,7 @@
 """Immutable artifact contracts for the tempering-accuracy campaign."""
 
 import hashlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,45 @@ def test_campaign_identity_fails_closed_without_git_identity(
         artifacts.campaign_identity(root)
 
 
+def test_source_identity_checks_the_whole_repo_but_respects_ignores(tmp_path):
+    for relative in (
+        "benchmarks/profiling/common.py",
+        "benchmarks/profiling/locking.py",
+        "pyproject.toml",
+        "uv.lock",
+    ):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("baseline\n")
+    (tmp_path / ".gitignore").write_text(".venv/\nspecs/\n")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=smcx test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "baseline",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    for relative in (".venv/ignored.py", "specs/ignored.md"):
+        path = tmp_path / relative
+        path.parent.mkdir()
+        path.write_text("ignored\n")
+    source, _ = artifacts._source_identity(tmp_path)
+    assert source["git_dirty"] is False
+
+    (tmp_path / "jax.py").write_text("raise RuntimeError\n")
+    source, _ = artifacts._source_identity(tmp_path)
+    assert source["git_dirty"] is True
+
+
 @pytest.mark.parametrize(("index", "field"), ((0, "schema"), (4, "block")))
 def test_raw_result_identity_is_type_strict(tmp_path, index, field):
     request = artifacts.campaign_requests()[index]
@@ -100,3 +140,16 @@ def test_manifest_and_raw_results_are_exclusive_and_resumable(
     path.write_text(foreign + "\n")
     with pytest.raises(ValueError, match="invalid raw result"):
         artifacts.load_raw_result(tmp_path, request, digest)
+
+
+@pytest.mark.parametrize("parent", ("raw", "attempts"))
+def test_exclusive_write_rejects_symlinked_parent(tmp_path, parent):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / parent).symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        artifacts._write_exclusive(
+            tmp_path / parent / "result.json", {"result": "unsafe"}
+        )
+    assert not any(outside.iterdir())
