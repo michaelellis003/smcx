@@ -33,10 +33,19 @@ def test_public_measurements_preserve_values_without_private_payloads():
         "first_execution_s": 4.0,
         "steady_times_s": [1.0, 2.0],
     }
+    boundary = {"power_status": "AC", "thermal_status": "nominal"}
     expected_failure = {
         "kind": "execution_failure",
+        "key_index": 2,
+        "key_words": [1, 2],
+        "key_indices": [2, 3],
         "failed_call": {"role": "steady", "index": 2},
         "timing_prefix": prefix,
+        "boundaries": dict.fromkeys(
+            ("pre_timing", "post_timing", "post_cell"), boundary
+        ),
+        "changed_domains": ["source", "host"],
+        "worker_failure": {"kind": "worker_exit"},
     }
     failure = report_measurements._failure(
         expected_failure
@@ -44,6 +53,10 @@ def test_public_measurements_preserve_values_without_private_payloads():
             "message": "secret /private/path",
             "stdout_tail": "secret stdout",
             "stderr_tail": "secret stderr",
+            "worker_failure": {
+                "kind": "worker_exit",
+                "stderr_tail": "secret nested stderr",
+            },
         }
     )
 
@@ -59,6 +72,8 @@ def test_public_measurements_preserve_values_without_private_payloads():
 
 
 def test_measurements_fail_closed_on_nested_schema():
+    with pytest.raises(ValueError):
+        report_measurements._schema_version(True)
     request = artifacts.CampaignRequest("accuracy", _CELL, None)
     run = _run(0)
     run["unexpected"] = "hidden"
