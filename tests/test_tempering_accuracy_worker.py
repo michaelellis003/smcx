@@ -14,6 +14,7 @@ import pytest
 
 import benchmarks.tempering_accuracy.worker as worker
 import smcx
+from benchmarks.tempering_accuracy.core import accuracy_keys
 from benchmarks.tempering_accuracy.plan import (
     current_cells,
     current_smoke_cells,
@@ -41,6 +42,21 @@ def _fake_posterior(cell):
         ess=jnp.asarray([500.0, 700.0], dtype=dtype),
         acceptance_rates=jnp.asarray([0.2, 0.3], dtype=dtype),
     )
+
+
+def _key_words(key):
+    return tuple(int(word) for word in np.asarray(jr.key_data(key)))
+
+
+def _fake_record(request, key, key_index, *, structural=True):
+    posterior = _fake_posterior(request.cell)
+    if not structural:
+        posterior = posterior._replace(
+            marginal_loglik=jnp.asarray(
+                np.nan, dtype=posterior.marginal_loglik.dtype
+            )
+        )
+    return worker._record_posterior(request, key, key_index, posterior)
 
 
 def _valid_runtime(cell):
@@ -319,3 +335,93 @@ def test_runtime_flags_retain_registered_environment_values(monkeypatch):
         monkeypatch.setenv(name, value)
 
     assert worker._runtime_flags() == expected
+
+
+def test_accuracy_runs_all_committed_keys_in_order_without_timing(monkeypatch):
+    cell = _active_cell(current_cells())
+    calls = []
+
+    def fake_run_once(request, key, key_index):
+        calls.append((key_index, _key_words(key)))
+        return _fake_record(request, key, key_index)
+
+    def forbidden_timing(*args, **kwargs):
+        raise AssertionError("accuracy execution must not time")
+
+    monkeypatch.setattr(worker, "_run_once", fake_run_once)
+    monkeypatch.setattr(worker, "_run_timing", forbidden_timing)
+    monkeypatch.setattr(worker, "_clock", forbidden_timing)
+
+    request = WorkerRequest(_MANIFEST, "accuracy", cell, None)
+    payload = execute_request(request)
+    expected = [_key_words(key) for key in accuracy_keys()]
+
+    assert payload["failure"] is None
+    assert payload["timing"] is None
+    assert calls == list(enumerate(expected))
+    assert len(payload["runs"]) == len(expected) == 32
+    assert [run["key_index"] for run in payload["runs"]] == list(range(32))
+    assert [tuple(run["key_words"]) for run in payload["runs"]] == expected
+    json.dumps(payload, allow_nan=False)
+
+
+def test_accuracy_retains_structural_failures_and_finishes_keys(monkeypatch):
+    cell = _active_cell(current_cells())
+    calls = []
+    failed_indices = [3, 17]
+
+    def fake_run_once(request, key, key_index):
+        calls.append(key_index)
+        return _fake_record(
+            request,
+            key,
+            key_index,
+            structural=key_index not in failed_indices,
+        )
+
+    monkeypatch.setattr(worker, "_run_once", fake_run_once)
+
+    payload = execute_request(WorkerRequest(_MANIFEST, "accuracy", cell, None))
+
+    assert calls == list(range(32))
+    assert len(payload["runs"]) == 32
+    assert payload["failure"] == {
+        "kind": "structural_failure",
+        "exception_type": None,
+        "message": "registered structural checks failed",
+        "key_indices": failed_indices,
+    }
+    assert not payload["runs"][3]["structural"]["passed"]
+    assert payload["runs"][3]["log_evidence"] is None
+    assert payload["runs"][31]["key_index"] == 31
+    json.dumps(payload, allow_nan=False)
+
+
+def test_accuracy_retains_prefix_and_failing_key_context(monkeypatch):
+    cell = _active_cell(current_cells())
+    calls = []
+    failed_index = 7
+
+    def fail_committed_key(request, key, key_index):
+        calls.append(key_index)
+        if key_index == failed_index:
+            raise RuntimeError("committed accuracy failure")
+        return _fake_record(request, key, key_index)
+
+    monkeypatch.setattr(worker, "_run_once", fail_committed_key)
+
+    payload = execute_request(WorkerRequest(_MANIFEST, "accuracy", cell, None))
+
+    assert calls == list(range(failed_index + 1))
+    assert [run["key_index"] for run in payload["runs"]] == list(
+        range(failed_index)
+    )
+    assert payload["timing"] is None
+    assert payload["failure"] == {
+        "kind": "execution_failure",
+        "exception_type": "RuntimeError",
+        "message": "committed accuracy failure",
+        "key_index": failed_index,
+        "key_words": list(_key_words(accuracy_keys()[failed_index])),
+    }
+    json.dumps(payload, allow_nan=False)
