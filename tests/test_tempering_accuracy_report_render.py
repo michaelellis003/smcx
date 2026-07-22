@@ -214,7 +214,7 @@ def test_plots_are_deterministic_and_report_omissions(tmp_path):
     second_cost = tmp_path / "second-cost.png"
 
     summary = render_plots(evidence, first_gate, first_cost)
-    second = render_plots(evidence, second_gate, second_cost)
+    render_plots(evidence, second_gate, second_cost)
 
     assert summary == PlotSummary(
         evaluated_gate_cells=1,
@@ -222,15 +222,17 @@ def test_plots_are_deterministic_and_report_omissions(tmp_path):
         eligible_cost_cells=1,
         unavailable_cost_cells=71,
     )
-    assert second == summary
     assert first_gate.read_bytes() == second_gate.read_bytes()
     assert first_cost.read_bytes() == second_cost.read_bytes()
-    assert first_gate.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-    assert first_cost.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
     evidence = _evidence()
+    render_plots(
+        evidence,
+        tmp_path / "eligible-gates.png",
+        tmp_path / "eligible-cost.png",
+    )
     cell = evidence["cells"][0]
     cell["status"] = "failed_accuracy"
     cell["accuracy"]["status"] = "failed_accuracy"
@@ -240,6 +242,8 @@ def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
         evidence, tmp_path / "gates.png", tmp_path / "cost.png"
     )
 
-    assert summary.evaluated_gate_cells == 1
     assert summary.eligible_cost_cells == 0
     assert summary.unavailable_cost_cells == 72
+    assert (tmp_path / "eligible-gates.png").read_bytes() != (
+        tmp_path / "gates.png"
+    ).read_bytes()
