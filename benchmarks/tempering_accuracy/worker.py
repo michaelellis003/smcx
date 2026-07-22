@@ -103,14 +103,17 @@ class TimingRecord(NamedTuple):
 
 
 class _TimingFailure(NamedTuple):
-    """Diagnostic prefix retained when one measured call raises."""
+    """Diagnostic evidence retained when timing or extraction raises."""
 
     exception_type: str
     message: str
-    role: str
-    index: int
+    role: str | None
+    index: int | None
     first_execution_s: float | None
     steady_times_s: tuple[float, ...]
+    pre_timing: dict[str, str | None]
+    post_timing: dict[str, str | None] | None
+    failure_boundary: dict[str, str | None]
 
 
 def _request_dict(request: WorkerRequest) -> dict[str, object]:
@@ -426,7 +429,15 @@ def _run_timing(
             None,
             None,
             _TimingFailure(
-                type(error).__name__, str(error), "first", 0, None, ()
+                type(error).__name__,
+                str(error),
+                "first",
+                0,
+                None,
+                (),
+                pre_timing,
+                None,
+                _timing_environment(),
             ),
         )
     first_execution = _clock() - started
@@ -446,17 +457,38 @@ def _run_timing(
                     index,
                     first_execution,
                     tuple(steady),
+                    pre_timing,
+                    None,
+                    _timing_environment(),
                 ),
             )
         steady.append(_clock() - started)
 
     post_timing = _timing_environment()
-    device_stats = _device_memory(device)
-    record = _record_posterior(request, prepared.key, None, posterior)
+    try:
+        durations = (first_execution, *steady)
+        if any(not math.isfinite(value) or value < 0 for value in durations):
+            raise RuntimeError("timing clock produced an invalid duration")
+        device_stats = _device_memory(device)
+        record = _record_posterior(request, prepared.key, None, posterior)
+        rss_after = _max_rss_bytes()
+    except Exception as error:
+        return (
+            None,
+            None,
+            _TimingFailure(
+                type(error).__name__,
+                str(error),
+                None,
+                None,
+                first_execution,
+                tuple(steady),
+                pre_timing,
+                post_timing,
+                _timing_environment(),
+            ),
+        )
     post_cell = _timing_environment()
-    durations = (first_execution, *steady)
-    if any(not math.isfinite(value) or value < 0 for value in durations):
-        raise RuntimeError("timing clock produced an invalid duration")
     environment = {
         "device_id": int(device.id),
         "device_kind": str(device.device_kind),
@@ -470,7 +502,7 @@ def _run_timing(
         "device_stats": device_stats,
         "executable_analysis": None,
         "process_max_rss_before_measurement_bytes": rss_before,
-        "process_max_rss_bytes": _max_rss_bytes(),
+        "process_max_rss_bytes": rss_after,
     }
     timing = TimingRecord(
         "host_shell",
@@ -525,20 +557,29 @@ def execute_request(request: WorkerRequest) -> dict[str, Any]:
         elif request.phase == "timing":
             timing, record, timing_failure = _run_timing(request)
             if timing_failure is not None:
-                payload["failure"] = {
+                failure: dict[str, Any] = {
                     "kind": "execution_failure",
                     "exception_type": timing_failure.exception_type,
                     "message": timing_failure.message,
-                    "failed_call": {
-                        "role": timing_failure.role,
-                        "index": timing_failure.index,
-                    },
                     "timing_prefix": {
                         "eligible": False,
                         "first_execution_s": timing_failure.first_execution_s,
                         "steady_times_s": list(timing_failure.steady_times_s),
                     },
+                    "environment": {
+                        "pre_timing": timing_failure.pre_timing,
+                        "post_timing": timing_failure.post_timing,
+                        "failure_boundary": timing_failure.failure_boundary,
+                    },
                 }
+                if timing_failure.role is None:
+                    failure["failed_stage"] = "post_timing_extraction"
+                else:
+                    failure["failed_call"] = {
+                        "role": timing_failure.role,
+                        "index": timing_failure.index,
+                    }
+                payload["failure"] = failure
                 return payload
             assert timing is not None and record is not None
             payload["timing"] = _jsonable(timing)
