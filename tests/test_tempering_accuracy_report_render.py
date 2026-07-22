@@ -3,11 +3,13 @@
 
 """Published report rendering contracts for the tempering campaign."""
 
+import copy
 import gzip
 import json
 
 import numpy as np
 import pytest
+from benchmarks.tempering_accuracy.report_markdown import render_markdown
 
 from benchmarks.profiling.common import canonical_json
 from benchmarks.tempering_accuracy.analysis import (
@@ -27,6 +29,7 @@ from benchmarks.tempering_accuracy.report_data import (
 )
 from benchmarks.tempering_accuracy.report_render import (
     AttemptEvidence,
+    build_evidence,
     evidence_gzip,
 )
 from benchmarks.tempering_accuracy.report_timing import Summary, TimingReport
@@ -160,3 +163,97 @@ def test_evidence_is_canonical_reproducible_and_sanitized():
     ]
     assert "/private/" not in decoded.decode()
     assert "secret" not in decoded.decode()
+
+
+def _table_rows(markdown, heading):
+    section = markdown.split(f"## {heading}\n", 1)[1].split("\n## ", 1)[0]
+    return [line for line in section.splitlines() if line.startswith("| ")][2:]
+
+
+def _evidence():
+    attempt = AttemptEvidence(1, 0, "9" * 64, "launch_error")
+    return build_evidence(_campaign_report(), attempts=(attempt,))
+
+
+def test_markdown_report_is_deterministic_complete_and_sanitized():
+    evidence = _evidence()
+    first = render_markdown(evidence, report_date="2026-07-22")
+
+    assert first == render_markdown(evidence, report_date="2026-07-22")
+    assert first.startswith("# Tempering accuracy — 2026-07-22\n")
+    assert "**Verdict:** `current_rwm_not_eligible`" in first
+    assert "Gates: — · Cost: —" in first
+    assert "| Centering | 6,228 | 9 | 9 |" in first
+    assert "| Evidence resolution | 84 | 1 | 1 |" in first
+    assert len(_table_rows(first, "Minimum passing sweep")) == 24
+    assert len(_table_rows(first, "Matched challenge")) == 12
+    assert len(_table_rows(first, "All cells")) == 84
+    assert "| G0 | 4 | 1,000 | cpu_f64 | 5 |" in first
+    assert "| G0 | 4 | 1,000 | mps_f32 | — |" in first
+    assert "execution_failure" in first
+    assert "launch_error" in first
+    assert "waste_free" in first
+    assert "/private/" not in first
+    assert "secret" not in first
+    assert "CPU/MPS" not in first
+    assert "speedup" not in first.lower()
+    assert first.endswith("\n")
+
+    linked = render_markdown(
+        evidence,
+        report_date="2026-07-22",
+        gate_figure="figures/gates.svg",
+        cost_figure="figures/cost.svg",
+    )
+    assert "[Gates](figures/gates.svg) · [Cost](figures/cost.svg)" in linked
+
+
+def test_markdown_hides_timing_for_an_accuracy_ineligible_cell():
+    evidence = _evidence()
+    cell = evidence["cells"][0]
+    cell["status"] = "failed_accuracy"
+    cell["accuracy"]["status"] = "failed_accuracy"
+    cell["accuracy"]["correctness_eligible"] = False
+    evidence["status_counts"] = {
+        "failed_accuracy": 1,
+        "not_run_after_stop": 83,
+    }
+
+    markdown = render_markdown(evidence, report_date="2026-07-22")
+    row = next(
+        line
+        for line in _table_rows(markdown, "All cells")
+        if line.startswith(
+            "| current_systematic-g0-d4-n1000-cpu_f64-systematic-s5 |"
+        )
+    )
+    values = [value.strip() for value in row.strip("|").split("|")]
+    assert values[-4:] == ["—", "—", "—", "—"]
+
+
+def test_markdown_fails_closed_on_malformed_evidence():
+    evidence = _evidence()
+    malformed = []
+    for mutation in ("schema", "cells", "timing", "counts"):
+        candidate = copy.deepcopy(evidence)
+        if mutation == "schema":
+            candidate["schema_version"] = 2
+        elif mutation == "cells":
+            candidate["cells"].pop()
+        elif mutation == "timing":
+            del candidate["cells"][0]["timing"]["steady"]
+        else:
+            candidate["gate_counts"]["centering"]["passed"] = True
+        malformed.append(candidate)
+
+    for candidate in malformed:
+        with pytest.raises(ValueError, match="evidence"):
+            render_markdown(candidate, report_date="2026-07-22")
+    with pytest.raises(ValueError, match="report date"):
+        render_markdown(evidence, report_date="22 July 2026")
+    with pytest.raises(ValueError, match="figure link"):
+        render_markdown(
+            evidence,
+            report_date="2026-07-22",
+            gate_figure="bad\nlink",
+        )
