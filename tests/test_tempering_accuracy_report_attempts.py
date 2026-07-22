@@ -155,3 +155,9 @@ def test_retry_indices_are_contiguous_and_entries_are_regular_files(tmp_path):
     (attempts / "notes").mkdir()
     with pytest.raises(ValueError, match="unexpected"):
         load_attempts(tmp_path, _DIGEST)
+
+
+def test_broken_attempt_directory_symlink_is_not_treated_as_missing(tmp_path):
+    (tmp_path / "attempts").symlink_to(tmp_path / "missing")
+    with pytest.raises(ValueError, match="unexpected"):
+        load_attempts(tmp_path, _DIGEST)

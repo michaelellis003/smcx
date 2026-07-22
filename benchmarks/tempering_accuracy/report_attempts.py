@@ -169,9 +169,11 @@ def load_attempts(output_dir: Path, manifest_sha256: str) -> AttemptInventory:
     if not _is_digest(manifest_sha256):
         raise ValueError("attempt manifest digest is invalid")
     directory = Path(output_dir) / "attempts"
+    if directory.is_symlink():
+        raise ValueError("unexpected attempts directory entry")
     if not directory.exists():
         return _inventory(())
-    if directory.is_symlink() or not directory.is_dir():
+    if not directory.is_dir():
         raise ValueError("unexpected attempts directory entry")
     paths = tuple(directory.iterdir())
     if any(path.is_symlink() or not path.is_file() for path in paths):
