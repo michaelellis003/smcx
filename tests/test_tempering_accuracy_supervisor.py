@@ -52,10 +52,20 @@ _IDENTITY: dict[str, Any] = {
     },
     "host": {
         "os": "Darwin",
+        "os_release": "25.2.0",
         "machine": "arm64",
+        "macos": "26.2",
+        "macos_build": "25C56",
         "cpu_model": "Apple M3 Pro",
         "hardware_model": "Mac15,7",
+        "physical_memory_bytes": 38_654_705_664,
     },
+}
+_ELIGIBLE_BOUNDARY = {
+    "power_status": "Now drawing from 'AC Power'",
+    "thermal_status": (
+        "No thermal warning level; No performance warning level"
+    ),
 }
 
 
@@ -67,6 +77,17 @@ def _payload(request, *, failure=None):
         "timing": None,
         "runs": [],
     }
+
+
+def _timing_payload(request):
+    payload = _payload(request)
+    payload["timing"] = {
+        "environment": {
+            name: deepcopy(_ELIGIBLE_BOUNDARY)
+            for name in ("pre_timing", "post_timing", "post_cell")
+        }
+    }
+    return payload
 
 
 def _configure(monkeypatch, requests):
@@ -154,6 +175,17 @@ def test_hard_preflight_precedes_manifest(monkeypatch, tmp_path, fault):
     with pytest.raises(supervisor.CampaignError):
         supervisor.run_campaign(tmp_path)
     assert not built
+
+
+@pytest.mark.parametrize(
+    "field", ("macos", "macos_build", "os_release", "physical_memory_bytes")
+)
+def test_hard_preflight_requires_stable_host_metadata(field):
+    identity = deepcopy(_IDENTITY)
+    identity["host"][field] = None
+
+    with pytest.raises(supervisor.CampaignError, match="identity"):
+        supervisor._require_preflight(identity)
 
 
 def test_lock_spans_manifest_and_exact_phase_order(monkeypatch, tmp_path):
@@ -274,8 +306,7 @@ def test_metal_timing_retains_supervisor_prelaunch(monkeypatch, tmp_path):
     snapshot = {"power_status": "AC", "thermal_status": "cool"}
     monkeypatch.setattr(supervisor, "_prelaunch_snapshot", lambda: snapshot)
     monkeypatch.setattr(supervisor, "load_raw_result", lambda *args: None)
-    payload = _payload(request)
-    payload["timing"] = {"environment": {}}
+    payload = _timing_payload(request)
     monkeypatch.setattr(
         supervisor,
         "run_worker",
@@ -287,6 +318,45 @@ def test_metal_timing_retains_supervisor_prelaunch(monkeypatch, tmp_path):
     )
     assert supervisor.run_campaign(tmp_path) == 0
     assert raw[0]["timing"]["environment"]["supervisor_prelaunch"] == snapshot
+
+
+@pytest.mark.parametrize("boundary", ("pre_timing", "post_timing", "post_cell"))
+def test_ineligible_metal_boundary_retains_timing_and_stops(
+    monkeypatch, tmp_path, boundary
+):
+    request = next(
+        item
+        for item in campaign_requests()
+        if item.phase == "timing" and item.cell.lane == "mps_f32"
+    )
+    requests = (request, campaign_requests()[-1])
+    _configure(monkeypatch, requests)
+    monkeypatch.setattr(supervisor, "load_raw_result", lambda *args: None)
+    payload = _timing_payload(request)
+    payload["timing"]["environment"][boundary]["power_status"] = "Battery"
+    calls = []
+    monkeypatch.setattr(
+        supervisor,
+        "run_worker",
+        lambda *args, **kwargs: (
+            calls.append(1) or WorkerAttempt(payload, False)
+        ),
+    )
+    raw = []
+    monkeypatch.setattr(
+        supervisor, "write_raw_result", lambda *args: raw.append(args[-1])
+    )
+
+    assert supervisor.run_campaign(tmp_path) == 1
+    assert len(calls) == len(raw) == 1
+    assert raw[0]["failure"]["kind"] == ("metal_timing_environment_ineligible")
+    assert raw[0]["failure"]["boundaries"][boundary]["power_status"] == (
+        "Battery"
+    )
+    assert raw[0]["timing"] == payload["timing"] | {
+        "environment": payload["timing"]["environment"]
+        | {"supervisor_prelaunch": {}}
+    }
 
 
 def test_retryable_launch_attempt_is_exclusive_and_rerunnable(
@@ -428,6 +498,7 @@ def test_postlaunch_identity_drift_is_an_immutable_failure(
     _configure(monkeypatch, (request,))
     changed = deepcopy(_IDENTITY)
     changed["source"]["sha256"] = "e" * 64
+    changed["packages"]["jax"] = "changed"
     identities = iter((deepcopy(_IDENTITY), deepcopy(_IDENTITY), changed))
     monkeypatch.setattr(
         supervisor, "campaign_identity", lambda root: next(identities)
@@ -436,11 +507,21 @@ def test_postlaunch_identity_drift_is_an_immutable_failure(
     monkeypatch.setattr(
         supervisor,
         "run_worker",
-        lambda *args, **kwargs: WorkerAttempt(_payload(request), False),
+        lambda *args, **kwargs: WorkerAttempt(
+            _payload(
+                request,
+                failure={"kind": "worker_exit", "stderr_tail": "x" * 5_000},
+            ),
+            False,
+        ),
     )
     raw = []
     monkeypatch.setattr(
         supervisor, "write_raw_result", lambda *args: raw.append(args[-1])
     )
     assert supervisor.run_campaign(tmp_path) == 1
-    assert raw[0]["failure"]["kind"] == "source_identity_changed_after_launch"
+    failure = raw[0]["failure"]
+    assert failure["kind"] == "source_identity_changed_after_launch"
+    assert failure["changed_domains"] == ["source", "packages"]
+    assert failure["worker_failure"]["kind"] == "worker_exit"
+    assert len(failure["worker_failure"]["stderr_tail"]) == 4_096
