@@ -143,6 +143,16 @@ def test_evidence_is_canonical_reproducible_and_sanitized():
     assert len(evidence["cells"]) == 84
     assert evidence["cells"][0]["accuracy"]["correctness_eligible"]
     assert np.isclose(evidence["cells"][0]["timing"]["steady"]["median"], 1)
+    assert evidence["gate_counts"]["centering"] == {
+        "passed": 9,
+        "evaluated": 9,
+        "registered": 6_228,
+    }
+    assert evidence["gate_counts"]["evidence_resolution"] == {
+        "passed": 1,
+        "evaluated": 1,
+        "registered": 84,
+    }
     assert evidence["failures"][0]["kind"] == "execution_failure"
     assert evidence["attempts"] == [attempt._asdict()]
     assert evidence["exclusions"] == [
