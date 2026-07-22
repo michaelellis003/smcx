@@ -1,6 +1,9 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
+# Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
+# Apache-2.0. Modified: local ESS and log-ESS helpers.
+
 """Log-space weight normalization utilities."""
 
 import jax.numpy as jnp

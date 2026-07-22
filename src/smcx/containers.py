@@ -1,6 +1,10 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
+# Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
+# Apache-2.0. Modified: structured states and additional posterior,
+# streaming-checkpoint, and reporting containers.
+
 """Containers for particle filter state and posteriors.
 
 All containers are :class:`~typing.NamedTuple` subclasses so they are

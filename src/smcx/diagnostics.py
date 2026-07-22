@@ -1,6 +1,10 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
+# Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
+# Apache-2.0. Modified: corrected Pareto-k and tail-ESS semantics,
+# genealogy and scoring diagnostics, and structured-state support.
+
 r"""Diagnostic utilities for particle filter posteriors.
 
 Posterior summaries (Vehtari: *report posterior summaries with
@@ -439,11 +443,11 @@ def log_bayes_factor(
         marginal likelihood is dominated by prior tails that have
         little effect on posterior inference, so a Bayes factor can
         reverse sign under prior changes that leave the posterior
-        essentially unchanged.  Consider complementing Bayes factors
-        with predictive comparisons (e.g. cumulative log-scores from
-        :func:`cumulative_log_score` or CRPS from :func:`crps`) and
-        use :func:`replicated_log_ml` to quantify Monte Carlo
-        variability.
+        essentially unchanged. Inspect
+        :func:`cumulative_log_score` to see when evidence differences
+        accrue, complement the comparison with a predictive criterion
+        such as :func:`crps`, and use :func:`replicated_log_ml` to
+        quantify Monte Carlo variability.
 
     Args:
         log_ml_1: Log marginal likelihood of model 1.
@@ -884,9 +888,9 @@ def cumulative_log_score(
         S_t = \sum_{s=1}^{t} \log p(y_s \mid y_{1:s-1})
 
     so that :math:`S_T` equals the total marginal log-likelihood.
-    Comparing :math:`S_t` across models gives a time-resolved
-    predictive comparison that, unlike Bayes factors, is less
-    sensitive to the prior.
+    Comparing :math:`S_t` across models shows when their log Bayes
+    factor accrues. At the final time their difference is exactly the
+    log Bayes factor, with the same prior sensitivity.
 
     Args:
         posterior: Particle filter posterior output.

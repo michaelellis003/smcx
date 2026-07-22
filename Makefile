@@ -20,10 +20,10 @@ test: lint FORCE
 	uv run pytest -v
 
 docs: FORCE
-	uv run mkdocs build
+	uv run properdocs build --strict
 
 serve-docs: FORCE
-	uv run mkdocs serve
+	uv run properdocs serve
 
 clean: FORCE
 	git clean -dfx -e .venv

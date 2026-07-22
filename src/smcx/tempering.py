@@ -7,8 +7,8 @@ Anneals from the prior to the posterior
 :math:`\pi_\phi \propto p(x)\, L(x)^\phi` along an adaptive schedule
 [Del Moral, Doucet & Jasra, 2006]: the next temperature solves
 ``ESS(phi) = target_ess * N`` by bisection on the *resident*
-log-likelihood vector — a deterministic solve, no fresh sampling
-(Jasra et al., 2011). Each stage reweights by
+log-likelihood vector — a deterministic solve with no fresh sampling.
+Each stage reweights by
 :math:`\ell \cdot \Delta\phi` (evidence increment at the reweight,
 pre-move — the Del Moral et al. collapse), resamples, and applies
 :math:`\pi_{\phi'}`-invariant random-walk Metropolis moves whose

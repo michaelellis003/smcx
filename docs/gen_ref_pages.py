@@ -11,6 +11,9 @@ import mkdocs_gen_files
 src = Path(__file__).parent.parent / "src"
 
 for path in sorted(src.rglob("*.py")):
+    if path.name.startswith("_") and path.name != "__init__.py":
+        continue
+
     module_path = path.relative_to(src).with_suffix("")
     full_doc_path = Path("api", path.relative_to(src).with_suffix(".md"))
 
