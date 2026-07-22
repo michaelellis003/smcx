@@ -96,7 +96,10 @@ def _exclusion() -> dict[str, Any]:
 
 
 def _load_manifest(output_dir: Path) -> tuple[dict[str, Any], str]:
-    encoded = (output_dir / "manifest.json").read_bytes()
+    path = output_dir / "manifest.json"
+    if path.is_symlink():
+        raise ValueError("manifest must not be a symlink")
+    encoded = path.read_bytes()
     try:
         manifest = json.loads(encoded)
     except json.JSONDecodeError as error:
@@ -130,11 +133,14 @@ def _load_manifest(output_dir: Path) -> tuple[dict[str, Any], str]:
 def _raw_names(raw_dir: Path) -> set[str]:
     if not raw_dir.exists():
         return set()
-    if not raw_dir.is_dir() or any(
-        not path.is_file() for path in raw_dir.iterdir()
-    ):
+    if raw_dir.is_symlink():
+        raise ValueError("raw directory must not be a symlink")
+    paths = tuple(raw_dir.iterdir()) if raw_dir.is_dir() else ()
+    if any(path.is_symlink() for path in paths):
+        raise ValueError("raw directory contains a symlink")
+    if not raw_dir.is_dir() or any(not path.is_file() for path in paths):
         raise ValueError("raw directory contains an unexpected artifact")
-    return {path.name for path in raw_dir.iterdir()}
+    return {path.name for path in paths}
 
 
 def load_campaign(output_dir: Path) -> CampaignData:
@@ -165,6 +171,8 @@ def load_campaign(output_dir: Path) -> CampaignData:
                 hashlib.sha256(path.read_bytes()).hexdigest(),
             )
         )
+    if any(result["failure"] is not None for result in results[:-1]):
+        raise ValueError("raw results continue after a terminal failure")
     frozen_inventory = tuple(inventory)
     raw_sha256 = hashlib.sha256(
         canonical_json([item._asdict() for item in frozen_inventory]).encode()
