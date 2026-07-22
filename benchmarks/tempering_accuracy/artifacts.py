@@ -122,13 +122,6 @@ def _source_identity(root: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "status",
             "--porcelain",
             "--untracked-files=all",
-            "--",
-            "src/smcx",
-            "benchmarks/tempering_accuracy",
-            "benchmarks/profiling/common.py",
-            "benchmarks/profiling/locking.py",
-            "pyproject.toml",
-            "uv.lock",
         ),
         cwd=root,
         allow_empty=True,
@@ -209,7 +202,11 @@ def manifest_sha256(manifest: Mapping[str, Any]) -> str:
 
 
 def _write_exclusive(path: Path, value: Mapping[str, Any]) -> None:
+    if path.parent.is_symlink():
+        raise ValueError("artifact parent must not be a symlink")
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.parent.is_symlink():
+        raise ValueError("artifact parent must not be a symlink")
     descriptor, name = tempfile.mkstemp(dir=path.parent)
     temporary = Path(name)
     try:
