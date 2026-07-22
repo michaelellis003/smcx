@@ -13,6 +13,7 @@ from benchmarks.profiling.common import _command_value
 from benchmarks.profiling.locking import HostCampaignLock
 from benchmarks.tempering_accuracy.artifacts import (
     SCHEMA_VERSION,
+    CampaignRequest,
     _write_exclusive,
     bind_request,
     build_manifest,
@@ -37,6 +38,8 @@ _REQUIRED_PACKAGES = (
     "smcx",
 )
 _CAPTURE_LIMIT = 4_096
+_IDENTITY_DOMAINS = ("source", "lock", "packages", "python", "host")
+_METAL_BOUNDARIES = ("pre_timing", "post_timing", "post_cell")
 
 
 class CampaignError(RuntimeError):
@@ -56,7 +59,24 @@ def _bounded(value: Any) -> Any:
         return value[-_CAPTURE_LIMIT:]
     if isinstance(value, Mapping):
         return {str(name): _bounded(item) for name, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_bounded(item) for item in value]
     return value
+
+
+def _metal_snapshot_eligible(value: object) -> bool:
+    """Return whether one power and thermal snapshot is admissible."""
+    if not isinstance(value, Mapping):
+        return False
+    power = value.get("power_status")
+    thermal = value.get("thermal_status")
+    return bool(
+        isinstance(power, str)
+        and isinstance(thermal, str)
+        and "Now drawing from 'AC Power'" in power
+        and "No thermal warning level" in thermal
+        and "No performance warning level" in thermal
+    )
 
 
 def _prelaunch_snapshot() -> dict[str, str | None]:
@@ -65,14 +85,7 @@ def _prelaunch_snapshot() -> dict[str, str | None]:
         "power_status": _command_value(("pmset", "-g", "batt")),
         "thermal_status": _command_value(("pmset", "-g", "therm")),
     }
-    power = snapshot["power_status"] or ""
-    thermal = snapshot["thermal_status"] or ""
-    eligible = (
-        "Now drawing from 'AC Power'" in power
-        and "No thermal warning level" in thermal
-        and "No performance warning level" in thermal
-    )
-    if not eligible:
+    if not _metal_snapshot_eligible(snapshot):
         raise _RetryableError({
             "kind": "metal_prelaunch_ineligible",
             "prelaunch": _bounded(snapshot),
@@ -96,6 +109,11 @@ def _identity_failure(
         return None
     return {
         "kind": kind,
+        "changed_domains": [
+            name
+            for name in _IDENTITY_DOMAINS
+            if observed.get(name) != expected.get(name)
+        ],
         "expected_source_sha256": expected.get("source", {}).get("sha256"),
         "observed_source_sha256": observed.get("source", {}).get("sha256"),
     }
@@ -167,6 +185,31 @@ def _retain_prelaunch(
     return result
 
 
+def _metal_boundary_failure(
+    request: CampaignRequest, payload: Mapping[str, Any]
+) -> dict[str, Any] | None:
+    """Return terminal evidence for an ineligible MPS timing boundary."""
+    target = request.phase == "timing" and request.cell.lane == "mps_f32"
+    if not target or payload.get("failure") is not None:
+        return None
+    timing = payload.get("timing")
+    environment = (
+        timing.get("environment") if isinstance(timing, Mapping) else None
+    )
+    boundaries = {
+        name: environment.get(name)
+        if isinstance(environment, Mapping)
+        else None
+        for name in _METAL_BOUNDARIES
+    }
+    if all(_metal_snapshot_eligible(value) for value in boundaries.values()):
+        return None
+    return {
+        "kind": "metal_timing_environment_ineligible",
+        "boundaries": _bounded(boundaries),
+    }
+
+
 def _virtualization_status() -> str | None:
     """Return the macOS hypervisor-presence flag without importing JAX."""
     return _command_value(("sysctl", "-n", "kern.hv_vmm_present"))
@@ -205,6 +248,18 @@ def _require_preflight(identity: Mapping[str, Any]) -> None:
         raise CampaignError("campaign source is not clean")
     if any(not _filled(packages.get(name)) for name in _REQUIRED_PACKAGES):
         raise CampaignError("required campaign packages are unavailable")
+    host_fields = (
+        host.get("macos"),
+        host.get("macos_build"),
+        host.get("os_release"),
+    )
+    memory = host.get("physical_memory_bytes")
+    if (
+        not all(_filled(value) for value in host_fields)
+        or type(memory) is not int
+        or memory <= 0
+    ):
+        raise CampaignError("campaign host identity is incomplete")
     physical_host = (
         host.get("os") == "Darwin"
         and host.get("machine") == "arm64"
@@ -304,11 +359,16 @@ def run_campaign(
             after = _identity_failure(
                 identity, "source_identity_changed_after_launch"
             )
-            payload = (
-                _raw_failure(bound, after, snapshot)
-                if after is not None
-                else _retain_prelaunch(attempt.payload, snapshot)
-            )
+            if after is not None:
+                worker_failure = attempt.payload.get("failure")
+                if isinstance(worker_failure, Mapping):
+                    after["worker_failure"] = worker_failure
+                payload = _raw_failure(bound, after, snapshot)
+            else:
+                payload = _retain_prelaunch(attempt.payload, snapshot)
+                boundary_failure = _metal_boundary_failure(request, payload)
+                if boundary_failure is not None:
+                    payload["failure"] = boundary_failure
             write_raw_result(output_dir, request, digest, payload)
             if payload["failure"] is not None:
                 return 1

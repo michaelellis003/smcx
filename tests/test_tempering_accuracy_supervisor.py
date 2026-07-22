@@ -212,7 +212,12 @@ def test_lock_spans_manifest_and_exact_phase_order(monkeypatch, tmp_path):
     def run(root, request, *, timeout_s):
         assert events == ["locked"]
         seen.append(CampaignRequest(request.phase, request.cell, request.block))
-        return WorkerAttempt(_payload(seen[-1]), False)
+        payload = (
+            _timing_payload(seen[-1])
+            if request.phase == "timing" and request.cell.lane == "mps_f32"
+            else _payload(seen[-1])
+        )
+        return WorkerAttempt(payload, False)
 
     monkeypatch.setattr(supervisor, "HostCampaignLock", Lock)
     monkeypatch.setattr(supervisor, "campaign_identity", identity)
@@ -498,7 +503,10 @@ def test_postlaunch_identity_drift_is_an_immutable_failure(
     _configure(monkeypatch, (request,))
     changed = deepcopy(_IDENTITY)
     changed["source"]["sha256"] = "e" * 64
+    changed["lock"]["sha256"] = "f" * 64
     changed["packages"]["jax"] = "changed"
+    changed["python"]["version"] = "changed"
+    changed["host"]["os_release"] = "changed"
     identities = iter((deepcopy(_IDENTITY), deepcopy(_IDENTITY), changed))
     monkeypatch.setattr(
         supervisor, "campaign_identity", lambda root: next(identities)
@@ -510,7 +518,11 @@ def test_postlaunch_identity_drift_is_an_immutable_failure(
         lambda *args, **kwargs: WorkerAttempt(
             _payload(
                 request,
-                failure={"kind": "worker_exit", "stderr_tail": "x" * 5_000},
+                failure={
+                    "kind": "worker_exit",
+                    "stderr_tail": "x" * 5_000,
+                    "nested": ["y" * 5_000],
+                },
             ),
             False,
         ),
@@ -522,6 +534,13 @@ def test_postlaunch_identity_drift_is_an_immutable_failure(
     assert supervisor.run_campaign(tmp_path) == 1
     failure = raw[0]["failure"]
     assert failure["kind"] == "source_identity_changed_after_launch"
-    assert failure["changed_domains"] == ["source", "packages"]
+    assert failure["changed_domains"] == [
+        "source",
+        "lock",
+        "packages",
+        "python",
+        "host",
+    ]
     assert failure["worker_failure"]["kind"] == "worker_exit"
     assert len(failure["worker_failure"]["stderr_tail"]) == 4_096
+    assert len(failure["worker_failure"]["nested"][0]) == 4_096
