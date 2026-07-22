@@ -228,11 +228,8 @@ def test_plots_are_deterministic_and_report_omissions(tmp_path):
 
 def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
     evidence = _evidence()
-    render_plots(
-        evidence,
-        tmp_path / "eligible-gates.png",
-        tmp_path / "eligible-cost.png",
-    )
+    eligible_gate = tmp_path / "eligible-gates.png"
+    render_plots(evidence, eligible_gate, tmp_path / "cost.png")
     cell = evidence["cells"][0]
     cell["status"] = "failed_accuracy"
     cell["accuracy"]["status"] = "failed_accuracy"
@@ -244,6 +241,4 @@ def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
 
     assert summary.eligible_cost_cells == 0
     assert summary.unavailable_cost_cells == 72
-    assert (tmp_path / "eligible-gates.png").read_bytes() != (
-        tmp_path / "gates.png"
-    ).read_bytes()
+    assert eligible_gate.read_bytes() != (tmp_path / "gates.png").read_bytes()

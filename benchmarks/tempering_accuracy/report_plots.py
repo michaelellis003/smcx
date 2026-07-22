@@ -184,7 +184,7 @@ def _gate_figure(rows: Sequence[_PlotCell], path: Path) -> None:
             row.cell["dimension"],
             row.cell["reference_particles"],
             row.cell["sweeps"],
-        ): row.gate_ratio
+        ): row
         for row in rows
     }
     colors = ("#e5e7eb", "#dbeafe", "#fed7aa")
@@ -198,11 +198,15 @@ def _gate_figure(rows: Sequence[_PlotCell], path: Path) -> None:
                     for particles in (1_000, 10_000):
                         row_states, row_labels = [], []
                         for sweeps in _SWEEPS:
-                            ratio = lookup[
+                            plot_cell = lookup[
                                 lane, geometry, dimension, particles, sweeps
                             ]
+                            ratio = plot_cell.gate_ratio
                             row_states.append(
-                                0 if ratio is None else 1 if ratio <= 1 else 2
+                                0
+                                if ratio is None
+                                else 1
+                                + int(plot_cell.cost is None or ratio > 1)
                             )
                             row_labels.append(
                                 "—" if ratio is None else f"{ratio:.2g}x"
@@ -245,9 +249,8 @@ def _gate_figure(rows: Sequence[_PlotCell], path: Path) -> None:
         figure.text(
             0.5,
             0.035,
-            "Blue: passes ≤1x · orange: fails >1x · grey/—: unavailable",
+            "Blue: passes ≤1x · orange: ineligible · grey/—: unavailable",
             ha="center",
-            fontsize=8,
         )
         figure.subplots_adjust(
             left=0.14, right=0.98, top=0.90, bottom=0.12, hspace=0.40
@@ -305,7 +308,6 @@ def _cost_figure(rows: Sequence[_PlotCell], path: Path) -> None:
             "Blue: G0; orange: G1. Marker: d=4 ○, d=32 □, d=128 △; "
             "size: N. No timing ratio is used.",
             ha="center",
-            fontsize=8,
         )
         figure.tight_layout(rect=(0, 0.10, 1, 0.93))
         _save(figure, path)
