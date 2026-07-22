@@ -3,7 +3,6 @@
 
 """Deterministic public figures for tempering-accuracy evidence."""
 
-import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, cast
@@ -12,28 +11,6 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
 
-from benchmarks.tempering_accuracy.report_markdown import _validate
-
-
-def _fields(names: str) -> set[str]:
-    return set(names.split())
-
-
-_GATE = _fields(
-    "family index estimate oracle error standard_deviation estimator_se "
-    "tolerance passed"
-)
-_LOSS = _fields(
-    "family replicate_losses mse rmse mse_standard_error "
-    "rmse_standard_error mse_interval_low mse_interval_high "
-    "median_steady_seconds median_pair_evaluations "
-    "fixed_key_time_normalized_loss evaluation_normalized_loss"
-)
-_WORK = _fields(
-    "stages mean_acceptance min_ess_fraction total_pairs resampling_events "
-    "ancestor_draws"
-)
-_SUMMARY = _fields("values median q1 q3 iqr minimum maximum")
 _LANES = ("cpu_f64", "mps_f32")
 _DIMENSIONS = (4, 32, 128)
 _SWEEPS = (5, 20, 50)
@@ -55,109 +32,51 @@ class _PlotCell(NamedTuple):
     cost: tuple[float, float, float, float] | None
 
 
-def _bad(detail: str) -> ValueError:
-    return ValueError(f"plot evidence {detail}")
-
-
-def _map(value: object, fields: set[str]) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping) or set(value) != fields:
-        raise _bad("has an invalid mapping schema")
-    return cast(Mapping[str, Any], value)
-
-
-def _seq(value: object) -> Sequence[Any]:
-    if not isinstance(value, list | tuple):
-        raise _bad("has an invalid sequence")
-    return value
-
-
-def _number(value: Any, *, positive: bool = False) -> float | None:
-    if value is None:
-        return None
-    if type(value) not in {int, float} or not math.isfinite(value):
-        raise _bad("has an invalid number")
-    result = float(value)
-    if positive and result <= 0:
-        raise _bad("has a non-positive number")
-    return result
-
-
-def _gate_ratio(accuracy: Mapping[str, Any], dimension: int) -> float | None:
-    mean = _seq(accuracy["mean_gates"])
-    covariance = _seq(accuracy["covariance_gates"])
-    expected_covariance = tuple(
-        index * (dimension - 1) // (min(16, dimension) - 1)
-        for index in range(min(16, dimension))
+def _gate_ratio(accuracy: Mapping[str, Any]) -> float | None:
+    gates = (
+        *accuracy["mean_gates"],
+        *accuracy["covariance_gates"],
+        accuracy["evidence_gate"],
     )
-    expected = (
-        *(("mean", index) for index in range(dimension)),
-        *(("projected_covariance", index) for index in expected_covariance),
-        ("evidence_ratio", 0),
-    )
-    gates = (*mean, *covariance, accuracy["evidence_gate"])
-    if len(gates) != len(expected):
-        raise _bad("has the wrong registered gates")
-    ratios = []
-    for value, (family, index) in zip(gates, expected, strict=True):
-        gate = _map(value, _GATE)
-        if (
-            gate["family"] != family
-            or gate["index"] != index
-            or type(gate["index"]) is not int
-            or type(gate["passed"]) is not bool
-        ):
-            raise _bad("has an unregistered gate")
-        error = _number(gate["error"])
-        tolerance = _number(gate["tolerance"], positive=True)
-        if error is None or tolerance is None:
-            return None
-        ratios.append(abs(error) / tolerance)
-    resolution = _number(accuracy["evidence_resolution_width"])
-    if resolution is None:
+    if accuracy["evidence_resolution_width"] is None or any(
+        gate["error"] is None or gate["tolerance"] is None for gate in gates
+    ):
         return None
-    if resolution < 0:
-        raise _bad("has a negative resolution width")
-    ratios.append(resolution / 0.10)
+    ratios = [
+        abs(float(gate["error"])) / float(gate["tolerance"]) for gate in gates
+    ]
+    ratios.append(float(accuracy["evidence_resolution_width"]) / 0.10)
     return max(ratios)
 
 
 def _cost(
     accuracy: Mapping[str, Any], work: object
 ) -> tuple[float, float, float, float]:
-    if (
-        not isinstance(work, Mapping)
-        or not {"total_pairs"} <= set(work) <= _WORK
-    ):
-        raise _bad("has invalid work evidence")
     summaries = cast(Mapping[str, Any], work)
-    pairs = _map(summaries["total_pairs"], _SUMMARY)
-    values = _seq(pairs["values"])
-    median_pairs = _number(pairs["median"], positive=True)
-    if not values or median_pairs is None:
-        raise _bad("has invalid work evidence")
-    losses = []
-    for name in _LOSSES:
-        loss = _map(accuracy[f"{name}_loss"], _LOSS)
-        rmse = _number(loss["rmse"])
-        if loss["family"] != name or rmse is None or rmse < 0:
-            raise _bad("has invalid loss evidence")
-        losses.append(rmse)
-    return median_pairs, losses[0], losses[1], losses[2]
+    losses = [float(accuracy[f"{name}_loss"]["rmse"]) for name in _LOSSES]
+    return (
+        float(summaries["total_pairs"]["median"]),
+        losses[0],
+        losses[1],
+        losses[2],
+    )
 
 
 def _plot_cells(evidence: Mapping[str, Any]) -> tuple[_PlotCell, ...]:
     rows = []
-    for item in _validate(evidence)[:72]:
+    cells = cast(Sequence[Mapping[str, Any]], evidence["cells"])
+    for item in cells[:72]:
         cell = cast(Mapping[str, Any], item["cell"])
         accuracy = item["accuracy"]
         if accuracy is None:
             rows.append(_PlotCell(cell, None, None))
             continue
         accuracy = cast(Mapping[str, Any], accuracy)
-        eligible = item["status"] == "eligible"
-        if accuracy["correctness_eligible"] is not eligible:
-            raise _bad("has an inconsistent eligibility decision")
-        ratio = _gate_ratio(accuracy, cell["dimension"])
+        eligible = (
+            item["status"] == "eligible"
+            and accuracy["correctness_eligible"] is True
+        )
+        ratio = _gate_ratio(accuracy)
         cost = _cost(accuracy, item["work"]) if eligible else None
         rows.append(_PlotCell(cell, ratio, cost))
     return tuple(rows)
@@ -318,14 +237,6 @@ def render_plots(
     evidence: Mapping[str, Any], gate_path: Path, cost_path: Path
 ) -> PlotSummary:
     """Write deterministic gate and within-lane cost PNG figures."""
-    paths = (gate_path, cost_path)
-    if any(
-        not isinstance(path, Path) or path.suffix.lower() != ".png"
-        for path in paths
-    ):
-        raise ValueError("plot destinations must be explicit PNG paths")
-    if gate_path.absolute() == cost_path.absolute():
-        raise ValueError("plot destinations must be distinct")
     rows = _plot_cells(evidence)
     gate_count = sum(row.gate_ratio is not None for row in rows)
     cost_count = sum(row.cost is not None for row in rows)

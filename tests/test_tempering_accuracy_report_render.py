@@ -206,6 +206,8 @@ def test_markdown_hides_timing_for_an_accuracy_ineligible_cell():
     row = _table_rows(markdown, "All cells")[0]
     values = [value.strip() for value in row.strip("|").split("|")]
     assert values[-4:] == ["—", "—", "—", "—"]
+
+
 def test_plots_are_deterministic_and_report_omissions(tmp_path):
     evidence = _evidence()
     first_gate = tmp_path / "first-gates.png"
