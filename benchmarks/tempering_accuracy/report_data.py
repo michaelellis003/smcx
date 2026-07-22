@@ -131,10 +131,10 @@ def _load_manifest(output_dir: Path) -> tuple[dict[str, Any], str]:
 
 
 def _raw_names(raw_dir: Path) -> set[str]:
-    if not raw_dir.exists():
-        return set()
     if raw_dir.is_symlink():
         raise ValueError("raw directory must not be a symlink")
+    if not raw_dir.exists():
+        return set()
     paths = tuple(raw_dir.iterdir()) if raw_dir.is_dir() else ()
     if any(path.is_symlink() for path in paths):
         raise ValueError("raw directory contains a symlink")
