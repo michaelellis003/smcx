@@ -7,13 +7,13 @@ import hashlib
 import json
 
 import pytest
+
+from benchmarks.profiling.common import canonical_json
+from benchmarks.tempering_accuracy.artifacts import bind_request, request_dict
 from benchmarks.tempering_accuracy.report_attempts import (
     AttemptEvidence,
     load_attempts,
 )
-
-from benchmarks.profiling.common import canonical_json
-from benchmarks.tempering_accuracy.artifacts import bind_request, request_dict
 from benchmarks.tempering_accuracy.report_data import campaign_requests
 
 _DIGEST = "d" * 64
@@ -105,6 +105,7 @@ def test_attempts_are_bound_hashed_ordered_and_sanitized(tmp_path):
         "request",
         "failure_kind",
         "failure_schema",
+        "metal_schema",
         "extra_field",
     ),
 )
@@ -129,6 +130,12 @@ def test_attempt_schema_and_identity_are_exact(tmp_path, case):
             record["failure"] = _failure("timeout")
         elif case == "failure_schema":
             record["failure"]["unexpected"] = None
+        elif case == "metal_schema":
+            record["failure"] = {
+                "kind": "metal_prelaunch_ineligible",
+                "exception_type": "OSError",
+                "message": "wrong shape",
+            }
         else:
             record["unexpected"] = None
         _write(attempts, 3, 0, record, name)
