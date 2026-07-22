@@ -27,13 +27,13 @@ def _identity():
     }
 
 
-def _payload(request, digest):
+def _payload(request, digest, *, failure=None):
     return {
         "schema_version": 1,
         "request": artifacts.request_dict(
             artifacts.bind_request(request, digest)
         ),
-        "failure": {"kind": "execution_failure", "message": "retained"},
+        "failure": failure,
         "timing": None,
         "runs": [],
     }
@@ -104,4 +104,54 @@ def test_load_campaign_rejects_an_unexpected_raw_file(monkeypatch, tmp_path):
     (raw / "notes.txt").write_text("not campaign evidence")
 
     with pytest.raises(ValueError, match="unexpected artifact"):
+        load_campaign(tmp_path)
+
+
+def test_load_campaign_rejects_results_after_a_terminal_failure(
+    monkeypatch, tmp_path
+):
+    manifest = _manifest(monkeypatch, tmp_path)
+    digest = artifacts.ensure_manifest(tmp_path, manifest)
+    requests = artifacts.campaign_requests()
+    first = _payload(
+        requests[0],
+        digest,
+        failure={"kind": "execution_failure", "message": "retained"},
+    )
+    artifacts.write_raw_result(tmp_path, requests[0], digest, first)
+    artifacts.write_raw_result(
+        tmp_path, requests[1], digest, _payload(requests[1], digest)
+    )
+
+    with pytest.raises(ValueError, match="terminal failure"):
+        load_campaign(tmp_path)
+
+
+@pytest.mark.parametrize("artifact", ("manifest", "raw_dir", "raw_file"))
+def test_load_campaign_rejects_symlinked_evidence(
+    monkeypatch, tmp_path, artifact
+):
+    manifest = _manifest(monkeypatch, tmp_path)
+    if artifact == "manifest":
+        target = tmp_path / "manifest-target.json"
+        _write_manifest(tmp_path, manifest)
+        (tmp_path / "manifest.json").rename(target)
+        (tmp_path / "manifest.json").symlink_to(target)
+    else:
+        digest = artifacts.ensure_manifest(tmp_path, manifest)
+        raw = tmp_path / "raw"
+        if artifact == "raw_dir":
+            target = tmp_path / "raw-target"
+            target.mkdir()
+            raw.symlink_to(target, target_is_directory=True)
+        else:
+            request = artifacts.campaign_requests()[0]
+            target_root = tmp_path / "target"
+            target = artifacts.write_raw_result(
+                target_root, request, digest, _payload(request, digest)
+            )
+            raw.mkdir()
+            (raw / target.name).symlink_to(target)
+
+    with pytest.raises(ValueError, match="symlink"):
         load_campaign(tmp_path)
