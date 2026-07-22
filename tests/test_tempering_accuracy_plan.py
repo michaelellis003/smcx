@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Frozen campaign-plan contracts for issue #30."""
+"""Frozen tempering-accuracy campaign-plan contracts."""
 
 import hashlib
 import itertools

@@ -70,8 +70,6 @@ exclude_docs: |
   design/
   examples/
   research/
-  conversation.md
-  ecosystem-conversation.md
 
 # Page Navigation Hierarchy
 nav:

@@ -109,7 +109,7 @@ Python version, date. Results are dated markdown in
 
 ## Amendments
 
-- 2026-07-14 (panel round 2, pre-code): pinned k=3; defined the SV-1
+- 2026-07-14 (second review, pre-code): pinned k=3; defined the SV-1
   cross-library gate; made the Jensen budget one-sided; quantified
   the verdict mapping (both-N rule, full-covariance report-only,
   ≈ defined as <1.2×, unmapped outcomes → weak).

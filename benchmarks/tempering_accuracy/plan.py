@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Deterministic campaign plan and work accounting for issue #30."""
+"""Deterministic tempering-accuracy plan and work accounting."""
 
 import itertools
 import math

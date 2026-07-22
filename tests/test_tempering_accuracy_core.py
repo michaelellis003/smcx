@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Frozen mathematical and planning contracts for issue #30."""
+"""Frozen mathematical and planning contracts for tempering accuracy."""
 
 import math
 

@@ -6,10 +6,11 @@
 # ms/step discrepancy.
 import statistics
 import sys
+from pathlib import Path
 
 import mlx.core as mx
 
-sys.path.insert(0, "/Users/michaelellis/Projects/smcx/benchmarks/killtest")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "killtest"))
 from mlx_side import bench, make_track
 
 
