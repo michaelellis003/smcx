@@ -5,6 +5,7 @@
 
 import json
 import math
+from typing import cast
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -27,6 +28,7 @@ _MANIFEST = "a" * 64
     "worker_request",
     (
         WorkerRequest("bad", "smoke", current_smoke_cells()[0], None),
+        WorkerRequest(cast(str, 7), "smoke", current_smoke_cells()[0], None),
         WorkerRequest(
             _MANIFEST,
             "smoke",
