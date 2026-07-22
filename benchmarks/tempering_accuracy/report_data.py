@@ -39,6 +39,12 @@ _MANIFEST_FIELDS = {
     "exclusions",
     "campaign_identity",
 }
+_IDENTITY_FIELDS = {"source", "lock", "packages", "python", "host"}
+_ALGORITHM_CONTRACT = {
+    "proposal_covariance_source": "weighted_pre_resample_cloud",
+    "proposal_scale": "2.38^2 / dimension",
+    "target_ess": 0.5,
+}
 
 
 class InventoryEntry(NamedTuple):
@@ -106,17 +112,15 @@ def _load_manifest(output_dir: Path) -> tuple[dict[str, Any], str]:
         and manifest["schema_version"] == 1
         and manifest["campaign"] == "tempering_accuracy"
         and manifest["order_seed"] == ORDER_SEED
-        and manifest["algorithm_contract"]
-        == {
-            "proposal_covariance_source": "weighted_pre_resample_cloud",
-            "proposal_scale": "2.38^2 / dimension",
-            "target_ess": 0.5,
-        }
+        and canonical_json(manifest["algorithm_contract"])
+        == canonical_json(_ALGORITHM_CONTRACT)
         and len(requests) == 508
         and plan_sha256 == _PLAN_SHA256 == manifest["plan_sha256"]
-        and manifest["requests"] == expected
-        and manifest["exclusions"] == [_exclusion()]
+        and canonical_json(manifest["requests"]) == canonical_json(expected)
+        and canonical_json(manifest["exclusions"])
+        == canonical_json([_exclusion()])
         and isinstance(manifest["campaign_identity"], dict)
+        and set(manifest["campaign_identity"]) == _IDENTITY_FIELDS
     )
     if not valid:
         raise ValueError("manifest does not match the registered campaign")
