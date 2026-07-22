@@ -47,6 +47,11 @@ def test_manifest_hash_names_and_waste_free_exclusion(monkeypatch, tmp_path):
     assert exclusion["tracking_issue"] == 38
     assert tuple(exclusion["blocked_request_counts"].values()) == (2, 60, 12)
     assert (len(exclusion["smoke_cells"]), len(exclusion["cells"])) == (2, 12)
+    assert manifest["algorithm_contract"] == {
+        "proposal_covariance_source": "weighted_pre_resample_cloud",
+        "proposal_scale": "2.38^2 / dimension",
+        "target_ess": 0.5,
+    }
     names = list(map(artifacts.raw_filename, artifacts.campaign_requests()))
     assert len(names) == len(set(names)) == 508
 
@@ -56,15 +61,13 @@ def test_campaign_identity_fails_closed_without_git_identity(
     monkeypatch, missing
 ):
     root = Path(__file__).resolve().parents[1]
-    values = {"status": "", "commit": "c" * 40, missing: None}
 
-    monkeypatch.setattr(
-        artifacts,
-        "_command_value",
-        lambda command, **kwargs: values[
-            "status" if "status" in command else "commit"
-        ],
-    )
+    def command_value(command, **kwargs):
+        kind = "status" if "status" in command else "commit"
+        values = {"status": "", "commit": "c" * 40}
+        return None if kind == missing else values[kind]
+
+    monkeypatch.setattr(artifacts, "_command_value", command_value)
     with pytest.raises(RuntimeError, match="git identity"):
         artifacts.campaign_identity(root)
 
