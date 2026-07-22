@@ -24,6 +24,24 @@ from benchmarks.tempering_accuracy.worker import WorkerRequest, execute_request
 _MANIFEST = "a" * 64
 
 
+def _active_cell(cells):
+    lane = "mps_f32" if worker.jax.default_backend() == "mps" else "cpu_f64"
+    return next(cell for cell in cells if cell.lane == lane)
+
+
+def _fake_posterior(cell):
+    dtype = jnp.dtype("float64" if cell.lane == "cpu_f64" else "float32")
+    count = cell.reference_particles
+    return smcx.TemperedPosterior(
+        particles=jnp.zeros((count, cell.dimension), dtype=dtype),
+        log_weights=jnp.full((count,), -math.log(count), dtype=dtype),
+        marginal_loglik=jnp.asarray(-3.0, dtype=dtype),
+        temperatures=jnp.asarray([0.4, 1.0], dtype=dtype),
+        ess=jnp.asarray([500.0, 700.0], dtype=dtype),
+        acceptance_rates=jnp.asarray([0.2, 0.3], dtype=dtype),
+    )
+
+
 @pytest.mark.parametrize(
     "worker_request",
     (
@@ -56,24 +74,12 @@ def test_invalid_requests_become_retained_failure_payloads(worker_request):
 def test_smoke_dispatches_public_temper_and_retains_complete_summary(
     monkeypatch,
 ):
-    lane = "mps_f32" if worker.jax.default_backend() == "mps" else "cpu_f64"
-    cell = next(cell for cell in current_smoke_cells() if cell.lane == lane)
+    cell = _active_cell(current_smoke_cells())
     calls = []
 
     def fake_temper(*args, **kwargs):
         calls.append((args, kwargs))
-        num_particles = args[4]
-        dtype = jnp.dtype("float64" if lane == "cpu_f64" else "float32")
-        return smcx.TemperedPosterior(
-            particles=jnp.zeros((num_particles, cell.dimension), dtype=dtype),
-            log_weights=jnp.full(
-                (num_particles,), -math.log(num_particles), dtype=dtype
-            ),
-            marginal_loglik=jnp.asarray(-3.0, dtype=dtype),
-            temperatures=jnp.asarray([0.4, 1.0], dtype=dtype),
-            ess=jnp.asarray([500.0, 700.0], dtype=dtype),
-            acceptance_rates=jnp.asarray([0.2, 0.3], dtype=dtype),
-        )
+        return _fake_posterior(cell)
 
     monkeypatch.setattr(worker.smcx, "temper", fake_temper)
     payload = execute_request(WorkerRequest(_MANIFEST, "smoke", cell, None))
@@ -103,3 +109,127 @@ def test_smoke_dispatches_public_temper_and_retains_complete_summary(
     assert record["work"]["total_pairs"] == 11_000
     assert record["structural"]["passed"]
     json.dumps(payload, allow_nan=False)
+
+
+def test_timing_measures_registered_public_call_schedule(monkeypatch):
+    cell = _active_cell(current_cells())
+    calls = []
+    burns = []
+    ticks = iter(float(index) for index in range(16))
+
+    def fake_temper(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _fake_posterior(cell)
+
+    monkeypatch.setattr(worker.smcx, "temper", fake_temper)
+    monkeypatch.setattr(
+        worker, "_burn_backend", lambda: burns.append(True), raising=False
+    )
+    monkeypatch.setattr(worker, "_clock", lambda: next(ticks), raising=False)
+    monkeypatch.setattr(
+        worker,
+        "_timing_environment",
+        lambda: {"power_status": "AC", "thermal_status": "nominal"},
+        raising=False,
+    )
+    monkeypatch.setattr(worker, "_max_rss_bytes", lambda: 123, raising=False)
+    monkeypatch.setattr(worker, "_device_memory", lambda _: {}, raising=False)
+
+    payload = execute_request(WorkerRequest(_MANIFEST, "timing", cell, 0))
+
+    assert payload["failure"] is None
+    assert burns == [True]
+    assert len(calls) == 8
+    first_callbacks = calls[0][0][1:4]
+    assert all(call[0][1:4] == first_callbacks for call in calls)
+    assert all(
+        np.array_equal(jr.key_data(call[0][0]), jr.key_data(jr.key(20_260_719)))
+        for call in calls
+    )
+    timing = payload["timing"]
+    assert timing["execution_mode"] == "host_shell"
+    assert timing["backend_startup_burns"] == 1
+    assert timing["warmups"] == 0
+    assert timing["repeats"] == 7
+    assert timing["first_execution_s"] == pytest.approx(1.0)
+    assert timing["steady_times_s"] == pytest.approx([1.0] * 7)
+    assert len(payload["runs"]) == 1
+    json.dumps(payload, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    ("cell", "runtime"),
+    (
+        (
+            next(cell for cell in current_cells() if cell.lane == "cpu_f64"),
+            {"backend": "mps", "x64": True, "cache_dir": None, "async": None},
+        ),
+        (
+            next(cell for cell in current_cells() if cell.lane == "cpu_f64"),
+            {"backend": "cpu", "x64": False, "cache_dir": None, "async": None},
+        ),
+        (
+            next(cell for cell in current_cells() if cell.lane == "cpu_f64"),
+            {
+                "backend": "cpu",
+                "x64": True,
+                "cache_dir": "/tmp/x",
+                "async": None,
+            },
+        ),
+        (
+            next(cell for cell in current_cells() if cell.lane == "mps_f32"),
+            {"backend": "mps", "x64": False, "cache_dir": None, "async": "1"},
+        ),
+    ),
+)
+def test_timing_refuses_unattested_runtime_before_temper(
+    monkeypatch,
+    cell,
+    runtime,
+):
+    calls = []
+    monkeypatch.setattr(
+        worker, "_runtime_state", lambda: runtime, raising=False
+    )
+    monkeypatch.setattr(worker.smcx, "temper", lambda *args: calls.append(args))
+
+    payload = execute_request(WorkerRequest(_MANIFEST, "timing", cell, 0))
+
+    assert payload["failure"]["kind"] == "execution_failure"
+    assert payload["failure"]["exception_type"] == "RuntimeError"
+    assert payload["timing"] is None
+    assert payload["runs"] == []
+    assert calls == []
+
+
+def test_timing_retains_failed_call_without_retry(monkeypatch):
+    cell = _active_cell(current_cells())
+    calls = []
+    ticks = iter(float(index) for index in range(20))
+
+    def fail_third_call(*args, **kwargs):
+        calls.append((args, kwargs))
+        if len(calls) == 3:
+            raise RuntimeError("registered timing failure")
+        return _fake_posterior(cell)
+
+    monkeypatch.setattr(worker.smcx, "temper", fail_third_call)
+    monkeypatch.setattr(worker, "_burn_backend", lambda: None, raising=False)
+    monkeypatch.setattr(worker, "_clock", lambda: next(ticks), raising=False)
+    monkeypatch.setattr(
+        worker, "_timing_environment", lambda: {}, raising=False
+    )
+    monkeypatch.setattr(worker, "_max_rss_bytes", lambda: 123, raising=False)
+    monkeypatch.setattr(worker, "_device_memory", lambda _: {}, raising=False)
+
+    payload = execute_request(WorkerRequest(_MANIFEST, "timing", cell, 0))
+
+    assert len(calls) == 3
+    assert payload["failure"] == {
+        "kind": "execution_failure",
+        "exception_type": "RuntimeError",
+        "message": "registered timing failure",
+    }
+    assert payload["timing"] is None
+    assert payload["runs"] == []
