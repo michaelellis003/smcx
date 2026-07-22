@@ -629,6 +629,15 @@ def crps(
 
     Returns:
         Scalar CRPS (lower is better, zero for perfect prediction).
+
+    References:
+        Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
+        continuous probability distributions.
+        https://doi.org/10.1287/mnsc.22.10.1087
+
+        Gneiting, T., and Raftery, A. E. (2007). Strictly proper scoring
+        rules, prediction, and estimation.
+        https://doi.org/10.1198/016214506000001437
     """
     obs = jnp.asarray(observation)
     n = predictions.shape[0]
@@ -821,8 +830,8 @@ def tail_ess(
 
     Note: this replaces the earlier smcjax quantity of the same name,
     which measured top-weight-mass concentration and did not examine
-    particle values. It was ported from the MLX implementation under
-    ADR-0010 and ADR-0018.
+    particle values. It was carried forward from smcx's former MLX
+    implementation under ADR-0010 and ADR-0018.
 
     Args:
         posterior: Any :class:`ParticleFilterResult`.
@@ -897,6 +906,11 @@ def cumulative_log_score(
 
     Returns:
         Cumulative log-scores, shape ``(ntime,)``.
+
+    References:
+        Gneiting, T., and Raftery, A. E. (2007). Strictly proper scoring
+        rules, prediction, and estimation.
+        https://doi.org/10.1198/016214506000001437
     """
     return jnp.cumsum(posterior.log_evidence_increments)
 

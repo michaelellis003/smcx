@@ -119,6 +119,9 @@ The implemented methods draw on these primary sources:
   [Lee and Whiteley (2018)](https://doi.org/10.1093/biomet/asy028),
   [Zhang and Stephens (2009)](https://doi.org/10.1198/TECH.2009.08017),
   and [Vehtari et al. (2024)](https://jmlr.org/papers/v25/19-556.html).
+- Scoring rules:
+  [Matheson and Winkler (1976)](https://doi.org/10.1287/mnsc.22.10.1087)
+  and [Gneiting and Raftery (2007)](https://doi.org/10.1198/016214506000001437).
 - Reporting: [ArviZ](https://doi.org/10.21105/joss.01143).
 
 Parts of the filtering and diagnostics core descend from
