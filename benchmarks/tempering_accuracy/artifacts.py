@@ -185,6 +185,11 @@ def build_manifest(root: Path) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "campaign": "tempering_accuracy",
         "order_seed": ORDER_SEED,
+        "algorithm_contract": {
+            "proposal_covariance_source": "weighted_pre_resample_cloud",
+            "proposal_scale": "2.38^2 / dimension",
+            "target_ess": 0.5,
+        },
         "plan_sha256": hashlib.sha256(
             canonical_json(requests).encode()
         ).hexdigest(),
@@ -227,9 +232,7 @@ def ensure_manifest(output_dir: Path, manifest: Mapping[str, Any]) -> str:
         _write_exclusive(path, manifest)
     except FileExistsError:
         if path.read_bytes() != expected:
-            raise ValueError(
-                "output directory contains a different manifest"
-            ) from None
+            raise ValueError("different manifest") from None
     return hashlib.sha256(expected).hexdigest()
 
 
@@ -266,9 +269,7 @@ def load_raw_result(
             raise ValueError("result is not canonical JSON")
         _validate_result(value, request, digest)
     except (json.JSONDecodeError, TypeError, ValueError) as error:
-        raise ValueError(
-            f"invalid raw result; refusing to overwrite {path}: {error}"
-        ) from error
+        raise ValueError(f"invalid raw result {path}: {error}") from error
     return value
 
 
