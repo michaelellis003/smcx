@@ -30,6 +30,7 @@ _RETRYABLE_KINDS = {
     "metal_prelaunch_ineligible",
     "campaign_identity_changed_before_launch",
 }
+_IDENTITY_DOMAINS = ("source", "lock", "packages", "python", "host")
 
 
 class AttemptEvidence(NamedTuple):
@@ -88,11 +89,23 @@ def _failure_schema(value: object) -> str | None:
         return kind if valid else None
     digest_fields = {
         "kind",
+        "changed_domains",
         "expected_source_sha256",
         "observed_source_sha256",
     }
-    valid = set(failure) == digest_fields and all(
-        _is_digest(failure[name]) for name in digest_fields - {"kind"}
+    domains = failure.get("changed_domains")
+    valid_domains = (
+        isinstance(domains, list)
+        and bool(domains)
+        and domains == [name for name in _IDENTITY_DOMAINS if name in domains]
+    )
+    valid = (
+        set(failure) == digest_fields
+        and valid_domains
+        and all(
+            _is_digest(failure[name])
+            for name in ("expected_source_sha256", "observed_source_sha256")
+        )
     )
     return kind if valid else None
 
