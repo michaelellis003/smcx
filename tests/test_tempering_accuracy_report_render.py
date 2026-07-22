@@ -8,10 +8,6 @@ import json
 
 import numpy as np
 import pytest
-from benchmarks.tempering_accuracy.report_plots import (
-    PlotSummary,
-    render_plots,
-)
 
 from benchmarks.profiling.common import canonical_json
 from benchmarks.tempering_accuracy.analysis import (
@@ -30,6 +26,10 @@ from benchmarks.tempering_accuracy.report_data import (
     campaign_requests,
 )
 from benchmarks.tempering_accuracy.report_markdown import render_markdown
+from benchmarks.tempering_accuracy.report_plots import (
+    PlotSummary,
+    render_plots,
+)
 from benchmarks.tempering_accuracy.report_render import (
     AttemptEvidence,
     build_evidence,
