@@ -9,13 +9,10 @@ from typing import Any, cast
 import numpy as np
 
 from benchmarks.profiling.common import canonical_json
+from benchmarks.tempering_accuracy import report_accuracy
 from benchmarks.tempering_accuracy.artifacts import bind_request, request_dict
 from benchmarks.tempering_accuracy.core import build_target
 from benchmarks.tempering_accuracy.plan import cell_id
-from benchmarks.tempering_accuracy.report_accuracy import (
-    _parse_run,
-    _structural,
-)
 from benchmarks.tempering_accuracy.report_data import (
     CampaignData,
     campaign_requests,
@@ -27,10 +24,6 @@ def _names(value: str) -> frozenset[str]:
 
 
 _RESULT = {"schema_version", "request", "failure", "timing", "runs"}
-_RUN = _names(
-    "key_index key_words posterior_mean posterior_covariance log_evidence "
-    "temperatures reweighting_ess acceptance_rates work structural"
-)
 _TIMING = _names(
     "execution_mode backend_startup_burns warmups repeats first_execution_s "
     "steady_times_s backend dispatch_mode environment memory"
@@ -53,7 +46,7 @@ _FAILURE = _names(
     "expected_source_sha256 observed_source_sha256 boundaries changed_domains "
     "worker_failure"
 )
-_IDENTITY_DOMAINS = _names("source lock packages python host")
+_IDENTITY_DOMAINS = ("source", "lock", "packages", "python", "host")
 _METADATA = tuple(
     "execution_mode backend_startup_burns warmups repeats backend "  # noqa: SIM905
     "dispatch_mode".split()
@@ -86,7 +79,7 @@ def _boundary(value: object) -> dict[str, str | None]:
 
 
 def _positive(value: object) -> bool:
-    return bool(
+    return (
         type(value) in {int, float}
         and math.isfinite(cast(float, value))
         and cast(float, value) > 0
@@ -103,6 +96,22 @@ def _failure(value: object) -> dict[str, Any] | None:
     if type(kind) is not str or not kind.isidentifier():
         raise ValueError("measurement failure kind is invalid")
     result: dict[str, Any] = {"kind": kind}
+    if "key_index" in raw:
+        index = raw["key_index"]
+        if type(index) is not int or not 0 <= index < 32:
+            raise ValueError("measurement failure key index is invalid")
+        result["key_index"] = index
+    for name, length in (("key_words", 2), ("key_indices", None)):
+        if name in raw:
+            values = _numbers(raw[name], name, length)
+            if any(type(item) is not int for item in values):
+                raise ValueError(f"measurement {name} is invalid")
+            result[name] = values
+    indices = result.get("key_indices", [])
+    if indices != sorted(set(indices)) or not all(
+        0 <= item < 32 for item in indices
+    ):
+        raise ValueError("measurement key indices are invalid")
     if "failed_call" in raw:
         call = _map(raw["failed_call"], {"role", "index"}, "failed call")
         if (
@@ -142,42 +151,45 @@ def _failure(value: object) -> dict[str, Any] | None:
             {"pre_timing", "post_timing", "post_cell"},
             "failure boundaries",
         )
-        for boundary in boundaries.values():
-            _boundary(boundary)
-    if "changed_domains" in raw and (
-        type(raw["changed_domains"]) is not list
-        or not set(raw["changed_domains"]) <= _IDENTITY_DOMAINS
-    ):
-        raise ValueError("measurement identity domains are invalid")
+        result["boundaries"] = {
+            name: _boundary(boundary) for name, boundary in boundaries.items()
+        }
+    if "changed_domains" in raw:
+        domains = raw["changed_domains"]
+        if type(domains) is not list:
+            raise ValueError("measurement identity domains are invalid")
+        ordered = [name for name in _IDENTITY_DOMAINS if name in domains]
+        if domains != ordered:
+            raise ValueError("measurement identity domain order is invalid")
+        result["changed_domains"] = list(domains)
     if "worker_failure" in raw:
-        _failure(raw["worker_failure"])
+        nested = _failure(raw["worker_failure"])
+        if nested is None:
+            raise ValueError("measurement nested failure is invalid")
+        result["worker_failure"] = nested
     return result
+
+
+def _schema_version(value: object) -> None:
+    if type(value) is not int or value != 1:
+        raise ValueError("measurement schema version is invalid")
 
 
 def _memory(value: object) -> dict[str, int | None]:
     raw = _map(value, _MEMORY, "memory")
+    device = {} if raw["device_stats"] is None else raw["device_stats"]
+    executable = raw["executable_analysis"]
+    executable = {} if executable is None else executable
+    if type(device) is not dict or type(executable) is not dict:
+        raise ValueError("measurement nested memory is invalid")
     result = {
         "process_max_rss_before_measurement_bytes": raw[
             "process_max_rss_before_measurement_bytes"
         ],
         "process_max_rss_bytes": raw["process_max_rss_bytes"],
+        "device_peak_bytes_in_use": device.get("peak_bytes_in_use"),
+        "executable_peak_memory_bytes": executable.get("peak_memory_in_bytes"),
     }
-    for item in result.values():
-        if type(item) is not int or item < 0:
-            raise ValueError("measurement memory value is invalid")
-    device = raw["device_stats"]
-    executable = raw["executable_analysis"]
-    if any(
-        item is not None and type(item) is not dict
-        for item in (device, executable)
-    ):
-        raise ValueError("measurement nested memory is invalid")
-    result["device_peak_bytes_in_use"] = (
-        None if device is None else device.get("peak_bytes_in_use")
-    )
-    result["executable_peak_memory_bytes"] = (
-        None if executable is None else executable.get("peak_memory_in_bytes")
-    )
     if any(
         value is not None and (type(value) is not int or value < 0)
         for value in result.values()
@@ -208,17 +220,10 @@ def _timing(value: object, lane: str) -> dict[str, Any]:
         "cache_dir": None,
         "async": None,
     }
-    expected = [
-        "host_shell",
-        1,
-        0,
-        7,
-        backend,
-        "asynchronous" if x64 else "safe",
-    ]
-    metadata = canonical_json([
-        raw[name] for name in _METADATA
-    ]) == canonical_json(expected)
+    dispatch = "asynchronous" if x64 else "safe"
+    expected = ("host_shell", 1, 0, 7, backend, dispatch)
+    observed = [raw[name] for name in _METADATA]
+    metadata = canonical_json(observed) == canonical_json(expected)
     metadata &= flags == expected_flags and state == expected_state
     metadata &= type(environment["device_id"]) is int
     metadata &= type(environment["device_kind"]) is str
@@ -255,14 +260,13 @@ def _accuracy_runs(request: Any, values: object) -> list[dict[str, Any]]:
     )
     result = []
     for index, value in enumerate(values):
-        run = _map(value, _RUN, "accuracy run")
-        _parse_run(request.cell, run, index, target)
+        run = _map(value, report_accuracy._RUN_FIELDS, "accuracy run")
+        report_accuracy._parse_run(request.cell, run, index, target)
         schedules = {
             name: _numbers(run[name], name)
             for name in ("temperatures", "reweighting_ess", "acceptance_rates")
         }
         structural = dict(run["structural"])
-        _structural(structural)
         result.append({
             "key_index": run["key_index"],
             "key_words": list(run["key_words"]),
@@ -286,9 +290,8 @@ def build_measurements(campaign: CampaignData) -> dict[str, Any]:
     ):
         result = _map(raw, _RESULT, "result")
         expected = request_dict(bind_request(request, campaign.manifest_sha256))
-        if result["schema_version"] != 1 or canonical_json(
-            result["request"]
-        ) != canonical_json(expected):
+        _schema_version(result["schema_version"])
+        if canonical_json(result["request"]) != canonical_json(expected):
             raise ValueError("measurement request identity is invalid")
         failure = _failure(result["failure"])
         runs = result["runs"]
@@ -304,8 +307,8 @@ def build_measurements(campaign: CampaignData) -> dict[str, Any]:
         if request.phase == "timing" and result["timing"] is not None:
             if len(runs) != 1:
                 raise ValueError("measurement timing run is missing")
-            run = _map(runs[0], _RUN, "timing run")
-            _structural(run["structural"])
+            run = _map(runs[0], report_accuracy._RUN_FIELDS, "timing run")
+            report_accuracy._structural(run["structural"])
             entry["timing"] = _timing(result["timing"], request.cell.lane)
         elif request.phase == "accuracy":
             if result["timing"] is not None:
@@ -322,6 +325,4 @@ def build_measurements(campaign: CampaignData) -> dict[str, Any]:
             if request.phase == "timing" or len(runs) != 1:
                 raise ValueError("measurement successful result is incomplete")
         output.append(entry)
-    return dict(
-        schema_version=1, observed_requests=len(output), requests=output
-    )
+    return dict(schema_version=1, observed_requests=count, requests=output)

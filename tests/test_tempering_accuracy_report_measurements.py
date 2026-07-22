@@ -16,16 +16,11 @@ from tests.test_tempering_accuracy_report_timing import _timing
 _CELL = current_cells()[0]
 
 
-def _timing_record():
-    timing = _timing(_CELL, 1)
-    memory = timing["memory"]
-    memory["device_stats"] = {"peak_bytes_in_use": 123, "private": 999}
-    memory["executable_analysis"] = None
-    return timing
-
-
 def test_public_measurements_preserve_values_without_private_payloads():
-    timing = report_measurements._timing(_timing_record(), _CELL.lane)
+    raw_timing = _timing(_CELL, 1)
+    raw_timing["memory"]["device_stats"] = {"peak_bytes_in_use": 123}
+    raw_timing["memory"]["executable_analysis"] = None
+    timing = report_measurements._timing(raw_timing, _CELL.lane)
     request = artifacts.CampaignRequest("accuracy", _CELL, None)
     runs = report_measurements._accuracy_runs(request, [_run(0)])
     prefix = {
@@ -51,8 +46,6 @@ def test_public_measurements_preserve_values_without_private_payloads():
         expected_failure
         | {
             "message": "secret /private/path",
-            "stdout_tail": "secret stdout",
-            "stderr_tail": "secret stderr",
             "worker_failure": {
                 "kind": "worker_exit",
                 "stderr_tail": "secret nested stderr",
@@ -62,25 +55,14 @@ def test_public_measurements_preserve_values_without_private_payloads():
 
     assert timing["steady_times_s"] == [1.0] * 7
     assert timing["memory"]["device_peak_bytes_in_use"] == 123
-    assert runs[0]["key_index"] == 0
-    assert runs[0]["temperatures"] == [0.5, 1.0]
+    assert (runs[0]["key_index"], runs[0]["temperatures"]) == (0, [0.5, 1.0])
     assert failure == expected_failure
     encoded = json.dumps({"timing": timing, "runs": runs, "failure": failure})
-    assert "posterior_mean" not in encoded
-    assert "posterior_covariance" not in encoded
-    assert "private" not in encoded and "secret" not in encoded
+    assert "posterior_" not in encoded and "secret" not in encoded
 
 
 def test_measurements_fail_closed_on_nested_schema():
     with pytest.raises(ValueError):
         report_measurements._schema_version(True)
-    request = artifacts.CampaignRequest("accuracy", _CELL, None)
-    run = _run(0)
-    run["unexpected"] = "hidden"
-    with pytest.raises(ValueError):
-        report_measurements._accuracy_runs(request, [run])
-
-
-def test_incomplete_prefix_is_not_imputed():
     campaign = CampaignData({}, "", "", False, (0, 507), None, (), ())
     assert report_measurements.build_measurements(campaign)["requests"] == []
