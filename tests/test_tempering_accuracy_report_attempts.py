@@ -31,6 +31,7 @@ def _failure(kind):
     if kind == "campaign_identity_changed_before_launch":
         return {
             "kind": kind,
+            "changed_domains": ["lock", "packages"],
             "expected_source_sha256": "a" * 64,
             "observed_source_sha256": "b" * 64,
         }
@@ -105,6 +106,7 @@ def test_attempts_are_bound_hashed_ordered_and_sanitized(tmp_path):
         "request",
         "failure_kind",
         "failure_schema",
+        "identity_domains",
         "metal_schema",
         "extra_field",
     ),
@@ -130,6 +132,11 @@ def test_attempt_schema_and_identity_are_exact(tmp_path, case):
             record["failure"] = _failure("timeout")
         elif case == "failure_schema":
             record["failure"]["unexpected"] = None
+        elif case == "identity_domains":
+            record["failure"] = _failure(
+                "campaign_identity_changed_before_launch"
+            )
+            record["failure"]["changed_domains"] = ["message"]
         elif case == "metal_schema":
             record["failure"] = {
                 "kind": "metal_prelaunch_ineligible",
