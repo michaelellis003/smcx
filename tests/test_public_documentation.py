@@ -17,6 +17,10 @@ def test_public_text_excludes_internal_decision_labels() -> None:
         assert "ADR-" not in path.read_text(), path
 
 
+def test_internal_licensing_inventory_is_not_published() -> None:
+    assert not Path("docs/research/licensing.md").exists()
+
+
 def test_tutorials_execute_during_documentation_build() -> None:
     config = yaml.safe_load(Path("properdocs.yml").read_text())
     jupyter = next(
