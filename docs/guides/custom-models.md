@@ -19,13 +19,7 @@ Each algorithm asks only for behavior it can use:
 | Bootstrap | Initial cloud and transition | Observation |
 | Auxiliary | Initial cloud and transition | Observation and look-ahead |
 | Guided | Initial cloud and proposal | Proposal, transition, and observation |
-| Static | Initial cloud if needed | Base or target; new-data increment |
-| RBPF *(forthcoming)* | Sampled component | Matrices, offsets, covariances |
-
-For static inference or updating, the increment is the new-data likelihood;
-the current `temper` entry point also takes an initial sampler. The forthcoming
-native RBPF will define callbacks for its conditional-Gaussian matrices,
-offsets, and covariances in its own ADR.
+| Tempered SMC | Initial cloud | Prior and likelihood |
 
 A generic model object cannot infer a useful look-ahead function, guided
 proposal, parameter transform, or conditional-Gaussian decomposition. Select
