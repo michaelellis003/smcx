@@ -21,57 +21,52 @@ from benchmarks.tempering_accuracy.report_data import (
     campaign_requests,
 )
 
+
+def _names(value: str) -> frozenset[str]:
+    return frozenset(value.split())
+
+
 _RESULT = {"schema_version", "request", "failure", "timing", "runs"}
-_RUN = frozenset(
-    "key_index key_words posterior_mean posterior_covariance log_evidence "  # noqa: SIM905
-    "temperatures reweighting_ess acceptance_rates work structural".split()
+_RUN = _names(
+    "key_index key_words posterior_mean posterior_covariance log_evidence "
+    "temperatures reweighting_ess acceptance_rates work structural"
 )
-_TIMING = frozenset(
-    "execution_mode backend_startup_burns warmups repeats first_execution_s "  # noqa: SIM905
-    "steady_times_s backend dispatch_mode environment memory".split()
+_TIMING = _names(
+    "execution_mode backend_startup_burns warmups repeats first_execution_s "
+    "steady_times_s backend dispatch_mode environment memory"
 )
-_ENV = frozenset(
-    "device_id device_kind runtime_flags runtime_state pre_timing "  # noqa: SIM905
-    "post_timing post_cell".split()
+_ENV = _names(
+    "device_id device_kind runtime_flags runtime_state pre_timing post_timing "
+    "post_cell"
 )
-_FLAGS = {
-    "JAX_PLATFORMS",
-    "JAX_ENABLE_X64",
-    "JAX_DISABLE_JIT",
-    "JAX_ENABLE_COMPILATION_CACHE",
-}
-_STATE = {
-    "backend",
-    "x64",
-    "disable_jit",
-    "cache_enabled",
-    "cache_dir",
-    "async",
-}
-_MEMORY = {
-    "device_stats",
-    "executable_analysis",
-    "process_max_rss_before_measurement_bytes",
-    "process_max_rss_bytes",
-}
-_FAILURE = frozenset(
-    "kind exception_type message key_index key_words key_indices failed_call "  # noqa: SIM905
+_FLAGS = _names(
+    "JAX_PLATFORMS JAX_ENABLE_X64 JAX_DISABLE_JIT JAX_ENABLE_COMPILATION_CACHE"
+)
+_STATE = _names("backend x64 disable_jit cache_enabled cache_dir async")
+_MEMORY = _names(
+    "device_stats executable_analysis process_max_rss_before_measurement_bytes "
+    "process_max_rss_bytes"
+)
+_FAILURE = _names(
+    "kind exception_type message key_index key_words key_indices failed_call "
     "timing_prefix timeout_s stdout_tail stderr_tail returncode prelaunch "
-    "expected_source_sha256 observed_source_sha256".split()
+    "expected_source_sha256 observed_source_sha256 boundaries changed_domains "
+    "worker_failure"
+)
+_IDENTITY_DOMAINS = _names("source lock packages python host")
+_METADATA = tuple(
+    "execution_mode backend_startup_burns warmups repeats backend "  # noqa: SIM905
+    "dispatch_mode".split()
 )
 
 
-def _map(
-    value: object, fields: set[str] | frozenset[str], name: str
-) -> dict[str, Any]:
+def _map(value: object, fields: Any, name: str) -> dict[str, Any]:
     if type(value) is not dict or set(value) != fields:
         raise ValueError(f"measurement {name} schema is invalid")
     return cast(dict[str, Any], value)
 
 
-def _numbers(
-    value: object, name: str, *, length: int | None = None
-) -> list[Any]:
+def _numbers(value: object, name: str, length: int | None = None) -> list[Any]:
     if type(value) is not list or (length is not None and len(value) != length):
         raise ValueError(f"measurement {name} is invalid")
     for item in value:
@@ -85,11 +80,17 @@ def _numbers(
 
 def _boundary(value: object) -> dict[str, str | None]:
     result = _map(value, {"power_status", "thermal_status"}, "boundary")
-    if any(
-        item is not None and type(item) is not str for item in result.values()
-    ):
+    if not all(item is None or type(item) is str for item in result.values()):
         raise ValueError("measurement boundary value is invalid")
     return cast(dict[str, str | None], result)
+
+
+def _positive(value: object) -> bool:
+    return bool(
+        type(value) in {int, float}
+        and math.isfinite(cast(float, value))
+        and cast(float, value) > 0
+    )
 
 
 def _failure(value: object) -> dict[str, Any] | None:
@@ -119,20 +120,37 @@ def _failure(value: object) -> dict[str, Any] | None:
         first = prefix["first_execution_s"]
         steady = _numbers(prefix["steady_times_s"], "timing prefix")
         call = result.get("failed_call")
-        valid = (
-            prefix["eligible"] is False
-            and (first is None or type(first) in {int, float})
-            and call is not None
-            and len(steady) == call["index"]
-            and (
-                (call["role"] == "first" and first is None) or first is not None
-            )
+        valid_call = call == {"role": "first", "index": 0} and (
+            first is None and not steady
         )
-        if not valid:
+        valid_call |= bool(
+            call is not None
+            and call["role"] == "steady"
+            and 0 <= call["index"] < 7
+            and len(steady) == call["index"]
+            and _positive(first)
+            and all(_positive(item) for item in steady)
+        )
+        if prefix["eligible"] is not False or not valid_call:
             raise ValueError("measurement timing prefix is invalid")
         result["timing_prefix"] = {**prefix, "steady_times_s": steady}
     if "prelaunch" in raw:
         result["prelaunch"] = _boundary(raw["prelaunch"])
+    if "boundaries" in raw:
+        boundaries = _map(
+            raw["boundaries"],
+            {"pre_timing", "post_timing", "post_cell"},
+            "failure boundaries",
+        )
+        for boundary in boundaries.values():
+            _boundary(boundary)
+    if "changed_domains" in raw and (
+        type(raw["changed_domains"]) is not list
+        or not set(raw["changed_domains"]) <= _IDENTITY_DOMAINS
+    ):
+        raise ValueError("measurement identity domains are invalid")
+    if "worker_failure" in raw:
+        _failure(raw["worker_failure"])
     return result
 
 
@@ -149,10 +167,11 @@ def _memory(value: object) -> dict[str, int | None]:
             raise ValueError("measurement memory value is invalid")
     device = raw["device_stats"]
     executable = raw["executable_analysis"]
-    if device is not None and type(device) is not dict:
-        raise ValueError("measurement device memory is invalid")
-    if executable is not None and type(executable) is not dict:
-        raise ValueError("measurement executable memory is invalid")
+    if any(
+        item is not None and type(item) is not dict
+        for item in (device, executable)
+    ):
+        raise ValueError("measurement nested memory is invalid")
     result["device_peak_bytes_in_use"] = (
         None if device is None else device.get("peak_bytes_in_use")
     )
@@ -160,7 +179,7 @@ def _memory(value: object) -> dict[str, int | None]:
         None if executable is None else executable.get("peak_memory_in_bytes")
     )
     if any(
-        value is not None and type(value) is not int
+        value is not None and (type(value) is not int or value < 0)
         for value in result.values()
     ):
         raise ValueError("measurement memory value is invalid")
@@ -189,28 +208,29 @@ def _timing(value: object, lane: str) -> dict[str, Any]:
         "cache_dir": None,
         "async": None,
     }
-    metadata = (
-        raw["execution_mode"] == "host_shell"
-        and raw["backend_startup_burns"] == 1
-        and raw["warmups"] == 0
-        and raw["repeats"] == 7
-        and raw["backend"] == backend
-        and raw["dispatch_mode"] == ("asynchronous" if x64 else "safe")
-        and flags == expected_flags
-        and state == expected_state
-    )
+    expected = [
+        "host_shell",
+        1,
+        0,
+        7,
+        backend,
+        "asynchronous" if x64 else "safe",
+    ]
+    metadata = canonical_json([
+        raw[name] for name in _METADATA
+    ]) == canonical_json(expected)
+    metadata &= flags == expected_flags and state == expected_state
+    metadata &= type(environment["device_id"]) is int
+    metadata &= type(environment["device_kind"]) is str
     first = raw["first_execution_s"]
-    steady = _numbers(raw["steady_times_s"], "steady times", length=7)
-    if not metadata or type(first) not in {int, float} or first <= 0:
+    steady = _numbers(raw["steady_times_s"], "steady times", 7)
+    valid_times = _positive(first) and all(_positive(value) for value in steady)
+    if not metadata or not valid_times:
         raise ValueError("measurement timing metadata is invalid")
-    boundaries = {
-        name: _boundary(environment[name])
-        for name in ("pre_timing", "post_timing", "post_cell")
-    }
+    names = ("pre_timing", "post_timing", "post_cell")
     if "supervisor_prelaunch" in environment:
-        boundaries["supervisor_prelaunch"] = _boundary(
-            environment["supervisor_prelaunch"]
-        )
+        names += ("supervisor_prelaunch",)
+    boundaries = {name: _boundary(environment[name]) for name in names}
     return {
         **{name: raw[name] for name in _TIMING - {"environment", "memory"}},
         "steady_times_s": steady,
@@ -257,9 +277,8 @@ def _accuracy_runs(request: Any, values: object) -> list[dict[str, Any]]:
 def build_measurements(campaign: CampaignData) -> dict[str, Any]:
     """Return strict path-free measurements for the observed raw prefix."""
     requests = campaign_requests()
-    if len(campaign.results) != len(campaign.inventory) or len(
-        campaign.results
-    ) > len(requests):
+    count = len(campaign.results)
+    if count != len(campaign.inventory) or count > len(requests):
         raise ValueError("measurement inventory does not match raw results")
     output = []
     for ordinal, (request, raw) in enumerate(
@@ -272,6 +291,9 @@ def build_measurements(campaign: CampaignData) -> dict[str, Any]:
         ) != canonical_json(expected):
             raise ValueError("measurement request identity is invalid")
         failure = _failure(result["failure"])
+        runs = result["runs"]
+        if type(runs) is not list:
+            raise ValueError("measurement run list is invalid")
         entry: dict[str, Any] = {
             "ordinal": ordinal,
             "phase": request.phase,
@@ -280,16 +302,26 @@ def build_measurements(campaign: CampaignData) -> dict[str, Any]:
             "failure": failure,
         }
         if request.phase == "timing" and result["timing"] is not None:
+            if len(runs) != 1:
+                raise ValueError("measurement timing run is missing")
+            run = _map(runs[0], _RUN, "timing run")
+            _structural(run["structural"])
             entry["timing"] = _timing(result["timing"], request.cell.lane)
         elif request.phase == "accuracy":
             if result["timing"] is not None:
                 raise ValueError("measurement accuracy result contains timing")
-            entry["accuracy_runs"] = _accuracy_runs(request, result["runs"])
+            entry["accuracy_runs"] = _accuracy_runs(request, runs)
+            complete = (
+                failure is None or failure["kind"] == "structural_failure"
+            )
+            if complete and len(runs) != 32:
+                raise ValueError("measurement accuracy result is incomplete")
         elif result["timing"] is not None:
             raise ValueError("measurement untimed result contains timing")
+        elif failure is None:
+            if request.phase == "timing" or len(runs) != 1:
+                raise ValueError("measurement successful result is incomplete")
         output.append(entry)
-    return {
-        "schema_version": 1,
-        "observed_requests": len(output),
-        "requests": output,
-    }
+    return dict(
+        schema_version=1, observed_requests=len(output), requests=output
+    )
