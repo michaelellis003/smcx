@@ -10,6 +10,7 @@ import platform
 import sys
 import tempfile
 from collections.abc import Mapping
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -148,8 +149,11 @@ def _source_identity(root: Path) -> tuple[dict[str, Any], dict[str, str]]:
 def campaign_identity(root: Path) -> dict[str, Any]:
     """Capture source, lock, package, Python, and host identity."""
     source, lock = _source_identity(Path(root).resolve())
+
     packages = package_versions()
-    packages.pop("python", None)
+    for name in ("python", "tfp-nightly"):
+        packages.pop(name, None)
+    packages.update({name: version(name) for name in ("ml-dtypes", "scipy")})
     return {
         "source": source,
         "lock": lock,

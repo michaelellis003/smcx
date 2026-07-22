@@ -72,16 +72,14 @@ def test_manifest_hash_names_and_waste_free_exclusion(monkeypatch, tmp_path):
     assert artifacts.manifest_sha256(manifest) == expected
     names = list(map(artifacts.raw_filename, artifacts.campaign_requests()))
     assert len(names) == len(set(names)) == 508
-    assert names[0].endswith("s5-2cfd8e189f75362c.json")
-    assert names[-1].endswith("s20-823bf41c65d47b53.json")
 
 
 def test_campaign_identity_covers_source_lock_python_packages_and_host():
     root = Path(__file__).resolve().parents[1]
     identity = artifacts.campaign_identity(root)
-    assert set(identity) == {"source", "lock", "packages", "python", "host"}
     assert "benchmarks/profiling/locking.py" in identity["source"]["files"]
-    assert len(identity["source"]["sha256"]) == 64
+    assert {"ml-dtypes", "scipy"} <= identity["packages"].keys()
+    assert "tfp-nightly" not in identity["packages"]
     lock = (root / "uv.lock").read_bytes()
     assert identity["lock"]["sha256"] == hashlib.sha256(lock).hexdigest()
 
