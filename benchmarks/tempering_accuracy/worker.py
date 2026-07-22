@@ -101,6 +101,17 @@ class TimingRecord(NamedTuple):
     memory: dict[str, Any]
 
 
+class _TimingFailure(NamedTuple):
+    """Diagnostic prefix retained when one measured call raises."""
+
+    exception_type: str
+    message: str
+    role: str
+    index: int
+    first_execution_s: float | None
+    steady_times_s: tuple[float, ...]
+
+
 def _request_dict(request: WorkerRequest) -> dict[str, object]:
     return {
         "manifest_sha256": request.manifest_sha256,
@@ -375,7 +386,9 @@ def _run_once(
     return _record_posterior(request, prepared.key, key_index, posterior)
 
 
-def _run_timing(request: WorkerRequest) -> tuple[TimingRecord, RunRecord]:
+def _run_timing(
+    request: WorkerRequest,
+) -> tuple[TimingRecord | None, RunRecord | None, _TimingFailure | None]:
     """Measure one registered first call and seven steady public calls."""
     runtime = _validate_timing_runtime(request.cell)
     _burn_backend()
@@ -385,12 +398,35 @@ def _run_timing(request: WorkerRequest) -> tuple[TimingRecord, RunRecord]:
     pre_timing = _timing_environment()
 
     started = _clock()
-    posterior = _invoke_prepared(request, prepared)
+    try:
+        posterior = _invoke_prepared(request, prepared)
+    except Exception as error:
+        return (
+            None,
+            None,
+            _TimingFailure(
+                type(error).__name__, str(error), "first", 0, None, ()
+            ),
+        )
     first_execution = _clock() - started
     steady = []
-    for _ in range(7):
+    for index in range(7):
         started = _clock()
-        posterior = _invoke_prepared(request, prepared)
+        try:
+            posterior = _invoke_prepared(request, prepared)
+        except Exception as error:
+            return (
+                None,
+                None,
+                _TimingFailure(
+                    type(error).__name__,
+                    str(error),
+                    "steady",
+                    index,
+                    first_execution,
+                    tuple(steady),
+                ),
+            )
         steady.append(_clock() - started)
 
     post_timing = _timing_environment()
@@ -427,7 +463,7 @@ def _run_timing(request: WorkerRequest) -> tuple[TimingRecord, RunRecord]:
         environment,
         memory,
     )
-    return timing, record
+    return timing, record, None
 
 
 def _jsonable(value: Any) -> Any:
@@ -466,7 +502,24 @@ def execute_request(request: WorkerRequest) -> dict[str, Any]:
         if request.phase == "smoke":
             record = _run_once(request, jr.key(_TIMING_KEY), None)
         elif request.phase == "timing":
-            timing, record = _run_timing(request)
+            timing, record, timing_failure = _run_timing(request)
+            if timing_failure is not None:
+                payload["failure"] = {
+                    "kind": "execution_failure",
+                    "exception_type": timing_failure.exception_type,
+                    "message": timing_failure.message,
+                    "failed_call": {
+                        "role": timing_failure.role,
+                        "index": timing_failure.index,
+                    },
+                    "timing_prefix": {
+                        "eligible": False,
+                        "first_execution_s": timing_failure.first_execution_s,
+                        "steady_times_s": list(timing_failure.steady_times_s),
+                    },
+                }
+                return payload
+            assert timing is not None and record is not None
             payload["timing"] = _jsonable(timing)
         else:
             raise NotImplementedError(f"{request.phase} execution is pending")

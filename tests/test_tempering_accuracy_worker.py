@@ -142,6 +142,12 @@ def test_timing_fences_registered_matched_call_schedule(monkeypatch):
         calls.append((args, kwargs))
         return _fake_posterior(cell)
 
+    record_posterior = worker._record_posterior
+
+    def record(*args):
+        events.append("record")
+        return record_posterior(*args)
+
     monkeypatch.setattr(worker.smcx, "temper", fake_temper)
     monkeypatch.setattr(worker, "_burn_backend", lambda: events.append("burn"))
     monkeypatch.setattr(worker, "_clock", clock, raising=False)
@@ -150,6 +156,7 @@ def test_timing_fences_registered_matched_call_schedule(monkeypatch):
     monkeypatch.setattr(worker, "_max_rss_bytes", lambda: 123, raising=False)
     monkeypatch.setattr(worker, "_device_memory", lambda _: {}, raising=False)
     monkeypatch.setattr(worker, "_runtime_state", lambda: _valid_runtime(cell))
+    monkeypatch.setattr(worker, "_record_posterior", record)
 
     payload = execute_request(WorkerRequest(_MANIFEST, "timing", cell, 0))
 
@@ -166,6 +173,7 @@ def test_timing_fences_registered_matched_call_schedule(monkeypatch):
         "burn",
         "tuple",
         *(["clock", "temper", "TemperedPosterior", "clock"] * 8),
+        "record",
     ]
     timing = payload["timing"]
     assert timing["first_execution_s"] == pytest.approx(1.0)
@@ -208,18 +216,46 @@ def test_timing_refuses_unattested_runtime_before_temper(
     assert calls == []
 
 
-def test_timing_retains_failed_call_without_retry(monkeypatch):
+@pytest.mark.parametrize(
+    ("failure_call", "failed_call", "timing_prefix"),
+    (
+        (
+            1,
+            {"role": "first", "index": 0},
+            {
+                "eligible": False,
+                "first_execution_s": None,
+                "steady_times_s": [],
+            },
+        ),
+        (
+            3,
+            {"role": "steady", "index": 1},
+            {
+                "eligible": False,
+                "first_execution_s": 1.0,
+                "steady_times_s": [1.0],
+            },
+        ),
+    ),
+)
+def test_timing_retains_failed_call_without_retry(
+    monkeypatch,
+    failure_call,
+    failed_call,
+    timing_prefix,
+):
     cell = _active_cell(current_cells())
     calls = []
     ticks = iter(float(index) for index in range(20))
 
-    def fail_third_call(*args, **kwargs):
+    def fail_registered_call(*args, **kwargs):
         calls.append((args, kwargs))
-        if len(calls) == 3:
+        if len(calls) == failure_call:
             raise RuntimeError("registered timing failure")
         return _fake_posterior(cell)
 
-    monkeypatch.setattr(worker.smcx, "temper", fail_third_call)
+    monkeypatch.setattr(worker.smcx, "temper", fail_registered_call)
     monkeypatch.setattr(worker, "_burn_backend", lambda: None, raising=False)
     monkeypatch.setattr(worker, "_clock", lambda: next(ticks), raising=False)
     monkeypatch.setattr(
@@ -231,11 +267,55 @@ def test_timing_retains_failed_call_without_retry(monkeypatch):
 
     payload = execute_request(WorkerRequest(_MANIFEST, "timing", cell, 0))
 
-    assert len(calls) == 3
+    assert len(calls) == failure_call
     assert payload["failure"] == {
         "kind": "execution_failure",
         "exception_type": "RuntimeError",
         "message": "registered timing failure",
+        "failed_call": failed_call,
+        "timing_prefix": timing_prefix,
     }
     assert payload["timing"] is None
     assert payload["runs"] == []
+
+
+def test_system_value_returns_none_after_timeout(monkeypatch):
+    def timeout(*args, **kwargs):
+        assert kwargs["timeout"] == pytest.approx(5.0)
+        raise worker.subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(worker.subprocess, "run", timeout)
+
+    assert worker._system_value("host-status") is None
+
+
+def test_system_value_returns_none_after_nonzero_exit(monkeypatch):
+    def nonzero(*args, **kwargs):
+        assert kwargs["check"] is False
+        return worker.subprocess.CompletedProcess(args[0], 1, stdout="ignored")
+
+    monkeypatch.setattr(worker.subprocess, "run", nonzero)
+
+    assert worker._system_value("host-status") is None
+
+
+def test_runtime_flags_retain_registered_environment_values(monkeypatch):
+    names = (
+        "JAX_PLATFORMS",
+        "JAX_ENABLE_X64",
+        "JAX_COMPILATION_CACHE_DIR",
+        "JAX_DISABLE_JIT",
+        "JAX_ENABLE_COMPILATION_CACHE",
+        "JAX_MPS_ASYNC_DISPATCH",
+        "XLA_FLAGS",
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    )
+    expected = {name: f"registered-{index}" for index, name in enumerate(names)}
+    for name, value in expected.items():
+        monkeypatch.setenv(name, value)
+
+    assert worker._runtime_flags() == expected
