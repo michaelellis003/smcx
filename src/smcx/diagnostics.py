@@ -357,8 +357,8 @@ def _eve_class_mass_sq(
     weights = normalize(log_w_t)
     class_mass = jnp.zeros(num_particles).at[eve_t].add(weights)
     est = jnp.sum(class_mass**2)
-    # One Eve class left: the run carries no variance information
-    # (ADR-0021 reports this honestly instead of saturating at 1).
+    # One Eve class left: the run carries no variance information, so
+    # return infinity rather than saturating the estimate at 1.
     sorted_eve = jnp.sort(eve_t)
     num_classes = 1 + jnp.sum(sorted_eve[1:] != sorted_eve[:-1])
     return jnp.where(num_classes > 1, est, jnp.inf)
@@ -831,7 +831,7 @@ def tail_ess(
     Note: this replaces the earlier smcjax quantity of the same name,
     which measured top-weight-mass concentration and did not examine
     particle values. It was carried forward from smcx's former MLX
-    implementation under ADR-0010 and ADR-0018.
+    implementation.
 
     Args:
         posterior: Any :class:`ParticleFilterResult`.

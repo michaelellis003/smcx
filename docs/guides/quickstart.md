@@ -1,10 +1,8 @@
 # Quickstart
 
-This guide filters a one-dimensional linear-Gaussian state-space
-model from end to end: simulate data, run a bootstrap filter, read
-the diagnostics, then swap in a guided proposal and watch the
-evidence-estimate variance drop. Every code block runs as written;
-paste them in order into one session.
+This example simulates a one-dimensional linear-Gaussian model, runs a
+bootstrap filter, and then compares it with a guided proposal. Run the code
+blocks in order in one Python session.
 
 ## The model
 
@@ -24,10 +22,7 @@ the observation model returns a log-density.
 
 ```python
 import math
-from typing import NamedTuple
 
-import jax
-import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 import smcx
@@ -77,8 +72,7 @@ states, observations = smcx.simulate(
 ## Filter
 
 The bootstrap filter proposes from the transition and weights by the
-observation density. Ten thousand particles is comfortable: the whole
-time loop is one `lax.scan`, compiled once.
+observation density.
 
 ```python
 posterior = smcx.bootstrap_filter(
@@ -93,176 +87,11 @@ posterior = smcx.bootstrap_filter(
 means = smcx.weighted_mean(posterior)
 rmse = float(np.sqrt(np.mean((np.array(means) - np.array(states)) ** 2)))
 print("marginal loglik:", round(posterior.marginal_loglik.item(), 1))
-print("filter RMSE:", round(rmse, 3), "vs obs-only RMSE:", round(r_sd, 3))
+print("filter RMSE:", round(rmse, 3), "observation sd:", round(r_sd, 3))
 ```
 
-The filtered RMSE comes out near 0.37, roughly half the observation
-noise $\sigma_r = 0.7$ — the filter is extracting signal, not echoing
-the data.
-
-## Filter a stream in chunks
-
-Initialization consumes the first observation. Supply one explicit key for
-each later observation; identical keys make repeated steps and any chunking
-exactly equal on supported CPU and physical M-series Metal:
-
-```python
-step_root, init_key = jr.split(key_filt)
-step_keys = jr.split(step_root, observations.shape[0] - 1)
-checkpoint, _ = smcx.bootstrap_init(
-    init_key, initial_sampler, log_observation_fn, observations[0], 10_000
-)
-checkpoint, chunk = smcx.bootstrap_update(
-    step_keys[:49],
-    checkpoint,
-    transition_sampler,
-    log_observation_fn,
-    observations[1:50],
-)
-```
-
-`chunk` holds only its histories and conditional evidence; pass the returned
-checkpoint into the next update. Until smcx #38 closes, MPS applies one step
-per observation and an outer `jax.jit` is unsupported (ADR-0031).
-
-## Carry a structured latent state
-
-The bootstrap, auxiliary, and guided filters can carry any nonempty JAX
-PyTree of arrays. This is useful when a particle contains several values
-with different shapes—for example, a nonlinear state together with the
-conditional mean and covariance from a Kalman update. The initial
-sampler adds the same leading particle axis to every leaf; callbacks see
-one particle with that axis removed.
-
-```python
-class CompositeState(NamedTuple):
-    signal: jax.Array
-    conditional_mean: jax.Array
-    conditional_covariance: jax.Array
-
-
-def structured_initial(key, n):
-    signal = jr.normal(key, (n, 1))
-    return CompositeState(
-        signal=signal,
-        conditional_mean=jnp.zeros((n, 2)),
-        conditional_covariance=jnp.broadcast_to(jnp.eye(2), (n, 2, 2)),
-    )
-
-
-def structured_transition(key, state):
-    signal = rho * state.signal + q_sd * jr.normal(key, state.signal.shape)
-    mean = 0.9 * state.conditional_mean + 0.1 * signal
-    return CompositeState(signal, mean, state.conditional_covariance)
-
-
-def structured_log_observation(y, state):
-    z = (y[0] - state.signal[0]) / r_sd
-    return -0.5 * z * z - math.log(r_sd * math.sqrt(2 * math.pi))
-
-
-structured = smcx.bootstrap_filter(
-    jr.key(2),
-    structured_initial,
-    structured_transition,
-    structured_log_observation,
-    observations,
-    num_particles=10_000,
-)
-
-print(structured.filtered_particles.signal.shape)  # (100, 10000, 1)
-print(structured.filtered_particles.conditional_covariance.shape)
-# (100, 10000, 2, 2)
-```
-
-The tree structure, leaf event shapes, and dtypes stay fixed for the
-whole run. smcx applies each resampling decision jointly to every leaf,
-so the signal and its conditional moments cannot lose particle identity.
-`smcx.reconstruct_trajectories(structured)` returns the same tree with
-the same leaf shapes.
-
-Diagnostics that need Euclidean state arithmetic intentionally accept a
-dense `(T, N, D)` history. Select or project the state you want to
-summarize and reuse the posterior metadata:
-
-```python
-signal_posterior = structured._replace(
-    filtered_particles=structured.filtered_particles.signal
-)
-signal_means = smcx.weighted_mean(signal_posterior)
-```
-
-Liu–West, tempered SMC, and SMC² remain dense because their parameter
-proposals require an explicit Euclidean geometry. Equinox modules and
-other registered PyTree classes work at the callable boundary, but smcx
-does not require Equinox or define model classes of its own.
-
-## Add time-varying inputs
-
-Controlled dynamics and covariate-driven observations use the
-keyword-only `inputs` channel. An input sequence has shape `(T, U)`;
-a scalar sequence `(T,)` becomes `(T, 1)`. At time zero, `inputs[0]`
-reaches the initial-state and observation callbacks. At each later
-time t, `inputs[t]` reaches the transition into t and the observation
-at t. Every input-aware callback takes `input_t` last, even when that
-callback does not use it.
-
-Here a known control shifts the latent dynamics. The same input-aware
-model generates and filters the data:
-
-```python
-controls = jnp.sin(jnp.linspace(0.0, 4.0 * jnp.pi, 100))[:, None]
-control_scale = 0.2
-key_control_sim, key_control_filt = jr.split(jr.key(1))
-
-
-def controlled_initial(key, input_0):
-    return jr.normal(key, (1,)) + control_scale * input_0
-
-
-def controlled_initial_cloud(key, n, input_0):
-    return jr.normal(key, (n, 1)) + control_scale * input_0
-
-
-def controlled_transition(key, state, input_t):
-    noise = q_sd * jr.normal(key, state.shape)
-    return rho * state + control_scale * input_t + noise
-
-
-def controlled_emission(key, state, input_t):
-    del input_t
-    return state + r_sd * jr.normal(key, state.shape)
-
-
-def controlled_log_observation(y, state, input_t):
-    del input_t
-    z = (y[0] - state[0]) / r_sd
-    return -0.5 * z * z - math.log(r_sd * math.sqrt(2 * math.pi))
-
-
-controlled_states, controlled_observations = smcx.simulate(
-    key_control_sim,
-    controlled_initial,
-    controlled_transition,
-    controlled_emission,
-    num_timesteps=100,
-    inputs=controls,
-)
-controlled_posterior = smcx.bootstrap_filter(
-    key_control_filt,
-    controlled_initial_cloud,
-    controlled_transition,
-    controlled_log_observation,
-    controlled_observations,
-    num_particles=10_000,
-    inputs=controls,
-)
-```
-
-The auxiliary and guided filters follow the same input-last rule.
-Liu–West keeps parameters first, so its callbacks end in
-`(..., params, input_t)`; its parameter initializer remains
-`(key, num_particles)`.
+For the fixed seed above, the filtered RMSE is about 0.369, compared with
+an observation-noise scale of 0.7.
 
 ## Diagnose
 
@@ -278,13 +107,8 @@ for w in report["warnings"]:
     print("warning:", w)
 ```
 
-Both diagnostics come back clean: the effective sample size stays
-above ten percent of $N$ at every step, and the Pareto-$k$ tail
-index of the importance weights sits far below the 0.7 reliability
-threshold, so no warnings fire. Clean weight diagnostics do not make
-the bootstrap proposal free, though — ignoring the current
-observation still costs variance in the evidence estimate, and that
-is where a better proposal earns its keep.
+For this run, no warnings are returned. The diagnostics describe the particle
+weights; they do not measure the Monte Carlo variance of the evidence estimate.
 
 ## Cut the variance with a guided proposal
 
@@ -331,15 +155,8 @@ print("guided marginal loglik:", round(guided.marginal_loglik.item(), 1))
 print("guided min ESS:", round(g["min_ess"], 1))
 ```
 
-The guided filter lifts the worst-case ESS by about a third while
-returning the same marginal likelihood. The gain is real but bounded
-by the model itself: with $\sigma_r \approx 2\sigma_q$ the optimal
-proposal's standard deviation (0.28) barely differs from the
-transition's (0.3), so no proposal choice can make the weights flat
-here. Where the improvement shows clearly is in the variance of the
-evidence estimate. `replicated_log_ml` vmaps the whole filter over
-independent keys, and `store_history=False` keeps the replicated run
-at O(N) memory:
+`replicated_log_ml` runs independent filters without retaining particle
+histories:
 
 ```python
 def boot_lml(key):
@@ -374,16 +191,19 @@ print("bootstrap log-ML sd:", round(float(np.std(np.array(lml_b))), 3))
 print("guided    log-ML sd:", round(float(np.std(np.array(lml_g))), 3))
 ```
 
-The guided filter cuts the standard deviation of the log-evidence
-estimate from about 0.074 to 0.053 — half the variance for the price
-of three extra densities. Same target, tighter estimate; and smcx
-keeps the two filters behind the same call shape, so switching costs
-one function name.
+With these seeds, the minimum ESS is about 1,122 for the bootstrap filter and
+1,480 for the guided filter. Across the 20 replications above, the standard
+deviation of the log-evidence estimate is 0.074 and 0.053 respectively. These
+numbers describe this example, not a general performance guarantee.
 
 ## What next
 
 - The [stochastic volatility guide](stochastic-volatility.md) adds an
   unknown static parameter and learns it online.
+- The [custom-model guide](custom-models.md) covers structured latent states
+  and time-varying inputs.
+- `bootstrap_init`, `bootstrap_step`, and `bootstrap_update` support
+  checkpointed or chunked filtering.
 - Every function used here — `bootstrap_filter`, `guided_filter`,
   `simulate`, `diagnose`, `weighted_mean`, `replicated_log_ml` — has
   a full contract in the [API reference](../api/smcx/index.md).

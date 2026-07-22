@@ -109,7 +109,7 @@ def temper(
             higher-dimensional or poorly mixed targets may need more.
         target_ess: The bisection solves ``ESS = target_ess * N``
             for each stage's temperature increment.
-        resampling_fn: ADR-0004 contract resampler (applied at every
+        resampling_fn: Resampler applied at every
             stage — the schedule drives ESS to the target by
             construction).
         max_stages: Safety cap on the number of stages.

@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Optional ArviZ reporting bridge using public APIs (ADR-0027)."""
+"""Optional ArviZ reporting bridge using public constructors."""
 
 import importlib
 from collections.abc import Mapping, Sequence

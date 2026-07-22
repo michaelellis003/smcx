@@ -124,15 +124,6 @@ The implemented methods draw on these primary sources:
   and [Gneiting and Raftery (2007)](https://doi.org/10.1198/016214506000001437).
 - Reporting: [ArviZ](https://doi.org/10.21105/joss.01143).
 
-Parts of the filtering and diagnostics core descend from
-[`smcjax@e93d527`](https://github.com/michaelellis003/smcx/tree/e93d5272cb48b7f9b10e9cb0ff1618fdb20c7aad)
-under Apache-2.0; the affected source files record their modifications.
-particles, BlackJAX, Dynamax, TensorFlow Probability, NIMBLE, and ArviZ
-also informed interfaces or served as independent validation references.
-No code was copied or translated from those comparison libraries. The
-[licensing inventory](https://github.com/michaelellis003/smcx/blob/main/docs/research/licensing.md)
-records the exact borrowing mode and license for each project.
-
 ## Contributing
 
 Contributions are welcome. See
