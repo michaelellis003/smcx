@@ -3,6 +3,7 @@
 
 """Host supervisor contracts for issue #30."""
 
+import json
 import math
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 
 import benchmarks.tempering_accuracy.supervisor as supervisor
+from benchmarks.profiling.common import canonical_json
 from benchmarks.tempering_accuracy.artifacts import (
     CampaignRequest,
     bind_request,
@@ -82,12 +84,20 @@ def _configure(monkeypatch, requests):
     monkeypatch.setattr(
         supervisor, "campaign_requests", lambda: tuple(requests)
     )
+    monkeypatch.setattr(
+        supervisor, "_prelaunch_snapshot", lambda: {}, raising=False
+    )
 
 
 @pytest.mark.parametrize("timeout", (0, -1, math.inf, math.nan))
 def test_timeout_must_be_positive_and_finite(tmp_path, timeout):
     with pytest.raises(ValueError, match="timeout"):
         supervisor.run_campaign(tmp_path, timeout_s=timeout)
+
+
+def test_output_directory_cannot_overlap_attested_source():
+    with pytest.raises(supervisor.CampaignError, match="output_dir"):
+        supervisor.run_campaign(_ROOT)
 
 
 def test_cli_surface_and_nonmutating_dry_run(monkeypatch, tmp_path):
@@ -150,6 +160,7 @@ def test_lock_spans_manifest_and_exact_phase_order(monkeypatch, tmp_path):
     requests = campaign_requests()
     _configure(monkeypatch, requests)
     events = []
+    identity_calls = 0
 
     class Lock:
         def __enter__(self):
@@ -159,6 +170,8 @@ def test_lock_spans_manifest_and_exact_phase_order(monkeypatch, tmp_path):
             events.append("released")
 
     def identity(root):
+        nonlocal identity_calls
+        identity_calls += 1
         assert events == ["locked"]
         return deepcopy(_IDENTITY)
 
@@ -181,6 +194,7 @@ def test_lock_spans_manifest_and_exact_phase_order(monkeypatch, tmp_path):
         key=("smoke", "timing", "accuracy").index,
     )
     assert events == ["locked", "released"]
+    assert identity_calls == 1 + 2 * len(requests)
 
 
 @pytest.mark.parametrize("mode", ("prefix", "gap", "corrupt"))
@@ -229,3 +243,204 @@ def test_supervisor_import_does_not_import_jax():
         "assert 'jax' not in sys.modules"
     )
     subprocess.run([sys.executable, "-c", code], cwd=_ROOT, check=True)
+
+
+def test_metal_prelaunch_requires_ac_and_both_no_warnings(monkeypatch):
+    monkeypatch.setattr(
+        supervisor, "_command_value", lambda command: "Battery Power"
+    )
+    with pytest.raises(supervisor._RetryableError):
+        supervisor._prelaunch_snapshot()
+    monkeypatch.setattr(
+        supervisor,
+        "_command_value",
+        lambda command: (
+            "Now drawing from 'AC Power'"
+            if command[-1] == "batt"
+            else "No thermal warning level"
+        ),
+    )
+    with pytest.raises(supervisor._RetryableError):
+        supervisor._prelaunch_snapshot()
+
+
+def test_metal_timing_retains_supervisor_prelaunch(monkeypatch, tmp_path):
+    request = next(
+        item
+        for item in campaign_requests()
+        if item.phase == "timing" and item.cell.lane == "mps_f32"
+    )
+    _configure(monkeypatch, (request,))
+    snapshot = {"power_status": "AC", "thermal_status": "cool"}
+    monkeypatch.setattr(supervisor, "_prelaunch_snapshot", lambda: snapshot)
+    monkeypatch.setattr(supervisor, "load_raw_result", lambda *args: None)
+    payload = _payload(request)
+    payload["timing"] = {"environment": {}}
+    monkeypatch.setattr(
+        supervisor,
+        "run_worker",
+        lambda *args, **kwargs: WorkerAttempt(payload, False),
+    )
+    raw = []
+    monkeypatch.setattr(
+        supervisor, "write_raw_result", lambda *args: raw.append(args[-1])
+    )
+    assert supervisor.run_campaign(tmp_path) == 0
+    assert raw[0]["timing"]["environment"]["supervisor_prelaunch"] == snapshot
+
+
+def test_retryable_launch_attempt_is_exclusive_and_rerunnable(
+    monkeypatch, tmp_path
+):
+    request = campaign_requests()[0]
+    _configure(monkeypatch, (request,))
+    monkeypatch.setattr(supervisor, "load_raw_result", lambda *args: None)
+    monkeypatch.setattr(
+        supervisor,
+        "write_raw_result",
+        lambda *args: pytest.fail("retryable attempt became a raw result"),
+    )
+    payload = _payload(
+        request,
+        failure={"kind": "launch_error", "message": "x" * 5_000},
+    )
+    launches = []
+    monkeypatch.setattr(
+        supervisor,
+        "run_worker",
+        lambda *args, **kwargs: (
+            launches.append(1) or WorkerAttempt(payload, True)
+        ),
+    )
+    assert supervisor.run_campaign(tmp_path) == 1
+    assert supervisor.run_campaign(tmp_path) == 1
+    paths = sorted((tmp_path / "attempts").iterdir())
+    assert [path.name for path in paths] == ["000-000.json", "000-001.json"]
+    records = [json.loads(path.read_text()) for path in paths]
+    assert all(
+        path.read_text() == canonical_json(record) + "\n"
+        for path, record in zip(paths, records, strict=True)
+    )
+    assert records[0]["request"] == request_dict(bind_request(request, _DIGEST))
+    assert len(records[0]["failure"]["message"]) == 4_096
+    assert "timing" not in records[0] and len(launches) == 2
+
+
+@pytest.mark.parametrize(
+    ("mode", "kind"),
+    (
+        ("oserror", "launch_error"),
+        ("prelaunch", "metal_prelaunch_ineligible"),
+        ("source", "campaign_identity_changed_before_launch"),
+    ),
+)
+def test_prelaunch_failures_leave_raw_missing(
+    monkeypatch, tmp_path, mode, kind
+):
+    request = campaign_requests()[0]
+    if mode == "prelaunch":
+        request = next(
+            item
+            for item in campaign_requests()
+            if item.phase == "timing" and item.cell.lane == "mps_f32"
+        )
+    _configure(monkeypatch, (request,))
+    monkeypatch.setattr(supervisor, "load_raw_result", lambda *args: None)
+    monkeypatch.setattr(
+        supervisor,
+        "write_raw_result",
+        lambda *args: pytest.fail("prelaunch failure became raw"),
+    )
+    if mode == "oserror":
+        monkeypatch.setattr(
+            supervisor,
+            "run_worker",
+            lambda *args, **kwargs: (_ for _ in ()).throw(OSError("launch")),
+        )
+    elif mode == "prelaunch":
+        monkeypatch.setattr(
+            supervisor,
+            "_prelaunch_snapshot",
+            lambda: (_ for _ in ()).throw(
+                supervisor._RetryableError({"kind": kind})
+            ),
+        )
+    else:
+        changed = deepcopy(_IDENTITY)
+        changed["source"]["sha256"] = "e" * 64
+        identities = iter((deepcopy(_IDENTITY), changed))
+        monkeypatch.setattr(
+            supervisor, "campaign_identity", lambda root: next(identities)
+        )
+    assert supervisor.run_campaign(tmp_path) == 1
+    attempt = json.loads(next((tmp_path / "attempts").iterdir()).read_text())
+    assert attempt["failure"]["kind"] == kind
+
+
+@pytest.mark.parametrize(
+    "kind",
+    (
+        "timeout",
+        "worker_exit",
+        "malformed_output",
+        "execution_failure",
+        "structural_failure",
+    ),
+)
+def test_immutable_raw_failure_stops_without_retry(monkeypatch, tmp_path, kind):
+    requests = campaign_requests()[:2]
+    _configure(monkeypatch, requests)
+    monkeypatch.setattr(supervisor, "load_raw_result", lambda *args: None)
+    calls = []
+
+    def run(root, bound, **kwargs):
+        request = CampaignRequest(bound.phase, bound.cell, bound.block)
+        calls.append(request)
+        return WorkerAttempt(_payload(request, failure={"kind": kind}), False)
+
+    raw = []
+    monkeypatch.setattr(supervisor, "run_worker", run)
+    monkeypatch.setattr(
+        supervisor, "write_raw_result", lambda *args: raw.append(args[-1])
+    )
+    assert supervisor.run_campaign(tmp_path) == 1
+    assert calls == [requests[0]] and raw[0]["failure"]["kind"] == kind
+
+
+def test_existing_scientific_failure_is_a_complete_prefix(
+    monkeypatch, tmp_path
+):
+    request = campaign_requests()[0]
+    _configure(monkeypatch, (request,))
+    monkeypatch.setattr(
+        supervisor,
+        "load_raw_result",
+        lambda *args: _payload(request, failure={"kind": "scientific"}),
+    )
+    monkeypatch.setattr(supervisor, "run_worker", pytest.fail)
+    assert supervisor.run_campaign(tmp_path) == 1
+
+
+def test_postlaunch_identity_drift_is_an_immutable_failure(
+    monkeypatch, tmp_path
+):
+    request = campaign_requests()[0]
+    _configure(monkeypatch, (request,))
+    changed = deepcopy(_IDENTITY)
+    changed["source"]["sha256"] = "e" * 64
+    identities = iter((deepcopy(_IDENTITY), deepcopy(_IDENTITY), changed))
+    monkeypatch.setattr(
+        supervisor, "campaign_identity", lambda root: next(identities)
+    )
+    monkeypatch.setattr(supervisor, "load_raw_result", lambda *args: None)
+    monkeypatch.setattr(
+        supervisor,
+        "run_worker",
+        lambda *args, **kwargs: WorkerAttempt(_payload(request), False),
+    )
+    raw = []
+    monkeypatch.setattr(
+        supervisor, "write_raw_result", lambda *args: raw.append(args[-1])
+    )
+    assert supervisor.run_campaign(tmp_path) == 1
+    assert raw[0]["failure"]["kind"] == "source_identity_changed_after_launch"
