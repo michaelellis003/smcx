@@ -37,7 +37,7 @@ plugins:
           paths: ["src"]
           options:
             docstring_style: google
-            show_source: true
+            show_source: false
             show_root_heading: true
   - gen-files:
       scripts:
@@ -66,15 +66,19 @@ extra_javascript:
 
 exclude_docs: |
   gen_ref_pages.py
+  adr/
+  design/
+  research/
+  conversation.md
+  ecosystem-conversation.md
 
 # Page Navigation Hierarchy
 nav:
   - Home: index.md
+  - Getting started: guides/quickstart.md
   - Guides:
-      - Quickstart: guides/quickstart.md
       - ArviZ reporting: guides/arviz.md
-      - Custom Models: guides/custom-models.md
-      - Stochastic Volatility: guides/stochastic-volatility.md
-  - Examples:
-      - Regime-Switching HMM (thesis): examples/thesis_hmm_bayesian_workflow.ipynb
-  - API Reference: api/
+      - Custom models: guides/custom-models.md
+      - Stochastic volatility: guides/stochastic-volatility.md
+      - Regime-switching HMM: examples/thesis_hmm_bayesian_workflow.ipynb
+  - API reference: api/

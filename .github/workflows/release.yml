@@ -19,12 +19,8 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Manual-approval gate (SPEC 8 + the GPU release gate): approving
-    # a deployment to this environment attests that the GPU paths are
-    # verified — either the gpu-smoke CI job ran on a Metal-enabled
-    # runner, or the full suite passed on a local M-series GPU
-    # (AGENTS.md step 9). Configure required reviewers on the
-    # 'release' environment in repo settings.
+    # Approval attests that gpu-smoke ran on a Metal-enabled runner or
+    # that the full suite passed on a physical M-series GPU.
     environment: release
     steps:
       - name: Checkout

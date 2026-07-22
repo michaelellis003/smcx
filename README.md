@@ -1,58 +1,56 @@
 # smcx
 
-[![CI](https://github.com/michaelellis003/smcx/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelellis003/smcx/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/smcx?cacheSeconds=3600)](https://pypi.org/project/smcx/)
-[![License](https://img.shields.io/github/license/michaelellis003/smcx)](LICENSE)
+smcx is a [JAX](https://github.com/jax-ml/jax) library for Sequential
+Monte Carlo: particle filters, adaptive tempered SMC, and SMC² with a
+small, function-oriented API. It runs on CPU, CUDA, and TPU through JAX,
+and on Apple-silicon GPUs through the optional
+[jax-mps](https://github.com/tillahoffmann/jax-mps) backend.
 
-Sequential Monte Carlo in [JAX](https://github.com/jax-ml/jax): particle
-filters, adaptive tempered SMC, and SMC² with a small, flat API. Runs on
-CPU, CUDA, and TPU through stock JAX, and on Apple-silicon GPUs through
-the optional [jax-mps](https://github.com/tillahoffmann/jax-mps) backend.
+Features include:
 
-## Install
+- bootstrap, auxiliary, guided, and Liu–West particle filters;
+- adaptive tempered SMC and nested SMC² parameter inference;
+- systematic, stratified, multinomial, and residual resampling;
+- filtering diagnostics, scoring rules, trajectory reconstruction, and
+  ArviZ export; and
+- structured latent-state PyTrees and explicit time-varying inputs.
+
+smcx supplies inference algorithms, not model or distribution classes.
+Models are ordinary JAX callables, so they can be written directly or
+adapted from libraries such as
+[Dynamax](https://github.com/probml/dynamax).
+
+## Installation
+
+smcx requires Python 3.11 or later.
 
 ```bash
-pip install smcx            # CPU / CUDA / TPU via your jax install
-pip install "smcx[metal]"   # + jax-mps for Apple-silicon GPUs
+pip install smcx
 ```
 
-## What's in the box
+Install the optional extras for Apple-silicon GPU execution or ArviZ
+reporting with:
 
-- **Filters**: `bootstrap_filter`, `guided_filter` (general g·f/q
-  proposal weights), `auxiliary_filter` (twisted potentials), and
-  `liu_west_filter` (joint state–parameter, labeled approximate).
-- **Static targets**: `temper` — adaptive tempered SMC with an
-  ESS-bisection schedule and covariance-adapted random-walk moves.
-- **Parameter inference**: `smc2` — nested SMC² with vmapped inner
-  filters and PMMH rejuvenation.
-- **Resampling**: systematic, stratified, multinomial, and residual —
-  one probability-space contract and float32-safe query grids; filters
-  retain their weights in the log domain.
-- **Diagnostics**: ESS traces, quantile tail-ESS, Pareto-k
-  reliability, single-run log-evidence variance from the genealogy
-  (Lee & Whiteley 2018), trajectory reconstruction, CRPS,
-  cumulative log score, Bayes factors, posterior-predictive
-  sampling, and a one-call `diagnose` summary.
-- **Reporting**: install `smcx[arviz]` for `to_arviz` draws and metadata.
-- `store_history=False` on every filter drops memory from O(T·N) to
-  O(N) with a bit-identical evidence estimate.
+```bash
+pip install "smcx[metal]"
+pip install "smcx[arviz]"
+```
 
-Permanent SMC/PF tests use dependency-free mathematical oracles and fixed,
-Monte-Carlo-calibrated gates. The outside SMC/PF implementations were run once
-in isolated environments; their pinned sources, licenses, settings, and
-numerical summaries are retained beside the corresponding unit tests, not as
-test dependencies. Diagnostics retain their separately documented ArviZ
-cross-validation dependency.
+The `metal` extra uses jax-mps and is available on macOS arm64. Metal is
+float32-only; releases are tested on a physical M-series GPU as well as
+on CPU.
 
-| Component | Permanent oracle | One-time independent comparison |
-|---|---|---|
-| Resampling | Exact offspring moments | particles, BlackJAX |
-| Bootstrap / APF / guided | Kalman evidence and moments | particles; TFP where applicable |
-| Liu–West | Conjugate posterior | nimbleSMC/NIMBLE under matched semantics |
-| Tempering | Conjugate evidence and moments | particles, BlackJAX |
-| SMC² | Grid-converged Kalman integral | particles; limited TFP diagnostic |
+## Documentation
 
-## Quick start
+The [documentation](https://michaelellis003.github.io/smcx/) includes a
+[quickstart](https://michaelellis003.github.io/smcx/guides/quickstart/),
+guides for
+[custom models](https://michaelellis003.github.io/smcx/guides/custom-models/)
+and [ArviZ reporting](https://michaelellis003.github.io/smcx/guides/arviz/),
+and the complete
+[API reference](https://michaelellis003.github.io/smcx/api/smcx/).
+
+## Quick example
 
 ```python
 import jax.numpy as jnp
@@ -60,117 +58,85 @@ import jax.random as jr
 
 import smcx
 
-# A 1-D linear-Gaussian state-space model.
-A, Q, R = 0.9, 0.5, 0.3
+a, q, r = 0.9, 0.5, 0.3
 
 
-def init(key, n):
-    return jr.normal(key, (n, 1))
+def initial_sampler(key, num_particles):
+    return jr.normal(key, (num_particles, 1))
 
 
-def transition(key, z):
-    return A * z + jnp.sqrt(Q) * jr.normal(key, z.shape)
+def transition_sampler(key, state):
+    return a * state + jnp.sqrt(q) * jr.normal(key, state.shape)
 
 
-def log_observation(y, z):
-    return -0.5 * (jnp.log(2 * jnp.pi * R) + (y[0] - z[0]) ** 2 / R)
+def log_observation(y, state):
+    error = y[0] - state[0]
+    return -0.5 * (jnp.log(2 * jnp.pi * r) + error**2 / r)
 
 
-def emission(key, z):
-    return z + jnp.sqrt(R) * jr.normal(key, z.shape)
-
-
-_, emissions = smcx.simulate(
-    jr.key(1),
-    lambda key: init(key, 1)[0],
-    transition,
-    emission,
-    num_timesteps=100,
-)
-
-post = smcx.bootstrap_filter(
+observations = jnp.array([0.2, -0.1, 0.4, 0.7, 0.3])[:, None]
+posterior = smcx.bootstrap_filter(
     jr.key(0),
-    init,
-    transition,
+    initial_sampler,
+    transition_sampler,
     log_observation,
-    emissions,
+    observations,
     num_particles=10_000,
 )
-post.marginal_loglik  # log of an unbiased evidence estimate
-smcx.diagnose(post)  # ESS / diversity / Pareto-k health summary
+
+posterior.marginal_loglik
+smcx.weighted_mean(posterior)
+smcx.diagnose(posterior)
 ```
 
-Callbacks are per-particle; smcx vmaps them internally. Everything
-takes an explicit PRNG key, and posteriors are NamedTuples — ordinary
-JAX PyTrees. The bootstrap, auxiliary, and guided filters, plus
-`simulate`, also accept a nonempty PyTree as the latent state. Every
-particle-cloud leaf has leading axis `N`; every stored-history leaf has
-leading axes `(T, N)`, and all leaves share the same resampling ancestry.
-Liu–West, tempered SMC, and SMC² retain dense Euclidean parameter and
-latent-state arrays.
+Callbacks describe one particle; smcx vectorizes them over the cloud.
+Every stochastic operation takes an explicit PRNG key, and posterior
+containers are JAX PyTrees.
 
-All four filters and `simulate` accept a keyword-only `inputs` sequence
-for controlled dynamics and covariate-driven observations; input-aware
-callbacks receive the aligned `input_t` as their final argument.
-Trajectory reconstruction and posterior prediction preserve structured
-states. Euclidean summaries such as `weighted_mean`, `tail_ess`, and
-`diagnose` require a dense state history, so select or project a leaf
-before calling them on a structured posterior.
+## Citation
 
-smcx is deliberately just the inference engine: it defines no model
-classes and no distributions. Models enter as JAX callables — your
-own closures, or thin wrappers around a model library such as
-[Dynamax](https://github.com/probml/dynamax) (the example notebook uses
-Dynamax models this way; unit tests use frozen dependency-free oracles).
+If smcx contributes to academic work, cite the release used. The
+repository's **Cite this repository** menu is generated from
+[`CITATION.cff`](https://github.com/michaelellis003/smcx/blob/main/CITATION.cff)
+and provides BibTeX and APA entries.
 
-## Apple silicon
+## Sources and attribution
 
-The `[metal]` extra runs the same code on M-series GPUs via jax-mps.
-Filter correctness on Metal is gate-verified in this repository's test
-suite (`SMCX_TEST_PLATFORM=mps` runs it on the GPU), and several of the
-performance fixes that make the backend fast for SMC-shaped workloads
-were contributed upstream from this project (jax-mps #215, #216, #220).
-Metal is float32-only; the suite runs float64 on CPU and float32 on
-Metal automatically.
+The broader Feynman–Kac architecture follows Chopin and
+Papaspiliopoulos's
+[*An Introduction to Sequential Monte Carlo*](https://doi.org/10.1007/978-3-030-47845-2).
+The implemented methods draw on these primary sources:
 
-## Development
+- Particle filters: [Gordon, Salmond, and Smith (1993)](https://doi.org/10.1049/ip-f-2.1993.0015),
+  [Pitt and Shephard (1999)](https://doi.org/10.1080/01621459.1999.10474153),
+  [Doucet, Godsill, and Andrieu (2000)](https://doi.org/10.1023/A:1008935410038),
+  and [Liu and West (2001)](https://doi.org/10.1007/978-1-4757-3437-9_10).
+- Static and parameter inference:
+  [Del Moral, Doucet, and Jasra (2006)](https://doi.org/10.1111/j.1467-9868.2006.00553.x)
+  and [Chopin, Jacob, and Papaspiliopoulos (2013)](https://doi.org/10.1111/j.1467-9868.2012.01046.x).
+- Resampling and diagnostics:
+  [Douc, Cappé, and Moulines (2005)](https://doi.org/10.1109/ISPA.2005.195385),
+  [Lee and Whiteley (2018)](https://doi.org/10.1093/biomet/asy028),
+  [Zhang and Stephens (2009)](https://doi.org/10.1198/TECH.2009.08017),
+  and [Vehtari et al. (2024)](https://jmlr.org/papers/v25/19-556.html).
+- Reporting: [ArviZ](https://doi.org/10.21105/joss.01143).
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Parts of the filtering and diagnostics core descend from
+[`smcjax@e93d527`](https://github.com/michaelellis003/smcx/tree/e93d5272cb48b7f9b10e9cb0ff1618fdb20c7aad)
+under Apache-2.0; the affected source files record their modifications.
+particles, BlackJAX, Dynamax, TensorFlow Probability, NIMBLE, and ArviZ
+also informed interfaces or served as independent validation references.
+No code was copied or translated from those comparison libraries. The
+[licensing inventory](https://github.com/michaelellis003/smcx/blob/main/docs/research/licensing.md)
+records the exact borrowing mode and license for each project.
 
-```bash
-git clone https://github.com/michaelellis003/smcx.git
-cd smcx
-uv sync
-uv run pre-commit install
-uv run pre-commit install --hook-type commit-msg
-uv run pre-commit install --hook-type pre-push
-```
+## Contributing
 
-A `Makefile` covers common tasks:
-
-```bash
-make test        # lint + pytest
-make lint        # ruff check, format check, license headers, ty
-make format      # add license headers, ruff format, ruff fix
-make docs        # build docs
-```
-
-Releases are automated: `python-semantic-release` reads conventional
-commits on merge to main, bumps the version, tags, and publishes.
-
-## Acknowledgments
-
-smcx's design draws on the SMC ecosystem:
-[particles](https://github.com/nchopin/particles) and Chopin &
-Papaspiliopoulos's *An Introduction to Sequential Monte Carlo* (the
-Feynman-Kac architecture),
-[BlackJAX](https://github.com/blackjax-devs/blackjax) (the resampling
-contract), [Dynamax](https://github.com/probml/dynamax) (container
-conventions), TensorFlow Probability (criterion/trace hooks), and
-design lessons from PyMC, FilterPy, pfilter, pyfilter, Stone Soup,
-pomp, nimbleSMC, and ArviZ. Algorithm docstrings and validation tests carry
-the formal references and immutable implementation pins.
+Contributions are welcome. See
+[`CONTRIBUTING.md`](https://github.com/michaelellis003/smcx/blob/main/CONTRIBUTING.md)
+for the development setup and pull-request conventions.
 
 ## License
 
-Apache-2.0
+smcx is distributed under the
+[Apache License 2.0](https://github.com/michaelellis003/smcx/blob/main/LICENSE).
