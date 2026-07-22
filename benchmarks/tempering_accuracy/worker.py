@@ -18,6 +18,7 @@ import numpy as np
 import smcx
 from benchmarks.tempering_accuracy.core import (
     Callbacks,
+    accuracy_keys,
     build_target,
     make_callbacks,
 )
@@ -386,6 +387,26 @@ def _run_once(
     return _record_posterior(request, prepared.key, key_index, posterior)
 
 
+def _run_accuracy(
+    request: WorkerRequest,
+) -> tuple[list[RunRecord], dict[str, Any] | None]:
+    """Run committed accuracy keys sequentially without retrying."""
+    records: list[RunRecord] = []
+    for key_index, key in enumerate(accuracy_keys()):
+        key_words = [int(word) for word in np.asarray(jr.key_data(key))]
+        try:
+            records.append(_run_once(request, key, key_index))
+        except Exception as error:
+            return records, {
+                "kind": "execution_failure",
+                "exception_type": type(error).__name__,
+                "message": str(error),
+                "key_index": key_index,
+                "key_words": key_words,
+            }
+    return records, None
+
+
 def _run_timing(
     request: WorkerRequest,
 ) -> tuple[TimingRecord | None, RunRecord | None, _TimingFailure | None]:
@@ -500,7 +521,7 @@ def execute_request(request: WorkerRequest) -> dict[str, Any]:
         return payload
     try:
         if request.phase == "smoke":
-            record = _run_once(request, jr.key(_TIMING_KEY), None)
+            records = [_run_once(request, jr.key(_TIMING_KEY), None)]
         elif request.phase == "timing":
             timing, record, timing_failure = _run_timing(request)
             if timing_failure is not None:
@@ -521,15 +542,28 @@ def execute_request(request: WorkerRequest) -> dict[str, Any]:
                 return payload
             assert timing is not None and record is not None
             payload["timing"] = _jsonable(timing)
+            records = [record]
         else:
-            raise NotImplementedError(f"{request.phase} execution is pending")
-        payload["runs"] = [_jsonable(record)]
-        if not record.structural.passed:
-            payload["failure"] = {
+            records, accuracy_failure = _run_accuracy(request)
+            if accuracy_failure is not None:
+                payload["runs"] = [_jsonable(record) for record in records]
+                payload["failure"] = accuracy_failure
+                return payload
+        payload["runs"] = [_jsonable(record) for record in records]
+        failed_indices = [
+            record.key_index
+            for record in records
+            if not record.structural.passed
+        ]
+        if failed_indices:
+            failure: dict[str, Any] = {
                 "kind": "structural_failure",
                 "exception_type": None,
                 "message": "registered structural checks failed",
             }
+            if request.phase == "accuracy":
+                failure["key_indices"] = failed_indices
+            payload["failure"] = failure
     except Exception as error:
         payload["failure"] = {
             "kind": "execution_failure",
