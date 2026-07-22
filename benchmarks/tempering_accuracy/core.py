@@ -40,6 +40,7 @@ class Callbacks(NamedTuple):
     initial_sampler: DenseInitialSampler
     log_prior: StaticLogDensity
     log_likelihood: StaticLogDensity
+    device_inputs: tuple[jax.Array, ...]
 
 
 def _chol_solve(matrix: np.ndarray, right: np.ndarray) -> np.ndarray:
@@ -127,7 +128,12 @@ def make_callbacks(target: GaussianTarget) -> Callbacks:
             )
         return -half * (dimension * log_two_pi + logdet + quadratic)
 
-    return Callbacks(initial_sampler, log_prior, log_likelihood)
+    return Callbacks(
+        initial_sampler,
+        log_prior,
+        log_likelihood,
+        (observation, sigma2, rho, half, log_two_pi),
+    )
 
 
 def accuracy_keys() -> jax.Array:
