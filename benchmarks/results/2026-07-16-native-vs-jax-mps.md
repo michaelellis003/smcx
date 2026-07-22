@@ -193,16 +193,16 @@ verdict machinery, correctness gates, and balanced ordering are covered by
 
 ## Addendum — 2026-07-16: tuned-JAX counter-experiment and scan correction
 
-*Added after an adversarial review of the result above. The original text is
-retained unchanged; this section corrects how two of its numbers should be
-read. Report-only: nothing here enters the pre-registered verdict.*
+*This post-hoc check leaves the original text unchanged and corrects how two
+of its numbers should be read. Report-only: nothing here enters the
+pre-registered verdict.*
 
 ### The tuned filter
 
-The review's central objection was that the JAX arm above is a naive port:
+The JAX arm above is a naive port:
 full history forces the compiler to materialize five (T, N) arrays, and the
 `lax.cond` resampling branch blocks optimization. We built the strongest fair
-JAX filter the reviewer asked for (`lgssm_pf_nohist`): unconditional
+JAX filter used for the counter-experiment (`lgssm_pf_nohist`): unconditional
 systematic resampling with no `lax.cond`, a scan that emits no per-step
 outputs, and only the marginal log-likelihood returned. The native arm was
 changed identically (`smcx.bootstrap_filter` with `resampling_threshold=1.0`,

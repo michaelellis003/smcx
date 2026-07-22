@@ -821,8 +821,8 @@ def tail_ess(
 
     Note: this replaces the earlier smcjax quantity of the same name,
     which measured top-weight-mass concentration and did not examine
-    particle values (panel finding; ported from the MLX
-    implementation, ADR-0010/0018).
+    particle values. It was ported from the MLX implementation under
+    ADR-0010 and ADR-0018.
 
     Args:
         posterior: Any :class:`ParticleFilterResult`.

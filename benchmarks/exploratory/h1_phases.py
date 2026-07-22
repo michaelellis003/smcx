@@ -15,7 +15,9 @@ import time
 import mlx.core as mx
 import numpy as np
 
-sys.path.insert(0, "/Users/michaelellis/Projects/smcx/benchmarks/killtest")
+sys.path.insert(
+    0, str(pathlib.Path(__file__).resolve().parents[1] / "killtest")
+)
 from mlx_side import make_lgssm, make_sv, make_track
 
 import smcx

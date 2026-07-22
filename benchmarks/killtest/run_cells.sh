@@ -2,10 +2,11 @@
 # Fresh-process-per-cell kill-test driver (protocol amendment 2026-07-15).
 set -e
 cd "$(dirname "$0")/../.."
+SMCJAX_PROJECT="${SMCJAX_PROJECT:-../smcjax}"
 for w in lgssm sv track track_full; do
   for n in 10000 100000 1000000; do
     echo "=== jax $w $n ==="
-    JAX_PLATFORMS=cpu uv run --project /Users/michaelellis/Projects/smcjax \
+    JAX_PLATFORMS=cpu uv run --project "${SMCJAX_PROJECT}" \
       python benchmarks/killtest/jax_side.py "$w" "$n"
   done
 done

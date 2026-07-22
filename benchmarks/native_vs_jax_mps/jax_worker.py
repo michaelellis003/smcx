@@ -325,10 +325,9 @@ def _lgssm_pf(size, jax, jnp):
 def _lgssm_pf_nohist(size, jax, jnp):
     """Build the report-only tuned JAX filter for jax-mps.
 
-    This is the strongest fair JAX implementation the adversarial review asked
-    for: unconditional systematic resampling removes the `lax.cond` branch, and
-    the scan returns no per-step outputs, so the compiler need not materialize
-    any (T, N) history. Only the marginal log-likelihood leaves the function.
+    Unconditional systematic resampling removes the `lax.cond` branch, and the
+    scan returns no per-step outputs, so the compiler need not materialize any
+    (T, N) history. Only the marginal log-likelihood leaves the function.
     """
     observations_np, oracle = lgssm_data()
     normalizer = float(np.log(2.0 * np.pi * LGSSM["r"]))

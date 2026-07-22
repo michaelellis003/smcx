@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Frozen statistical-analysis contracts for issue #30."""
+"""Frozen statistical-analysis contracts for tempering accuracy."""
 
 import math
 

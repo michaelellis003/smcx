@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Host-side statistical gates for the issue #30 accuracy campaign."""
+"""Host-side statistical gates for the tempering-accuracy campaign."""
 
 import math
 from collections.abc import Sequence

@@ -384,7 +384,7 @@ matrix.
 
 ### 2026-07-19 — pre-measurement execution-integrity completion
 
-A final adversarial audit tightened campaign provenance and resource visibility
+A final audit tightened campaign provenance and resource visibility
 before any inferential measurement. These requirements do not change a timed
 mathematical operation.
 
