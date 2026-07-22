@@ -78,8 +78,10 @@ def _request_dict(request: WorkerRequest) -> dict[str, object]:
 
 def _validate_request(request: WorkerRequest) -> None:
     digest = request.manifest_sha256
-    if len(digest) != 64 or any(
-        character not in "0123456789abcdef" for character in digest
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
     ):
         raise ValueError("manifest_sha256 must be 64 lowercase hex characters")
     standards = (*current_cells(), *matched_cells())
