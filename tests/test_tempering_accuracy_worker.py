@@ -54,13 +54,14 @@ def test_invalid_requests_become_retained_failure_payloads(worker_request):
 def test_smoke_dispatches_public_temper_and_retains_complete_summary(
     monkeypatch,
 ):
-    cell = current_smoke_cells()[0]
+    lane = "mps_f32" if worker.jax.default_backend() == "mps" else "cpu_f64"
+    cell = next(cell for cell in current_smoke_cells() if cell.lane == lane)
     calls = []
 
     def fake_temper(*args, **kwargs):
         calls.append((args, kwargs))
         num_particles = args[4]
-        dtype = jnp.float64
+        dtype = jnp.dtype("float64" if lane == "cpu_f64" else "float32")
         return smcx.TemperedPosterior(
             particles=jnp.zeros((num_particles, cell.dimension), dtype=dtype),
             log_weights=jnp.full(
@@ -94,9 +95,9 @@ def test_smoke_dispatches_public_temper_and_retains_complete_summary(
     assert record["posterior_mean"] == [0.0] * 4
     assert record["posterior_covariance"] == np.zeros((4, 4)).tolist()
     assert record["log_evidence"] == pytest.approx(-3.0)
-    assert record["temperatures"] == [0.4, 1.0]
-    assert record["reweighting_ess"] == [500.0, 700.0]
-    assert record["acceptance_rates"] == [0.2, 0.3]
+    assert record["temperatures"] == pytest.approx([0.4, 1.0])
+    assert record["reweighting_ess"] == pytest.approx([500.0, 700.0])
+    assert record["acceptance_rates"] == pytest.approx([0.2, 0.3])
     assert record["work"]["total_pairs"] == 11_000
     assert record["structural"]["passed"]
     json.dumps(payload, allow_nan=False)
