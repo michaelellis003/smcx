@@ -522,6 +522,8 @@ def _run_timing(
 def _jsonable(value: Any) -> Any:
     if hasattr(value, "_asdict"):
         return {name: _jsonable(item) for name, item in value._asdict().items()}
+    if isinstance(value, dict):
+        return {name: _jsonable(item) for name, item in value.items()}
     if isinstance(value, np.ndarray):
         return _jsonable(value.tolist())
     if isinstance(value, list | tuple):
@@ -579,7 +581,7 @@ def execute_request(request: WorkerRequest) -> dict[str, Any]:
                         "role": timing_failure.role,
                         "index": timing_failure.index,
                     }
-                payload["failure"] = failure
+                payload["failure"] = _jsonable(failure)
                 return payload
             assert timing is not None and record is not None
             payload["timing"] = _jsonable(timing)
