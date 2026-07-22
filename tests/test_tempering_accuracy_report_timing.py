@@ -3,28 +3,17 @@
 
 """Timing eligibility contracts for the tempering-accuracy report."""
 
-import copy
-
 import pytest
 
 from benchmarks.tempering_accuracy.plan import current_cells
 from benchmarks.tempering_accuracy.report_timing import analyze_timing
 
 _CPU, _MPS = current_cells()[:2]
-_PACKAGES = {
-    name: "1.0"
-    for name in (
-        "jax",
-        "jax-mps",
-        "jaxlib",
-        "ml-dtypes",
-        "numpy",
-        "scipy",
-        "smcx",
-    )
-}
+_PACKAGE_NAMES = "jax jax-mps jaxlib ml-dtypes numpy scipy smcx"
+_PACKAGES = dict.fromkeys(_PACKAGE_NAMES.split(), "1.0")
 _POWER = "Now drawing from 'AC Power'"
 _THERMAL = "No thermal warning level\nNo performance warning level"
+_IDENTITY_DRIFT = "source_identity_changed_after_launch"
 
 
 def _identity():
@@ -91,7 +80,6 @@ def _timing(cell, block):
                 if backend == "mps"
                 else None
             ),
-            "process_max_rss_before_measurement_bytes": 500 + block,
             "process_max_rss_bytes": 1_000 + block,
         },
     }
@@ -124,16 +112,12 @@ def test_eligible_timing_summarizes_five_blocks_and_memory_scopes():
     (
         (("structural_failure", "execution_failure"), True, "failed_execution"),
         (("structural_failure",), True, "failed_structural"),
-        (
-            ("source_identity_changed_after_launch",),
-            False,
-            "ineligible_identity",
-        ),
+        ((_IDENTITY_DRIFT,), False, "ineligible_identity"),
         ((), True, "ineligible_identity"),
     ),
 )
 def test_timing_status_precedence(failures, dirty, expected):
-    blocks = list(copy.deepcopy(_blocks(_CPU)))
+    blocks = list(_blocks(_CPU))
     for block, kind in zip(blocks, failures, strict=False):
         block.update(failure={"kind": kind}, timing=None, runs=[])
     identity = _identity()
@@ -154,7 +138,7 @@ def test_timing_identity_requires_every_numerical_package(package, value):
 
 @pytest.mark.parametrize("case", ("extra_flag", "state", "time", "rss"))
 def test_timing_runtime_contract_is_exact(case):
-    blocks = list(copy.deepcopy(_blocks(_CPU)))
+    blocks = list(_blocks(_CPU))
     timing = blocks[0]["timing"]
     if case == "extra_flag":
         timing["environment"]["runtime_flags"]["OMP_NUM_THREADS"] = "1"
@@ -173,7 +157,7 @@ def test_timing_runtime_contract_is_exact(case):
     "boundary", ("pre_timing", "post_timing", "post_cell", "physical_host")
 )
 def test_metal_requires_all_three_power_and_thermal_boundaries(boundary):
-    blocks = list(copy.deepcopy(_blocks(_MPS)))
+    blocks = list(_blocks(_MPS))
     identity = _identity()
     if boundary == "physical_host":
         identity["host"]["cpu_model"] = "VirtualApple"

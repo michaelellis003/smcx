@@ -14,6 +14,7 @@ from benchmarks.tempering_accuracy.plan import CampaignCell
 
 _PACKAGES = {"jax", "jax-mps", "jaxlib", "ml-dtypes", "numpy", "scipy", "smcx"}
 _IDENTITY_FIELDS = {"source", "lock", "packages", "python", "host"}
+_IDENTITY_DRIFT = "source_identity_changed_after_launch"
 
 
 class Summary(NamedTuple):
@@ -137,6 +138,8 @@ def _environment_ok(
         return bool(
             host.get("os") == "Darwin"
             and host.get("machine") == "arm64"
+            and str(host.get("cpu_model", "")).startswith("Apple ")
+            and str(host.get("hardware_model", "")).startswith("Mac")
             and type(environment["device_id"]) is int
             and environment["device_id"] == 0
             and environment["device_kind"].lower() == "gpu"
@@ -188,13 +191,12 @@ def analyze_timing(
                 structural_failed |= not passed
                 timings.append(timing)
     if any(
-        kind not in {"structural_failure", "source_identity_drift"}
-        for kind in kinds
+        kind not in {"structural_failure", _IDENTITY_DRIFT} for kind in kinds
     ):
         return _empty("failed_execution")
     if "structural_failure" in kinds or structural_failed:
         return _empty("failed_structural")
-    if "source_identity_drift" in kinds:
+    if _IDENTITY_DRIFT in kinds:
         return _empty("ineligible_identity")
     if len(results) != 5:
         return _empty("not_run_after_stop")
