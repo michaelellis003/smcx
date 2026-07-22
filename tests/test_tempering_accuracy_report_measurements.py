@@ -18,6 +18,7 @@ _CELL = current_cells()[0]
 
 def test_public_measurements_preserve_values_without_private_payloads():
     raw_timing = _timing(_CELL, 1)
+    raw_timing["memory"]["process_max_rss_before_measurement_bytes"] = 900
     raw_timing["memory"]["device_stats"] = {"peak_bytes_in_use": 123}
     raw_timing["memory"]["executable_analysis"] = None
     timing = report_measurements._timing(raw_timing, _CELL.lane)
@@ -54,6 +55,7 @@ def test_public_measurements_preserve_values_without_private_payloads():
     )
 
     assert timing["steady_times_s"] == [1.0] * 7
+    assert timing["memory"]["process_max_rss_before_measurement_bytes"] == 900
     assert timing["memory"]["device_peak_bytes_in_use"] == 123
     assert (runs[0]["key_index"], runs[0]["temperatures"]) == (0, [0.5, 1.0])
     assert failure == expected_failure
