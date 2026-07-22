@@ -127,7 +127,9 @@ def test_load_campaign_rejects_results_after_a_terminal_failure(
         load_campaign(tmp_path)
 
 
-@pytest.mark.parametrize("artifact", ("manifest", "raw_dir", "raw_file"))
+@pytest.mark.parametrize(
+    "artifact", ("manifest", "raw_dir", "raw_dir_broken", "raw_file")
+)
 def test_load_campaign_rejects_symlinked_evidence(
     monkeypatch, tmp_path, artifact
 ):
@@ -140,9 +142,10 @@ def test_load_campaign_rejects_symlinked_evidence(
     else:
         digest = artifacts.ensure_manifest(tmp_path, manifest)
         raw = tmp_path / "raw"
-        if artifact == "raw_dir":
+        if artifact in {"raw_dir", "raw_dir_broken"}:
             target = tmp_path / "raw-target"
-            target.mkdir()
+            if artifact == "raw_dir":
+                target.mkdir()
             raw.symlink_to(target, target_is_directory=True)
         else:
             request = artifacts.campaign_requests()[0]
