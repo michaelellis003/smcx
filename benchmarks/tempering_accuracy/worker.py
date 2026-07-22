@@ -4,6 +4,11 @@
 """Fresh-process standard-arm worker for issue #30."""
 
 import math
+import os
+import resource
+import subprocess
+import sys
+import time
 from typing import Any, NamedTuple
 
 import jax
@@ -11,7 +16,11 @@ import jax.random as jr
 import numpy as np
 
 import smcx
-from benchmarks.tempering_accuracy.core import build_target, make_callbacks
+from benchmarks.tempering_accuracy.core import (
+    Callbacks,
+    build_target,
+    make_callbacks,
+)
 from benchmarks.tempering_accuracy.plan import (
     CampaignCell,
     WorkCount,
@@ -20,9 +29,11 @@ from benchmarks.tempering_accuracy.plan import (
     matched_cells,
     work_count,
 )
+from smcx.types import ResamplingFn
 
 SCHEMA_VERSION = 1
 _TIMING_KEY = 20_260_719
+_clock = time.perf_counter
 
 
 class WorkerRequest(NamedTuple):
@@ -67,6 +78,29 @@ class RunRecord(NamedTuple):
     structural: StructuralChecks
 
 
+class PreparedCall(NamedTuple):
+    """Device-ready inputs reused across one worker invocation."""
+
+    key: jax.Array
+    callbacks: Callbacks
+    resampler: ResamplingFn
+
+
+class TimingRecord(NamedTuple):
+    """Raw timing and resource evidence for one fresh-process block."""
+
+    execution_mode: str
+    backend_startup_burns: int
+    warmups: int
+    repeats: int
+    first_execution_s: float
+    steady_times_s: tuple[float, ...]
+    backend: str
+    dispatch_mode: str
+    environment: dict[str, Any]
+    memory: dict[str, Any]
+
+
 def _request_dict(request: WorkerRequest) -> dict[str, object]:
     return {
         "manifest_sha256": request.manifest_sha256,
@@ -100,6 +134,94 @@ def _validate_request(request: WorkerRequest) -> None:
         raise ValueError(f"unknown phase: {request.phase}")
     if not valid:
         raise ValueError("request is not a registered phase/cell/block")
+
+
+def _runtime_state() -> dict[str, object]:
+    return {
+        "backend": jax.default_backend(),
+        "x64": bool(jax.config.values["jax_enable_x64"]),
+        "disable_jit": bool(jax.config.values["jax_disable_jit"]),
+        "cache_enabled": bool(
+            jax.config.values["jax_enable_compilation_cache"]
+        ),
+        "cache_dir": jax.config.values["jax_compilation_cache_dir"],
+        "async": os.environ.get("JAX_MPS_ASYNC_DISPATCH"),
+    }
+
+
+def _validate_timing_runtime(cell: CampaignCell) -> dict[str, object]:
+    """Reject a timing process whose selected runtime is not registered."""
+    state = _runtime_state()
+    backend = "cpu" if cell.lane == "cpu_f64" else "mps"
+    if state["backend"] != backend:
+        raise RuntimeError("timing runtime selected the wrong backend")
+    if bool(state["x64"]) != (cell.lane == "cpu_f64"):
+        raise RuntimeError("timing runtime selected the wrong x64 mode")
+    if bool(state["disable_jit"]):
+        raise RuntimeError("timing runtime disabled JIT compilation")
+    if bool(state["cache_enabled"]):
+        raise RuntimeError("timing runtime enabled the compilation cache")
+    if state["cache_dir"] not in (None, ""):
+        raise RuntimeError("timing runtime enabled a persistent cache")
+    if backend == "mps" and state["async"] not in (None, "", "0"):
+        raise RuntimeError("timing runtime enabled asynchronous MPS dispatch")
+    return state
+
+
+def _max_rss_bytes() -> int:
+    """Return process maximum resident memory in bytes."""
+    value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    return value if sys.platform == "darwin" else value * 1_024
+
+
+def _system_value(*command: str) -> str | None:
+    """Return one host-status command's output when available."""
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _timing_environment() -> dict[str, str | None]:
+    """Capture power and thermal state at a measurement boundary."""
+    return {
+        "power_status": _system_value("pmset", "-g", "batt"),
+        "thermal_status": _system_value("pmset", "-g", "therm"),
+    }
+
+
+def _runtime_flags() -> dict[str, str | None]:
+    names = (
+        "JAX_PLATFORMS JAX_ENABLE_X64 JAX_COMPILATION_CACHE_DIR "
+        "JAX_DISABLE_JIT JAX_ENABLE_COMPILATION_CACHE JAX_MPS_ASYNC_DISPATCH "
+        "XLA_FLAGS OMP_NUM_THREADS OPENBLAS_NUM_THREADS "
+        "MKL_NUM_THREADS VECLIB_MAXIMUM_THREADS NUMEXPR_NUM_THREADS"
+    )
+    return {name: os.environ.get(name) for name in names.split()}
+
+
+def _device_memory(device: Any) -> dict[str, Any] | None:
+    """Return the backend's allocator counters when it implements them."""
+    try:
+        stats = device.memory_stats()
+    except (AttributeError, RuntimeError):
+        return None
+    return None if stats is None else dict(stats)
+
+
+def _burn_backend() -> None:
+    """Remove one-time backend startup without warming the workload."""
+    device = jax.devices()[0]
+    argument = jax.device_put(np.ones(8, dtype=np.float32), device)
+    executable = jax.jit(lambda value: value + 1).lower(argument).compile()
+    jax.block_until_ready(executable(argument))
 
 
 def _structural_checks(
@@ -178,11 +300,8 @@ def _structural_checks(
     )
 
 
-def _run_once(
-    request: WorkerRequest,
-    key: jax.Array,
-    key_index: int | None,
-) -> RunRecord:
+def _prepare_call(request: WorkerRequest, key: jax.Array) -> PreparedCall:
+    """Build callbacks and fence their captured arrays before measurement."""
     dtype = np.float64 if request.cell.lane == "cpu_f64" else np.float32
     target = build_target(request.cell.geometry, request.cell.dimension, dtype)
     callbacks = make_callbacks(target)
@@ -191,18 +310,37 @@ def _run_once(
         if request.cell.resampler == "systematic"
         else smcx.multinomial
     )
+    placed_key = jax.device_put(key, jax.devices()[0])
+    jax.block_until_ready((placed_key, callbacks.device_inputs))
+    return PreparedCall(placed_key, callbacks, resampler)
+
+
+def _invoke_prepared(
+    request: WorkerRequest,
+    prepared: PreparedCall,
+) -> smcx.TemperedPosterior:
+    """Call the public host shell and fence its complete output PyTree."""
     posterior = smcx.temper(
-        key,
-        callbacks.initial_sampler,
-        callbacks.log_prior,
-        callbacks.log_likelihood,
+        prepared.key,
+        prepared.callbacks.initial_sampler,
+        prepared.callbacks.log_prior,
+        prepared.callbacks.log_likelihood,
         request.cell.reference_particles,
         num_mcmc_steps=request.cell.sweeps,
         target_ess=0.5,
-        resampling_fn=resampler,
+        resampling_fn=prepared.resampler,
         max_stages=1_000,
     )
-    jax.block_until_ready(posterior)
+    return jax.block_until_ready(posterior)
+
+
+def _record_posterior(
+    request: WorkerRequest,
+    key: jax.Array,
+    key_index: int | None,
+    posterior: smcx.TemperedPosterior,
+) -> RunRecord:
+    """Extract host summaries after any measured public call has finished."""
     particles = np.asarray(
         jax.device_get(posterior.particles), dtype=np.float64
     )
@@ -225,6 +363,71 @@ def _run_once(
         work_count(request.cell, stages),
         _structural_checks(posterior, request, mean, covariance),
     )
+
+
+def _run_once(
+    request: WorkerRequest,
+    key: jax.Array,
+    key_index: int | None,
+) -> RunRecord:
+    prepared = _prepare_call(request, key)
+    posterior = _invoke_prepared(request, prepared)
+    return _record_posterior(request, prepared.key, key_index, posterior)
+
+
+def _run_timing(request: WorkerRequest) -> tuple[TimingRecord, RunRecord]:
+    """Measure one registered first call and seven steady public calls."""
+    runtime = _validate_timing_runtime(request.cell)
+    _burn_backend()
+    prepared = _prepare_call(request, jr.key(_TIMING_KEY))
+    device = jax.devices()[0]
+    rss_before = _max_rss_bytes()
+    pre_timing = _timing_environment()
+
+    started = _clock()
+    posterior = _invoke_prepared(request, prepared)
+    first_execution = _clock() - started
+    steady = []
+    for _ in range(7):
+        started = _clock()
+        posterior = _invoke_prepared(request, prepared)
+        steady.append(_clock() - started)
+
+    post_timing = _timing_environment()
+    device_stats = _device_memory(device)
+    record = _record_posterior(request, prepared.key, None, posterior)
+    post_cell = _timing_environment()
+    durations = (first_execution, *steady)
+    if any(not math.isfinite(value) or value < 0 for value in durations):
+        raise RuntimeError("timing clock produced an invalid duration")
+    environment = {
+        "device_id": int(device.id),
+        "device_kind": str(device.device_kind),
+        "runtime_flags": _runtime_flags(),
+        "runtime_state": runtime,
+        "pre_timing": pre_timing,
+        "post_timing": post_timing,
+        "post_cell": post_cell,
+    }
+    memory = {
+        "device_stats": device_stats,
+        "executable_analysis": None,
+        "process_max_rss_before_measurement_bytes": rss_before,
+        "process_max_rss_bytes": _max_rss_bytes(),
+    }
+    timing = TimingRecord(
+        "host_shell",
+        1,
+        0,
+        7,
+        first_execution,
+        tuple(steady),
+        str(runtime["backend"]),
+        "asynchronous" if request.cell.lane == "cpu_f64" else "safe",
+        environment,
+        memory,
+    )
+    return timing, record
 
 
 def _jsonable(value: Any) -> Any:
@@ -260,9 +463,13 @@ def execute_request(request: WorkerRequest) -> dict[str, Any]:
         }
         return payload
     try:
-        if request.phase != "smoke":
+        if request.phase == "smoke":
+            record = _run_once(request, jr.key(_TIMING_KEY), None)
+        elif request.phase == "timing":
+            timing, record = _run_timing(request)
+            payload["timing"] = _jsonable(timing)
+        else:
             raise NotImplementedError(f"{request.phase} execution is pending")
-        record = _run_once(request, jr.key(_TIMING_KEY), None)
         payload["runs"] = [_jsonable(record)]
         if not record.structural.passed:
             payload["failure"] = {
