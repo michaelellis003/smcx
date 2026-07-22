@@ -184,6 +184,7 @@ def _cost_figure(rows: Sequence[_PlotCell], path: Path) -> None:
     axes = figure.subplots(2, 3, squeeze=False)
     geometry_colors = {"G0": "#2563eb", "G1": "#ea580c"}
     markers = {4: "o", 32: "s", 128: "^"}
+    sweep_alphas = {5: 0.45, 20: 0.7, 50: 1.0}
     try:
         for lane_index, lane in enumerate(_LANES):
             lane_rows = [row for row in rows if row.cell["lane"] == lane]
@@ -199,6 +200,7 @@ def _cost_figure(rows: Sequence[_PlotCell], path: Path) -> None:
                         s=24 if particles == 1_000 else 58,
                         marker=markers[row.cell["dimension"]],
                         color=geometry_colors[row.cell["geometry"]],
+                        alpha=sweep_alphas[row.cell["sweeps"]],
                     )
                 axis.set_xscale("log")
                 axis.set_yscale("symlog", linthresh=1e-6)
@@ -224,7 +226,7 @@ def _cost_figure(rows: Sequence[_PlotCell], path: Path) -> None:
             0.5,
             0.055,
             "Blue: G0; orange: G1. Marker: d=4 ○, d=32 □, d=128 △; "
-            "size: N. No timing ratio is used.",
+            "size: N; opacity: 5/20/50 sweeps. No timing ratio is used.",
             ha="center",
         )
         figure.tight_layout(rect=(0, 0.10, 1, 0.93))
