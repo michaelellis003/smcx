@@ -1,7 +1,7 @@
 # Copyright Contributors to the smcx project.
 # SPDX-License-Identifier: Apache-2.0
 
-r"""External-authority SMC² baseline: Chopin's `particles` (ADR-0014).
+r"""External-authority SMC² baseline: Chopin's `particles`.
 
 `particles` pins numpy<2 and so conflicts with smcx's runtime; run it
 in an isolated environment that ignores this project:

@@ -558,7 +558,7 @@ Metal allocator use, and the two-leaf equivalent reached 1.52 GiB. jax-mps
 0.10.10 was then available with native
 [`slice_update`](https://github.com/tillahoffmann/jax-mps/pull/219) and
 [`dynamic_slice`](https://github.com/tillahoffmann/jax-mps/pull/220)
-lowerings. ADR-0026 raises the supported floor.
+lowerings. The supported jax-mps floor is therefore 0.10.10.
 
 All 0.10.9 Metal timings remain diagnostic evidence for identifying the
 backend defect, not current performance evidence. The complete baseline,
@@ -743,8 +743,9 @@ the invariant RWM kernel moves toward the correct cloud as rejuvenation rises:
 These are accuracy diagnostics, not timed results. They support the expected
 dimension-dependent mixing cost of local random-walk mutation. Five moves are
 a workload/default, never an accuracy guarantee. Changing that default or the
-mutation kernel would change fixed-key numerical output and requires a new ADR
-and the repository's output-change process. See Roberts, Gelman, and Gilks
+mutation kernel would change fixed-key numerical output and requires separate
+design evidence plus the repository's output-change process. See Roberts,
+Gelman, and Gilks
 (1997) ([DOI](https://doi.org/10.1214/aoap/1034625254)) and Beskos, Crisan,
 and Jasra (2014) ([DOI](https://doi.org/10.1214/13-AAP951)).
 

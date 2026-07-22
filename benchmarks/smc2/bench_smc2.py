@@ -3,16 +3,16 @@
 
 """SMC² device benchmark: MLX-GPU vs MLX-CPU on the same smcx code.
 
-The second kill test (ADR-0014). SMC²'s live state is an
-(N_theta x N_x) tensor — the densest, most batch-shaped workload in
+This second kill test uses SMC²'s live (N_theta x N_x) tensor — the
+densest, most batch-shaped workload in
 the SMC literature — so it is the strongest case for the unified-
 memory thesis. This benchmark isolates the hardware: identical smcx
 code, only the MLX default device changes.
 
 Model: LGSSM with an unknown AR coefficient a (z_t = a z_{t-1} + q,
 y_t = z_t + r), so the marginal likelihood has an exact Kalman-grid
-reference for the correctness gate. Chopin's `particles` as an
-external baseline is a deferred follow-up (ADR-0014).
+reference for the correctness gate. Chopin's `particles` supplies an
+external baseline in ``particles_side.py``.
 
 Fresh process per cell (protocol amendment 2026-07-15): the driver
 re-invokes this script with ``--cell`` so no compile cache or device

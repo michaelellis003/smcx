@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""store_history=False tests (ADR-0011, ported from the MLX suite).
+"""Tests for ``store_history=False``, ported from the MLX suite.
 
 The MLX suite also asserted a device peak-memory drop; on CPU JAX
 there is no comparable counter, and the memory property is structural

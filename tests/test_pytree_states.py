@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Structured latent-state PyTree contracts (ADR-0024)."""
+"""Structured latent-state PyTree contracts."""
 
 from typing import NamedTuple
 

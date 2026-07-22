@@ -127,11 +127,11 @@ Python version, date. Results are dated markdown in
 - 2026-07-15 (pre-re-run): the 2026-07-14 run was contaminated
   (concurrent CPU workload; verdict provisional) — this re-run on an
   idle machine supersedes it. Added a `store_history=False`
-  (ADR-0011) MLX arm, **report-only**: the verdict's primary
+  MLX arm with `store_history=False`, **report-only**: the verdict's primary
   comparison remains full-history on both sides (smcjax always
   materializes history), the lean arm documents the smcx-native
   path. Same datasets (hashes unchanged).
-- 2026-07-15 (SMC² device benchmark, ADR-0014): added a **second
+- 2026-07-15 (SMC² device benchmark): added a **second
   kill test** for the nested SMC² sampler, whose (N_θ × N_x) tensor
   is the strongest unified-memory fit. Because smcjax has no SMC²,
   the baseline is **smcx on the MLX-CPU backend** (identical code,

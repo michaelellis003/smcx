@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for resumable bootstrap filtering (ADR-0028)."""
+"""Tests for resumable bootstrap filtering."""
 
 import math
 from functools import partial

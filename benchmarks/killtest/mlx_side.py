@@ -69,7 +69,7 @@ def make_sv():
 
 
 def make_track_batched(full_cov=False):
-    """ADR-0013 batched closures: transition as one GEMM.
+    """Use batched closures so the transition runs as one GEMM.
 
     Disclosed in the results file; XLA's vmap already fuses, MLX's
     does not.
@@ -171,7 +171,7 @@ def bench(make, n, reps, lag, store_history=True, batched=False):
 
 def run_cell(wname, n, workloads):
     make = workloads[wname]
-    batched = wname.startswith("track")  # ADR-0013, disclosed
+    batched = wname.startswith("track")  # Disclosed in the results.
     cell = {}
     cell["gpu_lag4"] = bench(make, n, R_KEYS, 4, batched=batched)
     for arm, lag in LAGS.items():
@@ -220,8 +220,8 @@ def main():
                 if lag == 4:
                     continue
                 cell[f"gpu_{arm}"] = bench(make, n, SWEEP_REPS, lag)
-            # store_history=False arm (ADR-0011; report-only per the
-            # 2026-07-15 protocol amendment)
+            # store_history=False arm (report-only per the 2026-07-15
+            # protocol amendment)
             cell["gpu_lag4_nohist"] = bench(
                 make, n, SWEEP_REPS, 4, store_history=False
             )
