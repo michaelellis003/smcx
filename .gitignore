@@ -42,6 +42,7 @@ htmlcov/
 # Local project records and raw benchmark output
 specs/
 benchmarks/data/
+/ROADMAP.md
 docs/adr/
 docs/design/
 docs/research/

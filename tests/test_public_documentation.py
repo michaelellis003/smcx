@@ -3,9 +3,25 @@
 
 """Checks for the published documentation surface."""
 
+import subprocess
 from pathlib import Path
 
 import yaml
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_internal_roadmap_is_not_tracked() -> None:
+    tracked = subprocess.run(
+        ("git", "-C", str(ROOT), "ls-files", "--", "ROADMAP.md"),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert not tracked
+
+    ignored = (ROOT / ".gitignore").read_text().splitlines()
+    assert "/ROADMAP.md" in ignored
 
 
 def test_public_text_excludes_internal_decision_labels() -> None:

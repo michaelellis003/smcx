@@ -1,15 +1,15 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Cross-validate the Pareto-k fit against ArviZ (ADR-0020).
+"""Cross-validate the Pareto-k fit against ArviZ.
 
 The docstring of :func:`smcx.diagnostics._fit_generalized_pareto`
 claims to match ArviZ's ``gpdfitnew`` / NumPyro's implementation of
 the Zhang & Stephens (2009) estimator with the Vehtari et al. (2024)
 prior. This test enforces the claim: the same log-weight vectors go
 through smcx's fit and through ``arviz.psislw``, and the fitted shape
-parameters must agree. ArviZ is a dev-only dependency (ADR-0020: it
-never enters the runtime requirements).
+parameters must agree. ArviZ is a dev-only dependency; it never enters
+the runtime requirements.
 """
 
 import jax.numpy as jnp

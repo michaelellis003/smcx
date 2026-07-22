@@ -8,7 +8,7 @@ import os
 # The suite runs on CPU by default so results are deterministic across
 # machines and unaffected by an installed `metal` extra (jax-mps
 # registers at higher priority than CPU). Set SMCX_TEST_PLATFORM=mps to
-# run the suite on the Apple-GPU backend explicitly (ADR-0018). Must
+# run the suite on the Apple-GPU backend explicitly. Must
 # happen before any JAX import triggers initialization.
 os.environ.setdefault(
     "JAX_PLATFORMS", os.environ.get("SMCX_TEST_PLATFORM", "cpu")

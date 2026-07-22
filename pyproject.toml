@@ -50,7 +50,7 @@ build-backend = "uv_build"
 
 [project.optional-dependencies]
 arviz = ["arviz>=0.23.4"]
-# Apple-GPU acceleration via the jax-mps PJRT plugin (ADR-0018).
+# Apple-GPU acceleration via the jax-mps PJRT plugin.
 metal = [
     # jax-mps only ships macOS-arm64 wheels; the marker keeps the
     # extra resolvable (as a no-op) on other platforms, e.g. Linux CI.
@@ -93,7 +93,7 @@ target-version = "py310"
 preview = true
 line-length = 80
 indent-width = 4
-# Generated mlx stubs (ADR-0007) are vendored artifacts, not code.
+# Generated mlx stubs are vendored artifacts, not code.
 extend-exclude = ["typings"]
 
 [tool.ruff.lint]
@@ -107,7 +107,7 @@ select = [
 ]
 ignore = [
     # jaxtyping uses string-shape annotations (e.g. Float[mx.array, " n"])
-    # which ruff parses as forward references and rejects (ADR-0007).
+    # which ruff parses as forward references and rejects.
     "F722",
 ]
 
@@ -182,7 +182,7 @@ upload_to_vcs_release = true
 # construction). The native-vs-jax-mps JAX worker is the same case: it
 # runs only inside the pinned `uv run --no-project` env, so jax and the
 # jax_plugins.mps backend are unresolvable in the project environment.
-# The MLX-era benchmark workers reference the pre-ADR-0018 API and
+# The MLX-era benchmark workers reference the pre-JAX API and
 # vendored MLX stubs. They remain as historical harness code.
 exclude = [
     # Example notebooks: runtime-verified by execution; *fns unpacking
@@ -197,7 +197,7 @@ exclude = [
 ]
 
 [tool.ty.environment]
-# Vendored mlx.core stubs (ADR-0007): upstream ships py.typed but no
+# Vendored mlx.core stubs: upstream ships py.typed but no
 # .pyi for the compiled extension. Regenerate on every mlx floor bump:
 #   uv run python -m nanobind.stubgen -m mlx.core -O typings/mlx
 extra-paths = ["typings"]

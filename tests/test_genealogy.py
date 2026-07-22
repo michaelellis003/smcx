@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Genealogy diagnostics (ADR-0021).
+"""Genealogy diagnostics.
 
 Covers trajectory reconstruction and single-run log-ML variance.
 
@@ -137,7 +137,7 @@ class TestLogMlVariance:
         np.testing.assert_allclose(ours, ref, rtol=rtol)
 
     def test_coalesced_genealogy_returns_inf(self):
-        """One Eve class carries no variance information (ADR-0021)."""
+        """One Eve class carries no variance information."""
         t_len, n = 4, 6
         ancestors = np.zeros((t_len, n), dtype=int)
         ancestors[0] = np.arange(n)  # identity at t=0 by construction
