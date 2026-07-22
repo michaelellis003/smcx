@@ -133,9 +133,12 @@ def _source_identity(root: Path) -> tuple[dict[str, Any], dict[str, str]]:
         cwd=root,
         allow_empty=True,
     )
+    commit = _command_value(("git", "rev-parse", "HEAD"), cwd=root)
+    if status is None or commit is None:
+        raise RuntimeError("campaign git identity is unavailable")
     source = {
-        "git_commit": _command_value(("git", "rev-parse", "HEAD"), cwd=root),
-        "git_dirty": None if status is None else bool(status),
+        "git_commit": commit,
+        "git_dirty": bool(status),
         "sha256": digest.hexdigest(),
         "files": [path.relative_to(root).as_posix() for path in paths],
     }
@@ -237,8 +240,10 @@ def _validate_result(
     timing = value.get("timing")
     valid = (
         set(value) == _FIELDS
-        and value.get("schema_version") == SCHEMA_VERSION
-        and value.get("request") == request_dict(bind_request(request, digest))
+        and type(value.get("schema_version")) is int
+        and value["schema_version"] == SCHEMA_VERSION
+        and canonical_json(value.get("request"))
+        == canonical_json(request_dict(bind_request(request, digest)))
         and isinstance(value.get("runs"), list)
         and (failure is None or isinstance(failure, dict))
         and (timing is None or isinstance(timing, dict))
