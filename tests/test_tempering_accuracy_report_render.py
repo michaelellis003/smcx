@@ -8,6 +8,10 @@ import json
 
 import numpy as np
 import pytest
+from benchmarks.tempering_accuracy.report_plots import (
+    PlotSummary,
+    render_plots,
+)
 
 from benchmarks.profiling.common import canonical_json
 from benchmarks.tempering_accuracy.analysis import (
@@ -202,3 +206,40 @@ def test_markdown_hides_timing_for_an_accuracy_ineligible_cell():
     row = _table_rows(markdown, "All cells")[0]
     values = [value.strip() for value in row.strip("|").split("|")]
     assert values[-4:] == ["—", "—", "—", "—"]
+def test_plots_are_deterministic_and_report_omissions(tmp_path):
+    evidence = _evidence()
+    first_gate = tmp_path / "first-gates.png"
+    first_cost = tmp_path / "first-cost.png"
+    second_gate = tmp_path / "second-gates.png"
+    second_cost = tmp_path / "second-cost.png"
+
+    summary = render_plots(evidence, first_gate, first_cost)
+    second = render_plots(evidence, second_gate, second_cost)
+
+    assert summary == PlotSummary(
+        evaluated_gate_cells=1,
+        unavailable_gate_cells=71,
+        eligible_cost_cells=1,
+        unavailable_cost_cells=71,
+    )
+    assert second == summary
+    assert first_gate.read_bytes() == second_gate.read_bytes()
+    assert first_cost.read_bytes() == second_cost.read_bytes()
+    assert first_gate.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert first_cost.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
+    evidence = _evidence()
+    cell = evidence["cells"][0]
+    cell["status"] = "failed_accuracy"
+    cell["accuracy"]["status"] = "failed_accuracy"
+    cell["accuracy"]["correctness_eligible"] = False
+
+    summary = render_plots(
+        evidence, tmp_path / "gates.png", tmp_path / "cost.png"
+    )
+
+    assert summary.evaluated_gate_cells == 1
+    assert summary.eligible_cost_cells == 0
+    assert summary.unavailable_cost_cells == 72
