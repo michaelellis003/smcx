@@ -140,6 +140,10 @@ def _runtime_state() -> dict[str, object]:
     return {
         "backend": jax.default_backend(),
         "x64": bool(jax.config.values["jax_enable_x64"]),
+        "disable_jit": bool(jax.config.values["jax_disable_jit"]),
+        "cache_enabled": bool(
+            jax.config.values["jax_enable_compilation_cache"]
+        ),
         "cache_dir": jax.config.values["jax_compilation_cache_dir"],
         "async": os.environ.get("JAX_MPS_ASYNC_DISPATCH"),
     }
@@ -153,6 +157,10 @@ def _validate_timing_runtime(cell: CampaignCell) -> dict[str, object]:
         raise RuntimeError("timing runtime selected the wrong backend")
     if bool(state["x64"]) != (cell.lane == "cpu_f64"):
         raise RuntimeError("timing runtime selected the wrong x64 mode")
+    if bool(state["disable_jit"]):
+        raise RuntimeError("timing runtime disabled JIT compilation")
+    if bool(state["cache_enabled"]):
+        raise RuntimeError("timing runtime enabled the compilation cache")
     if state["cache_dir"] not in (None, ""):
         raise RuntimeError("timing runtime enabled a persistent cache")
     if backend == "mps" and state["async"] not in (None, "", "0"):
@@ -171,13 +179,14 @@ def _system_value(*command: str) -> str | None:
     try:
         result = subprocess.run(
             command,
-            check=True,
             capture_output=True,
+            check=False,
             text=True,
+            timeout=5.0,
         )
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, subprocess.TimeoutExpired):
         return None
-    return result.stdout.strip()
+    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def _timing_environment() -> dict[str, str | None]:
@@ -190,18 +199,12 @@ def _timing_environment() -> dict[str, str | None]:
 
 def _runtime_flags() -> dict[str, str | None]:
     names = (
-        "JAX_PLATFORMS",
-        "JAX_ENABLE_X64",
-        "JAX_COMPILATION_CACHE_DIR",
-        "JAX_MPS_ASYNC_DISPATCH",
-        "XLA_FLAGS",
-        "OMP_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "VECLIB_MAXIMUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
+        "JAX_PLATFORMS JAX_ENABLE_X64 JAX_COMPILATION_CACHE_DIR "
+        "JAX_DISABLE_JIT JAX_ENABLE_COMPILATION_CACHE JAX_MPS_ASYNC_DISPATCH "
+        "XLA_FLAGS OMP_NUM_THREADS OPENBLAS_NUM_THREADS "
+        "MKL_NUM_THREADS VECLIB_MAXIMUM_THREADS NUMEXPR_NUM_THREADS"
     )
-    return {name: os.environ.get(name) for name in names}
+    return {name: os.environ.get(name) for name in names.split()}
 
 
 def _device_memory(device: Any) -> dict[str, Any] | None:
@@ -401,6 +404,7 @@ def _run_timing(request: WorkerRequest) -> tuple[TimingRecord, RunRecord]:
         "device_id": int(device.id),
         "device_kind": str(device.device_kind),
         "runtime_flags": _runtime_flags(),
+        "runtime_state": runtime,
         "pre_timing": pre_timing,
         "post_timing": post_timing,
         "post_cell": post_cell,
