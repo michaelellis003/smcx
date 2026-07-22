@@ -6,9 +6,9 @@
 import copy
 
 import pytest
-from benchmarks.tempering_accuracy.report_timing import analyze_timing
 
 from benchmarks.tempering_accuracy.plan import current_cells
+from benchmarks.tempering_accuracy.report_timing import analyze_timing
 
 _CPU, _MPS = current_cells()[:2]
 _PACKAGES = {
@@ -107,6 +107,7 @@ def test_eligible_timing_summarizes_five_blocks_and_memory_scopes():
     report = analyze_timing(_MPS, _blocks(_MPS), _identity())
 
     assert report.status == "eligible"
+    assert report.first and report.steady and report.process_rss
     assert report.first.values == (2.0, 4.0, 6.0, 8.0, 10.0)
     assert (report.steady.median, report.steady.iqr) == (3.0, 2.0)
     assert report.process_rss.median == 1_003
