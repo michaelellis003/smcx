@@ -42,6 +42,7 @@ def test_public_api_exports_all_expected_names(package):
         "cumulative_log_score",
         "diagnose",
         "ess",
+        "extended_kalman_filter",
         "liu_west_filter",
         "log_bayes_factor",
         "log_ess",
