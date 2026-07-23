@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.8.0 (2026-07-23)
+
+### Features
+
+- **runner**: Add caller-owned particle execution
+  ([#101](https://github.com/michaelellis003/smcx/pull/101),
+  [`9915ae6`](https://github.com/michaelellis003/smcx/commit/9915ae616577d604ff5c3316e3f713f73044bb47))
+
+
 ## v1.7.0 (2026-07-23)
 
 ### Chores
