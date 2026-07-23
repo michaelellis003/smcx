@@ -54,6 +54,8 @@ def run_particle_filter(
 ) -> ParticleFilterPosterior:
     """Run a caller-owned particle-filter initialization and step kernel."""
     num_timesteps = emissions.shape[0]
+    if num_timesteps == 0:
+        raise ValueError("emissions must contain at least one row")
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
     )

@@ -8,6 +8,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import pytest
 
 import smcx
 
@@ -17,6 +18,24 @@ class BootstrapCarry(NamedTuple):
 
     particles: jax.Array
     log_weights: jax.Array
+
+
+def test_runner_rejects_an_empty_emission_sequence():
+    def initialize(time_index, emission, key):
+        raise AssertionError((time_index, emission, key))
+
+    def step(carry, time_index, emission, key):
+        raise AssertionError((carry, time_index, emission, key))
+
+    with pytest.raises(
+        ValueError, match="emissions must contain at least one row"
+    ):
+        smcx.run_particle_filter(
+            jr.key(0),
+            initialize,
+            step,
+            jnp.empty((0, 1)),
+        )
 
 
 def test_runner_matches_bootstrap_filter_at_a_fixed_key():
