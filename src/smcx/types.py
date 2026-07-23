@@ -294,6 +294,50 @@ class LogTransitionFnWithInput(Protocol):
 
 
 @runtime_checkable
+class TransitionMeanFn(Protocol):
+    """Evaluate one nonlinear transition mean."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        /,
+    ) -> Float[Array, " state_dim"]: ...
+
+
+@runtime_checkable
+class TransitionJacobianFn(Protocol):
+    """Evaluate a transition Jacobian with respect to state."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        /,
+    ) -> Float[Array, "state_dim state_dim"]: ...
+
+
+@runtime_checkable
+class ObservationMeanFn(Protocol):
+    """Evaluate one nonlinear observation mean."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        /,
+    ) -> Float[Array, " observation_dim"]: ...
+
+
+@runtime_checkable
+class ObservationJacobianFn(Protocol):
+    """Evaluate an observation Jacobian with respect to state."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        /,
+    ) -> Float[Array, "observation_dim state_dim"]: ...
+
+
+@runtime_checkable
 class ParamTransitionSampler(Protocol):
     """Draw one parameter-conditioned transition."""
 
