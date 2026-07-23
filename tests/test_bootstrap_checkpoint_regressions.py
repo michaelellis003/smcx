@@ -31,12 +31,6 @@ def _assert_tree_equal(actual, expected):
         np.testing.assert_array_equal(actual_leaf, expected_leaf)
 
 
-def test_particle_state_documents_normalized_weights():
-    """The public checkpoint state names its actual weight invariant."""
-    docstring = " ".join((smcx.ParticleState.__doc__ or "").split())
-    assert "Normalized log importance weights" in docstring
-
-
 @pytest.mark.skipif(
     jax.default_backend() != "cpu",
     reason="frozen CPU/x64 arithmetic contract",

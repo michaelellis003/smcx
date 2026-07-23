@@ -1,32 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for :func:`smcx.bootstrap_filter` against independent references.
-
-The permanent gates use a dependency-free float64 Kalman recurrence and the
-frozen Dynamax fixture in :mod:`tests._lgssm_reference`. A one-time isolated
-campaign (2026-07-18; input-aware scalar LGSSM, T=30, N=4096, 128 seeds)
-also compared evidence and filtering moments out of process. Mean
-``Z_hat / Z_exact`` (Monte Carlo SE) was ``0.993628 (0.006205)`` for smcx,
-``0.995324 (0.006113)`` for particles, and ``1.003881 (0.005597)`` for TFP;
-all exact and cross-implementation moment discrepancies were below five SE.
-The frozen campaign case SHA-256 was
-``d59064d711ba96f3d61da207c79b8f1b4526eade25620dd40ec10f6ed47d2689``;
-smcx/particles used seeds 20261000--20261127 and TFP used
-20261200--20261327. Its complete case preimage, exact target, and runner
-settings are retained in :mod:`tests.test_reference_data`.
-
-Pinned external authorities (no code copied; neither is imported here):
-
-* particles 0.4, commit f71e94a21a11c73b58e2d694775b1b1d379b8854,
-  MIT source and license:
-  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/particles/state_space_models.py#L299-L351
-  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/LICENSE
-* TensorFlow Probability 0.25.0, commit
-  9709569d9c1159dc54154044f679edc4a15bd26b, Apache-2.0 source and license:
-  https://github.com/tensorflow/probability/blob/9709569d9c1159dc54154044f679edc4a15bd26b/tensorflow_probability/python/experimental/mcmc/particle_filter.py#L441-L638
-  https://github.com/tensorflow/probability/blob/9709569d9c1159dc54154044f679edc4a15bd26b/LICENSE
-"""
+"""Tests for :func:`smcx.bootstrap_filter` against an exact LGSSM oracle."""
 
 import math
 
