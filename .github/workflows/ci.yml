@@ -75,7 +75,7 @@ jobs:
       matrix:
         # Only versions satisfying requires-python (>=3.11, the
         # jax 0.10 line); older ones fail uv sync.
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.13"]
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -83,7 +83,7 @@ jobs:
       - name: Setup uv
         uses: ./.github/actions/setup-uv
         with:
-          # This is the ONLY place we pass a version, so it iterates through the matrix
+          # Exercise the oldest and newest supported Python versions.
           python-version: ${{ matrix.python-version }}
 
       - name: Run tests
@@ -98,6 +98,9 @@ jobs:
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
+        with:
+          # The coverage run is also the Python 3.12 compatibility leg.
+          python-version: "3.12"
 
       - name: Run tests with coverage
         run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
@@ -135,7 +138,7 @@ jobs:
           python-version: "3.13"
 
       - name: Run tests
-        run: uv run pytest -v --durations=0 -m 'not integration'
+        run: uv run pytest -v --durations=0
 
   # Exercise the jax-mps path when the hosted runner exposes Metal.
   # The release-environment approval attests the authoritative local

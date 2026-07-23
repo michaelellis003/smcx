@@ -6,10 +6,10 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-import numpy as np
 import pytest
 
 from smcx.bootstrap import bootstrap_filter
+from smcx.containers import LiuWestPosterior, ParticleFilterPosterior
 from smcx.diagnostics import (
     cumulative_log_score,
     diagnose,
@@ -24,7 +24,6 @@ from smcx.diagnostics import (
     weighted_quantile,
     weighted_variance,
 )
-from tests._kalman import kalman_1d
 from tests.conftest import _mvn_logpdf, _mvn_sample
 
 
@@ -65,64 +64,57 @@ def _run_bootstrap(lgssm_params, lgssm_data, n=10_000, seed=0):
     )
 
 
+def _make_posterior():
+    """Return a small posterior with exact uniform-weight summaries."""
+    n = 32
+    base = 2.0 * jnp.arange(n) - (n - 1)
+    particles = jnp.stack([base, base + 100.0, base - 100.0])[:, :, None]
+    increments = jnp.array([-1.0, -2.0, -3.0])
+    return ParticleFilterPosterior(
+        marginal_loglik=jnp.sum(increments),
+        filtered_particles=particles,
+        filtered_log_weights=jnp.full((3, n), -jnp.log(n)),
+        ancestors=jnp.broadcast_to(jnp.arange(n), (3, n)),
+        ess=jnp.full((3,), float(n)),
+        log_evidence_increments=increments,
+    )
+
+
+def _make_liu_west_posterior():
+    """Add a deterministic parameter cloud to the small posterior."""
+    posterior = _make_posterior()
+    return LiuWestPosterior(
+        *posterior,
+        filtered_params=posterior.filtered_particles / 10.0,
+    )
+
+
 class TestWeightedMean:
     """Tests for weighted_mean."""
 
-    def test_weighted_mean_matches_kalman(self, lgssm_params, lgssm_data):
-        """PF weighted means should track Kalman filtered means."""
-        _, emissions = lgssm_data
-        _, kalman_means, _ = kalman_1d(
-            np.asarray(emissions[:, 0]), 0.9, 0.25, 1.0, 0.0, 1.0
-        )
-        kalman_means = jnp.asarray(kalman_means)[:, None]
-
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data)
-        pf_means = weighted_mean(pf_post)
-
-        assert jnp.allclose(pf_means, kalman_means, atol=0.15), (
-            f"Max error: {float(jnp.max(jnp.abs(pf_means - kalman_means))):.4f}"
-        )
+    def test_weighted_mean_exact(self):
+        posterior = _make_posterior()
+        expected = jnp.array([[0.0], [100.0], [-100.0]])
+        assert jnp.array_equal(weighted_mean(posterior), expected)
 
 
 class TestWeightedVariance:
     """Tests for weighted_variance."""
 
-    def test_weighted_variance_uniform_weights(self, lgssm_params, lgssm_data):
+    def test_weighted_variance_uniform_weights(self):
         """With uniform weights, matches unweighted variance."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data)
-
-        # Create uniform-weight posterior for comparison
-        n = pf_post.filtered_particles.shape[1]
-        uniform_log_w = jnp.full_like(pf_post.filtered_log_weights, -jnp.log(n))
-        from smcx.containers import ParticleFilterPosterior
-
-        uniform_post = ParticleFilterPosterior(
-            marginal_loglik=pf_post.marginal_loglik,
-            filtered_particles=pf_post.filtered_particles,
-            filtered_log_weights=uniform_log_w,
-            ancestors=pf_post.ancestors,
-            ess=pf_post.ess,
-            log_evidence_increments=pf_post.log_evidence_increments,
-        )
-
-        wvar = weighted_variance(uniform_post)
-        # Unweighted variance
-        uvar = jnp.var(pf_post.filtered_particles, axis=1)
-
-        assert jnp.allclose(wvar, uvar, atol=1e-6)
+        result = weighted_variance(_make_posterior())
+        assert jnp.array_equal(result, jnp.full((3, 1), 341.0))
 
 
 class TestWeightedQuantile:
     """Tests for weighted_quantile."""
 
-    def test_weighted_quantile_median_near_mean(self, lgssm_params, lgssm_data):
-        """For roughly symmetric posterior, median ≈ mean."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data)
-        means = weighted_mean(pf_post)
-        medians = weighted_quantile(pf_post, jnp.array([0.5]))
-
-        # medians shape: (ntime, 1, state_dim), squeeze quantile dim
-        assert jnp.allclose(medians[:, 0, :], means, atol=0.2)
+    def test_weighted_quantile_median_exact(self):
+        posterior = _make_posterior()
+        result = weighted_quantile(posterior, jnp.array([0.5]))
+        expected = jnp.array([[[0.0]], [[100.0]], [[-100.0]]])
+        assert jnp.allclose(result, expected, rtol=0.0, atol=1e-6)
 
     def test_weighted_quantile_zero_weight_particles(self):
         """Quantiles should be correct even when some weights are zero.
@@ -130,8 +122,6 @@ class TestWeightedQuantile:
         With particles [1, 2, 3] and weights [0, 0.5, 0.5], the
         median should be near 2.5 (only particles 2 and 3 matter).
         """
-        from smcx.containers import ParticleFilterPosterior
-
         particles = jnp.array([[[1.0], [2.0], [3.0]]])  # (1, 3, 1)
         log_w = jnp.array([
             [jnp.finfo(jnp.float64).min, jnp.log(0.5), jnp.log(0.5)]
@@ -148,26 +138,6 @@ class TestWeightedQuantile:
         result = weighted_quantile(posterior, q)
         # Median of {2, 3} with equal weight = 2.5
         assert float(result[0, 0, 0]) == pytest.approx(2.5, abs=0.1)
-
-    def test_weighted_quantile_interval_contains_truth(
-        self, lgssm_params, lgssm_data
-    ):
-        """95% credible interval should cover true state most of time."""
-        states, _ = lgssm_data
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data)
-
-        quantiles = weighted_quantile(
-            pf_post, jnp.array([0.025, 0.975])
-        )  # (ntime, 2, state_dim)
-        lower = quantiles[:, 0, :]
-        upper = quantiles[:, 1, :]
-
-        covered = jnp.all((states >= lower) & (states <= upper), axis=-1)
-        coverage = float(jnp.mean(covered))
-
-        # With T=50, expect ~95% coverage but allow Monte Carlo
-        # variation: anything above 70% is acceptable
-        assert coverage > 0.70, f"Coverage {coverage:.2%} too low"
 
 
 class TestLogMLIncrements:
@@ -237,209 +207,49 @@ class TestLogBayesFactor:
 class TestReplicatedLogML:
     """Tests for replicated_log_ml."""
 
-    def test_replicated_log_ml_shape(self, lgssm_params, lgssm_data):
-        """Should return array of shape (num_replicates,)."""
-        _, emissions = lgssm_data
-        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
-
+    def test_replicated_log_ml_splits_keys_and_vectorizes(self):
         def filter_fn(key):
-            return bootstrap_filter(
-                key=key,
-                initial_sampler=init_fn,
-                transition_sampler=trans_fn,
-                log_observation_fn=obs_fn,
-                emissions=emissions,
-                num_particles=500,
-            ).marginal_loglik
+            return jr.normal(key)
 
-        result = replicated_log_ml(jr.PRNGKey(0), filter_fn, num_replicates=10)
-        assert result.shape == (10,)
-        assert jnp.all(jnp.isfinite(result))
-
-    def test_replicated_log_ml_variability(self, lgssm_params, lgssm_data):
-        """Replicates should have non-zero variance."""
-        _, emissions = lgssm_data
-        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
-
-        def filter_fn(key):
-            return bootstrap_filter(
-                key=key,
-                initial_sampler=init_fn,
-                transition_sampler=trans_fn,
-                log_observation_fn=obs_fn,
-                emissions=emissions,
-                num_particles=200,
-            ).marginal_loglik
-
-        result = replicated_log_ml(jr.PRNGKey(1), filter_fn, num_replicates=20)
+        key = jr.PRNGKey(0)
+        result = replicated_log_ml(key, filter_fn, num_replicates=10)
+        expected = jax.vmap(filter_fn)(jr.split(key, 10))
+        assert jnp.array_equal(result, expected)
         assert float(jnp.var(result)) > 0.0
 
 
 class TestParamWeightedMean:
     """Tests for param_weighted_mean."""
 
-    def test_param_weighted_mean_shape(self, lgssm_params, lgssm_data):
-        """Output shape should be (ntime, param_dim)."""
+    def test_param_weighted_mean_exact(self):
         from smcx.diagnostics import param_weighted_mean
-        from smcx.liu_west import liu_west_filter
 
-        _, emissions = lgssm_data
-        m0 = lgssm_params["initial_mean"]
-        P0 = lgssm_params["initial_cov"]
-        F = lgssm_params["dynamics_weights"]
-        Q = lgssm_params["dynamics_cov"]
-        H = lgssm_params["emissions_weights"]
-        R = lgssm_params["emissions_cov"]
-
-        def init(key, n):
-            return _mvn_sample(key, m0, P0, shape=(n,))
-
-        def trans(key, state, params):
-            mean = (F @ state[:, None]).squeeze(-1)
-            return _mvn_sample(key, mean, Q)
-
-        def obs(emission, state, params):
-            mean = (H @ state[:, None]).squeeze(-1)
-            return _mvn_logpdf(emission, mean, R)
-
-        def aux(emission, state, params):
-            pred = (H @ F @ state[:, None]).squeeze(-1)
-            return _mvn_logpdf(emission, pred, R)
-
-        def param_init(key, n):
-            return jnp.zeros((n, 1))
-
-        post = liu_west_filter(
-            key=jr.PRNGKey(42),
-            initial_sampler=init,
-            transition_sampler=trans,
-            log_observation_fn=obs,
-            log_auxiliary_fn=aux,
-            param_initial_sampler=param_init,
-            emissions=emissions,
-            num_particles=500,
-            shrinkage=0.95,
-        )
-
+        post = _make_liu_west_posterior()
         result = param_weighted_mean(post)
-        ntime = emissions.shape[0]
-        assert result.shape == (ntime, 1)
-        assert jnp.all(jnp.isfinite(result))
-
-    def test_param_weighted_mean_finite_values(self, lgssm_params, lgssm_data):
-        """All param mean values should be finite."""
-        from smcx.diagnostics import param_weighted_mean
-        from smcx.liu_west import liu_west_filter
-
-        _, emissions = lgssm_data
-        m0 = lgssm_params["initial_mean"]
-        P0 = lgssm_params["initial_cov"]
-        F = lgssm_params["dynamics_weights"]
-        Q = lgssm_params["dynamics_cov"]
-        H = lgssm_params["emissions_weights"]
-        R = lgssm_params["emissions_cov"]
-
-        def init(key, n):
-            return _mvn_sample(key, m0, P0, shape=(n,))
-
-        def trans(key, state, params):
-            mean = (F @ state[:, None]).squeeze(-1)
-            return _mvn_sample(key, mean, Q)
-
-        def obs(emission, state, params):
-            mean = (H @ state[:, None]).squeeze(-1)
-            return _mvn_logpdf(emission, mean, R)
-
-        def aux(emission, state, params):
-            pred = (H @ F @ state[:, None]).squeeze(-1)
-            return _mvn_logpdf(emission, pred, R)
-
-        def param_init(key, n):
-            return jnp.zeros((n, 1))
-
-        post = liu_west_filter(
-            key=jr.PRNGKey(7),
-            initial_sampler=init,
-            transition_sampler=trans,
-            log_observation_fn=obs,
-            log_auxiliary_fn=aux,
-            param_initial_sampler=param_init,
-            emissions=emissions,
-            num_particles=500,
-            shrinkage=0.95,
-        )
-
-        param_means = param_weighted_mean(post)
-        ntime = emissions.shape[0]
-        assert param_means.shape == (ntime, 1)
-        assert jnp.all(jnp.isfinite(param_means))
+        expected = jnp.array([[0.0], [10.0], [-10.0]])
+        assert jnp.allclose(result, expected, rtol=0.0, atol=1e-6)
 
 
 class TestParamWeightedQuantile:
     """Tests for param_weighted_quantile."""
 
-    def test_param_weighted_quantile_monotone(self, lgssm_params, lgssm_data):
+    def test_param_weighted_quantile_monotone(self):
         """Lower quantile <= upper quantile at every step."""
         from smcx.diagnostics import param_weighted_quantile
-        from smcx.liu_west import liu_west_filter
-
-        _, emissions = lgssm_data
-        m0 = lgssm_params["initial_mean"]
-        P0 = lgssm_params["initial_cov"]
-        F = lgssm_params["dynamics_weights"]
-        Q = lgssm_params["dynamics_cov"]
-        H = lgssm_params["emissions_weights"]
-        R = lgssm_params["emissions_cov"]
-
-        def init(key, n):
-            return _mvn_sample(key, m0, P0, shape=(n,))
-
-        def trans(key, state, params):
-            mean = (F @ state[:, None]).squeeze(-1)
-            return _mvn_sample(key, mean, Q)
-
-        def obs(emission, state, params):
-            mean = (H @ state[:, None]).squeeze(-1)
-            return _mvn_logpdf(emission, mean, R)
-
-        def aux(emission, state, params):
-            pred = (H @ F @ state[:, None]).squeeze(-1)
-            return _mvn_logpdf(emission, pred, R)
-
-        def param_init(key, n):
-            return jnp.zeros((n, 1))
-
-        post = liu_west_filter(
-            key=jr.PRNGKey(42),
-            initial_sampler=init,
-            transition_sampler=trans,
-            log_observation_fn=obs,
-            log_auxiliary_fn=aux,
-            param_initial_sampler=param_init,
-            emissions=emissions,
-            num_particles=500,
-            shrinkage=0.95,
-        )
 
         q = jnp.array([0.025, 0.5, 0.975])
-        result = param_weighted_quantile(post, q)
-        ntime = emissions.shape[0]
-        assert result.shape == (ntime, 3, 1)
-        # Monotonicity: q025 <= q50 <= q975
+        result = param_weighted_quantile(_make_liu_west_posterior(), q)
+        assert result.shape == (3, 3, 1)
         assert jnp.all(result[:, 0, :] <= result[:, 1, :])
         assert jnp.all(result[:, 1, :] <= result[:, 2, :])
+        expected_median = jnp.array([[0.0], [10.0], [-10.0]])
+        assert jnp.allclose(
+            result[:, 1, :], expected_median, rtol=0.0, atol=1e-6
+        )
 
 
 class TestCRPS:
     """Tests for crps."""
-
-    def test_crps_nonnegative(self):
-        """CRPS should always be non-negative."""
-        from smcx.diagnostics import crps
-
-        predictions = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        result = crps(predictions, jnp.float64(3.0))
-        assert float(result) >= 0.0
 
     def test_crps_zero_for_perfect_prediction(self):
         """CRPS = 0 when all predictions equal observation."""
@@ -497,9 +307,9 @@ class TestCRPS:
 class TestPosteriorPredictiveSample:
     """Tests for posterior_predictive_sample."""
 
-    def test_shape(self, lgssm_params, lgssm_data):
+    def test_shape(self, lgssm_params):
         """Output shape is (ntime, num_samples, emission_dim)."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=500)
+        pf_post = _make_posterior()
         F = lgssm_params["dynamics_weights"]
         Q = lgssm_params["dynamics_cov"]
         H = lgssm_params["emissions_weights"]
@@ -519,9 +329,9 @@ class TestPosteriorPredictiveSample:
         ntime = pf_post.filtered_particles.shape[0]
         assert result.shape == (ntime, 100, 1)
 
-    def test_finite(self, lgssm_params, lgssm_data):
+    def test_finite(self, lgssm_params):
         """All predictive samples should be finite."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=500)
+        pf_post = _make_posterior()
         F = lgssm_params["dynamics_weights"]
         Q = lgssm_params["dynamics_cov"]
         H = lgssm_params["emissions_weights"]
@@ -540,10 +350,9 @@ class TestPosteriorPredictiveSample:
         )
         assert jnp.all(jnp.isfinite(result))
 
-    def test_default_num_samples(self, lgssm_params, lgssm_data):
+    def test_default_num_samples(self, lgssm_params):
         """Default num_samples should equal num_particles."""
-        n = 200
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=n)
+        pf_post = _make_posterior()
         F = lgssm_params["dynamics_weights"]
         Q = lgssm_params["dynamics_cov"]
         H = lgssm_params["emissions_weights"]
@@ -560,28 +369,26 @@ class TestPosteriorPredictiveSample:
         result = posterior_predictive_sample(
             jr.PRNGKey(0), pf_post, trans, emit
         )
-        assert result.shape[1] == n
+        assert result.shape[1] == pf_post.filtered_log_weights.shape[1]
 
 
 class TestParetoKDiagnostic:
     """Tests for pareto_k_diagnostic."""
 
-    def test_pareto_k_shape(self, lgssm_params, lgssm_data):
+    def test_pareto_k_shape(self):
         """Output shape matches (ntime,)."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=1_000)
+        pf_post = _make_posterior()
         k_hat = pareto_k_diagnostic(pf_post)
         assert k_hat.shape == (pf_post.filtered_log_weights.shape[0],)
 
-    def test_pareto_k_finite(self, lgssm_params, lgssm_data):
+    def test_pareto_k_finite(self):
         """All k-hat values should be finite."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=1_000)
+        pf_post = _make_posterior()
         k_hat = pareto_k_diagnostic(pf_post)
         assert jnp.all(jnp.isfinite(k_hat))
 
     def test_pareto_k_uniform_weights_low(self):
         """Uniform weights should give low k (no heavy tail)."""
-        from smcx.containers import ParticleFilterPosterior
-
         n = 1000
         log_w = jnp.full((5, n), -jnp.log(n))
         particles = jnp.zeros((5, n, 1))
@@ -597,9 +404,9 @@ class TestParetoKDiagnostic:
         # Uniform weights have no tail: k should be small
         assert jnp.all(k_hat < 0.7)
 
-    def test_pareto_k_jit_compatible(self, lgssm_params, lgssm_data):
+    def test_pareto_k_jit_compatible(self):
         """pareto_k_diagnostic compiles under jax.jit."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=500)
+        pf_post = _make_posterior()
         result = jax.jit(pareto_k_diagnostic)(pf_post)
         assert jnp.all(jnp.isfinite(result))
 
@@ -782,9 +589,9 @@ class TestCumulativeLogScore:
 class TestDiagnose:
     """Tests for diagnose."""
 
-    def test_diagnose_returns_dict(self, lgssm_params, lgssm_data):
+    def test_diagnose_returns_dict(self):
         """Diagnose returns a dict with expected keys."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=1_000)
+        pf_post = _make_posterior()
         result = diagnose(pf_post)
         assert "min_ess" in result
         assert "min_diversity" in result
@@ -792,8 +599,8 @@ class TestDiagnose:
         assert "ess_below_threshold" in result
         assert "warnings" in result
 
-    def test_pareto_k_threshold_adds_warning(self, lgssm_params, lgssm_data):
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=500)
+    def test_pareto_k_threshold_adds_warning(self):
+        pf_post = _make_posterior()
         quiet = diagnose(pf_post, pareto_k_threshold=float("inf"))
         forced = diagnose(pf_post, pareto_k_threshold=-1.0)
 
