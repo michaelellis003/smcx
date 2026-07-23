@@ -129,10 +129,10 @@ Each callback also returns the public standard record:
 
 ```python
 smcx.ParticleFilterRecord(
-    particles,                 # PyTree leaves: (num_particles, ...)
-    normalized_log_weights,    # (num_particles,)
-    ancestor_indices,          # (num_particles,), integer
-    log_evidence_increment,    # scalar
+    particles,  # PyTree leaves: (num_particles, ...)
+    normalized_log_weights,  # (num_particles,)
+    ancestor_indices,  # (num_particles,), integer
+    log_evidence_increment,  # scalar
 )
 ```
 
