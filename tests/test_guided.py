@@ -268,5 +268,15 @@ class TestDegenerateRaises:
         def impossible(y, z):
             return jnp.array(-jnp.inf)
 
+        sample, log_q = _optimal_proposal()
         with pytest.raises(smcx.DegenerateWeightsError):
-            smcx.bootstrap_filter(jr.key(2), _init, _trans, impossible, Y, 200)
+            smcx.guided_filter(
+                jr.key(2),
+                _init,
+                sample,
+                log_q,
+                _log_trans,
+                impossible,
+                Y,
+                200,
+            )

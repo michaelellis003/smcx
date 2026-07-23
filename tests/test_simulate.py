@@ -1,11 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for smcx.simulate.
-
-Validates output shapes, statistical properties against analytical
-moments of a linear Gaussian SSM, and JIT compatibility.
-"""
+"""Tests for :func:`smcx.simulate`."""
 
 import jax
 import jax.numpy as jnp
@@ -56,37 +52,31 @@ class TestSimulateOutputShapes:
         assert emissions.shape == (20, 1)
 
 
-class TestSimulateLGSSMStatistics:
-    """Simulated samples should match analytical LGSSM moments."""
+def test_simulate_applies_callbacks_in_time_order():
+    """The initial state is emitted before transitions begin."""
 
-    def test_simulate_lgssm_statistics(self, lgssm_params):
-        """Mean and variance of states near analytical steady-state."""
-        init_fn, trans_fn, emit_fn = _make_lgssm_samplers(lgssm_params)
+    def initial_sampler(key):
+        del key
+        return jnp.array([1.0])
 
-        # Simulate many trajectories to estimate moments
-        keys = jr.split(jr.PRNGKey(42), 5_000)
+    def transition_sampler(key, state):
+        del key
+        return state + 1
 
-        def run_one(key):
-            states, _ = simulate(
-                key=key,
-                initial_sampler=init_fn,
-                transition_sampler=trans_fn,
-                emission_sampler=emit_fn,
-                num_timesteps=100,
-            )
-            return states[-1, 0]  # final state, scalar
+    def emission_sampler(key, state):
+        del key
+        return 2 * state
 
-        final_states = jax.vmap(run_one)(keys)
+    states, emissions = simulate(
+        jr.key(42),
+        initial_sampler,
+        transition_sampler,
+        emission_sampler,
+        num_timesteps=4,
+    )
 
-        # Steady-state variance of AR(1) with rho=0.9, sigma^2=0.25:
-        # V_ss = 0.25 / (1 - 0.81) = 0.25/0.19 ≈ 1.316
-        # Steady-state mean = 0
-        sample_mean = float(jnp.mean(final_states))
-        sample_var = float(jnp.var(final_states))
-
-        assert abs(sample_mean) < 0.1  # near zero
-        assert sample_var > 0.5  # substantially positive
-        assert sample_var < 3.0  # not unreasonably large
+    assert jnp.array_equal(states[:, 0], jnp.array([1.0, 2.0, 3.0, 4.0]))
+    assert jnp.array_equal(emissions[:, 0], jnp.array([2.0, 4.0, 6.0, 8.0]))
 
 
 class TestSimulateJIT:

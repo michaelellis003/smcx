@@ -50,8 +50,6 @@ class TestWeightsVmap:
         lw_batch = jnp.array([[1.0, 2.0, 3.0], [0.0, 0.0, 0.0]])
         vmapped = jax.vmap(log_normalize)
         log_norms, log_evs = vmapped(lw_batch)
-        # Cast through jnp.asarray since blackjax annotates the return as
-        # Scalar = int | float | Array, which confuses static checkers.
         assert jnp.asarray(log_norms).shape == (2, 3)
         assert jnp.asarray(log_evs).shape == (2,)
 

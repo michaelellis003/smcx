@@ -1,31 +1,14 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tempered SMC tests against exact and independent implementations.
+"""Tempered SMC tests against a conjugate Gaussian target.
 
 Conjugate ground truth: prior N(0, s0^2 I_d), likelihood
 N(y_obs; x, sl^2 I_d) => log Z = sum_i log N(y_i; 0, s0^2 + sl^2)
 exactly, and the posterior is Gaussian with known moments.
 
-One-time isolated validation on this exact target (2026-07-18; N=4000,
-12 fixed seeds) produced mean log evidence (Monte Carlo SE) ``-5.108088
-(.009799)`` for smcx, ``-5.121923 (.007684)`` for particles, and
-``-5.122697 (.005115)`` for BlackJAX, versus ``-5.12131172107733`` exact.
-All posterior mean and variance coordinates passed five-SE exact and
-cross-implementation gates. No outside package is imported by these tests.
-
-Pinned authorities (no code copied):
-
-* particles 0.4, f71e94a21a11c73b58e2d694775b1b1d379b8854, MIT:
-  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/particles/smc_samplers.py#L800-L958
-  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/LICENSE
-* BlackJAX 1.6.2, a9ef478c69d730a2caa13ca4b2d735c580e0feec,
-  Apache-2.0:
-  https://github.com/blackjax-devs/blackjax/blob/a9ef478c69d730a2caa13ca4b2d735c580e0feec/blackjax/smc/adaptive_tempered.py
-  https://github.com/blackjax-devs/blackjax/blob/a9ef478c69d730a2caa13ca4b2d735c580e0feec/LICENSE
-
 Algorithm: Del Moral, Doucet, and Jasra (2006),
-https://doi.org/10.1111/j.1467-9868.2006.00553.x
+https://doi.org/10.1111/j.1467-9868.2006.00553.x.
 """
 
 import math
