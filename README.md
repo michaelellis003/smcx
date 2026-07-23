@@ -11,6 +11,7 @@ Features include:
 
 - exact linear-Gaussian Kalman filtering and RTS smoothing;
 - bootstrap, auxiliary, guided, and Liu–West particle filters;
+- a public runner for caller-owned particle-filter kernels;
 - adaptive tempered SMC and nested SMC² parameter inference;
 - systematic, stratified, multinomial, and residual resampling;
 - filtering diagnostics, scoring rules, trajectory reconstruction, and
@@ -49,11 +50,13 @@ on CPU.
 
 The [documentation](https://michaelellis003.github.io/smcx/) includes a
 [quickstart](https://michaelellis003.github.io/smcx/guides/quickstart/),
-guides for
-[custom models](https://michaelellis003.github.io/smcx/guides/custom-models/)
+guides for [custom models and custom particle filters][custom-models]
 and [ArviZ reporting](https://michaelellis003.github.io/smcx/guides/arviz/),
 and the complete
 [API reference](https://michaelellis003.github.io/smcx/api/smcx/).
+
+[custom-models]:
+  https://michaelellis003.github.io/smcx/guides/custom-models/
 
 ## Quick example
 
@@ -110,6 +113,12 @@ and provides BibTeX and APA entries.
 The broader Feynman–Kac architecture follows Chopin and
 Papaspiliopoulos's
 [*An Introduction to Sequential Monte Carlo*](https://doi.org/10.1007/978-3-030-47845-2).
+The caller-owned particle-filter runner was informed by the functional
+state/information protocol in
+[BlackJAX 1.6.2](https://github.com/blackjax-devs/blackjax/releases/tag/1.6.2)
+and the separation of orchestration from history in
+[particles 0.4](https://github.com/nchopin/particles/releases/tag/v0.4).
+These are design credits; no code was copied or translated.
 The implemented methods draw on these primary sources:
 
 - Exact Gaussian state estimation:

@@ -100,6 +100,25 @@ class BootstrapStepInfo(NamedTuple):
     log_evidence_increment: Float[Array, ""]
 
 
+class ParticleFilterRecord(NamedTuple):
+    """Standard per-time record returned by caller-owned filter kernels.
+
+    Attributes:
+        particles: Current particle PyTree. Every leaf has leading size
+            ``num_particles``.
+        log_weights: Normalized log importance weights.
+        ancestors: Indices into the preceding particle cloud. Identity
+            indices are conventional at time zero.
+        log_evidence_increment: Current evidence increment, computed by the
+            caller's algorithm.
+    """
+
+    particles: ParticleCloud
+    log_weights: Float[Array, " num_particles"]
+    ancestors: Int[Array, " num_particles"]
+    log_evidence_increment: Float[Array, ""]
+
+
 class ParticleFilterPosterior(NamedTuple):
     r"""Full output of a particle filter run.
 

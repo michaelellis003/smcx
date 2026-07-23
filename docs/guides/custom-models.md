@@ -104,6 +104,118 @@ posterior = smcx.bootstrap_filter(
 The factory belongs to the application. An auxiliary or guided factory can
 return the extra callbacks required by that algorithm.
 
+## Compose a particle-filter kernel
+
+Use `smcx.run_particle_filter` when a built-in filter does not provide the
+algorithmic pieces you want to combine. The runner accepts these callback
+contracts when there are no time-varying inputs:
+
+```text
+initialize(time_index, emission_t, key_t) -> (carry, record)
+step(carry, time_index, emission_t, key_t) -> (carry, record)
+```
+
+An input-aware kernel inserts `input_t` before `key_t` in both callbacks:
+
+```text
+initialize(time_index, emission_t, input_t, key_t) -> (carry, record)
+step(carry, time_index, emission_t, input_t, key_t) -> (carry, record)
+```
+
+The carry may be any JAX PyTree of arrays. Its structure, leaf shapes, and
+dtypes must remain fixed across steps because the runner uses `jax.lax.scan`.
+It is private execution state and is not included in the returned posterior.
+Each callback also returns the public standard record:
+
+```python
+smcx.ParticleFilterRecord(
+    particles,  # PyTree leaves: (num_particles, ...)
+    normalized_log_weights,  # (num_particles,)
+    ancestor_indices,  # (num_particles,), integer
+    log_evidence_increment,  # scalar
+)
+```
+
+The record describes the current time. Ancestor indices refer to the previous
+cloud; an identity map is conventional at time zero. The runner aligns
+emissions, optional inputs, and fresh keys; computes ESS; accumulates the
+evidence increments; and assembles `smcx.ParticleFilterPosterior`. The
+callbacks retain control of resampling, propagation, weighting, and the
+increment calculation. Weight normalization and ancestor-index bounds are
+callback preconditions.
+
+This always-resampling bootstrap kernel composes only public smcx operations
+with the `initial`, `transition`, and `log_observation` callbacks defined
+above:
+
+```python
+num_particles = 4_096
+
+
+def weighted_record(particles, emission_t, ancestors):
+    log_scores = jax.vmap(log_observation, in_axes=(None, 0))(
+        emission_t, particles
+    )
+    log_weights, log_total = smcx.log_normalize(log_scores)
+    increment = log_total - jnp.log(jnp.asarray(num_particles))
+    record = smcx.ParticleFilterRecord(
+        particles,
+        log_weights,
+        ancestors,
+        increment,
+    )
+    return log_weights, record
+
+
+def initialize_kernel(time_index, emission_t, key_t):
+    del time_index
+    particles = initial(key_t, num_particles)
+    ancestors = jnp.arange(num_particles, dtype=jnp.int32)
+    log_weights, record = weighted_record(
+        particles,
+        emission_t,
+        ancestors,
+    )
+    return (particles, log_weights), record
+
+
+def step_kernel(carry, time_index, emission_t, key_t):
+    del time_index
+    previous_particles, previous_log_weights = carry
+    resample_key, transition_key = jr.split(key_t)
+    ancestors = smcx.systematic(
+        resample_key,
+        smcx.normalize(previous_log_weights),
+        num_particles,
+    )
+    selected = jax.tree.map(
+        lambda leaf: leaf[ancestors],
+        previous_particles,
+    )
+    particle_keys = jr.split(transition_key, num_particles)
+    particles = jax.vmap(transition)(particle_keys, selected)
+    log_weights, record = weighted_record(
+        particles,
+        emission_t,
+        ancestors,
+    )
+    return (particles, log_weights), record
+
+
+custom_posterior = smcx.run_particle_filter(
+    jr.key(0),
+    initialize_kernel,
+    step_kernel,
+    emissions,
+)
+```
+
+Initialization receives time zero and the first emission. The step callback
+then receives times one through `ntime - 1`. With `store_history=True`, the
+posterior stores every particle record. With `store_history=False`, its
+particle, weight, and ancestor histories contain only the final record; ESS
+and evidence increments remain available for every time step.
+
 ## Write input-aware callbacks explicitly
 
 Time-varying inputs use distinct callback signatures. At time zero,
