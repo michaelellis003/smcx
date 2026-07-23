@@ -132,6 +132,31 @@ class ParticleFilterPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " ntime"]
 
 
+class GaussianFilterPosterior(NamedTuple):
+    r"""Exact Gaussian filtering output.
+
+    Attributes:
+        marginal_loglik: Exact :math:`\log p(y_{1:T})`.
+        predicted_means: Means before conditioning at each step,
+            shape ``(ntime, state_dim)``.
+        predicted_covariances: Covariances before conditioning at each
+            step, shape ``(ntime, state_dim, state_dim)``.
+        filtered_means: Means after conditioning at each step,
+            shape ``(ntime, state_dim)``.
+        filtered_covariances: Covariances after conditioning at each
+            step, shape ``(ntime, state_dim, state_dim)``.
+        log_evidence_increments: Per-step log marginal likelihood
+            increments, shape ``(ntime,)``.
+    """
+
+    marginal_loglik: Scalar
+    predicted_means: Float[Array, "ntime state_dim"]
+    predicted_covariances: Float[Array, "ntime state_dim state_dim"]
+    filtered_means: Float[Array, "ntime state_dim"]
+    filtered_covariances: Float[Array, "ntime state_dim state_dim"]
+    log_evidence_increments: Float[Array, " ntime"]
+
+
 class LiuWestPosterior(NamedTuple):
     r"""Full output of a Liu-West particle filter run.
 

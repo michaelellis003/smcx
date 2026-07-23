@@ -16,6 +16,7 @@ from smcx.bootstrap import (
 from smcx.containers import (
     BootstrapCheckpoint,
     BootstrapStepInfo,
+    GaussianFilterPosterior,
     LiuWestPosterior,
     ParticleFilterPosterior,
     ParticleFilterResult,
@@ -44,6 +45,7 @@ from smcx.diagnostics import (
 )
 from smcx.exceptions import DegenerateWeightsError
 from smcx.guided import guided_filter
+from smcx.kalman import kalman_filter
 from smcx.liu_west import liu_west_filter
 from smcx.reporting import to_arviz
 from smcx.resampling import (
@@ -66,6 +68,7 @@ __all__ = [
     "BootstrapCheckpoint",
     "BootstrapStepInfo",
     "DegenerateWeightsError",
+    "GaussianFilterPosterior",
     "LiuWestPosterior",
     "ParticleFilterPosterior",
     "ParticleFilterResult",
@@ -83,6 +86,7 @@ __all__ = [
     "diagnose",
     "ess",
     "guided_filter",
+    "kalman_filter",
     "liu_west_filter",
     "log_bayes_factor",
     "log_ess",
