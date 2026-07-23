@@ -227,11 +227,12 @@ def test_scan_steps_uncompiled_match_public_two_step_run():
         observation_covariance,
         emissions,
     )
+    evidence = jnp.asarray(first.marginal_loglik)
     state = kalman_module._FilterState(
         first.filtered_means[0],
         first.filtered_covariances[0],
-        first.marginal_loglik,
-        jnp.zeros_like(first.marginal_loglik),
+        evidence,
+        jnp.zeros_like(evidence),
     )
     next_state, output = kalman_module._filter_step(
         state,
