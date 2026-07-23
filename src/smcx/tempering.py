@@ -104,9 +104,8 @@ def temper(
         log_likelihood_fn: Per-particle ``(state) -> scalar``
             log-likelihood; vmapped internally.
         num_particles: Number of particles N.
-        num_mcmc_steps: RWM sweeps per temperature stage. The default
-            five sweeps are a mutation budget, not an accuracy guarantee;
-            higher-dimensional or poorly mixed targets may need more.
+        num_mcmc_steps: RWM sweeps per temperature stage. Five may under-mix
+            in moderate or high dimensions.
         target_ess: The bisection solves ``ESS = target_ess * N``
             for each stage's temperature increment.
         resampling_fn: Resampler applied at every

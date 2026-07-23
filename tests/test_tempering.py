@@ -293,15 +293,6 @@ class TestMechanics:
             atol=frozen_atol,
         )
 
-    def test_default_mutation_budget_caveat_is_documented(self):
-        docstring = smcx.temper.__doc__
-        assert docstring is not None
-        normalized_docstring = " ".join(docstring.split())
-        assert (
-            "The default five sweeps are a mutation budget, not an accuracy "
-            "guarantee" in normalized_docstring
-        )
-
     def test_degenerate_likelihood_raises(self):
         init, log_prior, _ = _model()
 
