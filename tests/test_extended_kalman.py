@@ -386,3 +386,108 @@ def test_uncompiled_extended_step_matches_public_scan():
         (full.marginal_loglik,),
         ulps=256,
     )
+
+
+def _valid_extended_model():
+    def transition_mean(state):
+        return state
+
+    def transition_jacobian(_state):
+        return jnp.eye(1)
+
+    def observation_mean(state):
+        return state
+
+    def observation_jacobian(_state):
+        return jnp.eye(1)
+
+    return {
+        "initial_mean": jnp.zeros(1),
+        "initial_covariance": jnp.eye(1),
+        "transition_mean_fn": transition_mean,
+        "transition_jacobian_fn": transition_jacobian,
+        "transition_covariance": jnp.eye(1),
+        "observation_mean_fn": observation_mean,
+        "observation_jacobian_fn": observation_jacobian,
+        "observation_covariance": jnp.eye(1),
+        "emissions": jnp.zeros((2, 1)),
+    }
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "message"),
+    [
+        ("initial_mean", jnp.zeros((1, 1)), "initial_mean"),
+        ("initial_covariance", jnp.eye(2), "initial_covariance"),
+        ("transition_covariance", jnp.ones((2, 1, 1)), "transition_covariance"),
+        (
+            "observation_covariance",
+            jnp.ones((3, 1, 1)),
+            "observation_covariance",
+        ),
+        ("emissions", jnp.empty((0, 1)), "emissions"),
+        ("inputs", jnp.zeros((3, 1)), "inputs"),
+    ],
+)
+def test_extended_kalman_rejects_misaligned_arrays(argument, value, message):
+    """Malformed dense models fail at the public Python boundary."""
+    model = _valid_extended_model()
+    model[argument] = value
+
+    with pytest.raises(ValueError, match=message):
+        smcx.extended_kalman_filter(**model)
+
+
+@pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
+def test_extended_kalman_rejects_low_precision(dtype):
+    """Unsupported Cholesky dtypes fail cleanly at the public boundary."""
+    model = _valid_extended_model()
+    for name, value in model.items():
+        if isinstance(value, jax.Array):
+            model[name] = value.astype(dtype)
+
+    with pytest.raises(ValueError, match="float32 or float64"):
+        smcx.extended_kalman_filter(**model)
+
+
+@pytest.mark.parametrize(
+    ("callback", "replacement", "message"),
+    [
+        (
+            "transition_mean_fn",
+            lambda state: jnp.zeros(2, dtype=state.dtype),
+            "transition_mean_fn output",
+        ),
+        (
+            "transition_jacobian_fn",
+            lambda state: jnp.zeros((1, 2), dtype=state.dtype),
+            "transition_jacobian_fn output",
+        ),
+        (
+            "observation_mean_fn",
+            lambda state: jnp.zeros(2, dtype=state.dtype),
+            "observation_mean_fn output",
+        ),
+        (
+            "observation_jacobian_fn",
+            lambda state: jnp.zeros((2, 1), dtype=state.dtype),
+            "observation_jacobian_fn output",
+        ),
+        (
+            "observation_mean_fn",
+            lambda state: state.astype(jnp.float16),
+            "float32 or float64",
+        ),
+    ],
+)
+def test_extended_kalman_rejects_malformed_callback_output(
+    callback,
+    replacement,
+    message,
+):
+    """Mean and Jacobian callbacks preserve shape and dtype contracts."""
+    model = _valid_extended_model()
+    model[callback] = replacement
+
+    with pytest.raises(ValueError, match=message):
+        smcx.extended_kalman_filter(**model)
