@@ -3,6 +3,8 @@
 
 """Tests for exact linear-Gaussian filtering and smoothing."""
 
+import math
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -10,6 +12,7 @@ import pytest
 
 import smcx
 from tests import _kalman_reference as multivariate_reference
+from tests._kalman import kalman_1d
 from tests._lgssm_reference import EXACT_LOG_LIKELIHOOD, REFERENCE_TIMES
 from tests._lgssm_reference import FILTERED_MEANS as EXACT_FILTERED_MEANS
 from tests._lgssm_reference import FILTERED_VARIANCES as EXACT_FILTERED_VARS
@@ -19,9 +22,9 @@ def _assert_roundoff_close(actual, expected):
     """Compare the small, well-conditioned reference within f32/f64 error."""
     actual_array = np.asarray(actual)
     expected_array = np.asarray(expected)
-    # The fixture has five 2x2 recurrences and covariance condition numbers
-    # below 2.7. A 64*eps*scale forward-error budget covers their matrix
-    # products and triangular solves while remaining dtype-honest.
+    # The fixtures have either 50 stable scalar steps or five 2x2 steps
+    # with covariance condition numbers below 2.7. A 64*eps*scale
+    # forward-error budget covers their reductions and triangular solves.
     scale = max(1.0, float(np.max(np.abs(expected_array))))
     atol = 64 * np.finfo(actual_array.dtype).eps * scale
     np.testing.assert_allclose(
@@ -89,6 +92,35 @@ def test_kalman_filter_matches_frozen_dynamax_reference(
         posterior.marginal_loglik,
         rtol=0.0,
         atol=atol,
+    )
+
+
+def test_kalman_filter_reduces_to_scalar_numpy_oracle(lgssm_params, lgssm_data):
+    """Every scalar filtered moment follows the independent recurrence."""
+    _, emissions = lgssm_data
+    exact_loglik, exact_means, exact_variances = kalman_1d(
+        np.asarray(emissions[:, 0]),
+        a=0.9,
+        q=0.25,
+        r=1.0,
+        m0=0.0,
+        p0=1.0,
+    )
+    posterior = smcx.kalman_filter(
+        lgssm_params["initial_mean"],
+        lgssm_params["initial_cov"],
+        lgssm_params["dynamics_weights"],
+        lgssm_params["dynamics_cov"],
+        lgssm_params["emissions_weights"],
+        lgssm_params["emissions_cov"],
+        emissions,
+    )
+
+    _assert_roundoff_close(posterior.marginal_loglik, exact_loglik)
+    _assert_roundoff_close(posterior.filtered_means[:, 0], exact_means)
+    _assert_roundoff_close(
+        posterior.filtered_covariances[:, 0, 0],
+        exact_variances,
     )
 
 
@@ -207,6 +239,21 @@ def test_kalman_filter_rejects_input_matrix_without_inputs():
             jnp.eye(1),
             jnp.zeros((2, 1)),
             transition_input_matrix=jnp.eye(1),
+        )
+
+
+@pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
+def test_kalman_filter_rejects_unsupported_low_precision(dtype):
+    """Unsupported Cholesky dtypes fail cleanly at the public boundary."""
+    with pytest.raises(ValueError, match="float32 or float64"):
+        smcx.kalman_filter(
+            jnp.zeros(1, dtype=dtype),
+            jnp.eye(1, dtype=dtype),
+            jnp.eye(1, dtype=dtype),
+            jnp.eye(1, dtype=dtype),
+            jnp.eye(1, dtype=dtype),
+            jnp.eye(1, dtype=dtype),
+            jnp.zeros((1, 1), dtype=dtype),
         )
 
 
@@ -343,3 +390,26 @@ def test_joseph_update_preserves_float32_covariance_psd():
     # For this fixture, the subtractive P-KSK' update has minimum
     # eigenvalue below -0.65 on CPU and Metal, while Joseph gives >0.09.
     assert np.linalg.eigvalsh(covariance).min() >= 0.0
+
+
+def test_float32_evidence_avoids_long_horizon_accumulation_drift():
+    """Long, unequal increments do not accumulate naive-sum drift."""
+    num_timesteps = 10_000
+    dtype = jnp.float32
+    posterior = smcx.kalman_filter(
+        jnp.array([1_000.0], dtype=dtype),
+        jnp.array([[1.0]], dtype=dtype),
+        jnp.array([[1.0]], dtype=dtype),
+        jnp.array([[0.01]], dtype=dtype),
+        jnp.array([[1.0]], dtype=dtype),
+        jnp.array([[0.1]], dtype=dtype),
+        jnp.zeros((num_timesteps, 1), dtype=dtype),
+    )
+
+    accurate = math.fsum(
+        np.asarray(posterior.log_evidence_increments, dtype=np.float64)
+    )
+    # Returning the compensated f32 pair costs at most one final rounding;
+    # two ulps admits backend variation. Naive accumulation misses by >123.
+    tolerance = 2 * abs(np.spacing(np.float32(accurate)))
+    assert abs(float(posterior.marginal_loglik) - accurate) <= tolerance

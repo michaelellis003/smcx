@@ -15,6 +15,9 @@ References:
     Rauch, H. E., Tung, F., and Striebel, C. T. (1965). Maximum
     Likelihood Estimates of Linear Dynamic Systems.
     https://doi.org/10.2514/3.3166
+    Neumaier, A. (1974). Rundungsfehleranalyse einiger Verfahren zur
+    Summation endlicher Summen.
+    https://doi.org/10.1002/zamm.19740540106
 """
 
 import math
@@ -36,6 +39,7 @@ class _FilterState(NamedTuple):
     mean: Float[Array, " state_dim"]
     covariance: Float[Array, "state_dim state_dim"]
     marginal_loglik: Float[Array, ""]
+    log_evidence_compensation: Float[Array, ""]
 
 
 class _FilterStepOutput(NamedTuple):
@@ -60,6 +64,21 @@ def _symmetrize(
 ) -> Float[Array, "state_dim state_dim"]:
     """Remove roundoff asymmetry from a covariance matrix."""
     return 0.5 * (covariance + covariance.T)
+
+
+def _neumaier_add(
+    total: Float[Array, ""],
+    compensation: Float[Array, ""],
+    value: Float[Array, ""],
+) -> tuple[Float[Array, ""], Float[Array, ""]]:
+    """Add one evidence increment with Neumaier compensation."""
+    updated = total + value
+    compensation = compensation + jnp.where(
+        jnp.abs(total) >= jnp.abs(value),
+        (total - updated) + value,
+        (value - updated) + total,
+    )
+    return updated, compensation
 
 
 def _condition(
@@ -123,6 +142,11 @@ def _check_float_array(
     """Validate one public dense-array dtype."""
     if not jnp.issubdtype(value.dtype, jnp.floating):
         raise ValueError(f"{name} must have a floating dtype")
+    supported = (jnp.dtype(jnp.float32), jnp.dtype(jnp.float64))
+    if value.dtype not in supported:
+        raise ValueError(
+            f"{name} must have dtype float32 or float64; got {value.dtype}"
+        )
     if dtype is not None and value.dtype != dtype:
         raise ValueError(
             f"all arrays must have dtype {dtype}; got {name}={value.dtype}"
@@ -231,8 +255,9 @@ def kalman_filter(
             are misaligned, or control matrices are supplied without inputs.
 
     Note:
-        Covariances must be finite, symmetric, and positive definite.
-        Missing observations are not supported.
+        Arrays must use float32 or float64. Covariances must be finite,
+        symmetric, and positive definite. Missing observations are not
+        supported.
     """
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
         raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
@@ -360,6 +385,7 @@ def kalman_filter(
         filtered_mean_0,
         filtered_covariance_0,
         increment_0,
+        jnp.zeros_like(increment_0),
     )
 
     def _step(
@@ -387,10 +413,16 @@ def kalman_filter(
             observation,
             observation_offset,
         )
+        evidence, compensation = _neumaier_add(
+            state.marginal_loglik,
+            state.log_evidence_compensation,
+            increment,
+        )
         next_state = _FilterState(
             filtered_mean,
             filtered_covariance,
-            state.marginal_loglik + increment,
+            evidence,
+            compensation,
         )
         output = _FilterStepOutput(
             predicted_mean,
@@ -432,7 +464,7 @@ def kalman_filter(
         rest.log_evidence_increment,
     ))
     return GaussianFilterPosterior(
-        final_state.marginal_loglik,
+        final_state.marginal_loglik + final_state.log_evidence_compensation,
         predicted_means,
         predicted_covariances,
         filtered_means,

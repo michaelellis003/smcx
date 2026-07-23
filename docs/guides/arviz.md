@@ -35,10 +35,10 @@ reproducible.
 | `unconstrained_posterior` | Aligned u-space values, when supplied |
 | `posterior.attrs["marginal_loglik"]` | Evidence estimate for each run |
 
-Filter output has dimensions `(chain, draw, time, ...)`. Each time slice is a
-filtering marginal $p(x_t \mid y_{0:t})$; draws with the same index across time
-do not form a joint trajectory. Use `reconstruct_trajectories` when ancestry is
-needed.
+Particle-filter output has dimensions `(chain, draw, time, ...)`. Each time
+slice is a filtering marginal $p(x_t \mid y_{0:t})$; draws with the same index
+across time do not form a joint trajectory. Use `reconstruct_trajectories`
+when ancestry is needed.
 
 Structured particle states use their PyTree paths as variable names. Supply
 `var_names` to rename them and `dims` to label event dimensions. Values passed

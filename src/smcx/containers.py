@@ -133,10 +133,11 @@ class ParticleFilterPosterior(NamedTuple):
 
 
 class GaussianFilterPosterior(NamedTuple):
-    r"""Exact Gaussian filtering output.
+    r"""Gaussian filtering output.
 
     Attributes:
-        marginal_loglik: Exact :math:`\log p(y_{1:T})`.
+        marginal_loglik: :math:`\log p(y_{1:T})` as computed by the
+            filtering method.
         predicted_means: Means before conditioning at each step,
             shape ``(ntime, state_dim)``.
         predicted_covariances: Covariances before conditioning at each
@@ -158,13 +159,14 @@ class GaussianFilterPosterior(NamedTuple):
 
 
 class GaussianSmootherPosterior(NamedTuple):
-    r"""Exact Gaussian filtering and smoothing output.
+    r"""Gaussian filtering and smoothing output.
 
     The filtering fields are retained so a downstream method can consume
     one self-contained posterior without rerunning the forward pass.
 
     Attributes:
-        marginal_loglik: Exact :math:`\log p(y_{1:T})`.
+        marginal_loglik: :math:`\log p(y_{1:T})` as computed by the
+            filtering method.
         predicted_means: Means before conditioning at each step.
         predicted_covariances: Covariances before conditioning at each step.
         filtered_means: Means after conditioning at each step.

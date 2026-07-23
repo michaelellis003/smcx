@@ -12,6 +12,9 @@ predicted-state timing.
 Repository (BSD-3-Clause):
 https://github.com/statsmodels/statsmodels
 
+Immutable license:
+https://github.com/statsmodels/statsmodels/blob/40e6a84d26ac74623c6b94b718f0987ef0351c53/LICENSE.txt
+
 Immutable source:
 https://github.com/statsmodels/statsmodels/blob/40e6a84d26ac74623c6b94b718f0987ef0351c53/statsmodels/tsa/statespace/kalman_smoother.py
 
@@ -23,6 +26,9 @@ adds ``1e-9 I``.
 
 Repository (MIT):
 https://github.com/probml/dynamax
+
+Immutable license:
+https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/LICENSE
 
 Immutable source:
 https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/dynamax/linear_gaussian_ssm/inference.py
