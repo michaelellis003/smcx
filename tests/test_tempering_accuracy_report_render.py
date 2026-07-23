@@ -25,8 +25,10 @@ from benchmarks.tempering_accuracy.report_data import (
     InventoryEntry,
     campaign_requests,
 )
+from benchmarks.tempering_accuracy.report_markdown import render_markdown
 from benchmarks.tempering_accuracy.report_render import (
     AttemptEvidence,
+    build_evidence,
     evidence_gzip,
 )
 from benchmarks.tempering_accuracy.report_timing import Summary, TimingReport
@@ -160,3 +162,43 @@ def test_evidence_is_canonical_reproducible_and_sanitized():
     ]
     assert "/private/" not in decoded.decode()
     assert "secret" not in decoded.decode()
+
+
+def _table_rows(markdown, heading):
+    section = markdown.split(f"## {heading}\n", 1)[1].split("\n## ", 1)[0]
+    return [line for line in section.splitlines() if line.startswith("| ")][2:]
+
+
+def _evidence():
+    attempt = AttemptEvidence(1, 0, "9" * 64, "launch_error")
+    return build_evidence(_campaign_report(), attempts=(attempt,))
+
+
+def test_markdown_report_is_deterministic_complete_and_sanitized():
+    evidence = _evidence()
+    first = render_markdown(evidence, report_date="2026-07-22")
+    assert first == render_markdown(evidence, report_date="2026-07-22")
+    assert first.startswith("# Tempering accuracy — 2026-07-22\n")
+    assert "current_rwm_not_eligible`\n\nGates: — · Cost: —" in first
+    assert "| Centering | 6,228 | 9 | 9 |" in first
+    for heading, count in {
+        "Minimum passing sweep": 24,
+        "Matched challenge": 12,
+        "All cells": 84,
+    }.items():
+        assert len(_table_rows(first, heading)) == count
+    assert "execution_failure" in first and "launch_error" in first
+    assert "waste_free" in first and "CPU/MPS" not in first
+
+
+def test_markdown_hides_timing_for_an_accuracy_ineligible_cell():
+    evidence = _evidence()
+    cell = evidence["cells"][0]
+    cell["status"] = "failed_accuracy"
+    cell["accuracy"]["status"] = "failed_accuracy"
+    cell["accuracy"]["correctness_eligible"] = False
+    evidence["status_counts"] = {"failed_accuracy": 1, "not_run_after_stop": 83}
+    markdown = render_markdown(evidence, report_date="2026-07-22")
+    row = _table_rows(markdown, "All cells")[0]
+    values = [value.strip() for value in row.strip("|").split("|")]
+    assert values[-4:] == ["—", "—", "—", "—"]
