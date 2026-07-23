@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 
 import smcx
+from tests import _extended_kalman_reference as nonlinear_reference
 
 
 def test_extended_kalman_reduces_to_linear_filter():
@@ -130,3 +131,66 @@ def test_extended_kalman_input_callbacks_match_linear_controls():
         scale = max(1.0, float(np.max(np.abs(expected_array))))
         atol = 64 * np.finfo(expected_array.dtype).eps * scale
         np.testing.assert_allclose(actual, expected, rtol=0.0, atol=atol)
+
+
+def test_extended_kalman_matches_independent_nonlinear_reference():
+    """Every posterior field matches Stone Soup's Joseph-form EKF."""
+    reference = nonlinear_reference
+
+    def transition_mean(state):
+        return jnp.stack((
+            0.82 * state[0] + 0.18 * state[1] + 0.05 * jnp.sin(state[0]),
+            -0.12 * state[0] + 0.90 * state[1] + 0.04 * state[0] * state[1],
+        ))
+
+    def transition_jacobian(state):
+        return jnp.array([
+            [0.82 + 0.05 * jnp.cos(state[0]), 0.18],
+            [-0.12 + 0.04 * state[1], 0.90 + 0.04 * state[0]],
+        ])
+
+    def observation_mean(state):
+        return jnp.stack((
+            state[0] + 0.10 * state[1] ** 2,
+            0.65 * state[1] + 0.12 * jnp.sin(state[0]),
+        ))
+
+    def observation_jacobian(state):
+        return jnp.array([
+            [1.0, 0.20 * state[1]],
+            [0.12 * jnp.cos(state[0]), 0.65],
+        ])
+
+    posterior = smcx.extended_kalman_filter(
+        jnp.asarray(reference.INITIAL_MEAN),
+        jnp.asarray(reference.INITIAL_COVARIANCE),
+        transition_mean,
+        transition_jacobian,
+        jnp.asarray(reference.TRANSITION_COVARIANCE),
+        observation_mean,
+        observation_jacobian,
+        jnp.asarray(reference.OBSERVATION_COVARIANCE),
+        jnp.asarray(reference.EMISSIONS),
+    )
+    expected_fields = (
+        reference.MARGINAL_LOG_LIKELIHOOD,
+        reference.PREDICTED_MEANS,
+        reference.PREDICTED_COVARIANCES,
+        reference.FILTERED_MEANS,
+        reference.FILTERED_COVARIANCES,
+        reference.LOG_EVIDENCE_INCREMENTS,
+    )
+
+    # Five 2x2 steps have innovation condition number below 2.62.
+    # 256*eps*scale covers the observed operation depth on CPU and Metal.
+    for actual, expected in zip(posterior, expected_fields, strict=True):
+        actual_array = np.asarray(actual)
+        expected_array = np.asarray(expected, dtype=actual_array.dtype)
+        scale = max(1.0, float(np.max(np.abs(expected_array))))
+        atol = 256 * np.finfo(actual_array.dtype).eps * scale
+        np.testing.assert_allclose(
+            actual_array,
+            expected_array,
+            rtol=0.0,
+            atol=atol,
+        )
