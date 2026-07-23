@@ -6,9 +6,9 @@
 import gzip
 import math
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from io import BytesIO
-from typing import Any, NamedTuple
+from typing import Any
 
 import numpy as np
 
@@ -20,7 +20,9 @@ from benchmarks.tempering_accuracy.plan import (
     matched_cells,
 )
 from benchmarks.tempering_accuracy.report_accuracy import CampaignReport
+from benchmarks.tempering_accuracy.report_attempts import AttemptInventory
 from benchmarks.tempering_accuracy.report_data import campaign_requests
+from benchmarks.tempering_accuracy.report_measurements import build_measurements
 
 _HOST_FIELDS = (
     "cpu_count",
@@ -34,15 +36,6 @@ _HOST_FIELDS = (
     "physical_memory_bytes",
     "processor",
 )
-
-
-class AttemptEvidence(NamedTuple):
-    """Sanitized identity of one retained retryable launch failure."""
-
-    request_index: int
-    retry_index: int
-    sha256: str
-    kind: str
 
 
 def _jsonable(value: Any) -> Any:
@@ -65,28 +58,6 @@ def _kind(value: object) -> str:
     if not isinstance(value, str) or not value.isidentifier():
         raise ValueError("failure kind is not a safe identifier")
     return value
-
-
-def _attempts(
-    values: Sequence[AttemptEvidence] | None,
-) -> tuple[AttemptEvidence, ...]:
-    if values is None:
-        raise ValueError("a verified attempt inventory is required")
-    attempts = tuple(values)
-    keys = [(item.request_index, item.retry_index) for item in attempts]
-    valid = keys == sorted(set(keys)) and all(
-        type(item.request_index) is int
-        and 0 <= item.request_index < 508
-        and type(item.retry_index) is int
-        and item.retry_index >= 0
-        and len(item.sha256) == 64
-        and all(character in "0123456789abcdef" for character in item.sha256)
-        and _kind(item.kind)
-        for item in attempts
-    )
-    if not valid:
-        raise ValueError("attempt inventory is invalid")
-    return attempts
 
 
 def _safe_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
@@ -128,15 +99,18 @@ def _failures(report: CampaignReport) -> list[dict[str, Any]]:
 def build_evidence(
     report: CampaignReport,
     *,
-    attempts: Sequence[AttemptEvidence] | None = None,
+    attempts: AttemptInventory | None = None,
 ) -> dict[str, Any]:
     """Build the canonical, path-free public evidence document."""
-    retained_attempts = _attempts(attempts)
+    if attempts is None:
+        raise ValueError("an attempt inventory is required")
+    campaign = report.campaign
+    if attempts.manifest_sha256 != campaign.manifest_sha256:
+        raise ValueError("attempt inventory manifest does not match campaign")
     expected = (*current_cells(), *matched_cells())
     registered_gates = sum(centering_summary_count(cell) for cell in expected)
     if tuple(item.cell for item in report.cells) != expected:
         raise ValueError("report cells do not match the registered campaign")
-    campaign = report.campaign
     if campaign.complete and (
         len(campaign.inventory) != 508 or len(campaign.results) != 508
     ):
@@ -171,6 +145,7 @@ def build_evidence(
             "source_sha256": identity["source"]["sha256"],
             "lock_sha256": identity["lock"]["sha256"],
             "raw_sha256": campaign.raw_sha256,
+            "attempts_sha256": attempts.sha256,
             "raw_leaves": [
                 {"ordinal": item.ordinal, "sha256": item.sha256}
                 for item in campaign.inventory
@@ -215,7 +190,8 @@ def build_evidence(
             for item in report.cells
         ],
         "failures": _failures(report),
-        "attempts": _jsonable(retained_attempts),
+        "attempts": _jsonable(attempts.entries),
+        "measurements": build_measurements(campaign),
         "exclusions": _jsonable(campaign.manifest["exclusions"]),
     }
 
@@ -223,7 +199,7 @@ def build_evidence(
 def evidence_gzip(
     report: CampaignReport,
     *,
-    attempts: Sequence[AttemptEvidence] | None = None,
+    attempts: AttemptInventory | None = None,
 ) -> bytes:
     """Return reproducible gzip bytes containing canonical JSON evidence."""
     encoded = (

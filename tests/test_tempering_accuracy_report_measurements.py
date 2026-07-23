@@ -14,6 +14,49 @@ from tests.test_tempering_accuracy_report_accuracy import _run
 from tests.test_tempering_accuracy_report_timing import _timing
 
 _CELL = current_cells()[0]
+_BOUNDARY = {"power_status": "AC", "thermal_status": "nominal"}
+
+
+def _post_timing_failure():
+    return {
+        "kind": "execution_failure",
+        "exception_type": "RuntimeError",
+        "message": "secret /private/path",
+        "failed_stage": "post_timing_extraction",
+        "timing_prefix": {
+            "eligible": False,
+            "first_execution_s": 4.0,
+            "steady_times_s": [1.0] * 7,
+        },
+        "environment": {
+            "pre_timing": _BOUNDARY,
+            "post_timing": _BOUNDARY,
+            "failure_boundary": _BOUNDARY,
+        },
+    }
+
+
+def test_current_worker_timing_failure_is_retained_directly_and_nested():
+    failure = _post_timing_failure()
+    public = {
+        name: value
+        for name, value in failure.items()
+        if name not in {"exception_type", "message"}
+    }
+    assert report_measurements._failure(failure) == public
+
+    drift = {
+        "kind": "source_identity_changed_after_launch",
+        "changed_domains": ["source"],
+        "expected_source_sha256": "a" * 64,
+        "observed_source_sha256": "b" * 64,
+        "worker_failure": failure,
+    }
+    assert report_measurements._failure(drift) == {
+        "kind": drift["kind"],
+        "changed_domains": ["source"],
+        "worker_failure": public,
+    }
 
 
 def test_public_measurements_preserve_values_without_private_payloads():

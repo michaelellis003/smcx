@@ -45,6 +45,7 @@ class AttemptEvidence(NamedTuple):
 class AttemptInventory(NamedTuple):
     """Aggregate digest of an ordered sanitized attempt inventory."""
 
+    manifest_sha256: str
     sha256: str
     entries: tuple[AttemptEvidence, ...]
 
@@ -165,7 +166,9 @@ def _load_entry(
     )
 
 
-def _inventory(entries: Sequence[AttemptEvidence]) -> AttemptInventory:
+def _inventory(
+    manifest_sha256: str, entries: Sequence[AttemptEvidence]
+) -> AttemptInventory:
     ordered = tuple(sorted(entries, key=lambda item: item[:2]))
     retries: dict[int, list[int]] = defaultdict(list)
     for entry in ordered:
@@ -173,8 +176,9 @@ def _inventory(entries: Sequence[AttemptEvidence]) -> AttemptInventory:
     if any(values != list(range(len(values))) for values in retries.values()):
         raise ValueError("attempt retry indices must be contiguous")
     sanitized = [entry._asdict() for entry in ordered]
-    digest = hashlib.sha256(canonical_json(sanitized).encode()).hexdigest()
-    return AttemptInventory(digest, ordered)
+    domain = {"manifest_sha256": manifest_sha256, "entries": sanitized}
+    digest = hashlib.sha256(canonical_json(domain).encode()).hexdigest()
+    return AttemptInventory(manifest_sha256, digest, ordered)
 
 
 def load_attempts(output_dir: Path, manifest_sha256: str) -> AttemptInventory:
@@ -185,7 +189,7 @@ def load_attempts(output_dir: Path, manifest_sha256: str) -> AttemptInventory:
     if directory.is_symlink():
         raise ValueError("unexpected attempts directory entry")
     if not directory.exists():
-        return _inventory(())
+        return _inventory(manifest_sha256, ())
     if not directory.is_dir():
         raise ValueError("unexpected attempts directory entry")
     paths = tuple(directory.iterdir())
@@ -194,6 +198,7 @@ def load_attempts(output_dir: Path, manifest_sha256: str) -> AttemptInventory:
     requests = campaign_requests()
     if len(requests) != 508:
         raise ValueError("attempt request plan is not registered")
-    return _inventory([
-        _load_entry(path, manifest_sha256, requests) for path in paths
-    ])
+    return _inventory(
+        manifest_sha256,
+        [_load_entry(path, manifest_sha256, requests) for path in paths],
+    )

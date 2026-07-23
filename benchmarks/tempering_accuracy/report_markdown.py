@@ -240,7 +240,7 @@ def render_markdown(
     )
     digests = "; ".join(
         f"{name}: `{integrity[f'{name}_sha256']}`"
-        for name in ("manifest", "plan", "source", "lock", "raw")
+        for name in ("manifest", "plan", "source", "lock", "raw", "attempts")
     )
     sections.append(
         "## Methods and digests\n\n"

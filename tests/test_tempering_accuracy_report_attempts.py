@@ -64,8 +64,16 @@ def _write(attempts, index, retry, record=None, name=None):
 def test_missing_directory_is_an_explicit_empty_inventory(tmp_path):
     inventory = load_attempts(tmp_path, _DIGEST)
 
+    expected = {
+        "manifest_sha256": _DIGEST,
+        "entries": [],
+    }
+    assert inventory.manifest_sha256 == _DIGEST
     assert inventory.entries == ()
-    assert inventory.sha256 == hashlib.sha256(b"[]").hexdigest()
+    assert (
+        inventory.sha256
+        == hashlib.sha256(canonical_json(expected).encode()).hexdigest()
+    )
 
 
 def test_attempts_are_bound_hashed_ordered_and_sanitized(tmp_path):
@@ -90,7 +98,12 @@ def test_attempts_are_bound_hashed_ordered_and_sanitized(tmp_path):
         ),
     )
     sanitized = [entry._asdict() for entry in inventory.entries]
-    expected = hashlib.sha256(canonical_json(sanitized).encode()).hexdigest()
+    domain = {
+        "manifest_sha256": _DIGEST,
+        "entries": sanitized,
+    }
+    expected = hashlib.sha256(canonical_json(domain).encode()).hexdigest()
+    assert inventory.manifest_sha256 == _DIGEST
     assert inventory.sha256 == expected
     assert "/private/" not in canonical_json(sanitized)
     assert "power_status" not in canonical_json(sanitized)
