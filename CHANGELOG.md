@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.9.0 (2026-07-23)
+
+### Features
+
+- **kalman**: Add explicit-Jacobian extended filter
+  ([#102](https://github.com/michaelellis003/smcx/pull/102),
+  [`92a7335`](https://github.com/michaelellis003/smcx/commit/92a7335f7e9aec22c60fc95431057f3cf157ba45))
+
+
 ## v1.8.0 (2026-07-23)
 
 ### Features
