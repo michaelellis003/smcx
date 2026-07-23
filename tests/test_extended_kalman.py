@@ -3,12 +3,57 @@
 
 """Tests for extended Kalman filtering."""
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
 import smcx
+import smcx.kalman as kalman_module
 from tests import _extended_kalman_reference as nonlinear_reference
+
+
+def _assert_posterior_close(actual, expected, *, ulps=64):
+    """Compare well-conditioned filter fields within an f32/f64 budget."""
+    for actual_field, expected_field in zip(actual, expected, strict=True):
+        actual_array = np.asarray(actual_field)
+        expected_array = np.asarray(expected_field, dtype=actual_array.dtype)
+        scale = max(1.0, float(np.max(np.abs(expected_array))))
+        atol = ulps * np.finfo(actual_array.dtype).eps * scale
+        np.testing.assert_allclose(
+            actual_array,
+            expected_array,
+            rtol=0.0,
+            atol=atol,
+        )
+
+
+def _nonlinear_transition_mean(state):
+    return jnp.stack((
+        0.82 * state[0] + 0.18 * state[1] + 0.05 * jnp.sin(state[0]),
+        -0.12 * state[0] + 0.90 * state[1] + 0.04 * state[0] * state[1],
+    ))
+
+
+def _nonlinear_transition_jacobian(state):
+    return jnp.array([
+        [0.82 + 0.05 * jnp.cos(state[0]), 0.18],
+        [-0.12 + 0.04 * state[1], 0.90 + 0.04 * state[0]],
+    ])
+
+
+def _nonlinear_observation_mean(state):
+    return jnp.stack((
+        state[0] + 0.10 * state[1] ** 2,
+        0.65 * state[1] + 0.12 * jnp.sin(state[0]),
+    ))
+
+
+def _nonlinear_observation_jacobian(state):
+    return jnp.array([
+        [1.0, 0.20 * state[1]],
+        [0.12 * jnp.cos(state[0]), 0.65],
+    ])
 
 
 def test_extended_kalman_reduces_to_linear_filter():
@@ -17,10 +62,14 @@ def test_extended_kalman_reduces_to_linear_filter():
     initial_covariance = jnp.array([[0.5, 0.03], [0.03, 0.4]])
     transition_matrix = jnp.array([[0.85, 0.1], [-0.05, 0.9]])
     transition_bias = jnp.array([0.02, -0.03])
-    transition_covariance = jnp.array([[0.08, 0.01], [0.01, 0.06]])
+    transition_covariance = jnp.array([
+        [[0.08, 0.01], [0.01, 0.06]],
+        [[0.07, 0.00], [0.00, 0.05]],
+        [[0.09, -0.01], [-0.01, 0.08]],
+    ])
     observation_matrix = jnp.array([[1.0, -0.2]])
     observation_bias = jnp.array([0.04])
-    observation_covariance = jnp.array([[0.3]])
+    observation_covariance = jnp.array([[[0.3]], [[0.2]], [[0.4]], [[0.25]]])
     emissions = jnp.array([[0.1], [-0.2], [0.3], [0.05]])
 
     def transition_mean(state):
@@ -58,11 +107,7 @@ def test_extended_kalman_reduces_to_linear_filter():
         emissions,
     )
 
-    for actual, expected in zip(extended, exact, strict=True):
-        expected_array = np.asarray(expected)
-        scale = max(1.0, float(np.max(np.abs(expected_array))))
-        atol = 64 * np.finfo(expected_array.dtype).eps * scale
-        np.testing.assert_allclose(actual, expected, rtol=0.0, atol=atol)
+    _assert_posterior_close(extended, exact)
 
 
 def test_extended_kalman_input_callbacks_match_linear_controls():
@@ -127,49 +172,21 @@ def test_extended_kalman_input_callbacks_match_linear_controls():
         inputs=inputs,
     )
 
-    for actual, expected in zip(extended, exact, strict=True):
-        expected_array = np.asarray(expected)
-        scale = max(1.0, float(np.max(np.abs(expected_array))))
-        atol = 64 * np.finfo(expected_array.dtype).eps * scale
-        np.testing.assert_allclose(actual, expected, rtol=0.0, atol=atol)
+    _assert_posterior_close(extended, exact)
 
 
 def test_extended_kalman_matches_independent_nonlinear_reference():
     """Every posterior field matches Stone Soup's Joseph-form EKF."""
     reference = nonlinear_reference
 
-    def transition_mean(state):
-        return jnp.stack((
-            0.82 * state[0] + 0.18 * state[1] + 0.05 * jnp.sin(state[0]),
-            -0.12 * state[0] + 0.90 * state[1] + 0.04 * state[0] * state[1],
-        ))
-
-    def transition_jacobian(state):
-        return jnp.array([
-            [0.82 + 0.05 * jnp.cos(state[0]), 0.18],
-            [-0.12 + 0.04 * state[1], 0.90 + 0.04 * state[0]],
-        ])
-
-    def observation_mean(state):
-        return jnp.stack((
-            state[0] + 0.10 * state[1] ** 2,
-            0.65 * state[1] + 0.12 * jnp.sin(state[0]),
-        ))
-
-    def observation_jacobian(state):
-        return jnp.array([
-            [1.0, 0.20 * state[1]],
-            [0.12 * jnp.cos(state[0]), 0.65],
-        ])
-
     posterior = smcx.extended_kalman_filter(
         jnp.asarray(reference.INITIAL_MEAN),
         jnp.asarray(reference.INITIAL_COVARIANCE),
-        transition_mean,
-        transition_jacobian,
+        _nonlinear_transition_mean,
+        _nonlinear_transition_jacobian,
         jnp.asarray(reference.TRANSITION_COVARIANCE),
-        observation_mean,
-        observation_jacobian,
+        _nonlinear_observation_mean,
+        _nonlinear_observation_jacobian,
         jnp.asarray(reference.OBSERVATION_COVARIANCE),
         jnp.asarray(reference.EMISSIONS),
     )
@@ -184,17 +201,7 @@ def test_extended_kalman_matches_independent_nonlinear_reference():
 
     # Five 2x2 steps have innovation condition number below 2.62.
     # 256*eps*scale covers the observed operation depth on CPU and Metal.
-    for actual, expected in zip(posterior, expected_fields, strict=True):
-        actual_array = np.asarray(actual)
-        expected_array = np.asarray(expected, dtype=actual_array.dtype)
-        scale = max(1.0, float(np.max(np.abs(expected_array))))
-        atol = 256 * np.finfo(actual_array.dtype).eps * scale
-        np.testing.assert_allclose(
-            actual_array,
-            expected_array,
-            rtol=0.0,
-            atol=atol,
-        )
+    _assert_posterior_close(posterior, expected_fields, ulps=256)
 
 
 def test_extended_kalman_rejects_non_array_callback_output():
@@ -227,3 +234,155 @@ def test_extended_kalman_rejects_non_array_callback_output():
             jnp.eye(1),
             jnp.zeros((2, 1)),
         )
+
+
+def test_explicit_and_autodiff_jacobians_match_under_compilation():
+    """Caller-owned autodiff and analytic Jacobians are interchangeable."""
+    reference = nonlinear_reference
+    arrays = (
+        jnp.asarray(reference.INITIAL_MEAN),
+        jnp.asarray(reference.INITIAL_COVARIANCE),
+        jnp.asarray(reference.TRANSITION_COVARIANCE),
+        jnp.asarray(reference.OBSERVATION_COVARIANCE),
+        jnp.asarray(reference.EMISSIONS),
+    )
+    analytic = smcx.extended_kalman_filter(
+        arrays[0],
+        arrays[1],
+        _nonlinear_transition_mean,
+        _nonlinear_transition_jacobian,
+        arrays[2],
+        _nonlinear_observation_mean,
+        _nonlinear_observation_jacobian,
+        arrays[3],
+        arrays[4],
+    )
+    autodiff_transition = jax.jacfwd(_nonlinear_transition_mean)
+    autodiff_observation = jax.jacfwd(_nonlinear_observation_mean)
+
+    def run(
+        initial_mean,
+        initial_covariance,
+        transition_covariance,
+        observation_covariance,
+        emissions,
+    ):
+        return smcx.extended_kalman_filter(
+            initial_mean,
+            initial_covariance,
+            _nonlinear_transition_mean,
+            autodiff_transition,
+            transition_covariance,
+            _nonlinear_observation_mean,
+            autodiff_observation,
+            observation_covariance,
+            emissions,
+        )
+
+    autodiff = run(*arrays)
+    compiled = jax.jit(run)(*arrays)
+
+    _assert_posterior_close(autodiff, analytic, ulps=256)
+    _assert_posterior_close(compiled, autodiff)
+
+
+def test_one_step_rank_one_inputs_and_timed_covariances():
+    """A one-step model conditions the prior and canonicalizes scalar inputs."""
+    inputs = jnp.array([0.5])
+
+    def transition_mean(state, input_t):
+        return state + input_t
+
+    def transition_jacobian(_state, _input_t):
+        return jnp.eye(1)
+
+    def observation_mean(state, input_t):
+        return state + input_t
+
+    def observation_jacobian(_state, _input_t):
+        return jnp.eye(1)
+
+    extended = smcx.extended_kalman_filter(
+        jnp.zeros(1),
+        jnp.eye(1),
+        transition_mean,
+        transition_jacobian,
+        jnp.empty((0, 1, 1)),
+        observation_mean,
+        observation_jacobian,
+        jnp.ones((1, 1, 1)),
+        jnp.array([[0.25]]),
+        inputs=inputs,
+    )
+    exact = smcx.kalman_filter(
+        jnp.zeros(1),
+        jnp.eye(1),
+        jnp.eye(1),
+        jnp.empty((0, 1, 1)),
+        jnp.eye(1),
+        jnp.ones((1, 1, 1)),
+        jnp.array([[0.25]]),
+        observation_input_matrix=jnp.eye(1),
+        inputs=inputs,
+    )
+
+    _assert_posterior_close(extended, exact)
+
+
+def test_uncompiled_extended_step_matches_public_scan():
+    """The pure EKF step agrees with the second public filtering step."""
+    reference = nonlinear_reference
+    initial_mean = jnp.asarray(reference.INITIAL_MEAN)
+    initial_covariance = jnp.asarray(reference.INITIAL_COVARIANCE)
+    transition_covariance = jnp.asarray(reference.TRANSITION_COVARIANCE)
+    observation_covariance = jnp.asarray(reference.OBSERVATION_COVARIANCE)
+    emissions = jnp.asarray(reference.EMISSIONS[:2])
+    first = smcx.extended_kalman_filter(
+        initial_mean,
+        initial_covariance,
+        _nonlinear_transition_mean,
+        _nonlinear_transition_jacobian,
+        transition_covariance,
+        _nonlinear_observation_mean,
+        _nonlinear_observation_jacobian,
+        observation_covariance,
+        emissions[:1],
+    )
+    full = smcx.extended_kalman_filter(
+        initial_mean,
+        initial_covariance,
+        _nonlinear_transition_mean,
+        _nonlinear_transition_jacobian,
+        transition_covariance,
+        _nonlinear_observation_mean,
+        _nonlinear_observation_jacobian,
+        observation_covariance,
+        emissions,
+    )
+    evidence = jnp.asarray(first.marginal_loglik)
+    state = kalman_module._FilterState(
+        first.filtered_means[0],
+        first.filtered_covariances[0],
+        evidence,
+        jnp.zeros_like(evidence),
+    )
+    next_state, output = kalman_module._extended_filter_step(
+        state,
+        kalman_module._ExtendedFilterStepInput(
+            emissions[1],
+            transition_covariance,
+            observation_covariance,
+        ),
+        _nonlinear_transition_mean,
+        _nonlinear_transition_jacobian,
+        _nonlinear_observation_mean,
+        _nonlinear_observation_jacobian,
+    )
+
+    expected_output = tuple(field[1] for field in full[1:])
+    _assert_posterior_close(output, expected_output, ulps=256)
+    _assert_posterior_close(
+        (next_state.marginal_loglik + next_state.log_evidence_compensation,),
+        (full.marginal_loglik,),
+        ulps=256,
+    )
