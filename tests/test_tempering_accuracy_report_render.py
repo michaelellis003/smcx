@@ -270,3 +270,22 @@ def test_cost_plot_distinguishes_sweep_counts(tmp_path, monkeypatch):
     render_plots(evidence, tmp_path / "gates.png", tmp_path / "cost.png")
 
     assert observed == [0.45, 0.7, 1.0]
+
+
+def test_cost_plot_uses_nonnegative_rmse_scale(tmp_path, monkeypatch):
+    evidence = _evidence()
+    accuracy = evidence["cells"][0]["accuracy"]
+    for name in ("mean", "covariance", "evidence"):
+        accuracy[f"{name}_loss"]["rmse"] = 0.1
+    observed = []
+
+    def capture(figure, path):
+        if path.name == "cost.png":
+            observed.extend(axis.get_yscale() for axis in figure.axes)
+
+    monkeypatch.setattr(
+        "benchmarks.tempering_accuracy.report_plots._save", capture
+    )
+    render_plots(evidence, tmp_path / "gates.png", tmp_path / "cost.png")
+
+    assert observed == ["log"] * 6
