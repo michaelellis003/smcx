@@ -157,6 +157,35 @@ class GaussianFilterPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " ntime"]
 
 
+class GaussianSmootherPosterior(NamedTuple):
+    r"""Exact Gaussian filtering and smoothing output.
+
+    The filtering fields are retained so a downstream method can consume
+    one self-contained posterior without rerunning the forward pass.
+
+    Attributes:
+        marginal_loglik: Exact :math:`\log p(y_{1:T})`.
+        predicted_means: Means before conditioning at each step.
+        predicted_covariances: Covariances before conditioning at each step.
+        filtered_means: Means after conditioning at each step.
+        filtered_covariances: Covariances after conditioning at each step.
+        log_evidence_increments: Per-step log marginal likelihood increments.
+        smoothed_means: Means conditional on all observations, shape
+            ``(ntime, state_dim)``.
+        smoothed_covariances: Covariances conditional on all observations,
+            shape ``(ntime, state_dim, state_dim)``.
+    """
+
+    marginal_loglik: Scalar
+    predicted_means: Float[Array, "ntime state_dim"]
+    predicted_covariances: Float[Array, "ntime state_dim state_dim"]
+    filtered_means: Float[Array, "ntime state_dim"]
+    filtered_covariances: Float[Array, "ntime state_dim state_dim"]
+    log_evidence_increments: Float[Array, " ntime"]
+    smoothed_means: Float[Array, "ntime state_dim"]
+    smoothed_covariances: Float[Array, "ntime state_dim state_dim"]
+
+
 class LiuWestPosterior(NamedTuple):
     r"""Full output of a Liu-West particle filter run.
 

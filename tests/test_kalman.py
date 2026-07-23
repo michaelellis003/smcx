@@ -9,9 +9,27 @@ import numpy as np
 import pytest
 
 import smcx
+from tests import _kalman_reference as multivariate_reference
 from tests._lgssm_reference import EXACT_LOG_LIKELIHOOD, REFERENCE_TIMES
 from tests._lgssm_reference import FILTERED_MEANS as EXACT_FILTERED_MEANS
 from tests._lgssm_reference import FILTERED_VARIANCES as EXACT_FILTERED_VARS
+
+
+def _assert_roundoff_close(actual, expected):
+    """Compare the small, well-conditioned reference within f32/f64 error."""
+    actual_array = np.asarray(actual)
+    expected_array = np.asarray(expected)
+    # The fixture has five 2x2 recurrences and covariance condition numbers
+    # below 2.7. A 64*eps*scale forward-error budget covers their matrix
+    # products and triangular solves while remaining dtype-honest.
+    scale = max(1.0, float(np.max(np.abs(expected_array))))
+    atol = 64 * np.finfo(actual_array.dtype).eps * scale
+    np.testing.assert_allclose(
+        actual_array,
+        expected_array,
+        rtol=0.0,
+        atol=atol,
+    )
 
 
 def test_kalman_filter_matches_frozen_dynamax_reference(
@@ -190,3 +208,99 @@ def test_kalman_filter_rejects_input_matrix_without_inputs():
             jnp.zeros((2, 1)),
             transition_input_matrix=jnp.eye(1),
         )
+
+
+def test_multivariate_filter_and_smoother_match_independent_references():
+    """Timed affine results match statsmodels and cross-checked Dynamax."""
+    reference = multivariate_reference
+    posterior = smcx.kalman_filter(
+        jnp.asarray(reference.INITIAL_MEAN),
+        jnp.asarray(reference.INITIAL_COVARIANCE),
+        jnp.asarray(reference.TRANSITION_MATRIX),
+        jnp.asarray(reference.TRANSITION_COVARIANCE),
+        jnp.asarray(reference.OBSERVATION_MATRIX),
+        jnp.asarray(reference.OBSERVATION_COVARIANCE),
+        jnp.asarray(reference.EMISSIONS),
+        transition_bias=jnp.asarray(reference.TRANSITION_BIAS),
+        observation_bias=jnp.asarray(reference.OBSERVATION_BIAS),
+        transition_input_matrix=jnp.asarray(reference.TRANSITION_INPUT_MATRIX),
+        observation_input_matrix=jnp.asarray(
+            reference.OBSERVATION_INPUT_MATRIX
+        ),
+        inputs=jnp.asarray(reference.INPUTS),
+    )
+
+    _assert_roundoff_close(posterior.predicted_means, reference.PREDICTED_MEANS)
+    _assert_roundoff_close(
+        posterior.predicted_covariances,
+        reference.PREDICTED_COVARIANCES,
+    )
+    _assert_roundoff_close(posterior.filtered_means, reference.FILTERED_MEANS)
+    _assert_roundoff_close(
+        posterior.filtered_covariances,
+        reference.FILTERED_COVARIANCES,
+    )
+    _assert_roundoff_close(
+        posterior.log_evidence_increments,
+        reference.LOG_EVIDENCE_INCREMENTS,
+    )
+    _assert_roundoff_close(
+        posterior.marginal_loglik,
+        reference.MARGINAL_LOG_LIKELIHOOD,
+    )
+
+    smoothed = smcx.rts_smoother(
+        posterior,
+        jnp.asarray(reference.TRANSITION_MATRIX),
+    )
+    _assert_roundoff_close(smoothed.smoothed_means, reference.SMOOTHED_MEANS)
+    _assert_roundoff_close(
+        smoothed.smoothed_covariances,
+        reference.SMOOTHED_COVARIANCES,
+    )
+
+
+def test_rts_smoother_compiled_matches_eager_and_supports_one_step():
+    """The independent backward stage compiles and handles an empty scan."""
+    filtered = smcx.kalman_filter(
+        jnp.array([0.0]),
+        jnp.array([[1.0]]),
+        jnp.array([[0.9]]),
+        jnp.array([[0.25]]),
+        jnp.array([[1.0]]),
+        jnp.array([[0.5]]),
+        jnp.array([[0.2]]),
+    )
+
+    eager = smcx.rts_smoother(filtered, jnp.array([[0.9]]))
+    compiled = jax.jit(smcx.rts_smoother)(
+        filtered,
+        jnp.array([[0.9]]),
+    )
+
+    for eager_value, compiled_value in zip(eager, compiled, strict=True):
+        np.testing.assert_allclose(compiled_value, eager_value)
+    np.testing.assert_array_equal(
+        eager.smoothed_means,
+        filtered.filtered_means,
+    )
+    np.testing.assert_array_equal(
+        eager.smoothed_covariances,
+        filtered.filtered_covariances,
+    )
+
+
+def test_rts_smoother_rejects_misaligned_transition_history():
+    """The public smoother validates a researcher's supplied operators."""
+    filtered = smcx.kalman_filter(
+        jnp.array([0.0]),
+        jnp.array([[1.0]]),
+        jnp.array([[0.9]]),
+        jnp.array([[0.25]]),
+        jnp.array([[1.0]]),
+        jnp.array([[0.5]]),
+        jnp.zeros((3, 1)),
+    )
+
+    with pytest.raises(ValueError, match="transition_matrix"):
+        smcx.rts_smoother(filtered, jnp.ones((3, 1, 1)))

@@ -17,6 +17,7 @@ from smcx.containers import (
     BootstrapCheckpoint,
     BootstrapStepInfo,
     GaussianFilterPosterior,
+    GaussianSmootherPosterior,
     LiuWestPosterior,
     ParticleFilterPosterior,
     ParticleFilterResult,
@@ -45,7 +46,7 @@ from smcx.diagnostics import (
 )
 from smcx.exceptions import DegenerateWeightsError
 from smcx.guided import guided_filter
-from smcx.kalman import kalman_filter
+from smcx.kalman import kalman_filter, rts_smoother
 from smcx.liu_west import liu_west_filter
 from smcx.reporting import to_arviz
 from smcx.resampling import (
@@ -69,6 +70,7 @@ __all__ = [
     "BootstrapStepInfo",
     "DegenerateWeightsError",
     "GaussianFilterPosterior",
+    "GaussianSmootherPosterior",
     "LiuWestPosterior",
     "ParticleFilterPosterior",
     "ParticleFilterResult",
@@ -103,6 +105,7 @@ __all__ = [
     "reconstruct_trajectories",
     "replicated_log_ml",
     "residual",
+    "rts_smoother",
     "simulate",
     "smc2",
     "stratified",

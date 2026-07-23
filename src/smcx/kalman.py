@@ -4,13 +4,17 @@
 r"""Exact Gaussian inference for linear state-space models.
 
 The filter implements the covariance-form recursion of Kalman (1960)
-with a Joseph covariance update. Dynamax and statsmodels are independent
-numerical validation references; no implementation code is copied from
-either project.
+with a Joseph covariance update. The smoother implements the backward
+recursion of Rauch, Tung, and Striebel (1965). Dynamax and statsmodels
+are independent numerical validation references; no implementation
+code is copied from either project.
 
 References:
     Kalman, R. E. (1960). A New Approach to Linear Filtering and
     Prediction Problems. https://doi.org/10.1115/1.3662552
+    Rauch, H. E., Tung, F., and Striebel, C. T. (1965). Maximum
+    Likelihood Estimates of Linear Dynamic Systems.
+    https://doi.org/10.2514/3.3166
 """
 
 import math
@@ -22,7 +26,7 @@ from jax.scipy.linalg import solve_triangular
 from jaxtyping import Array, Float, Shaped
 
 from smcx._utils import _canonicalize_inputs
-from smcx.containers import GaussianFilterPosterior
+from smcx.containers import GaussianFilterPosterior, GaussianSmootherPosterior
 from smcx.types import InputSequence
 
 
@@ -42,6 +46,13 @@ class _FilterStepOutput(NamedTuple):
     filtered_mean: Float[Array, " state_dim"]
     filtered_covariance: Float[Array, "state_dim state_dim"]
     log_evidence_increment: Float[Array, ""]
+
+
+class _SmootherState(NamedTuple):
+    """Smoothed moments carried backward through the model."""
+
+    mean: Float[Array, " state_dim"]
+    covariance: Float[Array, "state_dim state_dim"]
 
 
 def _symmetrize(
@@ -423,4 +434,150 @@ def kalman_filter(
         filtered_means,
         filtered_covariances,
         increments,
+    )
+
+
+def _validate_filter_posterior(
+    posterior: GaussianFilterPosterior,
+) -> tuple[int, int, jnp.dtype]:
+    """Validate the moment shapes needed by the public smoother."""
+    means = posterior.filtered_means
+    if means.ndim != 2 or means.shape[0] == 0 or means.shape[1] == 0:
+        raise ValueError(
+            "filtered_means must have shape (T, state_dim) with positive axes"
+        )
+    num_timesteps, state_dim = means.shape
+    expected_shapes = (
+        ("predicted_means", posterior.predicted_means, means.shape),
+        (
+            "predicted_covariances",
+            posterior.predicted_covariances,
+            (num_timesteps, state_dim, state_dim),
+        ),
+        (
+            "filtered_covariances",
+            posterior.filtered_covariances,
+            (num_timesteps, state_dim, state_dim),
+        ),
+        (
+            "log_evidence_increments",
+            posterior.log_evidence_increments,
+            (num_timesteps,),
+        ),
+    )
+    dtype = means.dtype
+    _check_float_array(means, "filtered_means")
+    for name, value, shape in expected_shapes:
+        _check_float_array(value, name, dtype)
+        if value.shape != shape:
+            raise ValueError(
+                f"{name} must have shape {shape}; got {value.shape}"
+            )
+    marginal = jnp.asarray(posterior.marginal_loglik)
+    if marginal.ndim != 0:
+        raise ValueError("marginal_loglik must be scalar")
+    _check_float_array(marginal, "marginal_loglik", dtype)
+    return num_timesteps, state_dim, dtype
+
+
+def _rts_step(
+    next_state: _SmootherState,
+    args: tuple[Array, Array, Array, Array, Array],
+) -> tuple[_SmootherState, _SmootherState]:
+    """Apply one uncompiled Rauch--Tung--Striebel backward step."""
+    (
+        filtered_mean,
+        filtered_covariance,
+        next_predicted_mean,
+        next_predicted_covariance,
+        transition_matrix,
+    ) = args
+    cross_covariance = filtered_covariance @ transition_matrix.T
+    predicted_cholesky = jnp.linalg.cholesky(next_predicted_covariance)
+    lower_solution = solve_triangular(
+        predicted_cholesky,
+        cross_covariance.T,
+        lower=True,
+    )
+    gain = solve_triangular(
+        predicted_cholesky.T,
+        lower_solution,
+        lower=False,
+    ).T
+    smoothed_mean = filtered_mean + gain @ (
+        next_state.mean - next_predicted_mean
+    )
+    smoothed_covariance = _symmetrize(
+        filtered_covariance
+        + gain @ (next_state.covariance - next_predicted_covariance) @ gain.T
+    )
+    state = _SmootherState(smoothed_mean, smoothed_covariance)
+    return state, state
+
+
+def rts_smoother(
+    filtered_posterior: GaussianFilterPosterior,
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"],
+) -> GaussianSmootherPosterior:
+    r"""Run a Rauch--Tung--Striebel backward smoother.
+
+    This stage consumes only the forward pass's stored moments and the
+    transition operators. A caller may therefore construct a compatible
+    :class:`GaussianFilterPosterior` with a custom filtering method and
+    reuse this smoother independently.
+
+    Args:
+        filtered_posterior: Forward-pass Gaussian moments.
+        transition_matrix: Static ``(state_dim, state_dim)`` matrix or
+            time-varying array with leading length ``ntime - 1``. Entry
+            ``i`` maps state ``i`` to state ``i + 1``.
+
+    Returns:
+        The retained forward-pass fields plus smoothed means and
+        covariances.
+
+    Raises:
+        ValueError: The posterior or transition array has an invalid shape
+            or dtype.
+    """
+    num_timesteps, state_dim, dtype = _validate_filter_posterior(
+        filtered_posterior
+    )
+    _check_float_array(transition_matrix, "transition_matrix", dtype)
+    transition_matrices = _time_matrix(
+        transition_matrix,
+        num_timesteps - 1,
+        state_dim,
+        state_dim,
+        "transition_matrix",
+    )
+    last_state = _SmootherState(
+        filtered_posterior.filtered_means[-1],
+        filtered_posterior.filtered_covariances[-1],
+    )
+    scan_inputs = (
+        filtered_posterior.filtered_means[:-1],
+        filtered_posterior.filtered_covariances[:-1],
+        filtered_posterior.predicted_means[1:],
+        filtered_posterior.predicted_covariances[1:],
+        transition_matrices,
+    )
+    _, earlier_states = lax.scan(
+        _rts_step,
+        last_state,
+        scan_inputs,
+        reverse=True,
+    )
+    smoothed_means = jnp.concatenate((
+        earlier_states.mean,
+        last_state.mean[None],
+    ))
+    smoothed_covariances = jnp.concatenate((
+        earlier_states.covariance,
+        last_state.covariance[None],
+    ))
+    return GaussianSmootherPosterior(
+        *filtered_posterior,
+        smoothed_means,
+        smoothed_covariances,
     )
