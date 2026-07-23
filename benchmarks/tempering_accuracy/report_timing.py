@@ -15,6 +15,7 @@ from benchmarks.tempering_accuracy.plan import CampaignCell
 _PACKAGES = {"jax", "jax-mps", "jaxlib", "ml-dtypes", "numpy", "scipy", "smcx"}
 _IDENTITY_FIELDS = {"source", "lock", "packages", "python", "host"}
 _IDENTITY_DRIFT = "source_identity_changed_after_launch"
+_ENVIRONMENT_FAILURE = "metal_timing_environment_ineligible"
 
 
 class Summary(NamedTuple):
@@ -191,13 +192,17 @@ def analyze_timing(
                 structural_failed |= not passed
                 timings.append(timing)
     if any(
-        kind not in {"structural_failure", _IDENTITY_DRIFT} for kind in kinds
+        kind
+        not in {"structural_failure", _IDENTITY_DRIFT, _ENVIRONMENT_FAILURE}
+        for kind in kinds
     ):
         return _empty("failed_execution")
     if "structural_failure" in kinds or structural_failed:
         return _empty("failed_structural")
     if _IDENTITY_DRIFT in kinds:
         return _empty("ineligible_identity")
+    if _ENVIRONMENT_FAILURE in kinds:
+        return _empty("ineligible_environment")
     if len(results) != 5:
         return _empty("not_run_after_stop")
     if not _identity_ok(identity):
