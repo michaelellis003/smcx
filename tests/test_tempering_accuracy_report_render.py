@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from benchmarks.profiling.common import canonical_json
+from benchmarks.tempering_accuracy import report_render
 from benchmarks.tempering_accuracy.analysis import (
     ReplicateEstimate,
     analyze_accuracy,
@@ -21,6 +22,7 @@ from benchmarks.tempering_accuracy.report_accuracy import (
     CampaignReport,
     CellReport,
 )
+from benchmarks.tempering_accuracy.report_attempts import load_attempts
 from benchmarks.tempering_accuracy.report_data import (
     CampaignData,
     InventoryEntry,
@@ -32,11 +34,17 @@ from benchmarks.tempering_accuracy.report_plots import (
     render_plots,
 )
 from benchmarks.tempering_accuracy.report_render import (
-    AttemptEvidence,
     build_evidence,
     evidence_gzip,
 )
 from benchmarks.tempering_accuracy.report_timing import Summary, TimingReport
+
+_MANIFEST_SHA256 = "e" * 64
+_MEASUREMENTS = {
+    "schema_version": 1,
+    "observed_requests": 508,
+    "requests": [],
+}
 
 
 def _campaign_report():
@@ -121,7 +129,7 @@ def _campaign_report():
     )
     campaign = CampaignData(
         manifest,
-        "e" * 64,
+        _MANIFEST_SHA256,
         "f" * 64,
         True,
         None,
@@ -132,21 +140,25 @@ def _campaign_report():
     return CampaignReport(campaign, tuple(reports))
 
 
-def test_evidence_is_canonical_reproducible_and_sanitized():
+def test_evidence_is_canonical_reproducible_and_sanitized(
+    tmp_path, monkeypatch
+):
     report = _campaign_report()
-    attempt = AttemptEvidence(1, 0, "9" * 64, "launch_error")
+    attempts = load_attempts(tmp_path, _MANIFEST_SHA256)
+    monkeypatch.setattr(
+        report_render, "build_measurements", lambda campaign: _MEASUREMENTS
+    )
     with pytest.raises(ValueError, match="attempt inventory"):
         evidence_gzip(report)
-    with pytest.raises(ValueError, match="safe identifier"):
-        evidence_gzip(report, attempts=(attempt._replace(kind="/private"),))
-    first = evidence_gzip(report, attempts=(attempt,))
+    first = evidence_gzip(report, attempts=attempts)
 
-    assert first == evidence_gzip(report, attempts=(attempt,))
+    assert first == evidence_gzip(report, attempts=attempts)
     decoded = gzip.decompress(first)
     evidence = json.loads(decoded)
     assert decoded == (canonical_json(evidence) + "\n").encode()
     assert len(evidence["integrity"]["raw_leaves"]) == 508
-    assert evidence["integrity"]["manifest_sha256"] == "e" * 64
+    assert evidence["integrity"]["manifest_sha256"] == _MANIFEST_SHA256
+    assert evidence["integrity"]["attempts_sha256"] == attempts.sha256
     assert len(evidence["cells"]) == 84
     assert evidence["cells"][0]["accuracy"]["correctness_eligible"]
     assert np.isclose(evidence["cells"][0]["timing"]["steady"]["median"], 1)
@@ -161,7 +173,8 @@ def test_evidence_is_canonical_reproducible_and_sanitized():
         "registered": 84,
     }
     assert evidence["failures"][0]["kind"] == "execution_failure"
-    assert evidence["attempts"] == [attempt._asdict()]
+    assert evidence["attempts"] == []
+    assert evidence["measurements"] == _MEASUREMENTS
     assert evidence["exclusions"] == [
         {"arm": "waste_free", "status": "blocked"}
     ]
@@ -174,13 +187,18 @@ def _table_rows(markdown, heading):
     return [line for line in section.splitlines() if line.startswith("| ")][2:]
 
 
-def _evidence():
-    attempt = AttemptEvidence(1, 0, "9" * 64, "launch_error")
-    return build_evidence(_campaign_report(), attempts=(attempt,))
+def _evidence(tmp_path, monkeypatch):
+    attempts = load_attempts(tmp_path, _MANIFEST_SHA256)
+    monkeypatch.setattr(
+        report_render, "build_measurements", lambda campaign: _MEASUREMENTS
+    )
+    return build_evidence(_campaign_report(), attempts=attempts)
 
 
-def test_markdown_report_is_deterministic_complete_and_sanitized():
-    evidence = _evidence()
+def test_markdown_report_is_deterministic_complete_and_sanitized(
+    tmp_path, monkeypatch
+):
+    evidence = _evidence(tmp_path, monkeypatch)
     first = render_markdown(evidence, report_date="2026-07-22")
     assert first == render_markdown(evidence, report_date="2026-07-22")
     assert first.startswith("# Tempering accuracy — 2026-07-22\n")
@@ -192,12 +210,16 @@ def test_markdown_report_is_deterministic_complete_and_sanitized():
         "All cells": 84,
     }.items():
         assert len(_table_rows(first, heading)) == count
-    assert "execution_failure" in first and "launch_error" in first
+    assert "execution_failure" in first
     assert "waste_free" in first and "CPU/MPS" not in first
+    attempts_sha = evidence["integrity"]["attempts_sha256"]
+    assert f"attempts: `{attempts_sha}`" in first
 
 
-def test_markdown_hides_timing_for_an_accuracy_ineligible_cell():
-    evidence = _evidence()
+def test_markdown_hides_timing_for_an_accuracy_ineligible_cell(
+    tmp_path, monkeypatch
+):
+    evidence = _evidence(tmp_path, monkeypatch)
     cell = evidence["cells"][0]
     cell["status"] = "failed_accuracy"
     cell["accuracy"]["status"] = "failed_accuracy"
@@ -209,16 +231,28 @@ def test_markdown_hides_timing_for_an_accuracy_ineligible_cell():
     assert values[-4:] == ["—", "—", "—", "—"]
 
 
-def _plot_evidence():
-    evidence = _evidence()
+def test_evidence_rejects_attempts_bound_to_another_manifest(
+    tmp_path, monkeypatch
+):
+    attempts = load_attempts(tmp_path, "a" * 64)
+    monkeypatch.setattr(
+        report_render, "build_measurements", lambda campaign: _MEASUREMENTS
+    )
+
+    with pytest.raises(ValueError, match="manifest"):
+        evidence_gzip(_campaign_report(), attempts=attempts)
+
+
+def _plot_evidence(tmp_path, monkeypatch):
+    evidence = _evidence(tmp_path, monkeypatch)
     accuracy = evidence["cells"][0]["accuracy"]
     for name in ("mean", "covariance", "evidence"):
         accuracy[f"{name}_loss"]["rmse"] = 0.1
     return evidence
 
 
-def test_plots_are_deterministic_and_report_omissions(tmp_path):
-    evidence = _plot_evidence()
+def test_plots_are_deterministic_and_report_omissions(tmp_path, monkeypatch):
+    evidence = _plot_evidence(tmp_path, monkeypatch)
     first_gate = tmp_path / "first-gates.png"
     first_cost = tmp_path / "first-cost.png"
     second_gate = tmp_path / "second-gates.png"
@@ -237,8 +271,8 @@ def test_plots_are_deterministic_and_report_omissions(tmp_path):
     assert first_cost.read_bytes() == second_cost.read_bytes()
 
 
-def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
-    evidence = _plot_evidence()
+def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path, monkeypatch):
+    evidence = _plot_evidence(tmp_path, monkeypatch)
     eligible_gate = tmp_path / "eligible-gates.png"
     render_plots(evidence, eligible_gate, tmp_path / "cost.png")
     cell = evidence["cells"][0]
@@ -256,7 +290,7 @@ def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
 
 
 def test_cost_plot_distinguishes_sweep_counts(tmp_path, monkeypatch):
-    evidence = _plot_evidence()
+    evidence = _plot_evidence(tmp_path, monkeypatch)
     source = evidence["cells"][0]
     for index in (2, 4):
         item = evidence["cells"][index]
@@ -281,7 +315,7 @@ def test_cost_plot_distinguishes_sweep_counts(tmp_path, monkeypatch):
 
 
 def test_cost_plot_uses_nonnegative_rmse_scale(tmp_path, monkeypatch):
-    evidence = _plot_evidence()
+    evidence = _plot_evidence(tmp_path, monkeypatch)
     observed = []
 
     def capture(figure, path):
