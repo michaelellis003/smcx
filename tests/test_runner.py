@@ -38,6 +38,32 @@ def test_runner_rejects_an_empty_emission_sequence():
         )
 
 
+def test_runner_rejects_rank_two_record_weights():
+    particles = jnp.zeros((3, 1))
+    record = smcx.ParticleFilterRecord(
+        particles,
+        jnp.zeros((3, 1)),
+        jnp.arange(3, dtype=jnp.int32),
+        jnp.asarray(0.0),
+    )
+
+    def initialize(time_index, emission, key):
+        del time_index, emission, key
+        return particles, record
+
+    def step(carry, time_index, emission, key):
+        del time_index, emission, key
+        return carry, record
+
+    with pytest.raises(ValueError, match="record log_weights must be rank 1"):
+        smcx.run_particle_filter(
+            jr.key(0),
+            initialize,
+            step,
+            jnp.zeros((1, 1)),
+        )
+
+
 def test_runner_matches_bootstrap_filter_at_a_fixed_key():
     """The runner preserves the established filter key schedule."""
     num_particles = 8

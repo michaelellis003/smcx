@@ -3,11 +3,11 @@
 
 """Execution for caller-owned particle-filter kernels."""
 
-from typing import cast
+from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax
+from jax import lax, tree
 from jaxtyping import Array, Float
 
 from smcx._utils import (
@@ -16,6 +16,9 @@ from smcx._utils import (
     _prepend,
     _prepend_particle_history,
     _raise_if_degenerate,
+    _TreeSignature,
+    _validate_particle_cloud,
+    _validate_state_tree,
 )
 from smcx.containers import ParticleFilterPosterior, ParticleFilterRecord
 from smcx.types import (
@@ -28,6 +31,95 @@ from smcx.types import (
     PRNGKeyT,
 )
 from smcx.weights import ess as compute_ess
+
+
+class _RecordSignature(NamedTuple):
+    """Static structure shared by every callback record."""
+
+    particles: _TreeSignature
+    num_particles: int
+    log_weights_dtype: object
+    ancestors_dtype: object
+    increment_dtype: object
+
+
+def _validate_record(
+    record: object,
+    *,
+    name: str,
+    expected: _RecordSignature | None = None,
+) -> tuple[ParticleFilterRecord, _RecordSignature]:
+    """Validate and canonicalize one callback record."""
+    if not isinstance(record, ParticleFilterRecord):
+        raise TypeError(f"{name} must be a ParticleFilterRecord")
+    log_weights = jnp.asarray(record.log_weights)
+    if log_weights.ndim != 1:
+        raise ValueError(f"{name} log_weights must be rank 1")
+    num_particles = log_weights.shape[0]
+    if num_particles == 0:
+        raise ValueError(f"{name} must contain at least one particle")
+    if not jnp.issubdtype(log_weights.dtype, jnp.floating):
+        raise ValueError(f"{name} log_weights must be floating")
+    particle_signature = _validate_particle_cloud(
+        record.particles,
+        num_particles,
+        name=f"{name} particles",
+    )
+    ancestors = jnp.asarray(record.ancestors)
+    if ancestors.ndim != 1:
+        raise ValueError(f"{name} ancestors must be rank 1")
+    if ancestors.shape[0] != num_particles:
+        raise ValueError(
+            f"{name} ancestors must have length num_particles={num_particles}; "
+            f"got {ancestors.shape[0]}"
+        )
+    if not jnp.issubdtype(ancestors.dtype, jnp.integer):
+        raise ValueError(f"{name} ancestors must be integer")
+    increment = jnp.asarray(record.log_evidence_increment)
+    if increment.ndim != 0:
+        raise ValueError(f"{name} log_evidence_increment must be scalar")
+    if not jnp.issubdtype(increment.dtype, jnp.floating):
+        raise ValueError(f"{name} log_evidence_increment must be floating")
+    signature = _RecordSignature(
+        particle_signature,
+        num_particles,
+        log_weights.dtype,
+        ancestors.dtype,
+        increment.dtype,
+    )
+    if expected is not None:
+        sample = tree.map(lambda leaf: leaf[0], record.particles)
+        _validate_state_tree(
+            sample,
+            expected.particles,
+            name=f"{name} particles",
+        )
+        if num_particles != expected.num_particles:
+            raise ValueError(
+                f"{name} must preserve num_particles={expected.num_particles}; "
+                f"got {num_particles}"
+            )
+        for field, actual_dtype, expected_dtype in (
+            ("log_weights", log_weights.dtype, expected.log_weights_dtype),
+            ("ancestors", ancestors.dtype, expected.ancestors_dtype),
+            (
+                "log_evidence_increment",
+                increment.dtype,
+                expected.increment_dtype,
+            ),
+        ):
+            if actual_dtype != expected_dtype:
+                raise ValueError(
+                    f"{name} {field} must preserve dtype {expected_dtype}; "
+                    f"got {actual_dtype}"
+                )
+    canonical = ParticleFilterRecord(
+        record.particles,
+        log_weights,
+        ancestors,
+        increment,
+    )
+    return canonical, signature
 
 
 def _neumaier_add(
@@ -70,7 +162,11 @@ def run_particle_filter(
             time_0, emissions[0], inputs_arr[0], init_key
         )
 
-    increment_0 = jnp.asarray(record_0.log_evidence_increment)
+    record_0, record_signature = _validate_record(
+        record_0,
+        name="initial record",
+    )
+    increment_0 = record_0.log_evidence_increment
     correction_0 = jnp.zeros_like(increment_0)
     ess_0 = jnp.asarray(compute_ess(record_0.log_weights))
     step_keys = jr.split(step_key_root, num_timesteps - 1)
@@ -101,7 +197,12 @@ def run_particle_filter(
             next_carry, record = step_fn_u(
                 carry, time_index, emission_t, input_t, key_t
             )
-        increment = jnp.asarray(record.log_evidence_increment)
+        record, _ = _validate_record(
+            record,
+            name="step record",
+            expected=record_signature,
+        )
+        increment = record.log_evidence_increment
         total, correction = _neumaier_add(total, correction, increment)
         ess_t = jnp.asarray(compute_ess(record.log_weights))
         traces = ess_t, increment
