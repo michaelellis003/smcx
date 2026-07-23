@@ -5,6 +5,7 @@
 
 import gzip
 import json
+from copy import deepcopy
 
 import numpy as np
 import pytest
@@ -26,6 +27,10 @@ from benchmarks.tempering_accuracy.report_data import (
     campaign_requests,
 )
 from benchmarks.tempering_accuracy.report_markdown import render_markdown
+from benchmarks.tempering_accuracy.report_plots import (
+    PlotSummary,
+    render_plots,
+)
 from benchmarks.tempering_accuracy.report_render import (
     AttemptEvidence,
     build_evidence,
@@ -202,3 +207,90 @@ def test_markdown_hides_timing_for_an_accuracy_ineligible_cell():
     row = _table_rows(markdown, "All cells")[0]
     values = [value.strip() for value in row.strip("|").split("|")]
     assert values[-4:] == ["—", "—", "—", "—"]
+
+
+def _plot_evidence():
+    evidence = _evidence()
+    accuracy = evidence["cells"][0]["accuracy"]
+    for name in ("mean", "covariance", "evidence"):
+        accuracy[f"{name}_loss"]["rmse"] = 0.1
+    return evidence
+
+
+def test_plots_are_deterministic_and_report_omissions(tmp_path):
+    evidence = _plot_evidence()
+    first_gate = tmp_path / "first-gates.png"
+    first_cost = tmp_path / "first-cost.png"
+    second_gate = tmp_path / "second-gates.png"
+    second_cost = tmp_path / "second-cost.png"
+
+    summary = render_plots(evidence, first_gate, first_cost)
+    render_plots(evidence, second_gate, second_cost)
+
+    assert summary == PlotSummary(
+        evaluated_gate_cells=1,
+        unavailable_gate_cells=71,
+        eligible_cost_cells=1,
+        unavailable_cost_cells=71,
+    )
+    assert first_gate.read_bytes() == second_gate.read_bytes()
+    assert first_cost.read_bytes() == second_cost.read_bytes()
+
+
+def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
+    evidence = _plot_evidence()
+    eligible_gate = tmp_path / "eligible-gates.png"
+    render_plots(evidence, eligible_gate, tmp_path / "cost.png")
+    cell = evidence["cells"][0]
+    cell["status"] = "failed_accuracy"
+    cell["accuracy"]["status"] = "failed_accuracy"
+    cell["accuracy"]["correctness_eligible"] = False
+
+    summary = render_plots(
+        evidence, tmp_path / "gates.png", tmp_path / "cost.png"
+    )
+
+    assert summary.eligible_cost_cells == 0
+    assert summary.unavailable_cost_cells == 72
+    assert eligible_gate.read_bytes() != (tmp_path / "gates.png").read_bytes()
+
+
+def test_cost_plot_distinguishes_sweep_counts(tmp_path, monkeypatch):
+    evidence = _plot_evidence()
+    source = evidence["cells"][0]
+    for index in (2, 4):
+        item = evidence["cells"][index]
+        item["status"] = "eligible"
+        item["accuracy"] = deepcopy(source["accuracy"])
+        item["work"] = deepcopy(source["work"])
+    observed = []
+
+    def capture(figure, path):
+        if path.name == "cost.png":
+            observed.extend(
+                collection.get_alpha()
+                for collection in figure.axes[0].collections
+            )
+
+    monkeypatch.setattr(
+        "benchmarks.tempering_accuracy.report_plots._save", capture
+    )
+    render_plots(evidence, tmp_path / "gates.png", tmp_path / "cost.png")
+
+    assert observed == [0.45, 0.7, 1.0]
+
+
+def test_cost_plot_uses_nonnegative_rmse_scale(tmp_path, monkeypatch):
+    evidence = _plot_evidence()
+    observed = []
+
+    def capture(figure, path):
+        if path.name == "cost.png":
+            observed.extend(axis.get_yscale() for axis in figure.axes)
+
+    monkeypatch.setattr(
+        "benchmarks.tempering_accuracy.report_plots._save", capture
+    )
+    render_plots(evidence, tmp_path / "gates.png", tmp_path / "cost.png")
+
+    assert observed == ["log"] * 6
