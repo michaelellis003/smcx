@@ -2,6 +2,185 @@
 
 <!-- version list -->
 
+## v1.7.0 (2026-07-23)
+
+### Chores
+
+- Remove local paths and internal review language
+  ([#50](https://github.com/michaelellis003/smcx/pull/50),
+  [`e8bdfd9`](https://github.com/michaelellis003/smcx/commit/e8bdfd9efe45b2e63d996fded4cb60b81d8d7e4a))
+
+- **deps**: Bump jupyterlab from 4.6.1 to 4.6.2
+  ([#91](https://github.com/michaelellis003/smcx/pull/91),
+  [`f442568`](https://github.com/michaelellis003/smcx/commit/f442568f5a746f5d86c1a512e1f7a799c8d989e9))
+
+- **tempering**: Retire one-off accuracy campaign
+  ([#85](https://github.com/michaelellis003/smcx/pull/85),
+  [`87c6b2c`](https://github.com/michaelellis003/smcx/commit/87c6b2cb2a77528bcbb1c28b9e182065096934ee))
+
+### Documentation
+
+- Complete scoring-rule attribution ([#51](https://github.com/michaelellis003/smcx/pull/51),
+  [`72d552e`](https://github.com/michaelellis003/smcx/commit/72d552ef5839400d8a86c3188ff53388489c11e1))
+
+- Execute filtering tutorial ([#54](https://github.com/michaelellis003/smcx/pull/54),
+  [`ff0ac89`](https://github.com/michaelellis003/smcx/commit/ff0ac89e37efb77b97a55b51f6959fc696fca63b))
+
+- Remove internal decision index ([#58](https://github.com/michaelellis003/smcx/pull/58),
+  [`90b3926`](https://github.com/michaelellis003/smcx/commit/90b3926bf36280b0c72c391692908ca4e30150c0))
+
+- Remove internal integration records ([#59](https://github.com/michaelellis003/smcx/pull/59),
+  [`6fa59d7`](https://github.com/michaelellis003/smcx/commit/6fa59d76cac196658260249ec2799f9c1e156801))
+
+- Remove internal planning records ([#57](https://github.com/michaelellis003/smcx/pull/57),
+  [`18dbbb5`](https://github.com/michaelellis003/smcx/commit/18dbbb5d55a4d842c1474e35cf794d7ad64efbdf))
+
+- Remove licensing inventory ([#56](https://github.com/michaelellis003/smcx/pull/56),
+  [`627fc98`](https://github.com/michaelellis003/smcx/commit/627fc98a11d774985d266f0896ce5bdd22f0da2f))
+
+- Remove remaining internal decision records
+  ([#60](https://github.com/michaelellis003/smcx/pull/60),
+  [`caaecbf`](https://github.com/michaelellis003/smcx/commit/caaecbfe24eb359a8f08e3463884d9c03cfa3e8b))
+
+- Remove stale public artifacts ([#47](https://github.com/michaelellis003/smcx/pull/47),
+  [`921ef42`](https://github.com/michaelellis003/smcx/commit/921ef42abdef711ef0d05f90d99a79574da659e3))
+
+- Simplify contributor and documentation entry points
+  ([#49](https://github.com/michaelellis003/smcx/pull/49),
+  [`56129e4`](https://github.com/michaelellis003/smcx/commit/56129e41cd416b4467eca3f72f33c2e6eb935e7e))
+
+- Simplify public documentation and attribution
+  ([#48](https://github.com/michaelellis003/smcx/pull/48),
+  [`e0a75d0`](https://github.com/michaelellis003/smcx/commit/e0a75d0650a10d32f182b5c96786927f340286ed))
+
+- Tighten the public documentation ([#52](https://github.com/michaelellis003/smcx/pull/52),
+  [`6368872`](https://github.com/michaelellis003/smcx/commit/63688729597ebb3dc69ded0f5dfa2ea0f6b8d54a))
+
+- **benchmarks**: Report tempering accuracy ([#84](https://github.com/michaelellis003/smcx/pull/84),
+  [`2af605a`](https://github.com/michaelellis003/smcx/commit/2af605ad4ea454fc4b006517eed7ac68becbf01e))
+
+- **contributing**: Simplify public templates
+  ([#46](https://github.com/michaelellis003/smcx/pull/46),
+  [`465a6ac`](https://github.com/michaelellis003/smcx/commit/465a6ac2a601b9398fc12b2feea59c9da54eb037))
+
+### Features
+
+- Add exact Kalman filtering and RTS smoothing
+  ([#100](https://github.com/michaelellis003/smcx/pull/100),
+  [`05e1af9`](https://github.com/michaelellis003/smcx/commit/05e1af940bd5575e4b39765d4aedd149a7450202))
+
+### Testing
+
+- Focus regressions on package behavior ([#88](https://github.com/michaelellis003/smcx/pull/88),
+  [`63c877c`](https://github.com/michaelellis003/smcx/commit/63c877c7f1b417cc97e6dc5a4d2067b7f42c233e))
+
+- Remove non-product campaign checks ([#86](https://github.com/michaelellis003/smcx/pull/86),
+  [`0709227`](https://github.com/michaelellis003/smcx/commit/0709227c5815a6f54635ea931d1dea1e03359b40))
+
+- Remove profiling implementation locks ([#89](https://github.com/michaelellis003/smcx/pull/89),
+  [`2b4304e`](https://github.com/michaelellis003/smcx/commit/2b4304e0022e7420726527a6e894f7c8ed34eb14))
+
+- Scan only tracked public documentation ([#61](https://github.com/michaelellis003/smcx/pull/61),
+  [`2352190`](https://github.com/michaelellis003/smcx/commit/2352190087f2ae17ffa1c31b30b4da6293fd7859))
+
+- Streamline diagnostic coverage ([#90](https://github.com/michaelellis003/smcx/pull/90),
+  [`41569e6`](https://github.com/michaelellis003/smcx/commit/41569e6a59f70f1bacd7985e96715529c4861526))
+
+- **tempering**: Add current-RWM smoke worker
+  ([#62](https://github.com/michaelellis003/smcx/pull/62),
+  [`ecdeeaa`](https://github.com/michaelellis003/smcx/commit/ecdeeaa98ce4c1a399afaeeb970222206cb629b6))
+
+- **tempering**: Add replicated accuracy worker
+  ([#66](https://github.com/michaelellis003/smcx/pull/66),
+  [`00ee716`](https://github.com/michaelellis003/smcx/commit/00ee716fdeef753ef358591183a6bb8683f1888c))
+
+- **tempering**: Add standard timing worker ([#64](https://github.com/michaelellis003/smcx/pull/64),
+  [`183ffee`](https://github.com/michaelellis003/smcx/commit/183ffee2d47b521f31e103cae20e0fc249f629c0))
+
+- **tempering**: Aggregate accuracy evidence
+  ([#77](https://github.com/michaelellis003/smcx/pull/77),
+  [`acc8ca2`](https://github.com/michaelellis003/smcx/commit/acc8ca2a982a81f8be4fd9c2bd425dae5772d81f))
+
+- **tempering**: Classify timing report evidence
+  ([#75](https://github.com/michaelellis003/smcx/pull/75),
+  [`c486df0`](https://github.com/michaelellis003/smcx/commit/c486df0571d0b3343c448662520d51ba5b19ad72))
+
+- **tempering**: Enforce supervisor evidence boundaries
+  ([#73](https://github.com/michaelellis003/smcx/pull/73),
+  [`1489d97`](https://github.com/michaelellis003/smcx/commit/1489d97b35f6d42da878c9b001b79e55f58f5660))
+
+- **tempering**: Freeze accuracy campaign plan
+  ([#42](https://github.com/michaelellis003/smcx/pull/42),
+  [`07ffd99`](https://github.com/michaelellis003/smcx/commit/07ffd99f056db43ce91352c1ccdf92d76b7606ad))
+
+- **tempering**: Freeze accuracy efficiency losses
+  ([#44](https://github.com/michaelellis003/smcx/pull/44),
+  [`cedda39`](https://github.com/michaelellis003/smcx/commit/cedda392d1959504a48391f67c064d6630de5eda))
+
+- **tempering**: Freeze campaign artifacts ([#68](https://github.com/michaelellis003/smcx/pull/68),
+  [`c67297c`](https://github.com/michaelellis003/smcx/commit/c67297caedb05c4ffe9f6c17222ef1c2bcec015c))
+
+- **tempering**: Freeze replicated accuracy gates
+  ([#43](https://github.com/michaelellis003/smcx/pull/43),
+  [`76602ca`](https://github.com/michaelellis003/smcx/commit/76602ca01d14684472a032ecb3dd4ed813109c92))
+
+- **tempering**: Harden campaign artifacts ([#69](https://github.com/michaelellis003/smcx/pull/69),
+  [`b2da942`](https://github.com/michaelellis003/smcx/commit/b2da9423d0b1af45b2004732097a6baec4e98260))
+
+- **tempering**: Integrate campaign evidence
+  ([#82](https://github.com/michaelellis003/smcx/pull/82),
+  [`d79fa94`](https://github.com/michaelellis003/smcx/commit/d79fa94bca41e8a068ca91598028312ed6e4c65a))
+
+- **tempering**: Isolate campaign workers ([#70](https://github.com/michaelellis003/smcx/pull/70),
+  [`b261a98`](https://github.com/michaelellis003/smcx/commit/b261a98af455b9b8124f7b39aa0a730dab3d7b31))
+
+- **tempering**: Load campaign report evidence
+  ([#74](https://github.com/michaelellis003/smcx/pull/74),
+  [`e4d09e6`](https://github.com/michaelellis003/smcx/commit/e4d09e6fe9b80597e3fbc9ec85d0b0a7e09c998b))
+
+- **tempering**: Publish campaign report ([#83](https://github.com/michaelellis003/smcx/pull/83),
+  [`4d55dd5`](https://github.com/michaelellis003/smcx/commit/4d55dd5f9d1fd388585a57e3236f0e4c83b550f8))
+
+- **tempering**: Register accuracy target contracts
+  ([#41](https://github.com/michaelellis003/smcx/pull/41),
+  [`a7cfeaf`](https://github.com/michaelellis003/smcx/commit/a7cfeafd7734a67fcbc5ac46937a0114dac47422))
+
+- **tempering**: Render campaign evidence ([#79](https://github.com/michaelellis003/smcx/pull/79),
+  [`b01d28b`](https://github.com/michaelellis003/smcx/commit/b01d28b7422e3a14578003abd81f45a65615b16b))
+
+- **tempering**: Render campaign figures ([#81](https://github.com/michaelellis003/smcx/pull/81),
+  [`fe6f333`](https://github.com/michaelellis003/smcx/commit/fe6f3337d5b330bfdeddbeffa8ae6db34ffeef88))
+
+- **tempering**: Render campaign Markdown ([#80](https://github.com/michaelellis003/smcx/pull/80),
+  [`f50c184`](https://github.com/michaelellis003/smcx/commit/f50c18407f6111ceb9209e010cd23f140804e10a))
+
+- **tempering**: Retain callback device inputs
+  ([#63](https://github.com/michaelellis003/smcx/pull/63),
+  [`e4fd246`](https://github.com/michaelellis003/smcx/commit/e4fd246d40f36f078bfa27221bc3e010aa867d95))
+
+- **tempering**: Retain campaign launch attempts
+  ([#76](https://github.com/michaelellis003/smcx/pull/76),
+  [`8ad0e8a`](https://github.com/michaelellis003/smcx/commit/8ad0e8abe6bae89ec911cb36b9af949bfa18420c))
+
+- **tempering**: Retain partial timing evidence
+  ([#65](https://github.com/michaelellis003/smcx/pull/65),
+  [`f8bb66c`](https://github.com/michaelellis003/smcx/commit/f8bb66ce98dff63e5549d6889272ac4350217c88))
+
+- **tempering**: Retain public measurement evidence
+  ([#78](https://github.com/michaelellis003/smcx/pull/78),
+  [`6e7d657`](https://github.com/michaelellis003/smcx/commit/6e7d6570504609562e5e3c699c79e6e3f0109d24))
+
+- **tempering**: Retain supervisor evidence ([#72](https://github.com/michaelellis003/smcx/pull/72),
+  [`6fc888d`](https://github.com/michaelellis003/smcx/commit/6fc888de1473a8956410a32bd20e47698e70000d))
+
+- **tempering**: Retain timing failure boundaries
+  ([#67](https://github.com/michaelellis003/smcx/pull/67),
+  [`740e44c`](https://github.com/michaelellis003/smcx/commit/740e44c59cfe20aa49b803c9939aec1a0b1e2ba8))
+
+- **tempering**: Supervise frozen campaign ([#71](https://github.com/michaelellis003/smcx/pull/71),
+  [`da38fb0`](https://github.com/michaelellis003/smcx/commit/da38fb0ca47bbbca2f2b16eb18f6a7a90ab31d56))
+
+
 ## v1.6.0 (2026-07-21)
 
 ### Documentation
