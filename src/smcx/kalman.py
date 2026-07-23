@@ -134,6 +134,53 @@ def _condition(
     return filtered_mean, filtered_covariance, log_evidence_increment
 
 
+def _filter_step(
+    state: _FilterState,
+    args: tuple[Array, Array, Array, Array, Array, Array, Array],
+) -> tuple[_FilterState, _FilterStepOutput]:
+    """Apply one pure Kalman predict-and-condition step."""
+    (
+        observation,
+        transition,
+        transition_noise,
+        transition_offset,
+        observation_operator,
+        observation_noise,
+        observation_offset,
+    ) = args
+    predicted_mean = transition @ state.mean + transition_offset
+    predicted_covariance = _symmetrize(
+        transition @ state.covariance @ transition.T + transition_noise
+    )
+    filtered_mean, filtered_covariance, increment = _condition(
+        predicted_mean,
+        predicted_covariance,
+        observation_operator,
+        observation_noise,
+        observation,
+        observation_offset,
+    )
+    evidence, compensation = _neumaier_add(
+        state.marginal_loglik,
+        state.log_evidence_compensation,
+        increment,
+    )
+    next_state = _FilterState(
+        filtered_mean,
+        filtered_covariance,
+        evidence,
+        compensation,
+    )
+    output = _FilterStepOutput(
+        predicted_mean,
+        predicted_covariance,
+        filtered_mean,
+        filtered_covariance,
+        increment,
+    )
+    return next_state, output
+
+
 def _check_float_array(
     value: Shaped[Array, "*shape"],
     name: str,
@@ -388,51 +435,6 @@ def kalman_filter(
         jnp.zeros_like(increment_0),
     )
 
-    def _step(
-        state: _FilterState,
-        args: tuple[Array, Array, Array, Array, Array, Array, Array],
-    ) -> tuple[_FilterState, _FilterStepOutput]:
-        (
-            observation,
-            transition,
-            transition_noise,
-            transition_offset,
-            observation_operator,
-            observation_noise,
-            observation_offset,
-        ) = args
-        predicted_mean = transition @ state.mean + transition_offset
-        predicted_covariance = _symmetrize(
-            transition @ state.covariance @ transition.T + transition_noise
-        )
-        filtered_mean, filtered_covariance, increment = _condition(
-            predicted_mean,
-            predicted_covariance,
-            observation_operator,
-            observation_noise,
-            observation,
-            observation_offset,
-        )
-        evidence, compensation = _neumaier_add(
-            state.marginal_loglik,
-            state.log_evidence_compensation,
-            increment,
-        )
-        next_state = _FilterState(
-            filtered_mean,
-            filtered_covariance,
-            evidence,
-            compensation,
-        )
-        output = _FilterStepOutput(
-            predicted_mean,
-            predicted_covariance,
-            filtered_mean,
-            filtered_covariance,
-            increment,
-        )
-        return next_state, output
-
     scan_inputs = (
         emissions[1:],
         transition_matrices,
@@ -442,7 +444,7 @@ def kalman_filter(
         observation_covariances[1:],
         observation_biases[1:],
     )
-    final_state, rest = lax.scan(_step, state_0, scan_inputs)
+    final_state, rest = lax.scan(_filter_step, state_0, scan_inputs)
     predicted_means = jnp.concatenate((
         initial_mean[None],
         rest.predicted_mean,

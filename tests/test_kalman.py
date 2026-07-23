@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 import smcx
+import smcx.kalman as kalman_module
 from tests import _kalman_reference as multivariate_reference
 from tests._kalman import kalman_1d
 from tests._lgssm_reference import EXACT_LOG_LIKELIHOOD, REFERENCE_TIMES
@@ -199,6 +200,81 @@ def test_kalman_filter_compiled_matches_eager():
 
     for eager_value, compiled_value in zip(eager, compiled, strict=True):
         np.testing.assert_allclose(compiled_value, eager_value)
+
+
+def test_scan_steps_uncompiled_match_public_two_step_run():
+    """Pure forward and backward steps agree with their public scans."""
+    transition = jnp.array([[0.9]])
+    transition_covariance = jnp.array([[0.25]])
+    observation = jnp.array([[1.0]])
+    observation_covariance = jnp.array([[0.5]])
+    emissions = jnp.array([[0.2], [-0.1]])
+    first = smcx.kalman_filter(
+        jnp.array([0.0]),
+        jnp.array([[1.0]]),
+        transition,
+        transition_covariance,
+        observation,
+        observation_covariance,
+        emissions[:1],
+    )
+    full = smcx.kalman_filter(
+        jnp.array([0.0]),
+        jnp.array([[1.0]]),
+        transition,
+        transition_covariance,
+        observation,
+        observation_covariance,
+        emissions,
+    )
+    state = kalman_module._FilterState(
+        first.filtered_means[0],
+        first.filtered_covariances[0],
+        first.marginal_loglik,
+        jnp.zeros_like(first.marginal_loglik),
+    )
+    next_state, output = kalman_module._filter_step(
+        state,
+        (
+            emissions[1],
+            transition,
+            transition_covariance,
+            jnp.zeros(1),
+            observation,
+            observation_covariance,
+            jnp.zeros(1),
+        ),
+    )
+
+    np.testing.assert_allclose(output.filtered_mean, full.filtered_means[1])
+    np.testing.assert_allclose(
+        output.filtered_covariance,
+        full.filtered_covariances[1],
+    )
+    np.testing.assert_allclose(
+        next_state.marginal_loglik + next_state.log_evidence_compensation,
+        full.marginal_loglik,
+    )
+
+    smoothed = smcx.rts_smoother(full, transition)
+    _, direct = kalman_module._rts_step(
+        kalman_module._SmootherState(
+            smoothed.smoothed_means[1],
+            smoothed.smoothed_covariances[1],
+        ),
+        (
+            full.filtered_means[0],
+            full.filtered_covariances[0],
+            full.predicted_means[1],
+            full.predicted_covariances[1],
+            transition,
+        ),
+    )
+    np.testing.assert_allclose(direct.mean, smoothed.smoothed_means[0])
+    np.testing.assert_allclose(
+        direct.covariance,
+        smoothed.smoothed_covariances[0],
+    )
 
 
 @pytest.mark.parametrize(
