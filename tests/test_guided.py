@@ -1,33 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Guided-filter tests with exact and independent implementation evidence.
-
-The permanent general ``g*f/q`` gates below use a local Kalman recurrence.
-A one-time isolated input-aware campaign (2026-07-18; T=30, N=4096, 128
-fixed seeds) also compared smcx with particles 0.4 and TFP 0.25.0. For
-prior/optimal/misspecified proposals, smcx mean ``Z_hat / Z_exact`` (SE) was
-``0.993628 (.006205)``, ``1.001119 (.003752)``, and ``0.998199 (.005608)``;
-particles gave ``0.995324 (.006113)``, ``1.006273 (.003620)``, and
-``1.002662 (.004928)``. TFP gave ``1.003881 (.005597)``,
-``1.059130 (.021319)``, and ``1.003726 (.006151)``. All evidence and moment
-errors were below five SE. TFP normalizes its sampled correction and was used
-only as a secondary correctness check, not as an efficiency authority.
-The case SHA-256 was
-``d59064d711ba96f3d61da207c79b8f1b4526eade25620dd40ec10f6ed47d2689``;
-smcx/particles used seeds 20261000--20261127 and TFP used
-20261200--20261327. Its complete case preimage, exact target, and runner
-settings are retained in :mod:`tests.test_reference_data`.
-
-Pinned sources and licenses (no outside code copied or imported here):
-
-* particles 0.4, f71e94a21a11c73b58e2d694775b1b1d379b8854, MIT:
-  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/particles/state_space_models.py#L352-L438
-  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/LICENSE
-* TFP 0.25.0, 9709569d9c1159dc54154044f679edc4a15bd26b, Apache-2.0:
-  https://github.com/tensorflow/probability/blob/9709569d9c1159dc54154044f679edc4a15bd26b/tensorflow_probability/python/experimental/mcmc/particle_filter.py#L441-L638
-  https://github.com/tensorflow/probability/blob/9709569d9c1159dc54154044f679edc4a15bd26b/LICENSE
-"""
+"""Tests for :func:`smcx.guided_filter` against an exact LGSSM oracle."""
 
 import jax
 import jax.numpy as jnp

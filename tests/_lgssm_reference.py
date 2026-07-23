@@ -20,13 +20,10 @@ License: MIT, Copyright 2022 Probabilistic machine learning (immutable):
 https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/LICENSE
 
 Only numerical data are retained; no Dynamax code is copied or translated.
-The exact log likelihood and selected filtered moments are independently
-checked by the NumPy-f64 Kalman recurrence in :mod:`tests._kalman`.
+The smcx tests use them as an external numerical oracle.
 """
 
 import numpy as np
-
-DATA_SHA256 = "4f99527f00a23ec1413cc22856983bdb323587bc6d431ebde6b37e0622a4569f"
 
 STATES = np.array(
     [

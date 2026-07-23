@@ -1,24 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for :func:`smcx.auxiliary_filter` against independent references.
-
-A one-time isolated campaign (2026-07-18; input-aware scalar LGSSM, T=30,
-N=4096, 128 fixed seeds) compared the APF with an exact Kalman target and
-particles 0.4. Mean ``Z_hat / Z_exact`` (Monte Carlo SE) was
-``0.991542 (0.006764)`` for smcx and ``1.002977 (0.006071)`` for particles;
-evidence and filtering moments passed the preregistered five-SE gates.
-Both used seeds 20261000--20261127; the case SHA-256 was
-``d59064d711ba96f3d61da207c79b8f1b4526eade25620dd40ec10f6ed47d2689``.
-Its complete preimage, exact target, and runner settings are retained in
-:mod:`tests.test_reference_data`.
-
-Pinned external implementation (no code copied or imported here):
-particles 0.4, commit f71e94a21a11c73b58e2d694775b1b1d379b8854,
-MIT source and license:
-https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/particles/state_space_models.py#L352-L438
-https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/LICENSE
-"""
+"""Tests for :func:`smcx.auxiliary_filter` against an exact LGSSM oracle."""
 
 import math
 
