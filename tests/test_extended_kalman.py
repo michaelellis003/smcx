@@ -291,13 +291,13 @@ def test_one_step_rank_one_inputs_and_timed_covariances():
     inputs = jnp.array([0.5])
 
     def transition_mean(state, input_t):
-        return state + input_t
+        return state + input_t[0]
 
     def transition_jacobian(_state, _input_t):
         return jnp.eye(1)
 
     def observation_mean(state, input_t):
-        return state + input_t
+        return state + input_t[0]
 
     def observation_jacobian(_state, _input_t):
         return jnp.eye(1)
