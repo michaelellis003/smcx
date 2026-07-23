@@ -66,6 +66,14 @@ lw = smcx.liu_west_filter(
     emissions, 100,
 )
 assert jnp.isfinite(lw.marginal_loglik)
+
+kalman = smcx.kalman_filter(
+    jnp.zeros(1), jnp.eye(1), jnp.eye(1), 0.2 * jnp.eye(1),
+    jnp.eye(1), 0.3 * jnp.eye(1), emissions,
+)
+smoothed = smcx.rts_smoother(kalman, jnp.eye(1))
+assert jnp.isfinite(kalman.marginal_loglik)
+assert jnp.all(jnp.isfinite(smoothed.smoothed_covariances))
 print('OK')
 """
 

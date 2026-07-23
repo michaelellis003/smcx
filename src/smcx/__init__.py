@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Sequential Monte Carlo and particle filtering in JAX."""
+"""State-space inference with exact Gaussian and Monte Carlo methods."""
 
 from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _version

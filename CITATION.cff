@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use smcx, please cite it as below."
-title: "smcx: Sequential Monte Carlo in JAX"
+title: "smcx: State-space inference in JAX"
 type: software
 authors:
   - family-names: Ellis
@@ -11,6 +11,7 @@ license: Apache-2.0
 keywords:
   - sequential-monte-carlo
   - particle-filter
+  - kalman-filter
   - jax
   - apple-silicon
   - bayesian-inference

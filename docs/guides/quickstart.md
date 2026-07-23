@@ -23,6 +23,7 @@ the observation model returns a log-density.
 ```python
 import math
 
+import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 import smcx
@@ -69,7 +70,36 @@ states, observations = smcx.simulate(
 )
 ```
 
-## Filter
+## Establish the exact baseline
+
+This model is linear and Gaussian with known parameters, so its filtering
+distribution is available exactly. `kalman_filter` returns the prior and
+filtered moments at every time step plus the exact marginal likelihood.
+The separately callable smoother consumes that result rather than
+rerunning the model:
+
+```python
+transition = jnp.array([[rho]])
+exact = smcx.kalman_filter(
+    initial_mean=jnp.array([0.0]),
+    initial_covariance=jnp.array([[1.0]]),
+    transition_matrix=transition,
+    transition_covariance=jnp.array([[q_sd**2]]),
+    observation_matrix=jnp.array([[1.0]]),
+    observation_covariance=jnp.array([[r_sd**2]]),
+    emissions=observations,
+)
+smoothed = smcx.rts_smoother(exact, transition)
+
+exact.filtered_means.shape
+smoothed.smoothed_means.shape
+```
+
+The filter and smoother are independent pieces: a compatible
+`GaussianFilterPosterior` produced by research code can be passed to
+`rts_smoother` directly.
+
+## Run a particle filter
 
 The bootstrap filter proposes from the transition and weights by the
 observation density.
@@ -204,6 +234,6 @@ numbers describe this example, not a general performance guarantee.
   and time-varying inputs.
 - `bootstrap_init`, `bootstrap_step`, and `bootstrap_update` support
   checkpointed or chunked filtering.
-- Every function used here — `bootstrap_filter`, `guided_filter`,
-  `simulate`, `diagnose`, `weighted_mean`, `replicated_log_ml` — has
-  a full contract in the [API reference](../api/smcx/index.md).
+- Every function used here — including `kalman_filter`, `rts_smoother`,
+  `bootstrap_filter`, `guided_filter`, `simulate`, and `diagnose` — has a
+  full contract in the [API reference](../api/smcx/index.md).

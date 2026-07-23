@@ -1,7 +1,7 @@
 [project]
 name = "smcx"
 version = "1.6.0"
-description = "Sequential Monte Carlo in JAX: particle filters, tempered SMC, and SMC2 on CPU, CUDA, TPU, and Apple-silicon GPUs"
+description = "State-space inference in JAX: Kalman and particle filters, tempered SMC, and SMC2 across CPU and accelerators"
 readme = "README.md"
 authors = [
     { name = "Michael Ellis", email = "michaelellis003@gmail.com" }
@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 keywords = [
     "jax",
     "particle-filter",
+    "kalman-filter",
     "sequential-monte-carlo",
     "bayesian-inference",
     "apple-silicon",

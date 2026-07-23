@@ -229,6 +229,10 @@ def kalman_filter(
     Raises:
         ValueError: An array has an invalid shape or dtype, timed terms
             are misaligned, or control matrices are supplied without inputs.
+
+    Note:
+        Covariances must be finite, symmetric, and positive definite.
+        Missing observations are not supported.
     """
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
         raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
@@ -539,6 +543,10 @@ def rts_smoother(
     Raises:
         ValueError: The posterior or transition array has an invalid shape
             or dtype.
+
+    Note:
+        Predicted covariances must be finite, symmetric, and positive
+        definite.
     """
     num_timesteps, state_dim, dtype = _validate_filter_posterior(
         filtered_posterior
