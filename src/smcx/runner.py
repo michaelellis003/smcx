@@ -145,7 +145,50 @@ def run_particle_filter(
     inputs: InputSequence | None = None,
     store_history: bool = True,
 ) -> ParticleFilterPosterior:
-    """Run a caller-owned particle-filter initialization and step kernel."""
+    """Run caller-owned particle-filter initialization and step kernels.
+
+    This is the extension boundary for particle methods not represented by a
+    built-in filter. The callbacks own selection, mutation, weighting, and
+    each evidence increment. The runner owns time, input, and key alignment;
+    structural validation; ESS; compensated evidence accumulation; history
+    policy; and posterior construction.
+
+    Input-free callbacks have these scan-shaped signatures::
+
+        initialize(time_index, emission_t, key_t) -> (carry, record)
+        step(carry, time_index, emission_t, key_t) -> (carry, record)
+
+    Input-aware callbacks insert ``input_t`` immediately before ``key_t``.
+    ``record`` must be :class:`~smcx.containers.ParticleFilterRecord`.
+    Its log weights must already be normalized and its ancestor indices must
+    be in range; these are data-dependent callback preconditions rather than
+    conditions the compiled scan can raise on.
+
+    Args:
+        key: Root JAX PRNG key. The runner splits off initialization once,
+            then pre-splits one untouched key for every later callback.
+        initialize: Pure time-zero kernel, with or without an input argument.
+        step: Pure scan-shaped kernel, with the same input convention as
+            ``initialize``. Its carry may be any JAX-compatible PyTree whose
+            structure, leaf shapes, and dtypes remain fixed.
+        emissions: Observation array with shape ``(T, emission_dim)`` and
+            at least one row.
+        inputs: Optional inputs with shape ``(T, input_dim)`` or ``(T,)``.
+            Rank-one inputs become ``(T, 1)``.
+        store_history: If False, retain only the final particle, weight, and
+            ancestor record while keeping full ESS and evidence traces.
+
+    Returns:
+        Standard particle-filter posterior. The algorithm-specific carry is
+        internal execution state and is not returned.
+
+    Raises:
+        TypeError: A callback does not return ``ParticleFilterRecord``.
+        ValueError: Emissions, inputs, or a callback record are structurally
+            invalid, or a later record changes its particle or dtype contract.
+        DegenerateWeightsError: Eager evidence accumulation ends at NaN or
+            negative infinity.
+    """
     if emissions.ndim != 2:
         raise ValueError(
             "emissions must have shape (T, emission_dim); "
