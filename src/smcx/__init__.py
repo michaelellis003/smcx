@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""State-space inference with exact Gaussian and Monte Carlo methods."""
+"""State-space inference with Gaussian and Monte Carlo methods."""
 
 from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _version
@@ -47,7 +47,7 @@ from smcx.diagnostics import (
 )
 from smcx.exceptions import DegenerateWeightsError
 from smcx.guided import guided_filter
-from smcx.kalman import kalman_filter, rts_smoother
+from smcx.kalman import extended_kalman_filter, kalman_filter, rts_smoother
 from smcx.liu_west import liu_west_filter
 from smcx.reporting import to_arviz
 from smcx.resampling import (
@@ -90,6 +90,7 @@ __all__ = [
     "cumulative_log_score",
     "diagnose",
     "ess",
+    "extended_kalman_filter",
     "guided_filter",
     "kalman_filter",
     "liu_west_filter",

@@ -1,13 +1,17 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-r"""Exact Gaussian inference for linear state-space models.
+r"""Gaussian inference for linear and first-order nonlinear state-space models.
 
-The filter implements the covariance-form recursion of Kalman (1960)
-with a Joseph covariance update. The smoother implements the backward
-recursion of Rauch, Tung, and Striebel (1965). Dynamax and statsmodels
-are independent numerical validation references; no implementation
-code is copied from either project.
+The linear filter implements the exact covariance-form recursion of Kalman
+(1960) with a Joseph covariance update. The smoother implements the backward
+recursion of Rauch, Tung, and Striebel (1965). The extended filter applies a
+first-order Taylor approximation to nonlinear means with additive Gaussian
+noise, following Schmidt (1966).
+
+statsmodels and Dynamax validate the linear methods; Stone Soup and Dynamax
+validate the extended filter. They are comparison implementations, not
+implementation lineage; no code was copied or translated.
 
 References:
     Kalman, R. E. (1960). A New Approach to Linear Filtering and
@@ -15,13 +19,19 @@ References:
     Rauch, H. E., Tung, F., and Striebel, C. T. (1965). Maximum
     Likelihood Estimates of Linear Dynamic Systems.
     https://doi.org/10.2514/3.3166
+    Schmidt, S. F. (1966). Application of State-Space Methods to
+    Navigation Problems.
+    https://doi.org/10.1016/B978-1-4831-6716-9.50011-4
+    Särkkä, S., and Svensson, L. (2023). Bayesian Filtering and
+    Smoothing, second edition, chapter 7.
+    https://doi.org/10.1017/9781108917407
     Neumaier, A. (1974). Rundungsfehleranalyse einiger Verfahren zur
     Summation endlicher Summen.
     https://doi.org/10.1002/zamm.19740540106
 """
 
 import math
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 from jax import lax
@@ -30,7 +40,17 @@ from jaxtyping import Array, Float, Shaped
 
 from smcx._utils import _canonicalize_inputs
 from smcx.containers import GaussianFilterPosterior, GaussianSmootherPosterior
-from smcx.types import InputSequence
+from smcx.types import (
+    InputSequence,
+    ObservationJacobianFn,
+    ObservationJacobianFnWithInput,
+    ObservationMeanFn,
+    ObservationMeanFnWithInput,
+    TransitionJacobianFn,
+    TransitionJacobianFnWithInput,
+    TransitionMeanFn,
+    TransitionMeanFnWithInput,
+)
 
 
 class _FilterState(NamedTuple):
@@ -50,6 +70,23 @@ class _FilterStepOutput(NamedTuple):
     filtered_mean: Float[Array, " state_dim"]
     filtered_covariance: Float[Array, "state_dim state_dim"]
     log_evidence_increment: Float[Array, ""]
+
+
+class _ExtendedFilterStepInput(NamedTuple):
+    """Arrays consumed by one extended Kalman step."""
+
+    emission: Float[Array, " observation_dim"]
+    transition_covariance: Float[Array, "state_dim state_dim"]
+    observation_covariance: Float[Array, "observation_dim observation_dim"]
+
+
+class _ExtendedFilterStepInputWithInput(NamedTuple):
+    """Arrays and input consumed by one input-aware extended Kalman step."""
+
+    emission: Float[Array, " observation_dim"]
+    transition_covariance: Float[Array, "state_dim state_dim"]
+    observation_covariance: Float[Array, "observation_dim observation_dim"]
+    input_t: Float[Array, " input_dim"]
 
 
 class _SmootherState(NamedTuple):
@@ -96,6 +133,27 @@ def _condition(
     """Condition one Gaussian prior on one linear-Gaussian observation."""
     residual = observation - observation_matrix @ predicted_mean
     residual = residual - observation_bias
+    return _condition_from_residual(
+        predicted_mean,
+        predicted_covariance,
+        observation_matrix,
+        observation_covariance,
+        residual,
+    )
+
+
+def _condition_from_residual(
+    predicted_mean: Float[Array, " state_dim"],
+    predicted_covariance: Float[Array, "state_dim state_dim"],
+    observation_matrix: Float[Array, "observation_dim state_dim"],
+    observation_covariance: Float[Array, "observation_dim observation_dim"],
+    residual: Float[Array, " observation_dim"],
+) -> tuple[
+    Float[Array, " state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, ""],
+]:
+    """Condition one Gaussian prior using a supplied innovation residual."""
     innovation_covariance = _symmetrize(
         observation_matrix @ predicted_covariance @ observation_matrix.T
         + observation_covariance
@@ -124,8 +182,8 @@ def _condition(
         residual,
         lower=True,
     )
-    observation_dim = observation.shape[0]
-    log_two_pi = jnp.asarray(math.log(2.0 * math.pi), dtype=observation.dtype)
+    observation_dim = residual.shape[0]
+    log_two_pi = jnp.asarray(math.log(2.0 * math.pi), dtype=residual.dtype)
     log_evidence_increment = -0.5 * (
         observation_dim * log_two_pi
         + 2.0 * jnp.log(jnp.diag(innovation_cholesky)).sum()
@@ -240,6 +298,139 @@ def _time_vector(
             f"got {value.shape}"
         )
     return value
+
+
+def _check_callback_array(
+    value: object,
+    expected_shape: tuple[int, ...],
+    name: str,
+    dtype: jnp.dtype,
+) -> None:
+    """Validate a nonlinear Gaussian callback result."""
+    if not isinstance(value, Array):
+        raise ValueError(f"{name} must return a JAX array")
+    _check_float_array(value, name, dtype)
+    if value.shape != expected_shape:
+        raise ValueError(
+            f"{name} must have shape {expected_shape}; got {value.shape}"
+        )
+
+
+def _extended_filter_step(
+    state: _FilterState,
+    args: _ExtendedFilterStepInput,
+    transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
+    transition_jacobian_fn: (
+        TransitionJacobianFn | TransitionJacobianFnWithInput
+    ),
+    observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
+    observation_jacobian_fn: (
+        ObservationJacobianFn | ObservationJacobianFnWithInput
+    ),
+    input_t: Float[Array, " input_dim"] | None = None,
+) -> tuple[_FilterState, _FilterStepOutput]:
+    """Apply one pure extended Kalman predict-and-condition step."""
+    state_dim = state.mean.shape[0]
+    observation_dim = args.emission.shape[0]
+    dtype = state.mean.dtype
+    if input_t is None:
+        transition_fn = cast(TransitionMeanFn, transition_mean_fn)
+        transition_jacobian_function = cast(
+            TransitionJacobianFn,
+            transition_jacobian_fn,
+        )
+        observation_fn = cast(ObservationMeanFn, observation_mean_fn)
+        observation_jacobian_function = cast(
+            ObservationJacobianFn,
+            observation_jacobian_fn,
+        )
+        transition_mean = transition_fn(state.mean)
+        transition_jacobian = transition_jacobian_function(state.mean)
+    else:
+        transition_fn_u = cast(
+            TransitionMeanFnWithInput,
+            transition_mean_fn,
+        )
+        transition_jacobian_function_u = cast(
+            TransitionJacobianFnWithInput,
+            transition_jacobian_fn,
+        )
+        observation_fn_u = cast(
+            ObservationMeanFnWithInput,
+            observation_mean_fn,
+        )
+        observation_jacobian_function_u = cast(
+            ObservationJacobianFnWithInput,
+            observation_jacobian_fn,
+        )
+        transition_mean = transition_fn_u(state.mean, input_t)
+        transition_jacobian = transition_jacobian_function_u(
+            state.mean,
+            input_t,
+        )
+    _check_callback_array(
+        transition_mean,
+        (state_dim,),
+        "transition_mean_fn output",
+        dtype,
+    )
+    _check_callback_array(
+        transition_jacobian,
+        (state_dim, state_dim),
+        "transition_jacobian_fn output",
+        dtype,
+    )
+    predicted_covariance = _symmetrize(
+        transition_jacobian @ state.covariance @ transition_jacobian.T
+        + args.transition_covariance
+    )
+    if input_t is None:
+        observation_mean = observation_fn(transition_mean)
+        observation_jacobian = observation_jacobian_function(transition_mean)
+    else:
+        observation_mean = observation_fn_u(transition_mean, input_t)
+        observation_jacobian = observation_jacobian_function_u(
+            transition_mean,
+            input_t,
+        )
+    _check_callback_array(
+        observation_mean,
+        (observation_dim,),
+        "observation_mean_fn output",
+        dtype,
+    )
+    _check_callback_array(
+        observation_jacobian,
+        (observation_dim, state_dim),
+        "observation_jacobian_fn output",
+        dtype,
+    )
+    filtered_mean, filtered_covariance, increment = _condition_from_residual(
+        transition_mean,
+        predicted_covariance,
+        observation_jacobian,
+        args.observation_covariance,
+        args.emission - observation_mean,
+    )
+    evidence, compensation = _neumaier_add(
+        state.marginal_loglik,
+        state.log_evidence_compensation,
+        increment,
+    )
+    next_state = _FilterState(
+        filtered_mean,
+        filtered_covariance,
+        evidence,
+        compensation,
+    )
+    output = _FilterStepOutput(
+        transition_mean,
+        predicted_covariance,
+        filtered_mean,
+        filtered_covariance,
+        increment,
+    )
+    return next_state, output
 
 
 def kalman_filter(
@@ -445,6 +636,258 @@ def kalman_filter(
         observation_biases[1:],
     )
     final_state, rest = lax.scan(_filter_step, state_0, scan_inputs)
+    predicted_means = jnp.concatenate((
+        initial_mean[None],
+        rest.predicted_mean,
+    ))
+    predicted_covariances = jnp.concatenate((
+        initial_covariance[None],
+        rest.predicted_covariance,
+    ))
+    filtered_means = jnp.concatenate((
+        filtered_mean_0[None],
+        rest.filtered_mean,
+    ))
+    filtered_covariances = jnp.concatenate((
+        filtered_covariance_0[None],
+        rest.filtered_covariance,
+    ))
+    increments = jnp.concatenate((
+        increment_0[None],
+        rest.log_evidence_increment,
+    ))
+    return GaussianFilterPosterior(
+        final_state.marginal_loglik + final_state.log_evidence_compensation,
+        predicted_means,
+        predicted_covariances,
+        filtered_means,
+        filtered_covariances,
+        increments,
+    )
+
+
+def extended_kalman_filter(
+    initial_mean: Shaped[Array, "*initial_mean_shape"],
+    initial_covariance: Shaped[Array, "*initial_covariance_shape"],
+    transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
+    transition_jacobian_fn: (
+        TransitionJacobianFn | TransitionJacobianFnWithInput
+    ),
+    transition_covariance: Shaped[Array, "*transition_covariance_shape"],
+    observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
+    observation_jacobian_fn: (
+        ObservationJacobianFn | ObservationJacobianFnWithInput
+    ),
+    observation_covariance: Shaped[Array, "*observation_covariance_shape"],
+    emissions: Shaped[Array, "*emissions_shape"],
+    *,
+    inputs: InputSequence | None = None,
+) -> GaussianFilterPosterior:
+    r"""Run a first-order extended Kalman filter.
+
+    The model has nonlinear conditional means and additive Gaussian noise:
+
+    .. math::
+
+        x_0 &\sim N(m_0, P_0),\\
+        x_t &= f(x_{t-1}, u_t) + q_t,\\
+        y_t &= h(x_t, u_t) + r_t.
+
+    Jacobian callbacks are explicit and use output-by-input orientation.
+    At each positive time, ``f`` and its Jacobian are evaluated at the
+    preceding filtered mean; ``h`` and its Jacobian are evaluated at the
+    predicted mean. Callers may supply analytic callbacks or create them
+    explicitly with ``jax.jacfwd``.
+
+    Args:
+        initial_mean: Prior mean for ``x[0]``, shape ``(state_dim,)``.
+        initial_covariance: Prior covariance for ``x[0]``.
+        transition_mean_fn: ``state -> state_mean`` or, when inputs are
+            supplied, ``(state, input_t) -> state_mean``.
+        transition_jacobian_fn: State Jacobian of ``transition_mean_fn``
+            with the same input signature.
+        transition_covariance: Static transition covariance or a timed
+            array with leading length ``ntime - 1``.
+        observation_mean_fn: ``state -> observation_mean`` or, when inputs
+            are supplied, ``(state, input_t) -> observation_mean``.
+        observation_jacobian_fn: State Jacobian of
+            ``observation_mean_fn`` with the same input signature.
+        observation_covariance: Static observation covariance or a timed
+            array with leading length ``ntime``.
+        emissions: Observations with shape ``(ntime, observation_dim)``.
+        inputs: Optional exogenous inputs with shape ``(ntime, input_dim)``
+            or ``(ntime,)``. Input ``t`` reaches observation ``t`` and the
+            transition into ``t``; input zero does not alter the prior.
+
+    Returns:
+        Approximate Gaussian filtering moments. ``marginal_loglik`` and
+        ``log_evidence_increments`` contain linearized Gaussian innovation
+        log densities, not the exact nonlinear-model marginal likelihood.
+
+    Raises:
+        ValueError: An array or callback output has an invalid shape or
+            dtype.
+
+    Note:
+        Arrays must share a float32 or float64 dtype. Covariances must be
+        finite, symmetric, and positive definite. Missing observations are
+        not supported.
+
+    References:
+        Schmidt, S. F. (1966). Application of State-Space Methods to
+        Navigation Problems.
+        https://doi.org/10.1016/B978-1-4831-6716-9.50011-4
+        Särkkä, S., and Svensson, L. (2023). Bayesian Filtering and
+        Smoothing, second edition, chapter 7.
+        https://doi.org/10.1017/9781108917407
+    """
+    if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
+        raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
+    if emissions.ndim != 2 or emissions.shape[0] == 0:
+        raise ValueError(
+            "emissions must have shape (T, observation_dim) with T > 0"
+        )
+    num_timesteps, observation_dim = emissions.shape
+    state_dim = initial_mean.shape[0]
+    if observation_dim == 0:
+        raise ValueError("emissions must have observation_dim > 0")
+    dtype = initial_mean.dtype
+    named_arrays = (
+        ("initial_mean", initial_mean),
+        ("initial_covariance", initial_covariance),
+        ("transition_covariance", transition_covariance),
+        ("observation_covariance", observation_covariance),
+        ("emissions", emissions),
+    )
+    for name, value in named_arrays:
+        expected_dtype = None if name == "initial_mean" else dtype
+        _check_float_array(value, name, expected_dtype)
+    if initial_covariance.shape != (state_dim, state_dim):
+        raise ValueError(
+            "initial_covariance must have shape "
+            f"({state_dim}, {state_dim}); got {initial_covariance.shape}"
+        )
+    transition_covariances = _time_matrix(
+        transition_covariance,
+        num_timesteps - 1,
+        state_dim,
+        state_dim,
+        "transition_covariance",
+    )
+    observation_covariances = _time_matrix(
+        observation_covariance,
+        num_timesteps,
+        observation_dim,
+        observation_dim,
+        "observation_covariance",
+    )
+
+    if inputs is None:
+        inputs_arr = None
+        observation_fn = cast(ObservationMeanFn, observation_mean_fn)
+        observation_jacobian_function = cast(
+            ObservationJacobianFn,
+            observation_jacobian_fn,
+        )
+        observation_mean_0 = observation_fn(initial_mean)
+        observation_jacobian_0 = observation_jacobian_function(initial_mean)
+    else:
+        _check_float_array(inputs, "inputs", dtype)
+        inputs_arr = _canonicalize_inputs(inputs, num_timesteps)
+        observation_fn_u = cast(
+            ObservationMeanFnWithInput,
+            observation_mean_fn,
+        )
+        observation_jacobian_function_u = cast(
+            ObservationJacobianFnWithInput,
+            observation_jacobian_fn,
+        )
+        observation_mean_0 = observation_fn_u(initial_mean, inputs_arr[0])
+        observation_jacobian_0 = observation_jacobian_function_u(
+            initial_mean,
+            inputs_arr[0],
+        )
+    _check_callback_array(
+        observation_mean_0,
+        (observation_dim,),
+        "observation_mean_fn output",
+        dtype,
+    )
+    _check_callback_array(
+        observation_jacobian_0,
+        (observation_dim, state_dim),
+        "observation_jacobian_fn output",
+        dtype,
+    )
+    filtered_mean_0, filtered_covariance_0, increment_0 = (
+        _condition_from_residual(
+            initial_mean,
+            initial_covariance,
+            observation_jacobian_0,
+            observation_covariances[0],
+            emissions[0] - observation_mean_0,
+        )
+    )
+    state_0 = _FilterState(
+        filtered_mean_0,
+        filtered_covariance_0,
+        increment_0,
+        jnp.zeros_like(increment_0),
+    )
+
+    if inputs_arr is None:
+        scan_inputs = _ExtendedFilterStepInput(
+            emissions[1:],
+            transition_covariances,
+            observation_covariances[1:],
+        )
+
+        def _step(
+            state: _FilterState,
+            args: _ExtendedFilterStepInput,
+        ) -> tuple[_FilterState, _FilterStepOutput]:
+            return _extended_filter_step(
+                state,
+                args,
+                transition_mean_fn,
+                transition_jacobian_fn,
+                observation_mean_fn,
+                observation_jacobian_fn,
+            )
+
+        final_state, rest = lax.scan(_step, state_0, scan_inputs)
+    else:
+        scan_inputs_u = _ExtendedFilterStepInputWithInput(
+            emissions[1:],
+            transition_covariances,
+            observation_covariances[1:],
+            inputs_arr[1:],
+        )
+
+        def _step_with_input(
+            state: _FilterState,
+            args: _ExtendedFilterStepInputWithInput,
+        ) -> tuple[_FilterState, _FilterStepOutput]:
+            step_args = _ExtendedFilterStepInput(
+                args.emission,
+                args.transition_covariance,
+                args.observation_covariance,
+            )
+            return _extended_filter_step(
+                state,
+                step_args,
+                transition_mean_fn,
+                transition_jacobian_fn,
+                observation_mean_fn,
+                observation_jacobian_fn,
+                args.input_t,
+            )
+
+        final_state, rest = lax.scan(
+            _step_with_input,
+            state_0,
+            scan_inputs_u,
+        )
     predicted_means = jnp.concatenate((
         initial_mean[None],
         rest.predicted_mean,

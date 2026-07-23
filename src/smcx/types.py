@@ -7,7 +7,8 @@
 
 """Shared aliases and callback protocols for smcx.
 
-Matches the conventions used by Dynamax (``dynamax.types``).
+Core array and key aliases follow the conventions used by Dynamax
+(``dynamax.types``); callback protocols describe smcx's public boundaries.
 """
 
 from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
@@ -291,6 +292,98 @@ class LogTransitionFnWithInput(Protocol):
         input_t: Float[Array, " input_dim"],
         /,
     ) -> Scalar: ...
+
+
+@runtime_checkable
+class TransitionMeanFn(Protocol):
+    """Evaluate one nonlinear transition mean."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        /,
+    ) -> Float[Array, " state_dim"]: ...
+
+
+@runtime_checkable
+class TransitionMeanFnWithInput(Protocol):
+    """Evaluate one input-conditioned nonlinear transition mean."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Float[Array, " state_dim"]: ...
+
+
+@runtime_checkable
+class TransitionJacobianFn(Protocol):
+    """Evaluate a transition Jacobian with respect to state."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        /,
+    ) -> Float[Array, "state_dim state_dim"]: ...
+
+
+@runtime_checkable
+class TransitionJacobianFnWithInput(Protocol):
+    """Evaluate an input-conditioned transition state Jacobian."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Float[Array, "state_dim state_dim"]: ...
+
+
+@runtime_checkable
+class ObservationMeanFn(Protocol):
+    """Evaluate one nonlinear observation mean."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        /,
+    ) -> Float[Array, " observation_dim"]: ...
+
+
+@runtime_checkable
+class ObservationMeanFnWithInput(Protocol):
+    """Evaluate one input-conditioned nonlinear observation mean."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Float[Array, " observation_dim"]: ...
+
+
+@runtime_checkable
+class ObservationJacobianFn(Protocol):
+    """Evaluate an observation Jacobian with respect to state."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        /,
+    ) -> Float[Array, "observation_dim state_dim"]: ...
+
+
+@runtime_checkable
+class ObservationJacobianFnWithInput(Protocol):
+    """Evaluate an input-conditioned observation state Jacobian."""
+
+    def __call__(
+        self,
+        state: Float[Array, " state_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Float[Array, "observation_dim state_dim"]: ...
 
 
 @runtime_checkable

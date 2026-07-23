@@ -1,18 +1,93 @@
 # Author custom models
 
-Particle and tempered methods represent a model by the callbacks needed
-for one inference algorithm. You do not need to subclass an smcx model or
-wrap distributions in an smcx object. The boundary consists of arrays,
-PyTrees, and explicit PRNG keys. Exact linear-Gaussian models instead use
-the dense-array interface shown in the
+Nonlinear Gaussian, particle, and tempered methods represent a model by the
+callbacks needed for one inference algorithm. You do not need to subclass an
+smcx model or wrap distributions in an smcx object. The boundary consists of
+arrays, PyTrees, and, for stochastic algorithms, explicit PRNG keys. Exact
+linear-Gaussian models instead use the dense-array interface shown in the
 [quickstart](quickstart.md#establish-the-exact-baseline).
 
-Most callbacks act on one particle. smcx maps them over the particle cloud;
-only an initial sampler creates the whole cloud at once. This keeps model
-representation with your application while smcx owns resampling, schedules,
-and evidence accounting.
+## Compose a nonlinear Gaussian filter
 
-## Choose callbacks for the algorithm
+The extended Kalman filter separates a nonlinear model into four ordinary
+JAX callables:
+
+```text
+transition_mean(state) -> state_mean
+transition_jacobian(state) -> (state_dim, state_dim)
+observation_mean(state) -> observation_mean
+observation_jacobian(state) -> (observation_dim, state_dim)
+```
+
+Jacobians use output-by-input orientation. Each Jacobian can be analytic or
+created explicitly by the caller with `jax.jacfwd`; smcx does not select an
+automatic-differentiation policy. This example mixes both forms:
+
+```python
+import jax
+import jax.numpy as jnp
+
+import smcx
+
+
+def transition_mean(state):
+    return jnp.array([
+        0.9 * state[0] + 0.1 * jnp.sin(state[1]),
+        0.8 * state[1],
+    ])
+
+
+def transition_jacobian(state):
+    return jnp.array([
+        [0.9, 0.1 * jnp.cos(state[1])],
+        [0.0, 0.8],
+    ])
+
+
+def observation_mean(state):
+    return jnp.array([state[0] + 0.05 * state[1] ** 2])
+
+
+observation_jacobian = jax.jacfwd(observation_mean)
+
+emissions = jnp.array([[0.2], [-0.1], [0.4]])
+posterior = smcx.extended_kalman_filter(
+    jnp.zeros(2),
+    jnp.eye(2),
+    transition_mean,
+    transition_jacobian,
+    0.1 * jnp.eye(2),
+    observation_mean,
+    observation_jacobian,
+    jnp.array([[0.3]]),
+    emissions,
+)
+```
+
+The transition covariance may have shape `(state_dim, state_dim)` or
+`(ntime - 1, state_dim, state_dim)`. The observation covariance may have
+shape `(observation_dim, observation_dim)` or
+`(ntime, observation_dim, observation_dim)`. All arrays and callback outputs
+share one float32 or float64 dtype.
+
+With `inputs=...`, all four callbacks instead accept `(state, input_t)`.
+`inputs[t]` reaches the observation at `t` and the transition into `t`;
+`inputs[0]` does not transform the supplied prior. A rank-one input sequence
+is presented to callbacks as a length-one vector. When compiling a complete
+filter, close the four Python callbacks over in a `jax.jit` wrapper rather
+than passing them as dynamic array arguments.
+
+Separate mean and Jacobian callbacks make analytic, autodifferentiated, and
+experimental linearizations independently replaceable. The same
+function-oriented boundary lets research code compare these pieces without a
+model hierarchy.
+
+## Choose particle callbacks for the algorithm
+
+Most particle callbacks act on one particle. smcx maps them over the particle
+cloud; only an initial sampler creates the whole cloud at once. This keeps
+model representation with your application while smcx owns resampling,
+schedules, and evidence accounting.
 
 Each callback-driven algorithm asks only for behavior it can use:
 
