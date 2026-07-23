@@ -42,10 +42,12 @@ FilterCarry: TypeAlias = PyTree[Shaped[Array, "..."]]
 # beartype must admit any rank so the public plain-Python validator can raise
 # the documented ValueError instead of a wrapper-specific type-check error.
 if TYPE_CHECKING:
+    EmissionSequence: TypeAlias = Float[Array, "ntime emission_dim"]
     InputSequence: TypeAlias = (
         Float[Array, " ntime"] | Float[Array, "ntime input_dim"]
     )
 else:
+    EmissionSequence: TypeAlias = Float[Array, "*emission_shape"]
     InputSequence: TypeAlias = Float[Array, "*input_shape"]
 
 

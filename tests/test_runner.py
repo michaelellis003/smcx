@@ -98,6 +98,22 @@ def test_runner_rejects_an_empty_emission_sequence():
         )
 
 
+def test_runner_rejects_rank_one_emissions():
+    def initialize(time_index, emission, key):
+        raise AssertionError((time_index, emission, key))
+
+    def step(carry, time_index, emission, key):
+        raise AssertionError((carry, time_index, emission, key))
+
+    with pytest.raises(ValueError, match="emissions must have shape"):
+        smcx.run_particle_filter(
+            jr.key(0),
+            initialize,
+            step,
+            jnp.zeros(3),
+        )
+
+
 def test_runner_executes_a_custom_kernel_with_time_aligned_inputs():
     num_particles = 16
     emissions = jnp.array([[10.0], [20.0], [30.0]])

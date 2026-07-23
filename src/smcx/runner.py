@@ -8,7 +8,7 @@ from typing import NamedTuple, cast
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, tree
-from jaxtyping import Array, Float
+from jaxtyping import Array
 
 from smcx._utils import (
     _canonicalize_inputs,
@@ -22,6 +22,7 @@ from smcx._utils import (
 )
 from smcx.containers import ParticleFilterPosterior, ParticleFilterRecord
 from smcx.types import (
+    EmissionSequence,
     FilterCarry,
     InputSequence,
     ParticleFilterInitFn,
@@ -139,12 +140,17 @@ def run_particle_filter(
     key: PRNGKeyT,
     initialize: ParticleFilterInitFn | ParticleFilterInitFnWithInput,
     step: ParticleFilterStepFn | ParticleFilterStepFnWithInput,
-    emissions: Float[Array, "ntime emission_dim"],
+    emissions: EmissionSequence,
     *,
     inputs: InputSequence | None = None,
     store_history: bool = True,
 ) -> ParticleFilterPosterior:
     """Run a caller-owned particle-filter initialization and step kernel."""
+    if emissions.ndim != 2:
+        raise ValueError(
+            "emissions must have shape (T, emission_dim); "
+            f"got ndim={emissions.ndim}"
+        )
     num_timesteps = emissions.shape[0]
     if num_timesteps == 0:
         raise ValueError("emissions must contain at least one row")
