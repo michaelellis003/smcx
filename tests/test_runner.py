@@ -225,9 +225,9 @@ def test_runner_final_only_matches_full_custom_history(num_timesteps):
 
 def test_custom_runner_supports_jit_vmap_and_evidence_gradients():
     def run(key, evidence_scale=1.0):
-        callbacks = _transport_callbacks(8, evidence_scale)
+        initialize, step = _transport_callbacks(8, evidence_scale)
         return smcx.run_particle_filter(
-            key, *callbacks, _EMISSIONS, inputs=_INPUTS
+            key, initialize, step, _EMISSIONS, inputs=_INPUTS
         )
 
     eager = run(jr.key(12))
