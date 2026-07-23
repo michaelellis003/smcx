@@ -12,7 +12,10 @@ Matches the conventions used by Dynamax (``dynamax.types``).
 
 from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
 
-from jaxtyping import Array, Float, Int32, PRNGKeyArray, PyTree, Shaped
+from jaxtyping import Array, Float, Int, Int32, PRNGKeyArray, PyTree, Shaped
+
+if TYPE_CHECKING:
+    from smcx.containers import ParticleFilterRecord
 
 PRNGKeyT = PRNGKeyArray
 """JAX PRNG key (handles both old and new JAX key formats)."""
@@ -31,6 +34,9 @@ ParticleHistory: TypeAlias = PyTree[Shaped[Array, "ntime num_particles ..."]]
 
 StateHistory: TypeAlias = PyTree[Shaped[Array, "ntime ..."]]
 """Single-trajectory state PyTree with a leading time axis."""
+
+FilterCarry: TypeAlias = PyTree[Shaped[Array, "..."]]
+"""Caller-owned JAX PyTree carried by a particle-filter kernel."""
 
 # Static checkers see the accepted rank-one/rank-two contract. At runtime,
 # beartype must admit any rank so the public plain-Python validator can raise
@@ -350,3 +356,59 @@ class ResamplingFn(Protocol):
         num_samples: int,
         /,
     ) -> Int32[Array, " num_samples"]: ...
+
+
+@runtime_checkable
+class ParticleFilterInitFn(Protocol):
+    """Initialize a caller-owned particle-filter kernel."""
+
+    def __call__(
+        self,
+        time_index: Int[Array, ""],
+        emission_t: Float[Array, " emission_dim"],
+        key_t: PRNGKeyT,
+        /,
+    ) -> "tuple[FilterCarry, ParticleFilterRecord]": ...
+
+
+@runtime_checkable
+class ParticleFilterInitFnWithInput(Protocol):
+    """Initialize an input-aware caller-owned particle-filter kernel."""
+
+    def __call__(
+        self,
+        time_index: Int[Array, ""],
+        emission_t: Float[Array, " emission_dim"],
+        input_t: Float[Array, " input_dim"],
+        key_t: PRNGKeyT,
+        /,
+    ) -> "tuple[FilterCarry, ParticleFilterRecord]": ...
+
+
+@runtime_checkable
+class ParticleFilterStepFn(Protocol):
+    """Advance a caller-owned particle-filter kernel."""
+
+    def __call__(
+        self,
+        carry: FilterCarry,
+        time_index: Int[Array, ""],
+        emission_t: Float[Array, " emission_dim"],
+        key_t: PRNGKeyT,
+        /,
+    ) -> "tuple[FilterCarry, ParticleFilterRecord]": ...
+
+
+@runtime_checkable
+class ParticleFilterStepFnWithInput(Protocol):
+    """Advance an input-aware caller-owned particle-filter kernel."""
+
+    def __call__(
+        self,
+        carry: FilterCarry,
+        time_index: Int[Array, ""],
+        emission_t: Float[Array, " emission_dim"],
+        input_t: Float[Array, " input_dim"],
+        key_t: PRNGKeyT,
+        /,
+    ) -> "tuple[FilterCarry, ParticleFilterRecord]": ...

@@ -100,6 +100,15 @@ class BootstrapStepInfo(NamedTuple):
     log_evidence_increment: Float[Array, ""]
 
 
+class ParticleFilterRecord(NamedTuple):
+    """Standard per-time record returned by caller-owned filter kernels."""
+
+    particles: ParticleCloud
+    log_weights: Float[Array, " num_particles"]
+    ancestors: Int[Array, " num_particles"]
+    log_evidence_increment: Float[Array, ""]
+
+
 class ParticleFilterPosterior(NamedTuple):
     r"""Full output of a particle filter run.
 

@@ -20,6 +20,7 @@ from smcx.containers import (
     GaussianSmootherPosterior,
     LiuWestPosterior,
     ParticleFilterPosterior,
+    ParticleFilterRecord,
     ParticleFilterResult,
     ParticleState,
     SMC2Posterior,
@@ -55,6 +56,7 @@ from smcx.resampling import (
     stratified,
     systematic,
 )
+from smcx.runner import run_particle_filter
 from smcx.simulate import simulate
 from smcx.smc2 import smc2
 from smcx.tempering import temper
@@ -73,6 +75,7 @@ __all__ = [
     "GaussianSmootherPosterior",
     "LiuWestPosterior",
     "ParticleFilterPosterior",
+    "ParticleFilterRecord",
     "ParticleFilterResult",
     "ParticleState",
     "SMC2Posterior",
@@ -106,6 +109,7 @@ __all__ = [
     "replicated_log_ml",
     "residual",
     "rts_smoother",
+    "run_particle_filter",
     "simulate",
     "smc2",
     "stratified",
