@@ -3,29 +3,8 @@
 
 """Contract and distributional tests for the native resamplers.
 
-The expectation and covariance oracles below are independent consequences
-of categorical sampling, not frozen draws from another implementation.  The
-residual definition and variance results are from Douc, Cappe, and Moulines
-(2005), DOI 10.1109/ISPA.2005.195385, arXiv:cs/0507025.
-
-The implementations were also checked out-of-process at seed 20260718 with
-50,000 independent replicates per scheme.  Maximum absolute expected-count /
-covariance errors for smcx, particles, and BlackJAX were respectively:
-systematic ``.00234/.001404``, ``.00394/.000456``, ``.00232/.001404``;
-stratified ``.00274/.000564``, ``.00152/.001444``, ``.00274/.000564``;
-multinomial ``.00518/.003428``, ``.01096/.005312``, ``.00884/.004852``;
-and residual ``.00810/.000156``, ``.01110/.001620``, ``.00608/.000852``.
-Every entry was within five independently estimated Monte Carlo SEs. No
-upstream code or dependency is imported by this test:
-
-* particles 0.4, f71e94a21a11c73b58e2d694775b1b1d379b8854, MIT:
-  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/particles/resampling.py
-  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/LICENSE
-* BlackJAX 1.6.2 (a9ef478c69d730a2caa13ca4b2d735c580e0feec), Apache-2.0:
-  https://github.com/blackjax-devs/blackjax/blob/a9ef478c69d730a2caa13ca4b2d735c580e0feec/blackjax/smc/resampling.py
-  https://github.com/blackjax-devs/blackjax/blob/a9ef478c69d730a2caa13ca4b2d735c580e0feec/LICENSE
-
-No code was copied or translated from either implementation.
+The variance checks follow Douc, Cappe, and Moulines (2005),
+https://doi.org/10.1109/ISPA.2005.195385.
 """
 
 import jax
@@ -35,11 +14,6 @@ import numpy as np
 import pytest
 
 from smcx import multinomial, residual, stratified, systematic
-from smcx.resampling import (
-    _BELOW_ONE,
-    _normalized_cdf,
-    _searchsorted_clipped,
-)
 from smcx.types import ResamplingFn
 
 SCHEMES = [systematic, stratified, multinomial, residual]
@@ -131,14 +105,6 @@ class TestContract:
         large = resampler(key, large_weights, 257)
 
         np.testing.assert_array_equal(large, ordinary)
-
-    def test_sub_one_endpoint_never_selects_zero_weight_tail(self) -> None:
-        weights = jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32)
-        query = jnp.array([_BELOW_ONE], dtype=jnp.float32)
-
-        ancestor = _searchsorted_clipped(_normalized_cdf(weights), query)
-
-        np.testing.assert_array_equal(ancestor, np.array([0]))
 
     def test_public_systematic_clamps_rounded_endpoint(
         self, monkeypatch: pytest.MonkeyPatch

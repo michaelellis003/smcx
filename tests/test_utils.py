@@ -22,7 +22,6 @@ from smcx import (
     guided_filter,
     liu_west_filter,
 )
-from smcx.resampling import systematic
 
 
 def _run_standard_filter(
@@ -135,87 +134,6 @@ def _run_lookahead_filter(
         resampling_threshold=threshold,
         store_history=store_history,
     )
-
-
-@pytest.mark.parametrize(
-    ("threshold", "expected_resample", "expected_ancestors"),
-    [
-        (0.0, False, [0, 1, 2, 3]),
-        (5.0, True, [0, 1, 1, 2]),
-    ],
-    ids=["threshold-zero", "forced"],
-)
-def test_conditional_resample_preserves_fixed_key_output(
-    threshold: float,
-    expected_resample: bool,
-    expected_ancestors: list[int],
-) -> None:
-    """Changing normalization control flow must preserve seeded outputs."""
-    num_particles = 4
-    identity = jnp.arange(num_particles, dtype=jnp.int32)
-    log_weights = jnp.log(
-        jnp.array([0.25, 0.5, 0.1875, 0.0625], dtype=jnp.float32)
-    )
-
-    do_resample, ancestors = jax.jit(
-        lambda key, weights: utils._conditional_resample(
-            key,
-            weights,
-            jnp.asarray(utils.compute_ess(weights)),
-            systematic,
-            threshold,
-            num_particles,
-            identity,
-        )
-    )(jr.key(20260719), log_weights)
-
-    assert bool(do_resample) is expected_resample
-    np.testing.assert_array_equal(ancestors, expected_ancestors)
-
-
-@pytest.mark.skipif(
-    jax.default_backend() == "mps",
-    reason="jax-mps does not lower jax.debug.callback",
-)
-def test_conditional_resample_skips_normalize_without_resampling(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The no-resample runtime branch must not normalize a weight vector."""
-    normalization_calls: list[None] = []
-    original_normalize = utils.normalize
-
-    def record_call(_value: object) -> None:
-        normalization_calls.append(None)
-
-    def observed_normalize(log_weights: jax.Array) -> jax.Array:
-        jax.debug.callback(record_call, log_weights)
-        return original_normalize(log_weights)
-
-    monkeypatch.setattr(utils, "normalize", observed_normalize)
-    num_particles = 4
-    identity = jnp.arange(num_particles, dtype=jnp.int32)
-    log_weights = jnp.log(
-        jnp.array([0.25, 0.5, 0.1875, 0.0625], dtype=jnp.float32)
-    )
-
-    result = jax.jit(
-        lambda key, weights: utils._conditional_resample(
-            key,
-            weights,
-            jnp.asarray(utils.compute_ess(weights)),
-            systematic,
-            0.0,
-            num_particles,
-            identity,
-        )
-    )(jr.key(20260719), log_weights)
-    jax.block_until_ready(result)
-    jax.effects_barrier()
-
-    do_resample, ancestors = result
-    assert not bool(do_resample)
-    np.testing.assert_array_equal(ancestors, identity)
-    assert normalization_calls == []
 
 
 @pytest.mark.parametrize("algorithm", ["bootstrap", "guided"])

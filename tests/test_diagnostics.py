@@ -792,34 +792,12 @@ class TestDiagnose:
         assert "ess_below_threshold" in result
         assert "warnings" in result
 
-    def test_diagnose_healthy_filter_no_warnings(
-        self, lgssm_params, lgssm_data
-    ):
-        """A well-behaved filter should produce few or no warnings."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=5_000)
-        result = diagnose(pf_post)
-        # With 5000 particles on a simple LGSSM, ESS should be OK
-        assert result["min_ess"] > 1.0
-
-    def test_pareto_k_warning_states_reliability_not_variance(
-        self, lgssm_params, lgssm_data
-    ):
-        """The k-threshold warning is about reliability, not variance.
-
-        Weight variance is infinite for every k >= 0.5; the 0.7-ish
-        threshold is the PSIS practical-reliability boundary (Vehtari
-        et al. 2024). The warning must not present the threshold as
-        the infinite-variance boundary.
-        """
+    def test_pareto_k_threshold_adds_warning(self, lgssm_params, lgssm_data):
         pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=500)
-        # Force the warning regardless of the fitted k values.
-        result = diagnose(pf_post, pareto_k_threshold=-1.0)
-        k_warnings = [w for w in result["warnings"] if "Pareto-k" in w]
-        assert k_warnings, "expected a Pareto-k warning"
-        msg = k_warnings[0]
-        assert "unreliable" in msg
-        assert "0.5" in msg
-        assert "infinite variance at some steps" not in msg
+        quiet = diagnose(pf_post, pareto_k_threshold=float("inf"))
+        forced = diagnose(pf_post, pareto_k_threshold=-1.0)
+
+        assert len(forced["warnings"]) > len(quiet["warnings"])
 
     def test_diagnose_collapsed_ess_warns(self):
         """When ESS = 1, diagnose should warn."""

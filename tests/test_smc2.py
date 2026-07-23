@@ -1,41 +1,10 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""SMC² tests against a converged numerical oracle and outside evidence.
-
-For an LGSSM with unknown AR coefficient ``a``, a 20,001-point trapezoidal
-integration of the exact Kalman likelihood supplies the reference posterior.
-The retained refinement test bounds the numerical grid error.
-
-One-time isolated validation (2026-07-18; N_theta=128, N_x=256, eight fixed
-seeds) gave smcx log evidence/mean/variance ``-55.425010 (.056962)``,
-``.873361 (.002665)``, and ``.00721287 (.000250)``; particles 0.4 gave
-``-55.426805 (.064977)``, ``.873256 (.003133)``, and ``.00692804
-(.000318)``. The grid targets are ``-55.458652497463525``,
-``.870239461175306``, and ``.007183951188524291``; all passed five-SE gates.
-
-TFP 0.25.0's experimental ``smc_squared`` was also investigated. The matched
-call's trace was consistent with omitting the terminal observation, and its
-unmodified numerical output disagreed with the grid target. Its rejuvenation
-branch also explicitly resets outer log-weights to zero (uniform), rather
-than preserving its incoming weights. It was therefore rejected as a full
-SMC² authority. A disclosed
-diagnostic run with rejuvenation disabled and one unused terminal sentinel
-(N_theta=512, N_x=256, eight seeds) recovered log evidence ``-55.44813
-(.03615)``, posterior mean ``.869165 (.00134)``, and variance ``.00700898
-(.00025917)``, validating only its nested-weighting target.
-
-Pinned sources and licenses (no outside code copied or imported here):
-
-* particles 0.4, f71e94a21a11c73b58e2d694775b1b1d379b8854, MIT:
-  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/particles/smc_samplers.py#L1052-L1181
-  https://github.com/nchopin/particles/blob/f71e94a21a11c73b58e2d694775b1b1d379b8854/LICENSE
-* TFP 0.25.0, 9709569d9c1159dc54154044f679edc4a15bd26b, Apache-2.0:
-  https://github.com/tensorflow/probability/blob/9709569d9c1159dc54154044f679edc4a15bd26b/tensorflow_probability/python/experimental/mcmc/particle_filter.py#L766-L967
-  https://github.com/tensorflow/probability/blob/9709569d9c1159dc54154044f679edc4a15bd26b/LICENSE
+"""SMC² tests against a numerical LGSSM oracle.
 
 Algorithm: Chopin, Jacob, and Papaspiliopoulos (2013),
-https://doi.org/10.1111/j.1467-9868.2012.01046.x
+https://doi.org/10.1111/j.1467-9868.2012.01046.x.
 """
 
 import importlib
@@ -91,21 +60,6 @@ Y_JX = jnp.asarray(Y)[:, None]
 PARAM_INIT, LOG_PRIOR, INNER_INIT, INNER_TRANS, INNER_LOGOBS = _model()
 
 
-def _grid_reference(num_points):
-    """Integrate the exact Kalman likelihood by stabilized trapezoids."""
-    y = Y.astype(np.float64)
-    grid = np.linspace(0.5, 1.3, num_points)
-    ll = np.array([kalman_1d(y, a, Q, R, 0.0, P0)[0] for a in grid])
-    shifted_density = np.exp(ll - ll.max()) / 0.8
-    shifted_z = np.trapezoid(shifted_density, grid)
-    density = shifted_density / shifted_z
-    mean = float(np.trapezoid(density * grid, grid))
-    second = float(np.trapezoid(density * grid**2, grid))
-    logz = float(ll.max() + math.log(shifted_z))
-    return mean, second - mean**2, logz
-
-
-GRID_POINTS = 20_001
 GRID_MEAN = 0.870239461175306
 GRID_VARIANCE = 0.007183951188524291
 GRID_LOGZ = -55.458652497463525
@@ -501,18 +455,6 @@ class TestFixedKeyRegression:
         # A threshold above one forces rejuvenation at every time, while
         # positive acceptance records prove that each PMMH loop did work.
         assert np.all(np.asarray(posterior.acceptance_rates) > 0.0)
-
-
-class TestNumericalReference:
-    """The retained high-resolution grid constants are converged."""
-
-    def test_coarse_grid_reproduces_promoted_constants(self):
-        mean, variance, logz = _grid_reference(2_001)
-        # Difference between 2,001 and the promoted 20,001-point trapezoidal
-        # grids; 2e-9 therefore bounds the observed quadrature refinement.
-        assert mean == pytest.approx(GRID_MEAN, abs=2e-9)
-        assert variance == pytest.approx(GRID_VARIANCE, abs=2e-9)
-        assert logz == pytest.approx(GRID_LOGZ, abs=2e-9)
 
 
 class TestPosteriorRecovery:

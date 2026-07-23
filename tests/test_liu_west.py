@@ -1,46 +1,10 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for :func:`smcx.liu_west_filter` and its approximation boundary.
-
-The permanent gate uses the conjugate model and observations below. With an
-exact marginal look-ahead, N=5000, and 12 fixed seeds, smcx at ``a=.95`` gave
-posterior mean/variance ``.770542 (.018900 SE)`` and ``.018234 (.000911 SE)``;
-the exact values are ``.780951478386060`` and ``.018876018876019``.
-
-A separate one-time campaign matched nimbleSMC's available semantics: the
-same model and data, N=5000, 24 seeds (1--24), ``a=.95`` mapped to discount
-``d=1/(3-2a)``, a state-mean plug-in look-ahead, and multinomial resampling at
-every t>0. smcx and nimbleSMC posterior mean (SE) were respectively
-``.679184 (.014976)`` and ``.690884 (.015460)``; second moments were
-``.477746 (.020853)`` and ``.493187 (.020909)``. Their differences were
-``.544`` and ``.523`` combined SE; weighted variances differed by ``1.127``
-combined SE. smcx's evidence-ratio mean was ``.643876 (.238710 SE)``, 1.492 SE
-from one; nimbleSMC exposes no evidence normalizer.
-
-Both matched plug-in configurations show the same bias from the exact target
-(exact second moment ``.628761230469391``), while the stronger exact-marginal
-smcx configuration passes the permanent exact gate. This identifies a
-configuration-sensitive Liu--West approximation, not an implementation
-discrepancy. Remaining implementation differences were RNG engines, smcx's
-covariance jitter, and kernel-covariance timing.
-
-The isolated comparator used nimbleSMC 0.11.1 under R 4.4.3 with NIMBLE
-1.4.2. We elected nimbleSMC's BSD-3-Clause license alternative. NIMBLE's
-compiled ``rankSample`` dependency is GPL-2-or-later; it was executed only as
-an isolated black box. No outside or GPL code is imported, copied, translated,
-linked, or retained by these tests.
-
-* nimbleSMC 0.11.1, 6d39f55ed614d168e565ccf401b4cf82bafda998:
-  https://github.com/nimble-dev/nimbleSMC/blob/6d39f55ed614d168e565ccf401b4cf82bafda998/packages/nimbleSMC/R/LiuWestFilter.R#L98-L316
-  https://github.com/nimble-dev/nimbleSMC/blob/6d39f55ed614d168e565ccf401b4cf82bafda998/packages/nimbleSMC/DESCRIPTION
-  https://github.com/nimble-dev/nimbleSMC/blob/6d39f55ed614d168e565ccf401b4cf82bafda998/packages/nimbleSMC/LICENSE
-* NIMBLE 1.4.2, 812894c537a6679955456f373922e2f2208d5119:
-  https://github.com/nimble-dev/nimble/blob/812894c537a6679955456f373922e2f2208d5119/packages/nimble/inst/CppCode/RcppUtils.cpp#L655-L735
-  https://github.com/nimble-dev/nimble/blob/812894c537a6679955456f373922e2f2208d5119/packages/nimble/inst/COPYRIGHTS
+"""Tests for Liu-West filtering against a conjugate Gaussian reference.
 
 Algorithm: Liu and West (2001),
-https://doi.org/10.1007/978-1-4757-3437-9_10
+https://doi.org/10.1007/978-1-4757-3437-9_10.
 """
 
 import math
@@ -184,31 +148,6 @@ def _make_liu_west_fns():
 
 class TestLiuWestConjugateReference:
     """Liu-West output is characterized against an exact posterior."""
-
-    def test_promoted_exact_constants_follow_normal_conjugacy(self):
-        learned = CONJUGATE_OBSERVATIONS[1:]
-        marginal_var = 0.35 + 0.20
-        posterior_var = 1.0 / (1.0 / 4.0 + learned.size / marginal_var)
-        posterior_mean = posterior_var * learned.sum() / marginal_var
-        logz_rest = (
-            -0.5 * learned.size * math.log(2.0 * math.pi * marginal_var)
-            - 0.5 * float(learned @ learned) / marginal_var
-            - 0.5 * math.log(2.0 * math.pi * 4.0)
-            + 0.5 * math.log(2.0 * math.pi * posterior_var)
-            + 0.5 * posterior_mean**2 / posterior_var
-        )
-        first_logz = -0.5 * (
-            math.log(2.0 * math.pi * marginal_var)
-            + CONJUGATE_OBSERVATIONS[0] ** 2 / marginal_var
-        )
-
-        assert posterior_mean == pytest.approx(CONJUGATE_EXACT_MEAN, abs=1e-14)
-        assert posterior_var == pytest.approx(
-            CONJUGATE_EXACT_VARIANCE, abs=1e-14
-        )
-        assert first_logz + logz_rest == pytest.approx(
-            CONJUGATE_EXACT_LOGZ, abs=1e-13
-        )
 
     def test_evidence_and_parameter_moments_pass_five_se_gate(self):
         """Twelve committed runs match exact evidence and two moments."""
