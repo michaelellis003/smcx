@@ -42,9 +42,9 @@ _MEMORY = _names(
 )
 _FAILURE = _names(
     "kind exception_type message key_index key_words key_indices failed_call "
-    "timing_prefix timeout_s stdout_tail stderr_tail returncode prelaunch "
-    "expected_source_sha256 observed_source_sha256 boundaries changed_domains "
-    "worker_failure"
+    "failed_stage timing_prefix environment timeout_s stdout_tail stderr_tail "
+    "returncode prelaunch expected_source_sha256 observed_source_sha256 "
+    "boundaries changed_domains worker_failure"
 )
 _IDENTITY_DOMAINS = ("source", "lock", "packages", "python", "host")
 _METADATA = tuple(
@@ -120,6 +120,24 @@ def _failure(value: object) -> dict[str, Any] | None:
         ):
             raise ValueError("measurement failed call is invalid")
         result["failed_call"] = dict(call)
+    if "failed_stage" in raw:
+        if raw["failed_stage"] != "post_timing_extraction":
+            raise ValueError("measurement failed stage is invalid")
+        result["failed_stage"] = raw["failed_stage"]
+    if "environment" in raw:
+        environment = _map(
+            raw["environment"],
+            {"pre_timing", "post_timing", "failure_boundary"},
+            "failure environment",
+        )
+        post_timing = environment["post_timing"]
+        result["environment"] = {
+            "pre_timing": _boundary(environment["pre_timing"]),
+            "post_timing": (
+                None if post_timing is None else _boundary(post_timing)
+            ),
+            "failure_boundary": _boundary(environment["failure_boundary"]),
+        }
     if "timing_prefix" in raw:
         prefix = _map(
             raw["timing_prefix"],
@@ -140,7 +158,13 @@ def _failure(value: object) -> dict[str, Any] | None:
             and _positive(first)
             and all(_positive(item) for item in steady)
         )
-        if prefix["eligible"] is not False or not valid_call:
+        valid_stage = bool(
+            result.get("failed_stage") == "post_timing_extraction"
+            and _positive(first)
+            and len(steady) == 7
+            and all(_positive(item) for item in steady)
+        )
+        if prefix["eligible"] is not False or not (valid_call or valid_stage):
             raise ValueError("measurement timing prefix is invalid")
         result["timing_prefix"] = {**prefix, "steady_times_s": steady}
     if "prelaunch" in raw:
