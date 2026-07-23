@@ -209,8 +209,16 @@ def test_markdown_hides_timing_for_an_accuracy_ineligible_cell():
     assert values[-4:] == ["—", "—", "—", "—"]
 
 
-def test_plots_are_deterministic_and_report_omissions(tmp_path):
+def _plot_evidence():
     evidence = _evidence()
+    accuracy = evidence["cells"][0]["accuracy"]
+    for name in ("mean", "covariance", "evidence"):
+        accuracy[f"{name}_loss"]["rmse"] = 0.1
+    return evidence
+
+
+def test_plots_are_deterministic_and_report_omissions(tmp_path):
+    evidence = _plot_evidence()
     first_gate = tmp_path / "first-gates.png"
     first_cost = tmp_path / "first-cost.png"
     second_gate = tmp_path / "second-gates.png"
@@ -230,7 +238,7 @@ def test_plots_are_deterministic_and_report_omissions(tmp_path):
 
 
 def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
-    evidence = _evidence()
+    evidence = _plot_evidence()
     eligible_gate = tmp_path / "eligible-gates.png"
     render_plots(evidence, eligible_gate, tmp_path / "cost.png")
     cell = evidence["cells"][0]
@@ -248,7 +256,7 @@ def test_plots_do_not_impute_accuracy_ineligible_cost(tmp_path):
 
 
 def test_cost_plot_distinguishes_sweep_counts(tmp_path, monkeypatch):
-    evidence = _evidence()
+    evidence = _plot_evidence()
     source = evidence["cells"][0]
     for index in (2, 4):
         item = evidence["cells"][index]
@@ -273,10 +281,7 @@ def test_cost_plot_distinguishes_sweep_counts(tmp_path, monkeypatch):
 
 
 def test_cost_plot_uses_nonnegative_rmse_scale(tmp_path, monkeypatch):
-    evidence = _evidence()
-    accuracy = evidence["cells"][0]["accuracy"]
-    for name in ("mean", "covariance", "evidence"):
-        accuracy[f"{name}_loss"]["rmse"] = 0.1
+    evidence = _plot_evidence()
     observed = []
 
     def capture(figure, path):

@@ -203,7 +203,7 @@ def _cost_figure(rows: Sequence[_PlotCell], path: Path) -> None:
                         alpha=sweep_alphas[row.cell["sweeps"]],
                     )
                 axis.set_xscale("log")
-                axis.set_yscale("symlog", linthresh=1e-6)
+                axis.set_yscale("log")
                 axis.set_title(loss.capitalize())
                 axis.set_xlabel("Target-pair evaluations")
                 axis.set_ylabel(
