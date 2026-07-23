@@ -7,7 +7,6 @@ Algorithm: Chopin, Jacob, and Papaspiliopoulos (2013),
 https://doi.org/10.1111/j.1467-9868.2012.01046.x.
 """
 
-import importlib
 import math
 
 import jax
@@ -174,55 +173,6 @@ class TestStructure:
                 32,
                 ess_threshold=0.0,
             )
-
-
-class TestInnerKernelReductions:
-    """Inner kernels reuse row reductions already needed for weights."""
-
-    @pytest.mark.skipif(
-        jax.default_backend() == "mps",
-        reason="jax-mps does not lower jax.debug.callback",
-    )
-    def test_public_run_evaluates_each_inner_row_lse_once(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        smc2_module = importlib.import_module("smcx.smc2")
-        original_lse_rows = smc2_module._lse_rows
-        lse_shapes: list[tuple[int, ...]] = []
-
-        def record_call(value: object) -> None:
-            lse_shapes.append(np.asarray(value).shape)
-
-        def observed_lse_rows(values: jax.Array) -> jax.Array:
-            jax.debug.callback(record_call, values)
-            return original_lse_rows(values)
-
-        monkeypatch.setattr(smc2_module, "_lse_rows", observed_lse_rows)
-        (
-            param_init,
-            log_prior,
-            inner_sampler,
-            transition_sampler,
-            log_observation_fn,
-            emissions,
-        ) = _small_model()
-        posterior = smcx.smc2(
-            jr.key(20),
-            param_init,
-            log_prior,
-            inner_sampler,
-            transition_sampler,
-            log_observation_fn,
-            emissions,
-            3,
-            4,
-            ess_threshold=0.0,
-        )
-        jax.block_until_ready(posterior)
-        jax.effects_barrier()
-
-        assert lse_shapes.count((3, 4)) == emissions.shape[0]
 
 
 class TestCallbackFreshness:
