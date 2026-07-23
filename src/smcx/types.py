@@ -7,7 +7,8 @@
 
 """Shared aliases and callback protocols for smcx.
 
-Matches the conventions used by Dynamax (``dynamax.types``).
+Core array and key aliases follow the conventions used by Dynamax
+(``dynamax.types``); callback protocols describe smcx's public boundaries.
 """
 
 from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable

@@ -1,13 +1,17 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-r"""Exact Gaussian inference for linear state-space models.
+r"""Gaussian inference for linear and first-order nonlinear state-space models.
 
-The filter implements the covariance-form recursion of Kalman (1960)
-with a Joseph covariance update. The smoother implements the backward
-recursion of Rauch, Tung, and Striebel (1965). Dynamax and statsmodels
-are independent numerical validation references; no implementation
-code is copied from either project.
+The linear filter implements the exact covariance-form recursion of Kalman
+(1960) with a Joseph covariance update. The smoother implements the backward
+recursion of Rauch, Tung, and Striebel (1965). The extended filter applies a
+first-order Taylor approximation to nonlinear means with additive Gaussian
+noise, following Schmidt (1966).
+
+statsmodels and Dynamax validate the linear methods; Stone Soup and Dynamax
+validate the extended filter. They are comparison implementations, not
+implementation lineage; no code was copied or translated.
 
 References:
     Kalman, R. E. (1960). A New Approach to Linear Filtering and
@@ -15,6 +19,12 @@ References:
     Rauch, H. E., Tung, F., and Striebel, C. T. (1965). Maximum
     Likelihood Estimates of Linear Dynamic Systems.
     https://doi.org/10.2514/3.3166
+    Schmidt, S. F. (1966). Application of State-Space Methods to
+    Navigation Problems.
+    https://doi.org/10.1016/B978-1-4831-6716-9.50011-4
+    Särkkä, S., and Svensson, L. (2023). Bayesian Filtering and
+    Smoothing, second edition, chapter 7.
+    https://doi.org/10.1017/9781108917407
     Neumaier, A. (1974). Rundungsfehleranalyse einiger Verfahren zur
     Summation endlicher Summen.
     https://doi.org/10.1002/zamm.19740540106
@@ -675,20 +685,33 @@ def extended_kalman_filter(
 ) -> GaussianFilterPosterior:
     r"""Run a first-order extended Kalman filter.
 
-    The transition and observation callbacks define the conditional means
-    of a nonlinear model with additive Gaussian noise. Jacobian callbacks
-    are explicit and use output-by-input orientation.
+    The model has nonlinear conditional means and additive Gaussian noise:
+
+    .. math::
+
+        x_0 &\sim N(m_0, P_0),\\
+        x_t &= f(x_{t-1}, u_t) + q_t,\\
+        y_t &= h(x_t, u_t) + r_t.
+
+    Jacobian callbacks are explicit and use output-by-input orientation.
+    At each positive time, ``f`` and its Jacobian are evaluated at the
+    preceding filtered mean; ``h`` and its Jacobian are evaluated at the
+    predicted mean. Callers may supply analytic callbacks or create them
+    explicitly with ``jax.jacfwd``.
 
     Args:
         initial_mean: Prior mean for ``x[0]``, shape ``(state_dim,)``.
         initial_covariance: Prior covariance for ``x[0]``.
-        transition_mean_fn: ``state -> state_mean``.
-        transition_jacobian_fn: State Jacobian of ``transition_mean_fn``.
+        transition_mean_fn: ``state -> state_mean`` or, when inputs are
+            supplied, ``(state, input_t) -> state_mean``.
+        transition_jacobian_fn: State Jacobian of ``transition_mean_fn``
+            with the same input signature.
         transition_covariance: Static transition covariance or a timed
             array with leading length ``ntime - 1``.
-        observation_mean_fn: ``state -> observation_mean``.
+        observation_mean_fn: ``state -> observation_mean`` or, when inputs
+            are supplied, ``(state, input_t) -> observation_mean``.
         observation_jacobian_fn: State Jacobian of
-            ``observation_mean_fn``.
+            ``observation_mean_fn`` with the same input signature.
         observation_covariance: Static observation covariance or a timed
             array with leading length ``ntime``.
         emissions: Observations with shape ``(ntime, observation_dim)``.
@@ -697,7 +720,9 @@ def extended_kalman_filter(
             transition into ``t``; input zero does not alter the prior.
 
     Returns:
-        Approximate Gaussian filtering moments and innovation evidence.
+        Approximate Gaussian filtering moments. ``marginal_loglik`` and
+        ``log_evidence_increments`` contain linearized Gaussian innovation
+        log densities, not the exact nonlinear-model marginal likelihood.
 
     Raises:
         ValueError: An array or callback output has an invalid shape or
@@ -705,7 +730,16 @@ def extended_kalman_filter(
 
     Note:
         Arrays must share a float32 or float64 dtype. Covariances must be
-        finite, symmetric, and positive definite.
+        finite, symmetric, and positive definite. Missing observations are
+        not supported.
+
+    References:
+        Schmidt, S. F. (1966). Application of State-Space Methods to
+        Navigation Problems.
+        https://doi.org/10.1016/B978-1-4831-6716-9.50011-4
+        Särkkä, S., and Svensson, L. (2023). Bayesian Filtering and
+        Smoothing, second edition, chapter 7.
+        https://doi.org/10.1017/9781108917407
     """
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
         raise ValueError("initial_mean must have shape (state_dim,) with d > 0")

@@ -1,15 +1,16 @@
 # smcx
 
 smcx is a [JAX](https://github.com/jax-ml/jax) library for state-space
-inference: exact Gaussian filtering and smoothing, particle filters,
-adaptive tempered SMC, and SMC² with a small, function-oriented API. It
-runs on CPU, CUDA, and TPU through JAX, and on Apple-silicon GPUs through
-the optional
+inference: exact linear-Gaussian filtering and smoothing, first-order
+nonlinear Gaussian filtering, particle filters, adaptive tempered SMC,
+and SMC² with a small, function-oriented API. It runs on CPU, CUDA, and
+TPU through JAX, and on Apple-silicon GPUs through the optional
 [jax-mps](https://github.com/tillahoffmann/jax-mps) backend.
 
 Features include:
 
 - exact linear-Gaussian Kalman filtering and RTS smoothing;
+- extended Kalman filtering with explicit, replaceable Jacobian callbacks;
 - bootstrap, auxiliary, guided, and Liu–West particle filters;
 - a public runner for caller-owned particle-filter kernels;
 - adaptive tempered SMC and nested SMC² parameter inference;
@@ -19,9 +20,9 @@ Features include:
 - structured latent-state PyTrees and explicit time-varying inputs.
 
 smcx supplies inference algorithms, not model or distribution classes.
-Linear-Gaussian models are dense arrays; particle models are ordinary JAX
-callables, so they can be written directly or adapted from libraries such as
-[Dynamax](https://github.com/probml/dynamax).
+Linear-Gaussian models are dense arrays. Nonlinear Gaussian and particle
+models use ordinary JAX callables, so model functions, Jacobians, proposals,
+and other algorithmic pieces can be replaced independently.
 Filtering and smoothing remain separate functions joined by typed
 posterior containers, allowing research code to replace one stage
 without subclassing or rerunning the other.
@@ -121,9 +122,11 @@ and the separation of orchestration from history in
 These are design credits; no code was copied or translated.
 The implemented methods draw on these primary sources:
 
-- Exact Gaussian state estimation:
+- Exact linear-Gaussian state estimation:
   [Kalman (1960)](https://doi.org/10.1115/1.3662552) and
   [Rauch, Tung, and Striebel (1965)](https://doi.org/10.2514/3.3166).
+- First-order nonlinear Gaussian filtering:
+  [Schmidt (1966)](https://doi.org/10.1016/B978-1-4831-6716-9.50011-4).
 - Particle filters: [Gordon, Salmond, and Smith (1993)](https://doi.org/10.1049/ip-f-2.1993.0015),
   [Pitt and Shephard (1999)](https://doi.org/10.1080/01621459.1999.10474153),
   [Doucet, Godsill, and Andrieu (2000)](https://doi.org/10.1023/A:1008935410038),
@@ -143,13 +146,23 @@ The implemented methods draw on these primary sources:
 
 ### Numerical validation references
 
-The exact Gaussian outputs are independently validated against
-[Dynamax](https://github.com/probml/dynamax) 1.0.2 and
-[statsmodels](https://github.com/statsmodels/statsmodels) 0.14.6.
-They are comparison implementations, not code lineage: no code from
-either project is copied or translated. Exact commits, environments,
-licenses, and observed differences are recorded with the
-[frozen multivariate fixture](tests/_kalman_reference.py).
+The linear Kalman and RTS outputs are independently validated against
+[Dynamax 1.0.2](https://github.com/probml/dynamax/releases/tag/1.0.2)
+and
+[statsmodels 0.14.6](https://github.com/statsmodels/statsmodels/releases/tag/v0.14.6);
+the details are recorded with the
+[frozen linear fixture](tests/_kalman_reference.py).
+
+The extended Kalman outputs are independently validated against
+[Stone Soup 1.9.1](https://github.com/dstl/Stone-Soup/releases/tag/v1.9.1),
+cross-checked with Dynamax 1.0.2, and checked against
+[SciPy 1.18.0](https://github.com/scipy/scipy/releases/tag/v1.18.0)
+innovation log densities. Exact commits, environments, licenses, and
+observed differences are recorded with the
+[frozen nonlinear fixture](tests/_extended_kalman_reference.py).
+
+These projects are numerical comparison implementations, not code
+lineage; no implementation code was copied or translated.
 
 ## Contributing
 

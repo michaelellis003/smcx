@@ -11,10 +11,14 @@ The canonical outputs were generated on CPU in float64 with Stone Soup
 * Stone Soup 1.9.1, commit
   a4336b920a799cfe0a77ecb05867c5deeb371c7a, MIT:
   https://github.com/dstl/Stone-Soup/releases/tag/v1.9.1
+  https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/stonesoup/predictor/kalman.py
+  https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/stonesoup/updater/kalman.py
   https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/LICENSE
 * SciPy 1.18.0, commit
   54ef5423f2e4376230ec3bfda6912a07a50958e3, BSD-3-Clause:
   https://github.com/scipy/scipy/releases/tag/v1.18.0
+  https://github.com/scipy/scipy/blob/54ef5423f2e4376230ec3bfda6912a07a50958e3/scipy/stats/_multivariate.py
+  https://github.com/scipy/scipy/blob/54ef5423f2e4376230ec3bfda6912a07a50958e3/LICENSE.txt
 
 Stone Soup's ``ExtendedKalmanPredictor`` and ``ExtendedKalmanUpdater`` were
 used with ``use_joseph_cov=True`` and forced covariance symmetry. SciPy's
@@ -23,6 +27,7 @@ multivariate normal log density supplied the innovation likelihoods.
 The values were cross-checked with Dynamax 1.0.2, commit
 a216d7feec0d025560a0a194ed5abab538648375, MIT:
 https://github.com/probml/dynamax/releases/tag/1.0.2
+https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/dynamax/nonlinear_gaussian_ssm/inference_ekf.py
 https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/LICENSE
 
 Dynamax differed by at most 3.35e-10 in filtered means, 1.94e-9 in

@@ -1,9 +1,9 @@
 # smcx
 
 smcx provides state-space inference algorithms for JAX: exact
-linear-Gaussian filtering and smoothing, particle filters, adaptive
-tempered SMC, and SMC². It is a function-oriented inference library,
-not a modeling framework.
+linear-Gaussian filtering and smoothing, first-order nonlinear Gaussian
+filtering, particle filters, adaptive tempered SMC, and SMC². It is a
+function-oriented inference library, not a modeling framework.
 
 ## Installation
 
@@ -26,9 +26,9 @@ pip install "smcx[arviz]"
   then builds, diagnoses, and improves a particle filter.
 - [Filtering tutorial](tutorials/filtering.md) runs a complete example and
   plots its filtering intervals and effective sample size.
-- [Custom models](guides/custom-models.md) explains the callback boundary,
-  structured latent states, time-varying inputs, and an optional Equinox
-  representation.
+- [Custom models](guides/custom-models.md) explains nonlinear Gaussian and
+  particle callback boundaries, structured latent states, time-varying
+  inputs, and an optional Equinox representation.
 - [Stochastic volatility](guides/stochastic-volatility.md) learns a static
   parameter online with the Liu–West filter.
 - [ArviZ reporting](guides/arviz.md) exports weighted particle output for
@@ -38,14 +38,15 @@ pip install "smcx[arviz]"
 
 ## Model boundary
 
-Linear-Gaussian models enter as dense arrays. Particle-model callbacks
-describe one particle; smcx vectorizes them over the cloud. Every
-stochastic operation takes an explicit PRNG key. Bootstrap, auxiliary,
-and guided filters can carry nonempty latent-state PyTrees, and every
-filter accepts an explicit sequence of time-varying inputs.
+Linear-Gaussian models enter as dense arrays. The extended Kalman filter
+takes separate nonlinear mean and state-Jacobian callbacks. Particle-model
+callbacks describe one particle; smcx vectorizes them over the cloud.
+Every stochastic operation takes an explicit PRNG key. Bootstrap,
+auxiliary, and guided filters can carry nonempty latent-state PyTrees, and
+every filter accepts an explicit sequence of time-varying inputs.
 
-The Kalman filter and RTS smoother are separate functions connected by a
-typed Gaussian posterior. Particle algorithms similarly expose model,
+The linear Kalman filter, extended Kalman filter, and RTS smoother return
+typed Gaussian posteriors. Particle algorithms similarly expose model,
 proposal, and resampling callbacks. These boundaries allow research code
 to replace supported pieces without adopting a class hierarchy.
 
