@@ -113,6 +113,11 @@ def test_eligible_timing_summarizes_five_blocks_and_memory_scopes():
         (("structural_failure", "execution_failure"), True, "failed_execution"),
         (("structural_failure",), True, "failed_structural"),
         ((_IDENTITY_DRIFT,), False, "ineligible_identity"),
+        (
+            ("metal_timing_environment_ineligible",),
+            False,
+            "ineligible_environment",
+        ),
         ((), True, "ineligible_identity"),
     ),
 )
