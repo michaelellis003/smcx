@@ -1,9 +1,9 @@
 # smcx
 
-smcx provides Sequential Monte Carlo algorithms for JAX: particle
-filters, adaptive tempered SMC, and SMC². It is a function-oriented
-inference library, not a modeling framework; models enter as ordinary
-JAX callables.
+smcx provides state-space inference algorithms for JAX: exact
+linear-Gaussian filtering and smoothing, particle filters, adaptive
+tempered SMC, and SMC². It is a function-oriented inference library,
+not a modeling framework.
 
 ## Installation
 
@@ -22,8 +22,8 @@ pip install "smcx[arviz]"
 
 ## Start here
 
-- [Quickstart](guides/quickstart.md) builds and diagnoses a particle
-  filter, then replaces its bootstrap proposal with a guided proposal.
+- [Quickstart](guides/quickstart.md) establishes an exact Kalman baseline,
+  then builds, diagnoses, and improves a particle filter.
 - [Filtering tutorial](tutorials/filtering.md) runs a complete example and
   plots its filtering intervals and effective sample size.
 - [Custom models](guides/custom-models.md) explains the callback boundary,
@@ -38,10 +38,16 @@ pip install "smcx[arviz]"
 
 ## Model boundary
 
-Most callbacks describe one particle; smcx vectorizes them over the cloud.
-Every stochastic operation takes an explicit PRNG key. Bootstrap, auxiliary,
-and guided filters can carry nonempty latent-state PyTrees, and every filter
-accepts an explicit sequence of time-varying inputs.
+Linear-Gaussian models enter as dense arrays. Particle-model callbacks
+describe one particle; smcx vectorizes them over the cloud. Every
+stochastic operation takes an explicit PRNG key. Bootstrap, auxiliary,
+and guided filters can carry nonempty latent-state PyTrees, and every
+filter accepts an explicit sequence of time-varying inputs.
+
+The Kalman filter and RTS smoother are separate functions connected by a
+typed Gaussian posterior. Particle algorithms similarly expose model,
+proposal, and resampling callbacks. These boundaries allow research code
+to replace supported pieces without adopting a class hierarchy.
 
 CPU, CUDA, and TPU use stock JAX. The optional `metal` extra uses jax-mps on
 macOS arm64; Metal is float32-only.

@@ -1,13 +1,15 @@
 # smcx
 
-smcx is a [JAX](https://github.com/jax-ml/jax) library for Sequential
-Monte Carlo: particle filters, adaptive tempered SMC, and SMC² with a
-small, function-oriented API. It runs on CPU, CUDA, and TPU through JAX,
-and on Apple-silicon GPUs through the optional
+smcx is a [JAX](https://github.com/jax-ml/jax) library for state-space
+inference: exact Gaussian filtering and smoothing, particle filters,
+adaptive tempered SMC, and SMC² with a small, function-oriented API. It
+runs on CPU, CUDA, and TPU through JAX, and on Apple-silicon GPUs through
+the optional
 [jax-mps](https://github.com/tillahoffmann/jax-mps) backend.
 
 Features include:
 
+- exact linear-Gaussian Kalman filtering and RTS smoothing;
 - bootstrap, auxiliary, guided, and Liu–West particle filters;
 - adaptive tempered SMC and nested SMC² parameter inference;
 - systematic, stratified, multinomial, and residual resampling;
@@ -16,9 +18,12 @@ Features include:
 - structured latent-state PyTrees and explicit time-varying inputs.
 
 smcx supplies inference algorithms, not model or distribution classes.
-Models are ordinary JAX callables, so they can be written directly or
-adapted from libraries such as
+Linear-Gaussian models are dense arrays; particle models are ordinary JAX
+callables, so they can be written directly or adapted from libraries such as
 [Dynamax](https://github.com/probml/dynamax).
+Filtering and smoothing remain separate functions joined by typed
+posterior containers, allowing research code to replace one stage
+without subclassing or rerunning the other.
 
 ## Installation
 
@@ -107,6 +112,9 @@ Papaspiliopoulos's
 [*An Introduction to Sequential Monte Carlo*](https://doi.org/10.1007/978-3-030-47845-2).
 The implemented methods draw on these primary sources:
 
+- Exact Gaussian state estimation:
+  [Kalman (1960)](https://doi.org/10.1115/1.3662552) and
+  [Rauch, Tung, and Striebel (1965)](https://doi.org/10.2514/3.3166).
 - Particle filters: [Gordon, Salmond, and Smith (1993)](https://doi.org/10.1049/ip-f-2.1993.0015),
   [Pitt and Shephard (1999)](https://doi.org/10.1080/01621459.1999.10474153),
   [Doucet, Godsill, and Andrieu (2000)](https://doi.org/10.1023/A:1008935410038),
@@ -123,6 +131,16 @@ The implemented methods draw on these primary sources:
   [Matheson and Winkler (1976)](https://doi.org/10.1287/mnsc.22.10.1087)
   and [Gneiting and Raftery (2007)](https://doi.org/10.1198/016214506000001437).
 - Reporting: [ArviZ](https://doi.org/10.21105/joss.01143).
+
+### Numerical validation references
+
+The exact Gaussian outputs are independently validated against
+[Dynamax](https://github.com/probml/dynamax) 1.0.2 and
+[statsmodels](https://github.com/statsmodels/statsmodels) 0.14.6.
+They are comparison implementations, not code lineage: no code from
+either project is copied or translated. Exact commits, environments,
+licenses, and observed differences are recorded with the
+[frozen multivariate fixture](tests/_kalman_reference.py).
 
 ## Contributing
 

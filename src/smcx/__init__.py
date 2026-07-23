@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Sequential Monte Carlo and particle filtering in JAX."""
+"""State-space inference with exact Gaussian and Monte Carlo methods."""
 
 from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _version
@@ -16,6 +16,8 @@ from smcx.bootstrap import (
 from smcx.containers import (
     BootstrapCheckpoint,
     BootstrapStepInfo,
+    GaussianFilterPosterior,
+    GaussianSmootherPosterior,
     LiuWestPosterior,
     ParticleFilterPosterior,
     ParticleFilterResult,
@@ -44,6 +46,7 @@ from smcx.diagnostics import (
 )
 from smcx.exceptions import DegenerateWeightsError
 from smcx.guided import guided_filter
+from smcx.kalman import kalman_filter, rts_smoother
 from smcx.liu_west import liu_west_filter
 from smcx.reporting import to_arviz
 from smcx.resampling import (
@@ -66,6 +69,8 @@ __all__ = [
     "BootstrapCheckpoint",
     "BootstrapStepInfo",
     "DegenerateWeightsError",
+    "GaussianFilterPosterior",
+    "GaussianSmootherPosterior",
     "LiuWestPosterior",
     "ParticleFilterPosterior",
     "ParticleFilterResult",
@@ -83,6 +88,7 @@ __all__ = [
     "diagnose",
     "ess",
     "guided_filter",
+    "kalman_filter",
     "liu_west_filter",
     "log_bayes_factor",
     "log_ess",
@@ -99,6 +105,7 @@ __all__ = [
     "reconstruct_trajectories",
     "replicated_log_ml",
     "residual",
+    "rts_smoother",
     "simulate",
     "smc2",
     "stratified",

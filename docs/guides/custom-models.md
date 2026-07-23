@@ -1,9 +1,11 @@
 # Author custom models
 
-smcx represents a model by the callbacks needed for one inference
-algorithm. You do not need to subclass an smcx model or wrap distributions
-in an smcx object. The boundary consists of arrays, PyTrees, and explicit
-PRNG keys.
+Particle and tempered methods represent a model by the callbacks needed
+for one inference algorithm. You do not need to subclass an smcx model or
+wrap distributions in an smcx object. The boundary consists of arrays,
+PyTrees, and explicit PRNG keys. Exact linear-Gaussian models instead use
+the dense-array interface shown in the
+[quickstart](quickstart.md#establish-the-exact-baseline).
 
 Most callbacks act on one particle. smcx maps them over the particle cloud;
 only an initial sampler creates the whole cloud at once. This keeps model
@@ -12,7 +14,7 @@ and evidence accounting.
 
 ## Choose callbacks for the algorithm
 
-Each algorithm asks only for behavior it can use:
+Each callback-driven algorithm asks only for behavior it can use:
 
 | Algorithm | Sampling | Densities or weights |
 | --- | --- | --- |
