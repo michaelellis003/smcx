@@ -5,6 +5,7 @@
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 import smcx
 from tests import _extended_kalman_reference as nonlinear_reference
@@ -193,4 +194,36 @@ def test_extended_kalman_matches_independent_nonlinear_reference():
             expected_array,
             rtol=0.0,
             atol=atol,
+        )
+
+
+def test_extended_kalman_rejects_non_array_callback_output():
+    """Callback structural failures use the public validation exception."""
+
+    def transition_mean(_state):
+        return [0.0]
+
+    def transition_jacobian(_state):
+        return jnp.eye(1)
+
+    def observation_mean(state):
+        return state
+
+    def observation_jacobian(_state):
+        return jnp.eye(1)
+
+    with pytest.raises(
+        ValueError,
+        match="transition_mean_fn output must return a JAX array",
+    ):
+        smcx.extended_kalman_filter(
+            jnp.zeros(1),
+            jnp.eye(1),
+            transition_mean,
+            transition_jacobian,
+            jnp.eye(1),
+            observation_mean,
+            observation_jacobian,
+            jnp.eye(1),
+            jnp.zeros((2, 1)),
         )

@@ -291,12 +291,14 @@ def _time_vector(
 
 
 def _check_callback_array(
-    value: Shaped[Array, "*shape"],
+    value: object,
     expected_shape: tuple[int, ...],
     name: str,
     dtype: jnp.dtype,
 ) -> None:
     """Validate a nonlinear Gaussian callback result."""
+    if not isinstance(value, Array):
+        raise ValueError(f"{name} must return a JAX array")
     _check_float_array(value, name, dtype)
     if value.shape != expected_shape:
         raise ValueError(
