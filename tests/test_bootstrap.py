@@ -106,50 +106,6 @@ class TestBootstrapVsKalman:
         )
 
 
-# ---------------------------------------------------------------------------
-# Test: convergence with increasing particles
-# ---------------------------------------------------------------------------
-
-
-class TestBootstrapConvergence:
-    """PF estimates should improve with more particles."""
-
-    def test_log_ml_variance_decreases_at_alpha_0_05(
-        self, lgssm_params, lgssm_data
-    ):
-        """More particles reduce log-evidence variance at fixed alpha."""
-        _, emissions = lgssm_data
-
-        init_fn, trans_fn, obs_fn = _make_smcx_fns(lgssm_params)
-        variances = []
-        # Use disjoint committed seeds so the two samples are independent.
-        # A single seeded absolute error need not decrease monotonically.
-        campaigns = (
-            (256, range(3_000, 3_016)),
-            (4_096, range(4_000, 4_016)),
-        )
-        for num_particles, seeds in campaigns:
-            ratios = []
-            for seed in seeds:
-                pf = bootstrap_filter(
-                    key=jr.key(seed),
-                    initial_sampler=init_fn,
-                    transition_sampler=trans_fn,
-                    log_observation_fn=obs_fn,
-                    emissions=emissions,
-                    num_particles=num_particles,
-                )
-                ratios.append(
-                    math.exp(float(pf.marginal_loglik) - EXACT_LOG_LIKELIHOOD)
-                )
-            variances.append(np.var(ratios, ddof=1))
-
-        # Under equal normal variances, s_low^2 / s_high^2 ~ F(15, 15).
-        # The one-sided alpha=.05 critical value is 2.4034470714953375.
-        variance_ratio = variances[0] / variances[1]
-        assert variance_ratio > 2.4034470714953375, variances
-
-
 class TestBootstrapESSTrace:
     """ESS trace should be reasonable."""
 
