@@ -260,8 +260,8 @@ def test_multivariate_filter_and_smoother_match_independent_references():
     )
 
 
-def test_rts_smoother_compiled_matches_eager_and_supports_one_step():
-    """The independent backward stage compiles and handles an empty scan."""
+def test_rts_smoother_compiled_matches_eager():
+    """Compilation preserves a nonempty RTS backward scan."""
     filtered = smcx.kalman_filter(
         jnp.array([0.0]),
         jnp.array([[1.0]]),
@@ -269,7 +269,7 @@ def test_rts_smoother_compiled_matches_eager_and_supports_one_step():
         jnp.array([[0.25]]),
         jnp.array([[1.0]]),
         jnp.array([[0.5]]),
-        jnp.array([[0.2]]),
+        jnp.array([[0.2], [-0.1], [0.4]]),
     )
 
     eager = smcx.rts_smoother(filtered, jnp.array([[0.9]]))
@@ -280,12 +280,27 @@ def test_rts_smoother_compiled_matches_eager_and_supports_one_step():
 
     for eager_value, compiled_value in zip(eager, compiled, strict=True):
         np.testing.assert_allclose(compiled_value, eager_value)
+
+
+def test_rts_smoother_one_step_is_filter_identity():
+    """A one-step model has no backward transition to apply."""
+    filtered = smcx.kalman_filter(
+        jnp.array([0.0]),
+        jnp.array([[1.0]]),
+        jnp.array([[0.9]]),
+        jnp.array([[0.25]]),
+        jnp.array([[1.0]]),
+        jnp.array([[0.5]]),
+        jnp.array([[0.2]]),
+    )
+    smoothed = smcx.rts_smoother(filtered, jnp.array([[0.9]]))
+
     np.testing.assert_array_equal(
-        eager.smoothed_means,
+        smoothed.smoothed_means,
         filtered.filtered_means,
     )
     np.testing.assert_array_equal(
-        eager.smoothed_covariances,
+        smoothed.smoothed_covariances,
         filtered.filtered_covariances,
     )
 
@@ -304,3 +319,27 @@ def test_rts_smoother_rejects_misaligned_transition_history():
 
     with pytest.raises(ValueError, match="transition_matrix"):
         smcx.rts_smoother(filtered, jnp.ones((3, 1, 1)))
+
+
+def test_joseph_update_preserves_float32_covariance_psd():
+    """The public update remains PSD under cancellation in subtractive form."""
+    posterior = smcx.kalman_filter(
+        jnp.zeros(2, dtype=jnp.float32),
+        jnp.array(
+            [[350_000.0, -1_145_000.0], [-1_145_000.0, 3_749_000.0]],
+            dtype=jnp.float32,
+        ),
+        jnp.eye(2, dtype=jnp.float32),
+        jnp.eye(2, dtype=jnp.float32),
+        jnp.array(
+            [[0.45, 0.91], [-0.79, 0.95]],
+            dtype=jnp.float32,
+        ),
+        jnp.diag(jnp.array([0.1, 0.4], dtype=jnp.float32)),
+        jnp.zeros((1, 2), dtype=jnp.float32),
+    )
+
+    covariance = np.asarray(posterior.filtered_covariances[0])
+    # For this fixture, the subtractive P-KSK' update has minimum
+    # eigenvalue below -0.65 on CPU and Metal, while Joseph gives >0.09.
+    assert np.linalg.eigvalsh(covariance).min() >= 0.0
