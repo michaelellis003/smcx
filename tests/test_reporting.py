@@ -146,6 +146,8 @@ def test_adaptive_tempered_runs_pad_stage_diagnostics_with_validity_mask():
     diagnostics = _group(result, "particle_diagnostics")
 
     assert posterior["theta"].shape == (2, 4, 1)
+    assert np.all(posterior["theta"].values[1] >= 10.0)
+    assert diagnostics["stage_valid"].dims == ("run", "stage")
     np.testing.assert_array_equal(
         diagnostics["stage_valid"].values,
         np.array([[True, True, False], [True, True, True]]),
@@ -156,6 +158,21 @@ def test_adaptive_tempered_runs_pad_stage_diagnostics_with_validity_mask():
     )
     assert np.isnan(diagnostics["ess"].values[0, -1])
     assert np.isnan(diagnostics["acceptance_rates"].values[0, -1])
+
+
+def test_tempered_stage_diagnostics_require_aligned_lengths():
+    particles = jnp.arange(4, dtype=jnp.float32)[:, None]
+    posterior = TemperedPosterior(
+        particles=particles,
+        log_weights=jnp.full(4, -jnp.log(4.0)),
+        marginal_loglik=jnp.asarray(1.0),
+        temperatures=jnp.array([0.0, 1.0]),
+        ess=jnp.array([4.0]),
+        acceptance_rates=jnp.array([0.0, 0.8]),
+    )
+
+    with pytest.raises(ValueError, match="matching stage lengths"):
+        to_arviz(posterior, key=jr.key(9))
 
 
 def test_filter_metadata_and_observations_land_in_standard_groups():
