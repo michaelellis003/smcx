@@ -296,6 +296,13 @@ jobs:
       - name: Build sdist and wheel
         run: uv build
 
+      - name: Verify license in release artifacts
+        run: |
+          unzip -Z1 dist/*.whl | grep -E '/licenses/LICENSE$'
+          tar -tzf dist/*.tar.gz | grep -E '/LICENSE$'
+          unzip -p dist/*.whl '*/METADATA' \
+            | grep -Fx 'License-File: LICENSE'
+
       - name: Validate package metadata
         run: uvx twine check dist/*
 
