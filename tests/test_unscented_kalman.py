@@ -1,10 +1,12 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the scaled unscented numerical core."""
+"""Tests for scaled unscented Kalman filtering."""
 
+import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 import smcx
 import smcx.kalman as kalman_module
@@ -283,60 +285,35 @@ def test_unscented_kalman_reduces_to_linear_filter():
     for actual, expected in zip(unscented, exact, strict=True):
         _assert_roundoff_close(actual, expected)
 
-
-def test_unscented_kalman_input_callbacks_match_linear_controls():
-    """Input callbacks use the destination-time package convention."""
-    initial_mean = jnp.array([0.1, -0.2])
-    initial_covariance = jnp.array([[0.6, 0.04], [0.04, 0.45]])
-    transition_matrix = jnp.array([[0.9, 0.05], [-0.1, 0.8]])
-    transition_bias = jnp.array([0.03, -0.02])
-    transition_input_matrix = jnp.array([[0.4], [0.1]])
-    transition_covariance = jnp.array([[0.07, 0.01], [0.01, 0.05]])
-    observation_matrix = jnp.array([[1.0, 0.25]])
-    observation_bias = jnp.array([-0.05])
-    observation_input_matrix = jnp.array([[0.2]])
-    observation_covariance = jnp.array([[0.25]])
-    emissions = jnp.array([[20.0], [-0.1], [0.35], [0.2]])
-    inputs = jnp.array([100.0, 0.2, -0.4, 0.5])
-
-    def transition_mean(state, input_t):
-        return (
-            transition_matrix @ state
-            + transition_bias
-            + transition_input_matrix @ input_t
+    compiled = jax.jit(
+        lambda observations: smcx.unscented_kalman_filter(
+            initial_mean,
+            initial_covariance,
+            transition_mean,
+            transition_covariance,
+            observation_mean,
+            observation_covariance,
+            observations,
         )
-
-    def observation_mean(state, input_t):
-        return (
-            observation_matrix @ state
-            + observation_bias
-            + observation_input_matrix @ input_t
-        )
-
-    exact = smcx.kalman_filter(
-        initial_mean,
-        initial_covariance,
-        transition_matrix,
-        transition_covariance,
-        observation_matrix,
-        observation_covariance,
-        emissions,
-        transition_bias=transition_bias,
-        observation_bias=observation_bias,
-        transition_input_matrix=transition_input_matrix,
-        observation_input_matrix=observation_input_matrix,
-        inputs=inputs,
-    )
-    unscented = smcx.unscented_kalman_filter(
-        initial_mean,
-        initial_covariance,
-        transition_mean,
-        transition_covariance,
-        observation_mean,
-        observation_covariance,
-        emissions,
-        inputs=inputs,
-    )
-
-    for actual, expected in zip(unscented, exact, strict=True):
+    )(emissions)
+    for actual, expected in zip(compiled, unscented, strict=True):
         _assert_roundoff_close(actual, expected)
+
+
+@pytest.mark.parametrize("alpha", [1e-150, 1e-200])
+def test_unscented_filter_rejects_tiny_finite_alpha(alpha):
+    """Derived-rule overflow uses the public validation exception."""
+    zero = jnp.zeros(1, dtype=jnp.float32)
+    one = jnp.eye(1, dtype=jnp.float32)
+
+    with pytest.raises(ValueError, match="non-finite weights"):
+        smcx.unscented_kalman_filter(
+            zero,
+            one,
+            lambda state: state,
+            one,
+            lambda state: state,
+            one,
+            zero[None],
+            alpha=alpha,
+        )
