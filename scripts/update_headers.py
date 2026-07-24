@@ -4,13 +4,35 @@
 """Ensure all Python source files carry SPDX license headers."""
 
 import argparse
-import glob
 import os
+import subprocess
 import sys
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-blacklist = ["/build/", "/dist/", "/smcx.egg", "/venv/", "/.venv/"]
 file_types = [("*.py", "# {}")]
+
+
+def git_filenames(pattern: str) -> list[str]:
+    """Return tracked and nonignored untracked files matching a pattern."""
+    output = subprocess.check_output(
+        [
+            "git",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            pattern,
+        ],
+        cwd=root,
+    )
+    return [
+        os.path.join(root, os.fsdecode(filename))
+        for filename in sorted(output.split(b"\0"))
+        if filename
+    ]
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--check", action="store_true")
@@ -24,16 +46,14 @@ for basename, comment in file_types:
     # See https://spdx.org/ids-how
     spdx_line = comment.format("SPDX-License-Identifier: Apache-2.0\n")
 
-    filenames = glob.glob(os.path.join(root, "**", basename), recursive=True)
-    filenames.sort()
-    filenames = [
-        filename
-        for filename in filenames
-        if not any(word in filename for word in blacklist)
-    ]
+    filenames = git_filenames(basename)
     for filename in filenames:
-        with open(filename) as f:
-            lines = f.readlines()
+        # A file may vanish after Git reports the worktree snapshot.
+        try:
+            with open(filename) as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            continue
 
         # Ignore empty files like __init__.py
         if all(line.isspace() for line in lines):
@@ -69,7 +89,12 @@ for basename, comment in file_types:
             dirty.append(filename)
             continue
 
-        with open(filename, "w") as f:
+        # Omit O_CREAT so a file removed since reading is not recreated.
+        try:
+            descriptor = os.open(filename, os.O_WRONLY | os.O_TRUNC)
+        except FileNotFoundError:
+            continue
+        with os.fdopen(descriptor, "w") as f:
             f.write("".join(lines))
 
         print(f"updated {filename[len(root) + 1 :]}")
