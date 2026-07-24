@@ -2,6 +2,42 @@
 
 <!-- version list -->
 
+## v1.13.1 (2026-07-24)
+
+### Bug Fixes
+
+- **diagnostics**: Reject incomplete time histories
+  ([#113](https://github.com/michaelellis003/smcx/pull/113),
+  [`5d97c8c`](https://github.com/michaelellis003/smcx/commit/5d97c8c2478cd26d889d37809568a8bd2c1092f5))
+
+### Chores
+
+- Remove stale tooling and metadata ([#116](https://github.com/michaelellis003/smcx/pull/116),
+  [`3fb1f70`](https://github.com/michaelellis003/smcx/commit/3fb1f70f1d279c0d328899d19a1b91ab05a518e1))
+
+- **repo**: Make cleanup and deployments revision-safe
+  ([#115](https://github.com/michaelellis003/smcx/pull/115),
+  [`4e3d8a2`](https://github.com/michaelellis003/smcx/commit/4e3d8a2fdea668a0be0723ed6bc5e4921659b2a0))
+
+### Continuous Integration
+
+- **coverage**: Route uploads to smcx with OIDC
+  ([#118](https://github.com/michaelellis003/smcx/pull/118),
+  [`958e003`](https://github.com/michaelellis003/smcx/commit/958e00327cf7c9e3c98ce12935ea24618bebbc49))
+
+### Documentation
+
+- **particles**: Compose auxiliary-guided runner kernels
+  ([#110](https://github.com/michaelellis003/smcx/pull/110),
+  [`ac9572d`](https://github.com/michaelellis003/smcx/commit/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd))
+
+### Testing
+
+- **bootstrap**: Assert observable device behavior
+  ([#117](https://github.com/michaelellis003/smcx/pull/117),
+  [`7c783d6`](https://github.com/michaelellis003/smcx/commit/7c783d6dbec013079d1fa0d21105a23f3d68af6e))
+
+
 ## v1.13.0 (2026-07-24)
 
 ### Features
