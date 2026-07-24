@@ -25,6 +25,11 @@ multiple chains. `num_draws` controls how many equal-weight draws are
 resampled from each particle cloud; the key makes that resampling
 reproducible.
 
+Adaptive tempered runs may require different numbers of stages. Their
+stage-wise diagnostics are padded with `NaN` to the longest run, and the
+Boolean `particle_diagnostics.stage_valid` mask identifies each run's
+recorded stages.
+
 Particle-filter export requires the default `store_history=True`. A
 final-only result keeps the full ESS and evidence traces but only one particle
 cloud, so those arrays do not share an ArviZ `time` dimension. Rerun with full

@@ -33,6 +33,37 @@ def _stack(values: Sequence[object], name: str) -> Array:
     return jnp.stack([getattr(value, name) for value in values])
 
 
+def _tempering_stats(
+    runs: Sequence[TemperedPosterior],
+) -> dict[str, Array]:
+    """Pad adaptive stage traces while preserving their valid lengths."""
+    stage_counts = [run.temperatures.shape[0] for run in runs]
+    for run, count in zip(runs, stage_counts, strict=True):
+        if run.ess.shape != (count,) or run.acceptance_rates.shape != (count,):
+            raise ValueError(
+                "tempering diagnostics must have matching stage lengths"
+            )
+    max_stages = max(stage_counts)
+
+    def padded(name: str) -> Array:
+        return jnp.stack([
+            jnp.pad(
+                getattr(run, name),
+                (0, max_stages - count),
+                constant_values=jnp.nan,
+            )
+            for run, count in zip(runs, stage_counts, strict=True)
+        ])
+
+    return {
+        "temperatures": padded("temperatures"),
+        "ess": padded("ess"),
+        "acceptance_rates": padded("acceptance_rates"),
+        "stage_valid": jnp.arange(max_stages)[None, :]
+        < jnp.asarray(stage_counts)[:, None],
+    }
+
+
 def _resampled_group(
     values: Sequence[object],
     indices: Array,
@@ -135,6 +166,10 @@ def to_arviz(
     Returns:
         ``InferenceData`` on ArviZ 0.x or ``DataTree`` on ArviZ 1.x.
 
+        Adaptive tempered runs retain their independent stage counts.
+        Shorter diagnostic traces are padded with NaN and identified by
+        ``particle_diagnostics.stage_valid``.
+
     Raises:
         ValueError: A particle-filter result retains only its final particle
             cloud. ArviZ export requires aligned full histories.
@@ -203,9 +238,7 @@ def to_arviz(
         values = [run.particles for run in tempered_runs]
         stats = {
             "log_weights": log_weights,
-            "temperatures": _stack(tempered_runs, "temperatures"),
-            "ess": _stack(tempered_runs, "ess"),
-            "acceptance_rates": _stack(tempered_runs, "acceptance_rates"),
+            **_tempering_stats(tempered_runs),
         }
         stat_dims = {name: ["stage"] for name in stats}
         stat_dims["log_weights"] = ["particle"]
