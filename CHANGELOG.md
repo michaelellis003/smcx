@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.10.0 (2026-07-24)
+
+### Features
+
+- **kalman**: Add scaled unscented numerical core
+  ([#103](https://github.com/michaelellis003/smcx/pull/103),
+  [`cd24b10`](https://github.com/michaelellis003/smcx/commit/cd24b10ce838fb5659ca19fd6a6497a71da12408))
+
+
 ## v1.9.0 (2026-07-23)
 
 ### Features
