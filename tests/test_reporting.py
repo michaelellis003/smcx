@@ -122,6 +122,42 @@ def test_dense_and_structured_states_have_stable_names_and_dims():
     assert structured["x"].dims == ("chain", "draw", "time", "axis")
 
 
+def test_adaptive_tempered_runs_pad_stage_diagnostics_with_validity_mask():
+    particles = jnp.arange(4, dtype=jnp.float32)[:, None]
+    short = TemperedPosterior(
+        particles=particles,
+        log_weights=jnp.full(4, -jnp.log(4.0)),
+        marginal_loglik=jnp.asarray(1.0),
+        temperatures=jnp.array([0.0, 1.0]),
+        ess=jnp.array([4.0, 3.0]),
+        acceptance_rates=jnp.array([0.0, 0.8]),
+    )
+    long = TemperedPosterior(
+        particles=particles + 10.0,
+        log_weights=jnp.full(4, -jnp.log(4.0)),
+        marginal_loglik=jnp.asarray(2.0),
+        temperatures=jnp.array([0.0, 0.4, 1.0]),
+        ess=jnp.array([4.0, 3.5, 3.0]),
+        acceptance_rates=jnp.array([0.0, 0.7, 0.8]),
+    )
+
+    result = to_arviz([short, long], key=jr.key(8))
+    posterior = _group(result, "posterior")
+    diagnostics = _group(result, "particle_diagnostics")
+
+    assert posterior["theta"].shape == (2, 4, 1)
+    np.testing.assert_array_equal(
+        diagnostics["stage_valid"].values,
+        np.array([[True, True, False], [True, True, True]]),
+    )
+    np.testing.assert_allclose(
+        diagnostics["temperatures"].values,
+        np.array([[0.0, 1.0, np.nan], [0.0, 0.4, 1.0]]),
+    )
+    assert np.isnan(diagnostics["ess"].values[0, -1])
+    assert np.isnan(diagnostics["acceptance_rates"].values[0, -1])
+
+
 def test_filter_metadata_and_observations_land_in_standard_groups():
     result = to_arviz(
         _filter(), key=jr.key(3), emissions=jnp.array([[1.0], [2.0]])
