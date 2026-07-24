@@ -2,6 +2,43 @@
 
 <!-- version list -->
 
+## v1.13.5 (2026-07-24)
+
+### Bug Fixes
+
+- **filters**: Validate callback outputs throughout
+  ([#143](https://github.com/michaelellis003/smcx/pull/143),
+  [`5bdcafb`](https://github.com/michaelellis003/smcx/commit/5bdcafb5aa47fda169544eb5e93354dca0cec7ab))
+
+- **simulation**: Validate emission callback outputs
+  ([#136](https://github.com/michaelellis003/smcx/pull/136),
+  [`68acd42`](https://github.com/michaelellis003/smcx/commit/68acd428a7d006eda3fbfe235116db328eac3b9b))
+
+- **smc2**: Validate callback output contracts
+  ([#141](https://github.com/michaelellis003/smcx/pull/141),
+  [`ffce30d`](https://github.com/michaelellis003/smcx/commit/ffce30d925b969e7e0bd6d7b6caa6efc6b8fde8a))
+
+- **tempering**: Validate callback outputs at every stage
+  ([#142](https://github.com/michaelellis003/smcx/pull/142),
+  [`8d10479`](https://github.com/michaelellis003/smcx/commit/8d104791697ed33bc47d6a58392ba7548427abb2))
+
+### Refactoring
+
+- **auxiliary**: Extract pure scan step ([#145](https://github.com/michaelellis003/smcx/pull/145),
+  [`5c112e3`](https://github.com/michaelellis003/smcx/commit/5c112e310e6d255e36436ec56af8838c5d2e8015))
+
+- **guided**: Extract pure scan step ([#146](https://github.com/michaelellis003/smcx/pull/146),
+  [`3be2275`](https://github.com/michaelellis003/smcx/commit/3be2275396f819c7e54692be0a6c469725b88c07))
+
+- **numerics**: Share compensated summation
+  ([#147](https://github.com/michaelellis003/smcx/pull/147),
+  [`b65f117`](https://github.com/michaelellis003/smcx/commit/b65f117f5c91b62e961257dd2192e564c53f7f25))
+
+- **types**: Name replicated filter callback contract
+  ([#144](https://github.com/michaelellis003/smcx/pull/144),
+  [`7e70af5`](https://github.com/michaelellis003/smcx/commit/7e70af5e3674f6efc90895f9652e390ac6d9ca0f))
+
+
 ## v1.13.4 (2026-07-24)
 
 ### Bug Fixes
