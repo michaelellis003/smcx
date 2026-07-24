@@ -62,6 +62,7 @@ from jaxtyping import Array, Float, Int
 
 from smcx._utils import (
     _gather_particles,
+    _validate_emission,
     _validate_particle_cloud,
     _validate_state_tree,
     _weighted_quantile_1d,
@@ -579,7 +580,7 @@ def posterior_predictive_sample(
         transition_sampler: Function ``(key, state) -> state``. ``state``
             may be a latent-state PyTree.
         emission_sampler: Function ``(key, state) -> emission`` accepting
-            the same state PyTree.
+            the same state PyTree and returning a nonempty floating vector.
         num_samples: Number of predictive draws per time step.
             Defaults to the number of particles.
 
@@ -588,12 +589,15 @@ def posterior_predictive_sample(
         ``(ntime, num_samples, emission_dim)``.
 
     Raises:
-        ValueError: The posterior state is malformed or the transition
-            changes its PyTree structure, leaf shape, or dtype.
+        ValueError: ``num_samples`` is less than one, the posterior state is
+            malformed, the transition changes its PyTree contract, or the
+            emission is not a nonempty floating vector.
     """
     ntime, n_particles = posterior.filtered_log_weights.shape
     if num_samples is None:
         num_samples = n_particles
+    if num_samples < 1:
+        raise ValueError(f"num_samples must be >= 1; got {num_samples}")
 
     def _sample_one_step(
         log_weights_t: Float[Array, " num_particles"],
@@ -626,7 +630,13 @@ def posterior_predictive_sample(
         propagated = vmap(_transition)(trans_keys, resampled)
         # Draw emissions
         emit_keys = jr.split(k3, num_samples)
-        return vmap(emission_sampler)(emit_keys, propagated)
+
+        def _emit(key_i, state_i):
+            emission = emission_sampler(key_i, state_i)
+            _validate_emission(emission, name="emission_sampler output")
+            return emission
+
+        return vmap(_emit)(emit_keys, propagated)
 
     step_keys = jr.split(key, ntime)
     return vmap(_sample_one_step)(
