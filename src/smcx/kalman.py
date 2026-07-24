@@ -72,16 +72,16 @@ class _FilterStepOutput(NamedTuple):
     log_evidence_increment: Float[Array, ""]
 
 
-class _ExtendedFilterStepInput(NamedTuple):
-    """Arrays consumed by one extended Kalman step."""
+class _NonlinearFilterStepInput(NamedTuple):
+    """Arrays consumed by one nonlinear Gaussian filter step."""
 
     emission: Float[Array, " observation_dim"]
     transition_covariance: Float[Array, "state_dim state_dim"]
     observation_covariance: Float[Array, "observation_dim observation_dim"]
 
 
-class _ExtendedFilterStepInputWithInput(NamedTuple):
-    """Arrays and input consumed by one input-aware extended Kalman step."""
+class _NonlinearFilterStepInputWithInput(NamedTuple):
+    """Arrays and input consumed by one input-aware nonlinear step."""
 
     emission: Float[Array, " observation_dim"]
     transition_covariance: Float[Array, "state_dim state_dim"]
@@ -507,10 +507,11 @@ def _unscented_cross_covariance(
 def _unscented_condition(
     predicted_mean: Float[Array, " state_dim"],
     predicted_covariance: Float[Array, "state_dim state_dim"],
-    observation_mean_fn: ObservationMeanFn,
+    observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
     observation_covariance: Float[Array, "observation_dim observation_dim"],
     observation: Float[Array, " observation_dim"],
     rule: _ScaledUnscentedRule,
+    input_t: Float[Array, " input_dim"] | None = None,
 ) -> tuple[
     Float[Array, " state_dim"],
     Float[Array, "state_dim state_dim"],
@@ -522,7 +523,18 @@ def _unscented_condition(
         predicted_covariance,
         rule,
     )
-    observation_points = vmap(observation_mean_fn)(state_points)
+    if input_t is None:
+        observation_fn = cast(ObservationMeanFn, observation_mean_fn)
+        observation_points = vmap(observation_fn)(state_points)
+    else:
+        observation_fn_u = cast(
+            ObservationMeanFnWithInput,
+            observation_mean_fn,
+        )
+        observation_points = vmap(
+            observation_fn_u,
+            in_axes=(0, None),
+        )(state_points, input_t)
     _check_callback_array(
         observation_points,
         (state_points.shape[0], observation.shape[0]),
@@ -576,14 +588,26 @@ def _unscented_condition(
 
 def _unscented_filter_step(
     state: _FilterState,
-    args: _ExtendedFilterStepInput,
-    transition_mean_fn: TransitionMeanFn,
-    observation_mean_fn: ObservationMeanFn,
+    args: _NonlinearFilterStepInput,
+    transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
+    observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
     rule: _ScaledUnscentedRule,
+    input_t: Float[Array, " input_dim"] | None = None,
 ) -> tuple[_FilterState, _FilterStepOutput]:
     """Apply one pure unscented Kalman predict-and-condition step."""
     state_points = _sigma_points(state.mean, state.covariance, rule)
-    transition_points = vmap(transition_mean_fn)(state_points)
+    if input_t is None:
+        transition_fn = cast(TransitionMeanFn, transition_mean_fn)
+        transition_points = vmap(transition_fn)(state_points)
+    else:
+        transition_fn_u = cast(
+            TransitionMeanFnWithInput,
+            transition_mean_fn,
+        )
+        transition_points = vmap(
+            transition_fn_u,
+            in_axes=(0, None),
+        )(state_points, input_t)
     _check_callback_array(
         transition_points,
         state_points.shape,
@@ -604,6 +628,7 @@ def _unscented_filter_step(
         args.observation_covariance,
         args.emission,
         rule,
+        input_t,
     )
     evidence, compensation = _neumaier_add(
         state.marginal_loglik,
@@ -628,7 +653,7 @@ def _unscented_filter_step(
 
 def _extended_filter_step(
     state: _FilterState,
-    args: _ExtendedFilterStepInput,
+    args: _NonlinearFilterStepInput,
     transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
     transition_jacobian_fn: (
         TransitionJacobianFn | TransitionJacobianFnWithInput
@@ -1119,7 +1144,7 @@ def extended_kalman_filter(
     )
 
     if inputs_arr is None:
-        scan_inputs = _ExtendedFilterStepInput(
+        scan_inputs = _NonlinearFilterStepInput(
             emissions[1:],
             transition_covariances,
             observation_covariances[1:],
@@ -1127,7 +1152,7 @@ def extended_kalman_filter(
 
         def _step(
             state: _FilterState,
-            args: _ExtendedFilterStepInput,
+            args: _NonlinearFilterStepInput,
         ) -> tuple[_FilterState, _FilterStepOutput]:
             return _extended_filter_step(
                 state,
@@ -1140,7 +1165,7 @@ def extended_kalman_filter(
 
         final_state, rest = lax.scan(_step, state_0, scan_inputs)
     else:
-        scan_inputs_u = _ExtendedFilterStepInputWithInput(
+        scan_inputs_u = _NonlinearFilterStepInputWithInput(
             emissions[1:],
             transition_covariances,
             observation_covariances[1:],
@@ -1149,9 +1174,9 @@ def extended_kalman_filter(
 
         def _step_with_input(
             state: _FilterState,
-            args: _ExtendedFilterStepInputWithInput,
+            args: _NonlinearFilterStepInputWithInput,
         ) -> tuple[_FilterState, _FilterStepOutput]:
-            step_args = _ExtendedFilterStepInput(
+            step_args = _NonlinearFilterStepInput(
                 args.emission,
                 args.transition_covariance,
                 args.observation_covariance,
@@ -1272,8 +1297,6 @@ def unscented_kalman_filter(
         Smoothing, second edition, chapter 8.
         https://doi.org/10.1017/9781108917407
     """
-    if inputs is not None:
-        raise NotImplementedError("input-aware unscented filtering")
     setup = _prepare_nonlinear_filter(
         initial_mean,
         initial_covariance,
@@ -1288,15 +1311,21 @@ def unscented_kalman_filter(
         beta,
         kappa,
     )
-    transition_fn = cast(TransitionMeanFn, transition_mean_fn)
-    observation_fn = cast(ObservationMeanFn, observation_mean_fn)
+    if inputs is None:
+        inputs_arr = None
+        input_0 = None
+    else:
+        _check_float_array(inputs, "inputs", setup.dtype)
+        inputs_arr = _canonicalize_inputs(inputs, setup.num_timesteps)
+        input_0 = inputs_arr[0]
     filtered_mean_0, filtered_covariance_0, increment_0 = _unscented_condition(
         initial_mean,
         initial_covariance,
-        observation_fn,
+        observation_mean_fn,
         setup.observation_covariances[0],
         emissions[0],
         rule,
+        input_0,
     )
     state_0 = _FilterState(
         filtered_mean_0,
@@ -1304,25 +1333,57 @@ def unscented_kalman_filter(
         increment_0,
         jnp.zeros_like(increment_0),
     )
-    scan_inputs = _ExtendedFilterStepInput(
-        emissions[1:],
-        setup.transition_covariances,
-        setup.observation_covariances[1:],
-    )
-
-    def _step(
-        state: _FilterState,
-        args: _ExtendedFilterStepInput,
-    ) -> tuple[_FilterState, _FilterStepOutput]:
-        return _unscented_filter_step(
-            state,
-            args,
-            transition_fn,
-            observation_fn,
-            rule,
+    if inputs_arr is None:
+        scan_inputs = _NonlinearFilterStepInput(
+            emissions[1:],
+            setup.transition_covariances,
+            setup.observation_covariances[1:],
         )
 
-    final_state, rest = lax.scan(_step, state_0, scan_inputs)
+        def _step(
+            state: _FilterState,
+            args: _NonlinearFilterStepInput,
+        ) -> tuple[_FilterState, _FilterStepOutput]:
+            return _unscented_filter_step(
+                state,
+                args,
+                transition_mean_fn,
+                observation_mean_fn,
+                rule,
+            )
+
+        final_state, rest = lax.scan(_step, state_0, scan_inputs)
+    else:
+        scan_inputs_u = _NonlinearFilterStepInputWithInput(
+            emissions[1:],
+            setup.transition_covariances,
+            setup.observation_covariances[1:],
+            inputs_arr[1:],
+        )
+
+        def _step_with_input(
+            state: _FilterState,
+            args: _NonlinearFilterStepInputWithInput,
+        ) -> tuple[_FilterState, _FilterStepOutput]:
+            step_args = _NonlinearFilterStepInput(
+                args.emission,
+                args.transition_covariance,
+                args.observation_covariance,
+            )
+            return _unscented_filter_step(
+                state,
+                step_args,
+                transition_mean_fn,
+                observation_mean_fn,
+                rule,
+                args.input_t,
+            )
+
+        final_state, rest = lax.scan(
+            _step_with_input,
+            state_0,
+            scan_inputs_u,
+        )
     predicted_means = jnp.concatenate((
         initial_mean[None],
         rest.predicted_mean,
