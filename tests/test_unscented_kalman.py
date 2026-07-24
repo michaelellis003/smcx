@@ -451,12 +451,19 @@ def test_unscented_float32_update_is_psd_and_accurate():
         [9.999998754e-11, 5.046806022e-15],
         [5.046806022e-15, 9.990034666e-7],
     ])
-    # The innovation condition number is 9.94e6 and observed MPS error 5.01e-8.
-    # Four eps still rejects the subtractive update's -1.22e-5 eigenvalue.
-    budget = 4 * np.finfo(np.float32).eps
+    eps = np.finfo(np.float32).eps
+    # CPU/MPS errors are <=5.19e-8; 2*eps/3 retains 53% forward-error margin.
+    accuracy_budget = 2 * eps / 3
+    # Sixteen ulps at the posterior scale covers covariance eigensolver error.
+    psd_budget = 16 * eps * np.linalg.norm(expected, ord=2)
 
-    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=budget)
-    assert np.linalg.eigvalsh((actual + actual.T) / 2).min() >= -budget
+    np.testing.assert_allclose(
+        actual,
+        expected,
+        rtol=0.0,
+        atol=accuracy_budget,
+    )
+    assert np.linalg.eigvalsh((actual + actual.T) / 2).min() >= -psd_budget
 
 
 def test_unscented_kalman_matches_independent_nonlinear_reference():
