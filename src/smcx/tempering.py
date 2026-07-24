@@ -29,10 +29,10 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-import numpy as np
 from jax import jit, lax, vmap
 from jaxtyping import Array, Float
 
+from smcx._covariance import _weighted_covariance_factor
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _raise_if_degenerate,
@@ -58,42 +58,6 @@ from smcx.weights import log_normalize
 
 _BISECT_ITERS = 60
 _RWM_SCALE = 2.38
-
-
-def _weighted_cov_f64(particles: Array, weights: Array) -> np.ndarray:
-    """Two-pass weighted covariance on the host in float64.
-
-    One call per temperature stage — setup cost, not hot loop. The
-    single-pass form cancels catastrophically at ordinary posterior
-    offsets; two-pass in f64 is exact to rounding.
-    """
-    x = np.asarray(particles, dtype=np.float64)
-    w = np.asarray(weights, dtype=np.float64)
-    w = w / w.sum()
-    mu = w @ x
-    xc = x - mu
-    return (xc * w[:, None]).T @ xc
-
-
-def _chol_with_jitter(cov: np.ndarray) -> jnp.ndarray:
-    """Cholesky factor with escalating diagonal jitter on failure."""
-    d = cov.shape[0]
-    base = np.trace(cov) / max(d, 1)
-    for jitter_scale in (0.0, 1e-8, 1e-6, 1e-4):
-        jitter = base * jitter_scale
-        try:
-            lower = np.linalg.cholesky(cov + jitter * np.eye(d))
-            return jnp.asarray(lower)
-        except np.linalg.LinAlgError:
-            continue
-    # Last resort: eigenvalue clip.
-    eigvals, eigvecs = np.linalg.eigh(cov)
-    eigvals = np.clip(eigvals, base * 1e-6, None)
-    return jnp.asarray(
-        np.linalg.cholesky(
-            (eigvecs * eigvals) @ eigvecs.T + base * 1e-6 * np.eye(d)
-        )
-    )
 
 
 def _mutation_position(
@@ -274,7 +238,7 @@ def temper(
         acc = jnp.zeros(())
         for _ in range(num_mcmc_steps):
             kz, ku, key = jr.split(key, 3)
-            z = jr.normal(kz, (n, dim))
+            z = jr.normal(kz, (n, dim), dtype=particles.dtype)
             prop = particles + z @ l_prop.T
             lp = jnp.asarray(batch_prior(prop))
             ll = jnp.asarray(batch_lik(prop))
@@ -389,8 +353,11 @@ def temper(
 
         # --- adapt the default proposal from the weighted cloud ------
         if mutation_sweep is None:
-            cov = _weighted_cov_f64(particles, jnp.exp(lw_norm))
-            l_prop = _chol_with_jitter(scale2 * cov)
+            l_prop = _weighted_covariance_factor(
+                particles,
+                jnp.exp(lw_norm),
+                scale=scale2,
+            )
 
         # --- resample (always) + pi_{phi'}-invariant moves ----------
         key, kr, km = jr.split(key, 3)

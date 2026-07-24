@@ -295,6 +295,33 @@ class TestMechanics:
     """Acceptance, determinism, degeneracy, container."""
 
     @pytest.mark.parametrize(
+        "spread",
+        [0.0, np.finfo(np.float32).eps / 4],
+    )
+    def test_adaptive_mutation_handles_zero_and_near_zero_spread(
+        self,
+        spread,
+    ):
+        def init(_key, count):
+            values = spread * jnp.arange(count, dtype=jnp.float32)
+            return values[:, None]
+
+        def log_density(position):
+            return -0.5 * jnp.sum(position**2)
+
+        posterior = smcx.temper(
+            jr.key(47),
+            init,
+            log_density,
+            log_density,
+            2,
+            num_mcmc_steps=1,
+        )
+
+        assert posterior.particles.dtype == jnp.float32
+        assert np.all(np.isfinite(np.asarray(posterior.particles)))
+
+    @pytest.mark.parametrize(
         ("drifting_name", "message"),
         [
             ("prior", "log_prior_fn output must have shape"),
@@ -348,8 +375,8 @@ class TestMechanics:
         def zero_uniform(_key, shape=(), dtype=None):
             return jnp.zeros(shape, dtype=dtype)
 
-        def unit_normal(_key, shape):
-            return jnp.ones(shape, dtype=jnp.float32)
+        def unit_normal(_key, shape, dtype=None):
+            return jnp.ones(shape, dtype=dtype)
 
         monkeypatch.setattr(jr, "uniform", zero_uniform)
         monkeypatch.setattr(jr, "normal", unit_normal)

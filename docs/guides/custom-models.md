@@ -516,6 +516,10 @@ after each resampling stage. The caller is responsible for making each step
 invariant for the supplied target. Omitting both callbacks selects the
 existing cloud-adaptive random-walk Metropolis mutation. Pass ordinary
 callbacks rather than pre-jitting a function that accepts the target callable.
+The built-in tempering and SMC² proposals retain trace-relative jitter for
+ill-conditioned clouds. If no positive factor survives in the parameter
+dtype, they use a machine-epsilon variance floor with squared parameter units,
+so an identical parameter population remains a valid input.
 
 ## Optional Equinox representation
 
