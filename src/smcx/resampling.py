@@ -23,6 +23,22 @@ from smcx.types import PRNGKeyT
 _TINY = 1e-30
 
 
+def _validate_inputs(weights: Array, num_samples: int) -> None:
+    """Validate the static public resampling contract."""
+    if weights.ndim != 1:
+        raise ValueError(
+            f"weights must have shape (N,); got shape {weights.shape}"
+        )
+    if weights.shape[0] == 0:
+        raise ValueError("weights must contain at least one value")
+    if not jnp.issubdtype(weights.dtype, jnp.floating):
+        raise ValueError(
+            f"weights must have a floating dtype; got {weights.dtype}"
+        )
+    if num_samples < 1:
+        raise ValueError(f"num_samples must be >= 1; got {num_samples}")
+
+
 def _below_one(dtype: jnp.dtype) -> Array:
     """Return the largest representable value below one for ``dtype``."""
     one = jnp.ones((), dtype=dtype)
@@ -76,7 +92,11 @@ def systematic(
 
     Returns:
         Nondecreasing int32 ancestor indices.
+
+    Raises:
+        ValueError: The weights or sample count are structurally invalid.
     """
+    _validate_inputs(weights, num_samples)
     u0 = jax.random.uniform(key)
     grid = (u0 + jnp.arange(num_samples)) / num_samples
     queries = jnp.minimum(grid, _below_one(weights.dtype))
@@ -97,7 +117,11 @@ def stratified(
 
     Returns:
         Nondecreasing int32 ancestor indices.
+
+    Raises:
+        ValueError: The weights or sample count are structurally invalid.
     """
+    _validate_inputs(weights, num_samples)
     v = jax.random.uniform(key, (num_samples,))
     grid = (jnp.arange(num_samples) + v) / num_samples
     queries = jnp.minimum(grid, _below_one(weights.dtype))
@@ -125,7 +149,11 @@ def multinomial(
 
     Returns:
         Nondecreasing int32 ancestor indices.
+
+    Raises:
+        ValueError: The weights or sample count are structurally invalid.
     """
+    _validate_inputs(weights, num_samples)
     e = -jnp.log1p(-jax.random.uniform(key, (num_samples + 1,)))
     # ``maximum.accumulate`` has a pathological jax-mps 0.10.9 lowering.
     # The explicit associative prefix has the same semantics and stays O(N)
@@ -158,11 +186,15 @@ def residual(
         Int32 ancestor indices (deterministic block first, remainder
         drawn multinomially from the residual weights).
 
+    Raises:
+        ValueError: The weights or sample count are structurally invalid.
+
     References:
         Douc, R., Cappe, O., and Moulines, E. (2005). Comparison of
         resampling schemes for particle filtering.
         https://doi.org/10.1109/ISPA.2005.195385
     """
+    _validate_inputs(weights, num_samples)
     m = num_samples
     scaled_weights = _scale_by_max(weights)
     total = jnp.sum(scaled_weights)
