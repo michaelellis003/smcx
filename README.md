@@ -114,10 +114,11 @@ and provides BibTeX and APA entries.
 The broader Feynman–Kac architecture follows Chopin and
 Papaspiliopoulos's
 [*An Introduction to Sequential Monte Carlo*](https://doi.org/10.1007/978-3-030-47845-2).
-The caller-owned particle-filter runner was informed by the functional
-state/information protocol in
-[BlackJAX 1.6.2](https://github.com/blackjax-devs/blackjax/releases/tag/1.6.2)
-and the separation of orchestration from history in
+The caller-owned particle-filter runner and dependency-free tempering
+mutation boundary were informed by BlackJAX's functional state/information
+protocol and pinned
+[SMC-from-MCMC split](https://github.com/blackjax-devs/blackjax/blob/a9ef478c69d730a2caa13ca4b2d735c580e0feec/blackjax/smc/from_mcmc.py),
+and by the separation of orchestration from history in
 [particles 0.4](https://github.com/nchopin/particles/releases/tag/v0.4).
 These are design credits; no code was copied or translated.
 The implemented methods draw on these primary sources:

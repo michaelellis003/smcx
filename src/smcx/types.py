@@ -139,6 +139,47 @@ class StaticLogDensity(Protocol):
 
 
 @runtime_checkable
+class TemperingMutationState(Protocol):
+    """Expose the dense position carried by a tempering mutation kernel."""
+
+    @property
+    def position(self) -> Float[Array, " state_dim"]: ...
+
+
+@runtime_checkable
+class TemperingMutationInfo(Protocol):
+    """Expose one tempering mutation step's acceptance probability."""
+
+    @property
+    def acceptance_rate(self) -> Scalar: ...
+
+
+@runtime_checkable
+class TemperingMutationInitFn(Protocol):
+    """Initialize caller-owned mutation state at the current target."""
+
+    def __call__(
+        self,
+        position: Float[Array, " state_dim"],
+        tempered_logdensity_fn: StaticLogDensity,
+        /,
+    ) -> TemperingMutationState: ...
+
+
+@runtime_checkable
+class TemperingMutationStepFn(Protocol):
+    """Apply one keyed caller-owned mutation step."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        state: TemperingMutationState,
+        tempered_logdensity_fn: StaticLogDensity,
+        /,
+    ) -> tuple[TemperingMutationState, TemperingMutationInfo]: ...
+
+
+@runtime_checkable
 class TransitionSampler(Protocol):
     """Draw one particle from the transition distribution."""
 

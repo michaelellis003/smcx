@@ -10,23 +10,24 @@ Anneals from the prior to the posterior
 log-likelihood vector — a deterministic solve with no fresh sampling.
 Each stage reweights by
 :math:`\ell \cdot \Delta\phi` (evidence increment at the reweight,
-pre-move — the Del Moral et al. collapse), resamples, and applies
-:math:`\pi_{\phi'}`-invariant random-walk Metropolis moves whose
-proposal covariance is :math:`2.38^2/d \cdot \hat\Sigma` from the
-*weighted* pre-resample cloud (Roberts & Rosenthal, 2001) — two-pass
-in float64 on the host (single-pass cancels catastrophically at
-ordinary posterior offsets).
+pre-move — the Del Moral et al. collapse), resamples, and applies a
+:math:`\pi_{\phi'}`-invariant mutation. By default this is random-walk
+Metropolis with proposal covariance
+:math:`2.38^2/d \cdot \hat\Sigma` from the *weighted* pre-resample cloud
+(Roberts & Rosenthal, 2001) — two-pass in float64 on the host
+(single-pass cancels catastrophically at ordinary posterior offsets).
 
 The adaptive schedule is host-driven (bisection reads ESS values), so
-``temper`` itself is not jittable; the per-stage RWM sweep is jitted.
+``temper`` itself is not jittable; each per-stage mutation sweep is jitted.
 """
 
 import math
+from typing import cast
 
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
-from jax import jit, vmap
+from jax import jit, lax, vmap
 from jaxtyping import Array, Float
 
 from smcx.containers import TemperedPosterior
@@ -37,6 +38,10 @@ from smcx.types import (
     PRNGKeyT,
     ResamplingFn,
     StaticLogDensity,
+    TemperingMutationInfo,
+    TemperingMutationInitFn,
+    TemperingMutationState,
+    TemperingMutationStepFn,
 )
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
@@ -81,6 +86,53 @@ def _chol_with_jitter(cov: np.ndarray) -> jnp.ndarray:
     )
 
 
+def _mutation_position(
+    state: object,
+    expected_shape: tuple[int, ...],
+    expected_dtype: object,
+    *,
+    source: str,
+) -> Array:
+    """Validate and return a structural mutation state's position."""
+    if not hasattr(state, "position"):
+        raise ValueError(f"{source} must return state with a position field")
+    position = cast(TemperingMutationState, state).position
+    if not hasattr(position, "shape") or not hasattr(position, "dtype"):
+        raise ValueError(f"{source} state.position must be a JAX array")
+    if tuple(position.shape) != expected_shape:
+        raise ValueError(
+            f"{source} state.position must have shape {expected_shape}; "
+            f"got {position.shape}"
+        )
+    if position.dtype != expected_dtype:
+        raise ValueError(
+            f"{source} state.position must have dtype {expected_dtype}; "
+            f"got {position.dtype}"
+        )
+    return position
+
+
+def _mutation_acceptance_rate(info: object) -> Array:
+    """Validate and return one structural mutation diagnostic."""
+    if not hasattr(info, "acceptance_rate"):
+        raise ValueError(
+            "mutation_step_fn info must have an acceptance_rate field"
+        )
+    value = cast(TemperingMutationInfo, info).acceptance_rate
+    try:
+        rate: Array = jnp.asarray(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "mutation_step_fn acceptance_rate must be a scalar float"
+        ) from error
+    if rate.ndim != 0 or not jnp.issubdtype(rate.dtype, jnp.floating):
+        raise ValueError(
+            "mutation_step_fn acceptance_rate must be a scalar float; "
+            f"got shape {rate.shape} and dtype {rate.dtype}"
+        )
+    return rate
+
+
 def temper(
     key: PRNGKeyT,
     initial_sampler: DenseInitialSampler,
@@ -91,6 +143,8 @@ def temper(
     target_ess: float = 0.5,
     resampling_fn: ResamplingFn = systematic,
     *,
+    mutation_init_fn: TemperingMutationInitFn | None = None,
+    mutation_step_fn: TemperingMutationStepFn | None = None,
     max_stages: int = 1000,
 ) -> TemperedPosterior:
     r"""Sample a static target by adaptive tempered SMC.
@@ -111,6 +165,13 @@ def temper(
         resampling_fn: Resampler applied at every
             stage — the schedule drives ESS to the target by
             construction).
+        mutation_init_fn: Optional
+            ``(position, tempered_logdensity_fn) -> state`` callback.
+            State must be a JAX PyTree with a dense ``position`` field.
+        mutation_step_fn: Optional
+            ``(key, state, tempered_logdensity_fn) -> (state, info)``
+            callback. Info must expose a scalar floating
+            ``acceptance_rate``. Supply both mutation callbacks or neither.
         max_stages: Safety cap on the number of stages.
 
     Returns:
@@ -119,6 +180,8 @@ def temper(
         temperature/ESS/acceptance traces.
 
     Raises:
+        ValueError: Particle or mutation counts are invalid, callback pairing
+            is incomplete, or a mutation state or diagnostic is malformed.
         DegenerateWeightsError: The likelihood is ``-inf`` on the
             whole cloud (no tempering step is possible).
         RuntimeError: ``max_stages`` exceeded before reaching
@@ -126,6 +189,12 @@ def temper(
     """
     if num_particles < 1:
         raise ValueError(f"num_particles must be >= 1; got {num_particles}")
+    if num_mcmc_steps < 1:
+        raise ValueError(f"num_mcmc_steps must be >= 1; got {num_mcmc_steps}")
+    if (mutation_init_fn is None) != (mutation_step_fn is None):
+        raise ValueError(
+            "mutation_init_fn and mutation_step_fn must be supplied together"
+        )
     n = num_particles
     log_n = math.log(n)
     key, k_init = jr.split(key)
@@ -173,6 +242,61 @@ def temper(
             acc = acc + jnp.mean(accept)
         return particles, loglik, logprior, acc / num_mcmc_steps
 
+    mutation_sweep = None
+    if mutation_init_fn is not None:
+        initialize = mutation_init_fn
+        mutate = cast(TemperingMutationStepFn, mutation_step_fn)
+
+        @jit
+        def mutation_sweep(
+            key: PRNGKeyT,
+            particles: Float[Array, "num_particles state_dim"],
+            phi_arr: Float[Array, ""],
+        ) -> tuple[
+            Float[Array, "num_particles state_dim"],
+            Float[Array, ""],
+        ]:
+            """Run a caller-owned fixed-count mutation sweep."""
+
+            def tempered_logdensity(position):
+                return log_prior_fn(position) + phi_arr * log_likelihood_fn(
+                    position
+                )
+
+            def initialize_one(position):
+                state = initialize(position, tempered_logdensity)
+                _mutation_position(
+                    state,
+                    (dim,),
+                    particles.dtype,
+                    source="mutation_init_fn",
+                )
+                return state
+
+            states = vmap(initialize_one)(particles)
+            sweep_keys = jr.split(key, num_mcmc_steps)
+
+            def apply_sweep(states, sweep_key):
+                particle_keys = jr.split(sweep_key, n)
+
+                def apply_one(particle_key, state):
+                    next_state, info = mutate(
+                        particle_key, state, tempered_logdensity
+                    )
+                    _mutation_position(
+                        next_state,
+                        (dim,),
+                        particles.dtype,
+                        source="mutation_step_fn",
+                    )
+                    return next_state, _mutation_acceptance_rate(info)
+
+                return vmap(apply_one)(particle_keys, states)
+
+            states, acceptance_rates = lax.scan(apply_sweep, states, sweep_keys)
+            positions = cast(TemperingMutationState, states).position
+            return positions, jnp.mean(acceptance_rates)
+
     def ess_at(phi_new: float, phi: float) -> float:
         return float(compute_ess(log_w + (phi_new - phi) * loglik))
 
@@ -218,9 +342,10 @@ def temper(
         )
         total = t
 
-        # --- adapt proposal from the weighted pre-resample cloud ----
-        cov = _weighted_cov_f64(particles, jnp.exp(lw_norm))
-        l_prop = _chol_with_jitter(scale2 * cov)
+        # --- adapt the default proposal from the weighted cloud ------
+        if mutation_sweep is None:
+            cov = _weighted_cov_f64(particles, jnp.exp(lw_norm))
+            l_prop = _chol_with_jitter(scale2 * cov)
 
         # --- resample (always) + pi_{phi'}-invariant moves ----------
         key, kr, km = jr.split(key, 3)
@@ -228,14 +353,19 @@ def temper(
         particles = particles[idx]
         loglik = loglik[idx]
         logprior = logprior[idx]
-        particles, loglik, logprior, acc = rwm_sweep(
-            km,
-            particles,
-            loglik,
-            logprior,
-            jnp.asarray(phi_new),
-            l_prop,
-        )
+        if mutation_sweep is None:
+            particles, loglik, logprior, acc = rwm_sweep(
+                km,
+                particles,
+                loglik,
+                logprior,
+                jnp.asarray(phi_new),
+                l_prop,
+            )
+        else:
+            particles, acc = mutation_sweep(km, particles, jnp.asarray(phi_new))
+            loglik = jnp.asarray(batch_lik(particles))
+            logprior = jnp.asarray(batch_prior(particles))
         log_w = jnp.full((n,), -log_n)
 
         temps.append(phi_new)

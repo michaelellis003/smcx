@@ -12,6 +12,7 @@ https://doi.org/10.1111/j.1467-9868.2006.00553.x.
 """
 
 import math
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -70,6 +71,137 @@ def _small_tempering_model():
         return -0.5 * jnp.sum((observation - x) ** 2 / 0.7)
 
     return init, log_prior, log_lik
+
+
+class _MutationState(NamedTuple):
+    position: jax.Array
+    logdensity: jax.Array
+    step_index: jax.Array
+
+
+class _MutationInfo(NamedTuple):
+    acceptance_rate: jax.Array
+    is_accepted: jax.Array
+
+
+def _mutation_init(position, tempered_logdensity_fn):
+    return _MutationState(
+        position,
+        tempered_logdensity_fn(position),
+        jnp.zeros((), dtype=jnp.int32),
+    )
+
+
+def _mutation_step(key, state, tempered_logdensity_fn):
+    proposal_key, accept_key = jr.split(key)
+    scale = 0.15 + 0.05 * state.step_index.astype(state.position.dtype)
+    proposal = state.position + scale * jr.normal(
+        proposal_key, state.position.shape
+    )
+    proposal_logdensity = tempered_logdensity_fn(proposal)
+    log_ratio = proposal_logdensity - state.logdensity
+    acceptance_rate = jnp.exp(jnp.minimum(0.0, log_ratio))
+    is_accepted = jr.uniform(accept_key) < acceptance_rate
+    next_state = _MutationState(
+        jnp.where(is_accepted, proposal, state.position),
+        jnp.where(is_accepted, proposal_logdensity, state.logdensity),
+        state.step_index + 1,
+    )
+    return next_state, _MutationInfo(acceptance_rate, is_accepted)
+
+
+def _bad_mutation_init(position, tempered_logdensity_fn):
+    state = _mutation_init(position, tempered_logdensity_fn)
+    return state._replace(position=position[None])
+
+
+def _bad_mutation_step(key, state, tempered_logdensity_fn):
+    next_state, info = _mutation_step(key, state, tempered_logdensity_fn)
+    return next_state, info._replace(acceptance_rate=jnp.ones(2))
+
+
+class TestMutationCallback:
+    """Caller-owned mutation state composes with tempering and JIT."""
+
+    def test_stateful_kernel_matches_eager_and_compiled_execution(self):
+        init, log_prior, log_lik = _small_tempering_model()
+
+        def run():
+            return smcx.temper(
+                jr.key(41),
+                init,
+                log_prior,
+                log_lik,
+                8,
+                num_mcmc_steps=3,
+                target_ess=0.6,
+                mutation_init_fn=_mutation_init,
+                mutation_step_fn=_mutation_step,
+            )
+
+        with jax.disable_jit():
+            eager = run()
+        compiled = run()
+
+        for eager_value, compiled_value in zip(eager, compiled, strict=True):
+            np.testing.assert_allclose(
+                eager_value, compiled_value, rtol=2e-6, atol=2e-6
+            )
+        assert np.all(np.asarray(compiled.acceptance_rates) >= 0.0)
+        assert np.all(np.asarray(compiled.acceptance_rates) <= 1.0)
+
+    @pytest.mark.parametrize(
+        "callbacks",
+        [
+            {"mutation_init_fn": _mutation_init},
+            {"mutation_step_fn": _mutation_step},
+        ],
+    )
+    def test_mutation_callbacks_must_be_supplied_together(self, callbacks):
+        init, log_prior, log_lik = _small_tempering_model()
+        with pytest.raises(ValueError, match="must be supplied together"):
+            smcx.temper(
+                jr.key(42),
+                init,
+                log_prior,
+                log_lik,
+                5,
+                **callbacks,
+            )
+
+    @pytest.mark.parametrize(
+        ("initialize", "step", "message"),
+        [
+            (_bad_mutation_init, _mutation_step, "position must have shape"),
+            (_mutation_init, _bad_mutation_step, "must be a scalar float"),
+        ],
+    )
+    def test_malformed_mutation_contract_raises(
+        self, initialize, step, message
+    ):
+        init, log_prior, log_lik = _small_tempering_model()
+        with pytest.raises(ValueError, match=message):
+            smcx.temper(
+                jr.key(43),
+                init,
+                log_prior,
+                log_lik,
+                5,
+                mutation_init_fn=initialize,
+                mutation_step_fn=step,
+            )
+
+    def test_requires_at_least_one_mutation_step(self):
+        init, log_prior, log_lik = _small_tempering_model()
+        with pytest.raises(ValueError, match="num_mcmc_steps must be >= 1"):
+            smcx.temper(
+                jr.key(44),
+                init,
+                log_prior,
+                log_lik,
+                5,
+                num_mcmc_steps=0,
+            )
 
 
 class TestEvidence:

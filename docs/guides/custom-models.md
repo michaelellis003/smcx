@@ -388,6 +388,41 @@ Close over a fixed model rather than copying it into every latent particle.
 Replacing closed-over array values can make JAX retrace or recompile the
 filter, so pass frequently changing values through an explicit argument.
 
+## Replace the tempering mutation
+
+`smcx.temper` accepts one caller-owned invariant mutation through a paired
+structural callback boundary:
+
+```text
+mutation_init(position, tempered_logdensity_fn) -> state
+mutation_step(key, state, tempered_logdensity_fn) -> (state, info)
+```
+
+State is a JAX PyTree with a dense vector `position`; info is a JAX PyTree
+with a scalar floating `acceptance_rate`. NamedTuples are a convenient
+representation, and either object may carry extra fields. The target passed
+to both callbacks is the current stage density
+`log_prior + phi * log_likelihood`.
+
+```python
+posterior = smcx.temper(
+    jr.key(0),
+    initial,
+    log_prior,
+    log_likelihood,
+    num_particles=4_096,
+    mutation_init_fn=mutation_init,
+    mutation_step_fn=mutation_step,
+)
+```
+
+smcx batches independent states across particles and compiles the fixed-count
+sweep; `temper` itself remains host-driven. Mutation state is reinitialized
+after each resampling stage. The caller is responsible for making each step
+invariant for the supplied target. Omitting both callbacks selects the
+existing cloud-adaptive random-walk Metropolis mutation. Pass ordinary
+callbacks rather than pre-jitting a function that accepts the target callable.
+
 ## Optional Equinox representation
 
 If an application already uses Equinox, a callable module can be captured by
