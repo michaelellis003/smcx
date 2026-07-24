@@ -33,12 +33,12 @@ References:
 """
 
 import math
-from typing import cast
+from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, vmap
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Int
 
 from smcx._utils import (
     _canonicalize_inputs,
@@ -69,8 +69,28 @@ from smcx.types import (
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize, normalize
 
-# Carry type: (particles, params, log_weights, log_marginal_likelihood)
-_Carry = tuple[Array, Array, Array, Array, Array]
+
+class _LiuWestStepCarry(NamedTuple):
+    particles: Float[Array, "num_particles state_dim"]
+    params: Float[Array, "num_particles param_dim"]
+    log_weights: Float[Array, " num_particles"]
+    log_marginal_likelihood: Float[Array, ""]
+    ancestors: Int[Array, " num_particles"]
+
+
+class _LiuWestStepInput(NamedTuple):
+    emission: Float[Array, " emission_dim"]
+    input_t: Float[Array, " input_dim"] | None
+    time_index: Int[Array, ""]
+
+
+class _LiuWestStepOutput(NamedTuple):
+    particles: Float[Array, "num_particles state_dim"]
+    params: Float[Array, "num_particles param_dim"]
+    log_weights: Float[Array, " num_particles"]
+    ancestors: Int[Array, " num_particles"]
+    ess: Float[Array, ""]
+    log_evidence_increment: Float[Array, ""]
 
 
 def _validate_dense_initial_cloud(
@@ -184,6 +204,116 @@ def _init_liu_west(
         identity,
         state_signature,
     )
+
+
+def _liu_west_step(
+    carry: _LiuWestStepCarry,
+    inputs_t: _LiuWestStepInput,
+    key_t: PRNGKeyT,
+    *,
+    transition_sampler: ParamTransitionSampler
+    | ParamTransitionSamplerWithInput,
+    log_observation_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
+    log_auxiliary_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
+    resampling_fn: ResamplingFn,
+    resampling_threshold: float | ResamplingCriterion,
+    log_num_particles: Float[Array, ""],
+    shrinkage: Float[Array, ""],
+    kernel_variance: Float[Array, ""],
+    state_signature: _TreeSignature,
+) -> tuple[_LiuWestStepCarry, _LiuWestStepOutput]:
+    particles, params, log_weights, log_ml, _ = carry
+    emission_t, input_t, time_index = inputs_t
+    num_particles = log_weights.shape[0]
+    identity = jnp.arange(num_particles, dtype=jnp.int32)
+    resample_key, parameter_key, transition_key = jr.split(key_t, 3)
+
+    def _evaluate(
+        callback: ParamLogObservationFn | ParamLogObservationFnWithInput,
+        values: Float[Array, "num_particles state_dim"],
+        parameter_values: Float[Array, "num_particles param_dim"],
+    ) -> Array:
+        if input_t is None:
+            callback_fn = cast(ParamLogObservationFn, callback)
+            result = vmap(lambda z, p: callback_fn(emission_t, z, p))(
+                values, parameter_values
+            )
+        else:
+            callback_fn_u = cast(ParamLogObservationFnWithInput, callback)
+            result = vmap(
+                lambda z, p: callback_fn_u(emission_t, z, p, input_t)
+            )(values, parameter_values)
+        return cast(Array, result)
+
+    weights = normalize(log_weights)
+    param_mean = jnp.sum(weights[:, None] * params, axis=0)
+    param_dev = params - param_mean[None, :]
+    param_cov = jnp.einsum("n,nd,ne->de", weights, param_dev, param_dev)
+    shrunk = shrinkage * params + (1.0 - shrinkage) * param_mean[None, :]
+    log_aux = _evaluate(log_auxiliary_fn, particles, shrunk)
+    _validate_log_density_batch(log_aux, num_particles, name="log_auxiliary_fn")
+    log_first_norm, log_first_sum = log_normalize(log_weights + log_aux)
+    first_ess = jnp.asarray(compute_ess(log_first_norm))
+    do_resample, ancestors = _conditional_resample(
+        resample_key,
+        log_first_norm,
+        first_ess,
+        resampling_fn,
+        resampling_threshold,
+        num_particles,
+        identity,
+        time_index,
+    )
+    param_dim = params.shape[1]
+    jitter = 1e-8 * jnp.eye(param_dim)
+    chol = jnp.linalg.cholesky(kernel_variance * param_cov + jitter)
+    eps = jr.normal(parameter_key, (num_particles, param_dim))
+    new_params = shrunk[ancestors] + eps @ chol.T
+    particle_keys = jr.split(transition_key, num_particles)
+    if input_t is None:
+        transition_fn = cast(ParamTransitionSampler, transition_sampler)
+        propagated = vmap(transition_fn)(
+            particle_keys, particles[ancestors], new_params
+        )
+    else:
+        transition_fn_u = cast(
+            ParamTransitionSamplerWithInput, transition_sampler
+        )
+        propagated = vmap(transition_fn_u, in_axes=(0, 0, 0, None))(
+            particle_keys, particles[ancestors], new_params, input_t
+        )
+    batched_shapes = ((num_particles, *state_signature.shapes[0]),)
+    batched_signature = state_signature._replace(shapes=batched_shapes)
+    _validate_state_tree(
+        propagated, batched_signature, name="transition_sampler output"
+    )
+    log_obs = _evaluate(log_observation_fn, propagated, new_params)
+    _validate_log_density_batch(
+        log_obs, num_particles, name="log_observation_fn"
+    )
+    log_w_unnorm = jnp.where(
+        do_resample,
+        log_obs - log_aux[ancestors],
+        log_weights + log_obs,
+    )
+    log_w_norm, log_sum = log_normalize(log_w_unnorm)
+    log_ev_inc = jnp.where(
+        do_resample,
+        log_first_sum + log_sum - log_num_particles,
+        log_sum,
+    )
+    new_carry = _LiuWestStepCarry(
+        propagated,
+        new_params,
+        log_w_norm,
+        log_ml + log_ev_inc,
+        ancestors,
+    )
+    ess = jnp.asarray(compute_ess(log_w_norm))
+    output = _LiuWestStepOutput(
+        propagated, new_params, log_w_norm, ancestors, ess, log_ev_inc
+    )
+    return new_carry, output
 
 
 def liu_west_filter(
@@ -310,170 +440,39 @@ def liu_west_filter(
     )
 
     # --- Scan body for t = 1, ..., T-1 -------------------------------------
-    def _step(
-        carry: _Carry,
-        args: tuple[Array, ...],
-    ):
-        particles, params, log_weights, log_ml, _prev_anc = carry
+    def _step(carry: _LiuWestStepCarry, args: tuple[Array, ...]):
         if inputs_arr is None:
             step_key, y_t, time_index = args
             input_t = None
         else:
             step_key, y_t, input_t, time_index = args
-        k1, k2, k3 = jr.split(step_key, 3)
-
-        # Weighted parameter moments for kernel smoothing
-        w = normalize(log_weights)
-        param_mean = jnp.sum(w[:, None] * params, axis=0)
-        param_dev = params - param_mean[None, :]
-        param_cov = jnp.einsum("n,nd,ne->de", w, param_dev, param_dev)
-
-        # Shrunk means: m_i = a * phi_i + (1-a) * phi_bar
-        shrunk = a * params + (1.0 - a) * param_mean[None, :]
-
-        # 1. First-stage weights using shrunk params
-        if input_t is None:
-            auxiliary_fn = cast(ParamLogObservationFn, log_auxiliary_fn)
-            log_aux = cast(
-                Array,
-                vmap(lambda z, p: auxiliary_fn(y_t, z, p))(particles, shrunk),
-            )
-        else:
-            auxiliary_fn_u = cast(
-                ParamLogObservationFnWithInput, log_auxiliary_fn
-            )
-            log_aux = cast(
-                Array,
-                vmap(lambda z, p: auxiliary_fn_u(y_t, z, p, input_t))(
-                    particles, shrunk
-                ),
-            )
-        _validate_log_density_batch(
-            log_aux,
-            num_particles,
-            name="log_auxiliary_fn",
+        next_carry, output = _liu_west_step(
+            carry,
+            _LiuWestStepInput(y_t, input_t, time_index),
+            step_key,
+            transition_sampler=transition_sampler,
+            log_observation_fn=log_observation_fn,
+            log_auxiliary_fn=log_auxiliary_fn,
+            resampling_fn=resampling_fn,
+            resampling_threshold=resampling_threshold,
+            log_num_particles=log_n,
+            shrinkage=a,
+            kernel_variance=h_sq,
+            state_signature=state_signature,
         )
-        log_first_norm, log_first_sum = log_normalize(log_weights + log_aux)
-        first_ess: Array = jnp.asarray(compute_ess(log_first_norm))
-
-        # 2. Conditionally resample
-        do_resample, ancestors = _conditional_resample(
-            k1,
-            log_first_norm,
-            first_ess,
-            resampling_fn,
-            resampling_threshold,
-            num_particles,
-            identity_ancestors,
-            time_index,
-        )
-
-        # 3. Propagate params via kernel smoothing + propagate states
-        param_dim = params.shape[1]
-        # Jitter prevents NaN from cholesky on singular covariance
-        # (e.g. when all particles share the same parameter value).
-        jitter = 1e-8 * jnp.eye(param_dim)
-        chol = jnp.linalg.cholesky(h_sq * param_cov + jitter)
-        eps = jr.normal(k2, (num_particles, param_dim))
-        new_params = shrunk[ancestors] + eps @ chol.T
-
-        keys = jr.split(k3, num_particles)
-        if input_t is None:
-            transition_fn = cast(ParamTransitionSampler, transition_sampler)
-
-            def _propagate(key_i, state_i, param_i):
-                next_state = transition_fn(key_i, state_i, param_i)
-                _validate_state_tree(
-                    next_state,
-                    state_signature,
-                    name="transition_sampler output",
-                )
-                return next_state
-
-            propagated = vmap(_propagate)(
-                keys,
-                particles[ancestors],
-                new_params,
-            )
-        else:
-            transition_fn_u = cast(
-                ParamTransitionSamplerWithInput, transition_sampler
-            )
-
-            def _propagate_with_input(key_i, state_i, param_i):
-                next_state = transition_fn_u(key_i, state_i, param_i, input_t)
-                _validate_state_tree(
-                    next_state,
-                    state_signature,
-                    name="transition_sampler output",
-                )
-                return next_state
-
-            propagated = vmap(_propagate_with_input)(
-                keys,
-                particles[ancestors],
-                new_params,
-            )
-
-        # 4. Second-stage weights
-        if input_t is None:
-            observation_fn = cast(ParamLogObservationFn, log_observation_fn)
-            log_obs = cast(
-                Array,
-                vmap(lambda z, p: observation_fn(y_t, z, p))(
-                    propagated, new_params
-                ),
-            )
-        else:
-            observation_fn_u = cast(
-                ParamLogObservationFnWithInput, log_observation_fn
-            )
-            log_obs = cast(
-                Array,
-                vmap(lambda z, p: observation_fn_u(y_t, z, p, input_t))(
-                    propagated, new_params
-                ),
-            )
-        _validate_log_density_batch(
-            log_obs,
-            num_particles,
-            name="log_observation_fn",
-        )
-        log_w_unnorm = jnp.where(
-            do_resample,
-            log_obs - log_aux[ancestors],
-            log_weights + log_obs,
-        )
-        log_w_norm, log_sum = log_normalize(log_w_unnorm)
-
-        log_ev_inc = jnp.where(
-            do_resample,
-            log_first_sum + log_sum - log_n,
-            log_sum,
-        )
-
-        new_carry = (
-            propagated,
-            new_params,
-            log_w_norm,
-            log_ml + log_ev_inc,
-            ancestors,
-        )
-        ess_t = jnp.asarray(compute_ess(log_w_norm))
         if store_history:
-            return new_carry, (
-                propagated,
-                new_params,
-                log_w_norm,
-                ancestors,
-                ess_t,
-                log_ev_inc,
-            )
+            return next_carry, output
         # In final-only mode, the scan stacks only the scalar traces;
         # final arrays come from the carry.
-        return new_carry, (ess_t, log_ev_inc)
+        return next_carry, (output.ess, output.log_evidence_increment)
 
-    init_carry = (particles_0, params_0, log_w_0, log_ev_0, identity_ancestors)
+    init_carry = _LiuWestStepCarry(
+        particles_0,
+        params_0,
+        log_w_0,
+        log_ev_0,
+        identity_ancestors,
+    )
     step_keys = jr.split(key, num_timesteps - 1)
     time_indices = jnp.arange(1, num_timesteps, dtype=jnp.int32)
     scan_inputs = (
@@ -483,33 +482,23 @@ def liu_west_filter(
     )
 
     if store_history:
-        (
-            final_carry,
-            (
-                particles_rest,
-                params_rest,
-                log_w_rest,
-                ancestors_rest,
-                ess_rest,
-                log_ev_inc_rest,
-            ),
-        ) = lax.scan(_step, init_carry, scan_inputs)
-        all_particles = _prepend(particles_0, particles_rest)
-        all_params = _prepend(params_0, params_rest)
-        all_log_w = _prepend(log_w_0, log_w_rest)
-        all_ancestors = _prepend(identity_ancestors, ancestors_rest)
+        final_carry, outputs = lax.scan(_step, init_carry, scan_inputs)
+        all_particles = _prepend(particles_0, outputs.particles)
+        all_params = _prepend(params_0, outputs.params)
+        all_log_w = _prepend(log_w_0, outputs.log_weights)
+        all_ancestors = _prepend(identity_ancestors, outputs.ancestors)
+        ess_rest = outputs.ess
+        log_ev_inc_rest = outputs.log_evidence_increment
     else:
-        (
-            final_carry,
-            (ess_rest, log_ev_inc_rest),
-        ) = lax.scan(_step, init_carry, scan_inputs)
-        fp, fpar, flw, _, fanc = final_carry
-        all_particles = fp[None]
-        all_params = fpar[None]
-        all_log_w = flw[None]
-        all_ancestors = fanc[None]
+        final_carry, (ess_rest, log_ev_inc_rest) = lax.scan(
+            _step, init_carry, scan_inputs
+        )
+        all_particles = final_carry.particles[None]
+        all_params = final_carry.params[None]
+        all_log_w = final_carry.log_weights[None]
+        all_ancestors = final_carry.ancestors[None]
 
-    final_log_ml = final_carry[3]
+    final_log_ml = final_carry.log_marginal_likelihood
 
     _raise_if_degenerate(final_log_ml)
 
