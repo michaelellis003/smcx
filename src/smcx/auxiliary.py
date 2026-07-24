@@ -46,6 +46,7 @@ from smcx._utils import (
     _prepend_particle_history,
     _raise_if_degenerate,
     _validate_filter_inputs,
+    _validate_log_density_batch,
     _validate_state_tree,
 )
 from smcx.containers import ParticleFilterPosterior, ParticleState
@@ -133,7 +134,8 @@ def auxiliary_filter(
     Raises:
         ValueError: Inputs are malformed, a criterion result is not a scalar
             Boolean, the initial state tree is empty or has a wrong leading
-            axis, or a transition changes its structure, leaf shape, or dtype.
+            axis, a transition changes its state contract, or a log-density
+            callback output is malformed.
     """
     num_timesteps = _validate_filter_inputs(emissions, num_particles)
     inputs_arr = (
@@ -202,6 +204,11 @@ def auxiliary_filter(
                     state.particles
                 ),
             )
+        _validate_log_density_batch(
+            log_aux,
+            num_particles,
+            name="log_auxiliary_fn",
+        )
         log_first_stage = state.log_weights + log_aux
 
         # Normalise first-stage weights for resampling
@@ -267,6 +274,11 @@ def auxiliary_filter(
             log_obs = vmap(lambda z: observation_fn_u(y_t, z, input_t))(
                 propagated
             )
+        _validate_log_density_batch(
+            cast(Array, log_obs),
+            num_particles,
+            name="log_observation_fn",
+        )
         log_second_stage = log_obs - log_aux_ancestors
 
         # Compute evidence increment and normalize.
