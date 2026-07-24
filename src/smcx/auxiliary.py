@@ -242,12 +242,14 @@ def auxiliary_filter(
         log_observation_fn: Function
             ``(emission, state[, input_t]) -> log_prob`` that evaluates the
             observation log-density $\log p(y_t \mid z_t)$.
+            It must return a scalar with at least float32 precision.
             Will be ``vmap``-ped over the particle dimension (second
             argument) internally.
         log_auxiliary_fn: Function
             ``(emission, state[, input_t]) -> log_prob`` that evaluates the
             look-ahead log-density
             $\log g(y_{t+1} \mid x_t)$.
+            It must return a scalar with at least float32 precision.
             Will be ``vmap``-ped over the particle dimension (second
             argument) internally.  When this returns zero for all
             inputs the APF reduces to the bootstrap filter.

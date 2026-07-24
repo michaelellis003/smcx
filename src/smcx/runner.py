@@ -10,7 +10,7 @@ import jax.random as jr
 from jax import core, default_backend, lax, tree
 from jaxtyping import Array
 
-from smcx._numerics import _neumaier_add
+from smcx._numerics import _neumaier_add, _validate_minimum_float_precision
 from smcx._utils import (
     _canonicalize_inputs,
     _particle_time_axis,
@@ -62,6 +62,10 @@ def _validate_record(
         raise ValueError(f"{name} must contain at least one particle")
     if not jnp.issubdtype(log_weights.dtype, jnp.floating):
         raise ValueError(f"{name} log_weights must be floating")
+    _validate_minimum_float_precision(
+        log_weights,
+        name=f"{name} log_weights",
+    )
     particle_signature = _validate_particle_cloud(
         record.particles,
         num_particles,
@@ -82,6 +86,10 @@ def _validate_record(
         raise ValueError(f"{name} log_evidence_increment must be scalar")
     if not jnp.issubdtype(increment.dtype, jnp.floating):
         raise ValueError(f"{name} log_evidence_increment must be floating")
+    _validate_minimum_float_precision(
+        increment,
+        name=f"{name} log_evidence_increment",
+    )
     signature = _RecordSignature(
         particle_signature,
         num_particles,
@@ -150,9 +158,10 @@ def run_particle_filter(
 
     Input-aware callbacks insert ``input_t`` immediately before ``key_t``.
     ``record`` must be `smcx.containers.ParticleFilterRecord`.
-    Its log weights must already be normalized and its ancestor indices must
-    be in range; these are data-dependent callback preconditions rather than
-    conditions the compiled scan can raise on.
+    Its log weights must already be normalized, and both log-weight and
+    evidence fields must have at least float32 precision. Ancestor indices
+    must be in range; these are data-dependent callback preconditions rather
+    than conditions the compiled scan can raise on.
 
     Args:
         key: Root JAX PRNG key. The runner splits off initialization once,

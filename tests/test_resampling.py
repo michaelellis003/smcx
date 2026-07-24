@@ -241,6 +241,29 @@ class TestContract:
         np.testing.assert_array_equal(first, second)
 
     @pytest.mark.parametrize("resampler", SCHEMES, ids=SCHEME_IDS)
+    @pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
+    @pytest.mark.parametrize(
+        "values",
+        [
+            pytest.param(np.ones(512), id="uniform"),
+            pytest.param(
+                np.concatenate(([1.0], np.full(511, 1e-3))),
+                id="skewed",
+            ),
+        ],
+    )
+    def test_rejects_precision_below_float32(
+        self,
+        resampler: ResamplingFn,
+        dtype,
+        values: np.ndarray,
+    ) -> None:
+        weights = jnp.asarray(values, dtype=dtype)
+
+        with pytest.raises(ValueError, match="at least float32 precision"):
+            resampler(jr.key(156), weights, weights.size)
+
+    @pytest.mark.parametrize("resampler", SCHEMES, ids=SCHEME_IDS)
     def test_zero_weight_particles_are_never_selected(
         self, resampler: ResamplingFn
     ) -> None:

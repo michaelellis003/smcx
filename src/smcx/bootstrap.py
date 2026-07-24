@@ -110,7 +110,8 @@ def bootstrap_init(
     Args:
         init_key: Explicit key for sampling the initial particle cloud.
         initial_sampler: Initial-state callback, optionally input-aware.
-        log_observation_fn: Observation log-density callback.
+        log_observation_fn: Observation log-density callback returning a
+            scalar with at least float32 precision.
         first_emission: Observation ``y[0]``.
         num_particles: Number of particles.
         input_t: Optional ``inputs[0]`` passed to both callbacks.
@@ -280,7 +281,8 @@ def bootstrap_step(
         step_key: Explicit key for resampling and propagation.
         checkpoint: State returned by initialization or a prior step.
         transition_sampler: Transition callback, optionally input-aware.
-        log_observation_fn: Observation log-density callback.
+        log_observation_fn: Observation log-density callback returning a
+            scalar with at least float32 precision.
         emission_t: Current observation ``y[t]``.
         resampling_fn: Particle resampling algorithm.
         resampling_threshold: ESS resampling threshold as a particle fraction.
@@ -338,7 +340,8 @@ def bootstrap_update(
         step_keys: One explicit PRNG key per chunk observation.
         checkpoint: State returned by initialization or an earlier update.
         transition_sampler: Transition callback, optionally input-aware.
-        log_observation_fn: Observation log-density callback.
+        log_observation_fn: Observation log-density callback returning a
+            scalar with at least float32 precision.
         emissions_chunk: Consecutive observations after the checkpoint.
         resampling_fn: Particle resampling algorithm.
         resampling_threshold: ESS resampling threshold as a particle fraction.
@@ -509,6 +512,7 @@ def bootstrap_filter(
         log_observation_fn: Function
             ``(emission, state[, input_t]) -> log_prob`` that evaluates the
             observation log-density $\log p(y_t \mid z_t)$.
+            It must return a scalar with at least float32 precision.
             Will be ``vmap``-ped over the particle dimension (second
             argument) internally.
         emissions: Observed emissions, shape ``(T, D)``.

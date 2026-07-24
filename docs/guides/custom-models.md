@@ -121,6 +121,10 @@ Each callback-driven algorithm asks only for behavior it can use:
 
 Choose the algorithm first, then supply the callbacks shown in the table.
 smcx does not inspect a model object to discover optional capabilities.
+Density callback outputs, probability- and log-weight arrays, and runner
+record evidence increments must have at least float32 precision. smcx rejects
+float16 and bfloat16 at these boundaries instead of silently changing the
+arithmetic or fixed-key draws.
 
 ## Bind a plain JAX model
 

@@ -19,7 +19,10 @@ observation noise dominates the process noise and filtering has real
 work to do. A model in smcx is a handful of closures, written
 *per particle*: each takes one state array or PyTree and smcx `vmap`s it
 over the particle cloud internally. Samplers take an explicit PRNG key;
-the observation model returns a log-density.
+the observation model returns a log-density with at least float32 precision.
+The weight, ESS, and resampling APIs likewise reject float16 and bfloat16
+arrays because those formats cannot reliably preserve particle-weight
+invariants.
 
 ```python
 import math

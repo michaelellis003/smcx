@@ -13,6 +13,7 @@ import jax.numpy as jnp
 from jax.core import Tracer
 from jaxtyping import Array, Float
 
+from smcx._numerics import _validate_minimum_float_precision
 from smcx.types import Scalar
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ def _validate_log_weights(log_weights: _LogWeightVector) -> None:
         raise ValueError(
             f"log_weights must have a floating dtype; got {log_weights.dtype}"
         )
+    _validate_minimum_float_precision(log_weights, name="log_weights")
 
 
 def log_normalize(
@@ -47,7 +49,8 @@ def log_normalize(
     """Normalize log weights and return the log normalizing constant.
 
     Args:
-        log_weights: Unnormalized log importance weights.
+        log_weights: Unnormalized log importance weights with at least
+            float32 precision.
 
     Returns:
         A tuple ``(log_normalized, log_normalizer)`` where
@@ -55,8 +58,8 @@ def log_normalize(
         *log_normalizer* is ``logsumexp(log_weights)``.
 
     Raises:
-        ValueError: ``log_weights`` is not a nonempty rank-one floating JAX
-            array.
+        ValueError: ``log_weights`` is not a nonempty rank-one JAX array
+            with at least float32 precision.
     """
     _validate_log_weights(log_weights)
     log_normalizer = jnp.logaddexp.reduce(log_weights)  # type: ignore[union-attr]
@@ -70,14 +73,15 @@ def normalize(
     """Exponentiate and normalize log weights.
 
     Args:
-        log_weights: Unnormalized log importance weights.
+        log_weights: Unnormalized log importance weights with at least
+            float32 precision.
 
     Returns:
         Normalized weights that sum to one.
 
     Raises:
-        ValueError: ``log_weights`` is not a nonempty rank-one floating JAX
-            array.
+        ValueError: ``log_weights`` is not a nonempty rank-one JAX array
+            with at least float32 precision.
     """
     log_norm, _ = log_normalize(log_weights)
     return jnp.exp(log_norm)
@@ -91,14 +95,15 @@ def log_ess(
     Shift-invariant: ``log_ess = 2*LSE(lw) - LSE(2*lw)``.
 
     Args:
-        log_weights: Log importance weights (any normalization).
+        log_weights: Log importance weights (any normalization) with at
+            least float32 precision.
 
     Returns:
         ``log(ESS)`` as a scalar array.
 
     Raises:
-        ValueError: ``log_weights`` is not a nonempty rank-one floating JAX
-            array.
+        ValueError: ``log_weights`` is not a nonempty rank-one JAX array
+            with at least float32 precision.
     """
     _validate_log_weights(log_weights)
     two_lse = 2.0 * jnp.logaddexp.reduce(log_weights)  # type: ignore[union-attr]
@@ -112,13 +117,14 @@ def ess(
     """Effective sample size ``1 / sum(w_norm**2)`` from log weights.
 
     Args:
-        log_weights: Log importance weights (any normalization).
+        log_weights: Log importance weights (any normalization) with at
+            least float32 precision.
 
     Returns:
         The ESS as a scalar array in ``(0, num_particles]``.
 
     Raises:
-        ValueError: ``log_weights`` is not a nonempty rank-one floating JAX
-            array.
+        ValueError: ``log_weights`` is not a nonempty rank-one JAX array
+            with at least float32 precision.
     """
     return jnp.exp(log_ess(log_weights))

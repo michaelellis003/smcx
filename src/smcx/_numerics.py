@@ -8,6 +8,18 @@ from jax import lax
 from jaxtyping import Array, Float
 
 
+def _validate_minimum_float_precision(
+    values: Float[Array, " ..."],
+    *,
+    name: str,
+) -> None:
+    """Reject floating arrays whose representation is narrower than f32."""
+    if jnp.finfo(values.dtype).bits < jnp.finfo(jnp.float32).bits:
+        raise ValueError(
+            f"{name} must have at least float32 precision; got {values.dtype}"
+        )
+
+
 def _neumaier_add(
     total: Float[Array, "..."],
     correction: Float[Array, "..."],
