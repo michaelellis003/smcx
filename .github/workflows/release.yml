@@ -16,7 +16,10 @@ concurrency:
 
 jobs:
   release:
-    if: github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Approval attests that gpu-smoke ran on a Metal-enabled runner or
@@ -27,7 +30,23 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
           token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Verify release revision
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git fetch --no-tags origin \
+            '+refs/heads/main:refs/remotes/origin/main'
+          CHECKED_OUT_SHA=$(git rev-parse HEAD)
+          CURRENT_MAIN_SHA=$(git rev-parse refs/remotes/origin/main)
+          if [[ "$CHECKED_OUT_SHA" != "$RELEASE_SHA" ]] \
+            || [[ "$CURRENT_MAIN_SHA" != "$RELEASE_SHA" ]]; then
+            echo '::error::Successful CI revision is no longer current on main.'
+            exit 1
+          fi
+          git switch --force-create main "$RELEASE_SHA"
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
