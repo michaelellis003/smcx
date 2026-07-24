@@ -253,7 +253,10 @@ numbers describe this example, not a general performance guarantee.
 - The [custom-model guide](custom-models.md) covers structured latent states
   and time-varying inputs.
 - `bootstrap_init`, `bootstrap_step`, and `bootstrap_update` support
-  checkpointed or chunked filtering.
+  checkpointed or chunked filtering. Resumed checkpoints retain normalized
+  log weights, their matching ESS, and finite evidence state. Concrete calls
+  validate those invariants; a transformed `bootstrap_step` skips the
+  data-dependent checks, while `bootstrap_update` is host-only.
 - Every function used here — including `kalman_filter`, `rts_smoother`,
   `bootstrap_filter`, `guided_filter`, `simulate`, and `diagnose` — has a
   full contract in the [API reference](../api/smcx/index.md).

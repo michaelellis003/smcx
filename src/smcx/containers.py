@@ -87,7 +87,15 @@ class ParticleState(NamedTuple):
 
 
 class BootstrapCheckpoint(NamedTuple):
-    """Resumable state and ESS; evidence is its sum plus its correction."""
+    """Resumable normalized bootstrap-filter state.
+
+    Attributes:
+        state: Particle state with normalized log weights and finite running
+            log evidence.
+        ess: Effective sample size implied by ``state.log_weights``.
+        log_evidence_compensation: Finite correction summed with the running
+            log evidence.
+    """
 
     state: ParticleState
     ess: Float[Array, ""]
