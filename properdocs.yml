@@ -1,6 +1,6 @@
 # Project Information
 site_name: smcx
-site_description: Sequential Monte Carlo in JAX — particle filters, tempered SMC, and SMC²
+site_description: State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²
 site_author: Michael Ellis
 site_url: https://michaelellis003.github.io/smcx/
 repo_url: https://github.com/michaelellis003/smcx
