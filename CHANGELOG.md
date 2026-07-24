@@ -2,6 +2,38 @@
 
 <!-- version list -->
 
+## v1.13.6 (2026-07-24)
+
+### Bug Fixes
+
+- **diagnostics**: Track cumulative particle ancestry
+  ([#183](https://github.com/michaelellis003/smcx/pull/183),
+  [`87cb43d`](https://github.com/michaelellis003/smcx/commit/87cb43da72462c6572066ca7db1d888e7fb04b64))
+
+### Chores
+
+- Remove dead profiling and reference artifacts
+  ([#181](https://github.com/michaelellis003/smcx/pull/181),
+  [`f72177d`](https://github.com/michaelellis003/smcx/commit/f72177db5dd7e9a233749add38f60d1c16eb0e22))
+
+### Documentation
+
+- Align posterior and diagnostic contracts
+  ([#173](https://github.com/michaelellis003/smcx/pull/173),
+  [`8d08f8e`](https://github.com/michaelellis003/smcx/commit/8d08f8ed34c48967f6cec18616d8607648b765fe))
+
+- Correct API rendering and public claims ([#172](https://github.com/michaelellis003/smcx/pull/172),
+  [`6390740`](https://github.com/michaelellis003/smcx/commit/63907406e3e69da0961fd01ce125f2ed125d1a8e))
+
+- Correct platform and public contracts ([#182](https://github.com/michaelellis003/smcx/pull/182),
+  [`9937ab6`](https://github.com/michaelellis003/smcx/commit/9937ab61e340c60e8e1fbc359b957f648f65d68a))
+
+### Refactoring
+
+- **liu-west**: Extract pure scan step ([#148](https://github.com/michaelellis003/smcx/pull/148),
+  [`37b15ee`](https://github.com/michaelellis003/smcx/commit/37b15ee2dba944f741c568c7db0d46d1ae293ff6))
+
+
 ## v1.13.5 (2026-07-24)
 
 ### Bug Fixes
