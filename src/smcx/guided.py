@@ -258,8 +258,9 @@ def guided_filter(
         to every leaf.
 
     Raises:
-        DegenerateWeightsError: All weights collapsed (eager execution
-            only; under ``jax.jit`` the ``-inf`` marginal propagates).
+        DegenerateWeightsError: A particle-weight stage cannot be normalized
+            (eager execution only; under ``jax.jit`` its nonfinite signal
+            propagates).
         ValueError: Inputs are malformed, a criterion result is not a scalar
             Boolean, the initial state tree is empty or has a wrong leading
             axis, a proposal changes its state contract, or a log-density

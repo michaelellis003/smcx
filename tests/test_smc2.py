@@ -156,9 +156,11 @@ class TestStructure:
             np.array(a.filtered_params[-1]), np.array(b.filtered_params[0])
         )
 
-    def test_degenerate_raises(self):
+    @pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
+    def test_nonfinite_outer_normalizer_raises(self, value):
         def impossible(y, state, theta):
-            return jnp.array(-jnp.inf)
+            del y, state, theta
+            return value
 
         with pytest.raises(smcx.DegenerateWeightsError):
             smcx.smc2(

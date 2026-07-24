@@ -34,7 +34,7 @@ from jax import jit, lax, vmap
 from jaxtyping import Array, Float
 
 from smcx._numerics import _neumaier_add
-from smcx._utils import _validate_log_density_batch
+from smcx._utils import _raise_if_degenerate, _validate_log_density_batch
 from smcx.containers import TemperedPosterior
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import systematic
@@ -188,8 +188,8 @@ def temper(
     Raises:
         ValueError: Particle or mutation counts are invalid, callback pairing
             is incomplete, or a mutation state or diagnostic is malformed.
-        DegenerateWeightsError: The likelihood is ``-inf`` on the
-            whole cloud (no tempering step is possible).
+        DegenerateWeightsError: A tempering reweight stage cannot be
+            normalized.
         RuntimeError: ``max_stages`` exceeded before reaching
             ``phi = 1``.
     """
@@ -353,11 +353,14 @@ def temper(
 
     for _ in range(max_stages):
         # --- adaptive schedule: bisect ESS(phi') = target ----------
+        probe_delta = min(1e-6, 1.0 - phi)
+        _, probe_log_sum = log_normalize(log_w + probe_delta * loglik)
+        _raise_if_degenerate(probe_log_sum)
         e_full = ess_at(1.0, phi)
         if math.isnan(e_full) and math.isnan(ess_at(phi + 1e-6, phi)):
             raise DegenerateWeightsError(
-                "likelihood is -inf across the whole cloud; "
-                "no tempering step is possible"
+                "particle weights cannot be normalized at the next "
+                "tempering stage"
             )
         if e_full >= target:
             phi_new = 1.0
@@ -375,6 +378,7 @@ def temper(
 
         # --- reweight; increment at the reweight stage --------------
         lw_norm, log_sum = log_normalize(log_w + delta * loglik)
+        _raise_if_degenerate(log_sum)
         stage_ess = float(compute_ess(lw_norm))
         total, comp = _neumaier_add(total, comp, log_sum)
 

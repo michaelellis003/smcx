@@ -34,7 +34,7 @@ from typing import NamedTuple, cast
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, tree, vmap
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Bool, Float, Int
 
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
@@ -94,6 +94,7 @@ class _AuxiliaryStepOutput(NamedTuple):
     ancestors: Int[Array, " num_particles"]
     ess: Float[Array, ""]
     log_evidence_increment: Float[Array, ""]
+    normalizers_finite: Bool[Array, ""]
 
 
 def _auxiliary_step(
@@ -209,6 +210,7 @@ def _auxiliary_step(
         ancestors,
         ess_t,
         log_ev_inc,
+        jnp.isfinite(log_first_sum) & jnp.isfinite(log_sum),
     )
     return new_carry, output
 
@@ -280,8 +282,9 @@ def auxiliary_filter(
         leaf.
 
     Raises:
-        DegenerateWeightsError: All weights collapsed (eager execution
-            only; under ``jax.jit`` the ``-inf`` marginal propagates).
+        DegenerateWeightsError: A particle-weight stage cannot be normalized
+            (eager execution only; under ``jax.jit`` its nonfinite signal
+            propagates).
         ValueError: Inputs are malformed, a criterion result is not a scalar
             Boolean, the initial state tree is empty or has a wrong leading
             axis, a transition changes its state contract, or a log-density
@@ -347,7 +350,11 @@ def auxiliary_filter(
             return next_carry, output
         # In final-only mode, ancestors ride the carry (O(N)) and the
         # scan stacks just the scalar traces.
-        return next_carry, (output.ess, output.log_evidence_increment)
+        return next_carry, (
+            output.ess,
+            output.log_evidence_increment,
+            output.normalizers_finite,
+        )
 
     # Run the scan over t = 1 ... T-1
     step_keys = jr.split(key, num_timesteps - 1)
@@ -371,10 +378,16 @@ def auxiliary_filter(
         all_ancestors = _prepend(identity_ancestors, outputs.ancestors)
         ess_rest = outputs.ess
         log_ev_inc_rest = outputs.log_evidence_increment
+        normalizers_finite = outputs.normalizers_finite
     else:
-        final_carry, (ess_rest, log_ev_inc_rest) = lax.scan(
-            _step, init_carry, scan_inputs
-        )
+        (
+            final_carry,
+            (
+                ess_rest,
+                log_ev_inc_rest,
+                normalizers_finite,
+            ),
+        ) = lax.scan(_step, init_carry, scan_inputs)
         all_particles = _particle_time_axis(final_carry.state.particles)
         all_log_w = final_carry.state.log_weights[None]
         all_ancestors = final_carry.ancestors[None]
@@ -387,10 +400,18 @@ def auxiliary_filter(
         + final_carry.log_evidence_compensation
     )
 
-    _raise_if_degenerate(final_log_evidence)
+    all_normalizers_finite = jnp.isfinite(log_ev_0) & jnp.all(
+        normalizers_finite
+    )
+    checked_log_ml = jnp.where(
+        all_normalizers_finite,
+        final_log_evidence,
+        jnp.nan,
+    )
+    _raise_if_degenerate(checked_log_ml)
 
     return ParticleFilterPosterior(
-        marginal_loglik=final_log_evidence,
+        marginal_loglik=checked_log_ml,
         filtered_particles=all_particles,
         filtered_log_weights=all_log_w,
         ancestors=all_ancestors,

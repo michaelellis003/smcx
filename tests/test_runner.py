@@ -149,6 +149,15 @@ def _unexpected_callback(*args):
     raise AssertionError(args)
 
 
+@pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
+def test_runner_rejects_nonfinite_evidence_increment(value):
+    """The eager shell rejects a callback's nonfinite stage signal."""
+    initial = _valid_record()
+    invalid = _valid_record(log_evidence_increment=value)
+    with pytest.raises(smcx.DegenerateWeightsError):
+        _run_records(initial, invalid, num_timesteps=2)
+
+
 def test_runner_matches_bootstrap_filter_at_a_fixed_key():
     """The runner preserves the established filter key schedule."""
     num_particles = 8

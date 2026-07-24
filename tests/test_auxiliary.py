@@ -14,6 +14,7 @@ import pytest
 from smcx._numerics import _neumaier_add
 from smcx.auxiliary import auxiliary_filter
 from smcx.bootstrap import bootstrap_filter
+from smcx.exceptions import DegenerateWeightsError
 from tests._lgssm_reference import EXACT_LOG_LIKELIHOOD, REFERENCE_TIMES
 from tests._lgssm_reference import FILTERED_MEANS as EXACT_FILTERED_MEANS
 from tests._lgssm_reference import FILTERED_VARIANCES as EXACT_FILTERED_VARS
@@ -242,6 +243,7 @@ def test_uncompiled_step_matches_public_and_compiled_scan(
         expected_correction,
         record[2],
         *record,
+        jnp.asarray(True),
     )
     # Fixed keys remove MC error; five f32 eps covers compiler rounding.
     tolerance = float(5 * np.finfo(np.float32).eps)
@@ -252,6 +254,53 @@ def test_uncompiled_step_matches_public_and_compiled_scan(
             np.testing.assert_allclose(
                 value, target, rtol=tolerance, atol=tolerance
             )
+
+
+@pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
+def test_nonfinite_first_stage_raises(value, lgssm_params, lgssm_data):
+    """A discarded invalid look-ahead normalizer still fails the run."""
+    _, emissions = lgssm_data
+    initial, transition, observation, _ = _make_smcx_fns(lgssm_params)
+
+    def invalid_auxiliary(emission, state):
+        del emission, state
+        return value
+
+    with pytest.raises(DegenerateWeightsError):
+        auxiliary_filter(
+            jr.key(20),
+            initial,
+            transition,
+            observation,
+            invalid_auxiliary,
+            emissions[:2],
+            16,
+            resampling_threshold=0.0,
+        )
+
+
+def test_traced_invalid_first_stage_propagates(lgssm_params, lgssm_data):
+    """Transformed execution returns the nonfinite signal instead."""
+    _, emissions = lgssm_data
+    initial, transition, observation, _ = _make_smcx_fns(lgssm_params)
+
+    def run(value):
+        def auxiliary(emission, state):
+            del emission, state
+            return value
+
+        return auxiliary_filter(
+            jr.key(21),
+            initial,
+            transition,
+            observation,
+            auxiliary,
+            emissions[:2],
+            16,
+            resampling_threshold=0.0,
+        ).marginal_loglik
+
+    assert not jnp.isfinite(jax.jit(run)(jnp.asarray(jnp.inf)))
 
 
 # ---------------------------------------------------------------------------

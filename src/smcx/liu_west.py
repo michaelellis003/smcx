@@ -37,7 +37,7 @@ from typing import NamedTuple, cast
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, vmap
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Bool, Float, Int
 
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
@@ -92,6 +92,7 @@ class _LiuWestStepOutput(NamedTuple):
     ancestors: Int[Array, " num_particles"]
     ess: Float[Array, ""]
     log_evidence_increment: Float[Array, ""]
+    normalizers_finite: Bool[Array, ""]
 
 
 def _validate_dense_initial_cloud(
@@ -314,7 +315,13 @@ def _liu_west_step(
     )
     ess = jnp.asarray(compute_ess(log_w_norm))
     output = _LiuWestStepOutput(
-        propagated, new_params, log_w_norm, ancestors, ess, log_ev_inc
+        propagated,
+        new_params,
+        log_w_norm,
+        ancestors,
+        ess,
+        log_ev_inc,
+        jnp.isfinite(log_first_sum) & jnp.isfinite(log_sum),
     )
     return new_carry, output
 
@@ -396,8 +403,9 @@ def liu_west_filter(
         the marginal log-likelihood estimate, and ESS trace.
 
     Raises:
-        DegenerateWeightsError: All weights collapsed (eager execution
-            only; under ``jax.jit`` the ``-inf`` marginal propagates).
+        DegenerateWeightsError: A particle-weight stage cannot be normalized
+            (eager execution only; under ``jax.jit`` its nonfinite signal
+            propagates).
         ValueError: Inputs, particle count, shrinkage, callback output, or a
             criterion result is structurally invalid.
     """
@@ -468,7 +476,11 @@ def liu_west_filter(
             return next_carry, output
         # In final-only mode, the scan stacks only the scalar traces;
         # final arrays come from the carry.
-        return next_carry, (output.ess, output.log_evidence_increment)
+        return next_carry, (
+            output.ess,
+            output.log_evidence_increment,
+            output.normalizers_finite,
+        )
 
     init_carry = _LiuWestStepCarry(
         particles_0,
@@ -494,10 +506,16 @@ def liu_west_filter(
         all_ancestors = _prepend(identity_ancestors, outputs.ancestors)
         ess_rest = outputs.ess
         log_ev_inc_rest = outputs.log_evidence_increment
+        normalizers_finite = outputs.normalizers_finite
     else:
-        final_carry, (ess_rest, log_ev_inc_rest) = lax.scan(
-            _step, init_carry, scan_inputs
-        )
+        (
+            final_carry,
+            (
+                ess_rest,
+                log_ev_inc_rest,
+                normalizers_finite,
+            ),
+        ) = lax.scan(_step, init_carry, scan_inputs)
         all_particles = final_carry.particles[None]
         all_params = final_carry.params[None]
         all_log_w = final_carry.log_weights[None]
@@ -508,10 +526,18 @@ def liu_west_filter(
         + final_carry.log_evidence_compensation
     )
 
-    _raise_if_degenerate(final_log_ml)
+    all_normalizers_finite = jnp.isfinite(log_ev_0) & jnp.all(
+        normalizers_finite
+    )
+    checked_log_ml = jnp.where(
+        all_normalizers_finite,
+        final_log_ml,
+        jnp.nan,
+    )
+    _raise_if_degenerate(checked_log_ml)
 
     return LiuWestPosterior(
-        marginal_loglik=final_log_ml,
+        marginal_loglik=checked_log_ml,
         filtered_particles=all_particles,
         filtered_log_weights=all_log_w,
         ancestors=all_ancestors,

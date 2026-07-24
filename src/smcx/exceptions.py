@@ -7,7 +7,7 @@ __all__ = ["DegenerateWeightsError"]
 
 
 class DegenerateWeightsError(ValueError):
-    """A checked particle-weight or evidence state is ``-inf`` or NaN.
+    """A checked particle-weight normalizer or evidence state is nonfinite.
 
     Public algorithms raise at their eager shell boundaries, which may be
     initialization, an intermediate stage, or the end of a scan. Inside a

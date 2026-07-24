@@ -159,15 +159,32 @@ def test_init_rejects_nonpositive_particle_count_before_callbacks(
         )
 
 
-def test_init_and_step_raise_on_degenerate_weights():
-    """Each public shell rejects an all-negative-infinity update."""
-    impossible = lambda emission, state: -jnp.inf  # noqa: E731
+@pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
+def test_init_step_and_update_reject_nonfinite_weights(value):
+    """Each resumable shell rejects a non-normalizable update."""
+
+    def impossible(emission, state):
+        del emission, state
+        return value
+
     with pytest.raises(smcx.DegenerateWeightsError):
         smcx.bootstrap_init(
             jr.key(1), _initial, impossible, EMISSIONS[0], NUM_PARTICLES
         )
     with pytest.raises(smcx.DegenerateWeightsError):
         _advance(jr.key(2), _checkpoint(), observation=impossible)
+    with pytest.raises(smcx.DegenerateWeightsError):
+        smcx.bootstrap_update(
+            jr.split(jr.key(2), 1),
+            _checkpoint(),
+            _transition,
+            impossible,
+            EMISSIONS[1:2],
+        )
+
+
+def test_step_rejects_nonfinite_checkpoint_evidence():
+    """A nonfinite cumulative checkpoint is rejected after its update."""
     checkpoint = _checkpoint()
     state = checkpoint.state._replace(log_marginal_likelihood=jnp.nan)
     with pytest.raises(smcx.DegenerateWeightsError):
