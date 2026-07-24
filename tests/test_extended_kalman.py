@@ -368,7 +368,7 @@ def test_uncompiled_extended_step_matches_public_scan():
     )
     next_state, output = kalman_module._extended_filter_step(
         state,
-        kalman_module._ExtendedFilterStepInput(
+        kalman_module._NonlinearFilterStepInput(
             emissions[1],
             transition_covariance,
             observation_covariance,
