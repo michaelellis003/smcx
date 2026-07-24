@@ -9,11 +9,11 @@ r"""Forward simulation from a state-space model.
 
 Generates a single trajectory of latent states and observed emissions
 by drawing from the initial, transition, and emission distributions
-sequentially.  Uses the same callback interface as the particle
-filters so that model definitions are reusable.
+sequentially. Simulation shares the particle filters' latent-state,
+transition, and input conventions. Its initial and emission callbacks
+draw one trajectory rather than a particle cloud or log-density.
 
-The implementation uses `jax.lax.scan` so the full time-loop is
-compiled into a single XLA program.
+The implementation expresses the full time-loop as one `jax.lax.scan`.
 """
 
 from typing import cast

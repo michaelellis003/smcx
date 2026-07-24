@@ -171,8 +171,11 @@ def to_arviz(
         ``particle_diagnostics.stage_valid``.
 
     Raises:
-        ValueError: A particle-filter result retains only its final particle
-            cloud. ArviZ export requires aligned full histories.
+        ImportError: ArviZ is not installed.
+        TypeError: The input is empty, contains mixed posterior types, or
+            contains an unsupported posterior type.
+        ValueError: Draw count, particle axes, diagnostic histories,
+            unconstrained values, or named event dimensions are not aligned.
     """
     if isinstance(posteriors, (ParticleFilterPosterior, TemperedPosterior)):
         runs = (posteriors,)

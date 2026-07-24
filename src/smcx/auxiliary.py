@@ -25,8 +25,7 @@ At each time step the APF:
 When ``log_auxiliary_fn`` returns zero for all inputs, the APF
 reduces to the bootstrap filter.
 
-The implementation uses `jax.lax.scan` so the full time-loop is
-compiled into a single XLA program.
+The implementation expresses the full time-loop as one `jax.lax.scan`.
 """
 
 import math
@@ -247,7 +246,7 @@ def auxiliary_filter(
             inputs the APF reduces to the bootstrap filter.
         emissions: Observed emissions, shape ``(T, D)``.
         num_particles: Number of particles $N$.
-        resampling_fn: Resampling algorithm matching the Blackjax
+        resampling_fn: Resampling algorithm matching the BlackJAX
             signature ``(key, weights, num_samples) -> indices``.
             Defaults to `smcx.resampling.systematic`.
         resampling_threshold: ESS fraction (e.g. 0.5 means resample when
@@ -272,6 +271,8 @@ def auxiliary_filter(
         leaf.
 
     Raises:
+        DegenerateWeightsError: All weights collapsed (eager execution
+            only; under ``jax.jit`` the ``-inf`` marginal propagates).
         ValueError: Inputs are malformed, a criterion result is not a scalar
             Boolean, the initial state tree is empty or has a wrong leading
             axis, a transition changes its state contract, or a log-density

@@ -22,8 +22,7 @@ where $a$ is the shrinkage parameter, $\bar{\phi}$ is the weighted
 parameter mean, $V$ is the weighted parameter covariance, and
 $h^2 = 1 - a^2$.
 
-The implementation uses `jax.lax.scan` so the full time-loop is
-compiled into a single XLA program.
+The implementation expresses the full time-loop as one `jax.lax.scan`.
 
 References:
     Liu, J. and West, M. (2001). Combined Parameter and State Estimation
@@ -391,6 +390,8 @@ def liu_west_filter(
         the marginal log-likelihood estimate, and ESS trace.
 
     Raises:
+        DegenerateWeightsError: All weights collapsed (eager execution
+            only; under ``jax.jit`` the ``-inf`` marginal propagates).
         ValueError: Inputs, particle count, shrinkage, callback output, or a
             criterion result is structurally invalid.
     """
