@@ -410,6 +410,20 @@ class TestParetoKDiagnostic:
         result = jax.jit(pareto_k_diagnostic)(pf_post)
         assert jnp.all(jnp.isfinite(result))
 
+    def test_single_particle_posterior_reports_undefined_pareto_k(self):
+        """Pareto-k is undefined, rather than erroneous, when N is one."""
+        posterior = ParticleFilterPosterior(
+            marginal_loglik=jnp.asarray(-1.0),
+            filtered_particles=jnp.array([[[0.0]], [[1.0]]]),
+            filtered_log_weights=jnp.zeros((2, 1)),
+            ancestors=jnp.zeros((2, 1), dtype=jnp.int32),
+            ess=jnp.ones(2),
+            log_evidence_increments=jnp.array([-0.25, -0.75]),
+        )
+
+        assert jnp.all(jnp.isnan(pareto_k_diagnostic(posterior)))
+        assert jnp.isnan(diagnose(posterior)["max_pareto_k"])
+
     def test_pareto_k_ordering_by_tail_heaviness(self):
         """Cauchy log-weights produce a higher k than t_3 or Gaussian.
 
