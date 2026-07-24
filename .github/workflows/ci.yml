@@ -194,7 +194,25 @@ jobs:
       - name: Probe Metal availability
         id: metal
         run: |
-          if JAX_PLATFORMS=mps uv run python -c "import jax; import jax.numpy as jnp; x = jnp.zeros(8) + 1; x.block_until_ready(); print('Metal devices:', jax.devices())"; then
+          if JAX_PLATFORMS=mps JAX_ENABLE_X64=false uv run python - <<'PY'
+          import jax
+          import jax.numpy as jnp
+
+          backend = jax.default_backend()
+          devices = jax.devices()
+          x64 = bool(jax.config.read('jax_enable_x64'))
+          print(f'JAX backend: {backend}')
+          print(f'JAX devices: {devices}')
+          print(f'JAX x64: {x64}')
+          if backend != 'mps':
+              raise RuntimeError(f'expected mps backend, got {backend!r}')
+          if not devices or any(device.platform != 'mps' for device in devices):
+              raise RuntimeError(f'expected only mps devices, got {devices!r}')
+          if x64:
+              raise RuntimeError('expected x64 to be disabled on mps')
+          (jnp.zeros(8) + 1).block_until_ready()
+          PY
+          then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"

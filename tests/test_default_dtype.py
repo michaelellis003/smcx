@@ -18,6 +18,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 _SCRIPT = """
 import jax.numpy as jnp
 import jax.random as jr
@@ -76,6 +78,108 @@ assert jnp.isfinite(kalman.marginal_loglik)
 assert jnp.all(jnp.isfinite(smoothed.smoothed_covariances))
 print('OK')
 """
+
+_CONFTEST_SCRIPT = """
+import runpy
+import sys
+
+try:
+    namespace = runpy.run_path('tests/conftest.py')
+except Exception:
+    if 'jax' in sys.modules:
+        raise AssertionError('JAX imported before selector validation')
+    raise
+
+import jax
+import smcx
+
+print(f'backend={jax.default_backend()}')
+print(f'device_platforms={",".join(d.platform for d in jax.devices())}')
+print(f'x64={bool(jax.config.read("jax_enable_x64"))}')
+print(f'smcx={smcx.__name__}')
+print(namespace['pytest_report_header'](None))
+"""
+
+
+def _run_conftest(
+    overrides: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        not in {
+            "JAX_ENABLE_X64",
+            "JAX_PLATFORMS",
+            "SMCX_TEST_PLATFORM",
+        }
+    }
+    env.update(overrides)
+    return subprocess.run(
+        [sys.executable, "-c", _CONFTEST_SCRIPT],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+
+
+@pytest.mark.parametrize(
+    ("environment", "message"),
+    [
+        (
+            {"SMCX_TEST_PLATFORM": "cuda"},
+            "Invalid SMCX_TEST_PLATFORM",
+        ),
+        (
+            {
+                "JAX_PLATFORMS": "cpu",
+                "SMCX_TEST_PLATFORM": "mps",
+            },
+            "JAX_PLATFORMS conflicts with selected test platform",
+        ),
+        (
+            {
+                "JAX_ENABLE_X64": "true",
+                "JAX_PLATFORMS": "mps",
+                "SMCX_TEST_PLATFORM": "mps",
+            },
+            "JAX_ENABLE_X64 conflicts with selected test platform",
+        ),
+        (
+            {"JAX_ENABLE_X64": "false"},
+            "JAX_ENABLE_X64 conflicts with selected test platform",
+        ),
+    ],
+    ids=[
+        "invalid-selector",
+        "platform-conflict",
+        "mps-precision-conflict",
+        "default-precision-conflict",
+    ],
+)
+def test_test_platform_rejects_invalid_or_conflicting_environment(
+    environment: dict[str, str],
+    message: str,
+):
+    result = _run_conftest(environment)
+
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert "JAX imported before selector validation" not in result.stderr
+
+
+def test_test_platform_defaults_to_cpu_x64_and_reports_runtime():
+    result = _run_conftest({})
+
+    assert result.returncode == 0, result.stderr
+    assert "backend=cpu" in result.stdout
+    assert "device_platforms=cpu" in result.stdout
+    assert "x64=True" in result.stdout
+    assert "smcx=smcx" in result.stdout
+    assert "JAX backend: cpu" in result.stdout
+    assert "JAX devices:" in result.stdout
+    assert "JAX x64: True" in result.stdout
 
 
 def test_filters_are_silent_under_default_config():
