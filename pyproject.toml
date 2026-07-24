@@ -62,14 +62,12 @@ metal = [
 dev = [
     "arviz>=0.23.4",
     "beartype>=0.22.9",
-    "hypothesis>=6.156.6",
     "mkdocs-gen-files>=0.6.1",
     "mkdocs-jupyter>=0.26.3",
     "mkdocs-literate-nav>=0.6.3",
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.3",
     "matplotlib>=3.11.0",
-    "nanobind>=2.13.0",
     "pre-commit>=4.5.1",
     "properdocs>=1.6.7",
     "pytest>=9.0.3",
@@ -90,12 +88,10 @@ notebooks = [
 
 [tool.ruff]
 # Target version enables modern syntax upgrades where possible
-target-version = "py310"
+target-version = "py311"
 preview = true
 line-length = 80
 indent-width = 4
-# Generated mlx stubs are vendored artifacts, not code.
-extend-exclude = ["typings"]
 
 [tool.ruff.lint]
 select = [
@@ -107,7 +103,7 @@ select = [
     "RUF", # Ruff's custom advanced rules
 ]
 ignore = [
-    # jaxtyping uses string-shape annotations (e.g. Float[mx.array, " n"])
+    # jaxtyping uses string-shape annotations (e.g. Float[Array, " n"])
     # which ruff parses as forward references and rejects.
     "F722",
 ]
@@ -176,15 +172,13 @@ type = "github"
 upload_to_vcs_release = true
 
 [tool.ty.src]
-# Research scripts are lint/type-exempt artifacts; typings/ holds
-# generated stubs (checked as a search path, not as source);
-# killtest and the SMC² particles baseline span separate venvs
+# Research scripts are lint/type-exempt artifacts. Killtest and the
+# SMC² particles baseline span separate venvs
 # (jax_side / particles_side import packages unresolvable here by
-# construction). The native-vs-jax-mps JAX worker is the same case: it
-# runs only inside the pinned `uv run --no-project` env, so jax and the
-# jax_plugins.mps backend are unresolvable in the project environment.
-# The MLX-era benchmark workers reference the pre-JAX API and
-# vendored MLX stubs. They remain as historical harness code.
+# construction). The native-vs-jax-mps workers run only inside pinned
+# `uv run --no-project` environments, so their accelerator dependencies
+# are unresolvable in the project environment. The MLX-era benchmark
+# workers reference the pre-JAX API and remain as historical harness code.
 exclude = [
     # Example notebooks: runtime-verified by execution; *fns unpacking
     # and blackjax's own stubs defeat static arity analysis.
@@ -194,14 +188,7 @@ exclude = [
     "benchmarks/native_vs_jax_mps/jax_worker.py",
     "benchmarks/native_vs_jax_mps/mlx_worker.py",
     "benchmarks/smc2/**",
-    "typings/**",
 ]
-
-[tool.ty.environment]
-# Vendored mlx.core stubs: upstream ships py.typed but no
-# .pyi for the compiled extension. Regenerate on every mlx floor bump:
-#   uv run python -m nanobind.stubgen -m mlx.core -O typings/mlx
-extra-paths = ["typings"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
