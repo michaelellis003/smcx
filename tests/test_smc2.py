@@ -226,6 +226,16 @@ class TestCallbackValidation:
                 ),
                 "initial_sampler output.*num_particles=2",
             ),
+            (
+                lambda key, count, theta: jnp.zeros(count, dtype=theta.dtype),
+                "initial_sampler output must have shape",
+            ),
+            (
+                lambda key, count, theta: jnp.zeros(
+                    (count, 0), dtype=theta.dtype
+                ),
+                "initial_sampler output must have shape",
+            ),
         ],
     )
     def test_inner_initializer_requires_dense_particle_cloud(
