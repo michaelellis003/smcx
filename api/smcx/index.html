@@ -8783,7 +8783,10 @@ Rank-one inputs become <code>(T, 1)</code>.</p>
             <td>
               <div class="doc-md-description">
                 <p>If False, retain only the final particle, weight, and
-ancestor record while keeping full ESS and evidence traces.</p>
+ancestor record while keeping full ESS and evidence traces.
+On MPS, multi-observation execution uses one eager callback step
+per observation and cannot be wrapped in a JAX transform until
+smcx #38 closes.</p>
               </div>
             </td>
             <td>
@@ -8842,7 +8845,9 @@ ancestor record while keeping full ESS and evidence traces.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A callback does not return <code>ParticleFilterRecord</code>.</p>
+                <p>A callback does not return <code>ParticleFilterRecord</code>.
+On MPS, also raised when a multi-step run is traced by a JAX
+transform.</p>
               </div>
             </td>
           </tr>

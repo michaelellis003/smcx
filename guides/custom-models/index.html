@@ -1766,9 +1766,9 @@ contracts when there are no time-varying inputs:</p>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>step(carry, time_index, emission_t, input_t, key_t) -&gt; (carry, record)
 </span></code></pre></div>
 <p>The carry may be any JAX PyTree of arrays. Its structure, leaf shapes, and
-dtypes must remain fixed across steps because the runner uses <code>jax.lax.scan</code>.
-It is private execution state and is not included in the returned posterior.
-Each callback also returns the public standard record:</p>
+dtypes must remain fixed across steps. It is private execution state and is
+not included in the returned posterior. Each callback also returns the public
+standard record:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">smcx</span><span class="o">.</span><span class="n">ParticleFilterRecord</span><span class="p">(</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">particles</span><span class="p">,</span>  <span class="c1"># PyTree leaves: (num_particles, ...)</span>
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">normalized_log_weights</span><span class="p">,</span>  <span class="c1"># (num_particles,)</span>
@@ -1783,6 +1783,15 @@ evidence increments; and assembles <code>smcx.ParticleFilterPosterior</code>. Th
 callbacks retain control of resampling, propagation, weighting, and the
 increment calculation. Weight normalization and ancestor-index bounds are
 callback preconditions.</p>
+<p>CPU and other backends execute the later steps in one <code>jax.lax.scan</code> and
+support wrapping the runner in JAX transformations. Until
+<a href="https://github.com/michaelellis003/smcx/issues/38">smcx #38</a> closes, MPS
+instead executes one eager callback step per observation to contain an
+upstream Metal history-corruption defect. An outer <code>jax.jit</code>, <code>jax.vmap</code>, or
+gradient transform is unsupported for a multi-observation MPS run because it
+would restage those steps in one multi-step executable. The containment adds
+per-observation dispatch overhead on MPS; other backends retain the compiled
+scan.</p>
 <p>This always-resampling bootstrap kernel composes only public smcx operations
 with the <code>initial</code>, <code>transition</code>, and <code>log_observation</code> callbacks defined
 above:</p>
