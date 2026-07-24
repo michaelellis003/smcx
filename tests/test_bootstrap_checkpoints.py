@@ -5,7 +5,6 @@
 
 import math
 from functools import partial
-from unittest.mock import Mock
 
 import jax
 import jax.numpy as jnp
@@ -14,7 +13,6 @@ import numpy as np
 import pytest
 
 import smcx
-import smcx.bootstrap as bootstrap_module
 from smcx.bootstrap import _bootstrap_step, _validate_checkpoint
 from smcx.resampling import systematic
 
@@ -95,19 +93,16 @@ def _join_histories(*posteriors):
     )
 
 
-def test_update_selects_execution_from_checkpoint_device(monkeypatch):
-    """MPS loops over public steps while CPU retains the chunk scan."""
+def test_update_respects_checkpoint_device_and_rejects_transforms():
+    """The host shell follows its checkpoint device and rejects transforms."""
     checkpoint = _checkpoint()
     platform = checkpoint.state.log_weights.device.platform
-    public_step = Mock(wraps=bootstrap_module.bootstrap_step)
-    jax.block_until_ready(jr.split(jr.key(1), 2))
-    monkeypatch.setattr(bootstrap_module, "bootstrap_step", public_step)
     keys = jr.split(jr.key(2), 2)
-    _update(keys, checkpoint, EMISSIONS[1:3])
-    assert public_step.call_count == (2 if platform == "mps" else 0)
+    updated, _ = _update(keys, checkpoint, EMISSIONS[1:3])
+    assert {x.device.platform for x in jax.tree.leaves(updated)} == {platform}
+    with pytest.raises(TypeError, match="cannot run under a JAX transform"):
+        jax.jit(lambda: _update(keys, checkpoint, EMISSIONS[1:3]))()
     if platform == "mps":
-        with pytest.raises(TypeError, match="cannot run under a JAX"):
-            jax.jit(lambda: _update(keys, checkpoint, EMISSIONS[1:3]))()
         try:
             cpu = jax.devices("cpu")[0]
         except RuntimeError:
@@ -115,9 +110,7 @@ def test_update_selects_execution_from_checkpoint_device(monkeypatch):
         with jax.default_device(cpu):
             cpu_checkpoint = _checkpoint()
         assert not cpu_checkpoint.state.log_weights.committed
-        public_step.reset_mock()
         updated, _ = _update(keys, cpu_checkpoint, EMISSIONS[1:3])
-        assert public_step.call_count == 0
         assert {x.device.platform for x in jax.tree.leaves(updated)} == {"cpu"}
 
 
