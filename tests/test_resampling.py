@@ -12,6 +12,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 import pytest
+from jaxtyping import config as jaxtyping_config
 
 from smcx import multinomial, residual, stratified, systematic
 from smcx.types import ResamplingFn
@@ -41,6 +42,33 @@ def _replicated_counts(
 
 class TestContract:
     """Structural contract shared by all resampling schemes."""
+
+    @pytest.mark.parametrize("resampler", SCHEMES, ids=SCHEME_IDS)
+    @pytest.mark.parametrize(
+        ("weights", "num_samples", "message"),
+        [
+            (jnp.ones((2, 2)), 2, r"weights must have shape \(N,\)"),
+            (jnp.empty((0,)), 2, "weights must contain at least one value"),
+            (
+                jnp.ones((2,), dtype=jnp.int32),
+                2,
+                "weights must have a floating dtype",
+            ),
+            (jnp.ones((2,)), 0, "num_samples must be >= 1"),
+        ],
+    )
+    def test_rejects_malformed_structural_inputs(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        resampler: ResamplingFn,
+        weights: jax.Array,
+        num_samples: int,
+        message: str,
+    ) -> None:
+        monkeypatch.setattr(jaxtyping_config, "jaxtyping_disable", True)
+
+        with pytest.raises(ValueError, match=message):
+            resampler(jr.key(6), weights, num_samples)
 
     @pytest.mark.parametrize("resampler", SCHEMES, ids=SCHEME_IDS)
     def test_shape_dtype_bounds_and_seeded_determinism(
