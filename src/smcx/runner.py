@@ -141,13 +141,15 @@ def run_particle_filter(
     structural validation; ESS; compensated evidence accumulation; history
     policy; and posterior construction.
 
-    Input-free callbacks have these scan-shaped signatures::
+    Input-free callbacks have these scan-shaped signatures:
 
+    ```text
         initialize(time_index, emission_t, key_t) -> (carry, record)
         step(carry, time_index, emission_t, key_t) -> (carry, record)
+    ```
 
     Input-aware callbacks insert ``input_t`` immediately before ``key_t``.
-    ``record`` must be :class:`~smcx.containers.ParticleFilterRecord`.
+    ``record`` must be `smcx.containers.ParticleFilterRecord`.
     Its log weights must already be normalized and its ancestor indices must
     be in range; these are data-dependent callback preconditions rather than
     conditions the compiled scan can raise on.

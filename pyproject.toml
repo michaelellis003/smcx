@@ -125,8 +125,6 @@ docstring-code-format = true
 # breaking test_version_fallback_when_package_not_found on CI).
 version_toml = ["pyproject.toml:project.version"]
 commit_message = "chore(release): {version}"
-# Stay 0.x on BREAKING CHANGE commits until stability is declared.
-major_on_zero = false
 
 [tool.semantic_release.changelog.default_templates]
 changelog_file = "CHANGELOG.md"

@@ -786,11 +786,11 @@ def kalman_filter(
 
     The model is
 
-    .. math::
-
-        x_0 &\sim N(m_0, P_0),\\
-        x_t &= F x_{t-1} + b + B u_t + q_t,\\
-        y_t &= H x_t + d + D u_t + r_t.
+    $$
+    \begin{aligned} x_0 &\sim N(m_0, P_0),\\
+    x_t &= F x_{t-1} + b + B u_t + q_t,\\
+    y_t &= H x_t + d + D u_t + r_t. \end{aligned}
+    $$
 
     Args:
         initial_mean: Prior mean for ``x[0]``, shape ``(state_dim,)``.
@@ -1019,11 +1019,11 @@ def extended_kalman_filter(
 
     The model has nonlinear conditional means and additive Gaussian noise:
 
-    .. math::
-
-        x_0 &\sim N(m_0, P_0),\\
-        x_t &= f(x_{t-1}, u_t) + q_t,\\
-        y_t &= h(x_t, u_t) + r_t.
+    $$
+    \begin{aligned} x_0 &\sim N(m_0, P_0),\\
+    x_t &= f(x_{t-1}, u_t) + q_t,\\
+    y_t &= h(x_t, u_t) + r_t. \end{aligned}
+    $$
 
     Jacobian callbacks are explicit and use output-by-input orientation.
     At each positive time, ``f`` and its Jacobian are evaluated at the
@@ -1241,11 +1241,11 @@ def unscented_kalman_filter(
 
     The model has nonlinear conditional means and additive Gaussian noise:
 
-    .. math::
-
-        x_0 &\sim N(m_0, P_0),\\
-        x_t &= f(x_{t-1}, u_t) + q_t,\\
-        y_t &= h(x_t, u_t) + r_t.
+    $$
+    \begin{aligned} x_0 &\sim N(m_0, P_0),\\
+    x_t &= f(x_{t-1}, u_t) + q_t,\\
+    y_t &= h(x_t, u_t) + r_t. \end{aligned}
+    $$
 
     The symmetric ``2d + 1`` rule defaults to
     ``(alpha, beta, kappa) = (1, 2, 0)``. Its default covariance weights
@@ -1497,8 +1497,8 @@ def rts_smoother(
 
     This stage consumes only the forward pass's stored moments and the
     transition operators. A caller may therefore construct a compatible
-    :class:`GaussianFilterPosterior` with a custom filtering method and
-    reuse this smoother independently.
+    `smcx.containers.GaussianFilterPosterior` with a custom filtering
+    method and reuse this smoother independently.
 
     Args:
         filtered_posterior: Forward-pass Gaussian moments.

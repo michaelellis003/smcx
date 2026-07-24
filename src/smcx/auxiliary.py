@@ -15,16 +15,17 @@ At each time step the APF:
 
 1. **First-stage weights** — combines the current normalised weights
    with the look-ahead log-density
-   :math:`\log g(y_{t+1} \mid x_t^i)` to form first-stage weights.
+   $\log g(y_{t+1} \mid x_t^i)$ to form first-stage weights.
 2. **Resamples** (conditionally on ESS) using the first-stage weights.
 3. **Propagates** resampled particles through the transition prior.
 4. **Second-stage weights** — corrects for the look-ahead bias:
-   :math:`w_t^{(2)} = p(y_{t+1} \mid x_{t+1}^i) / g(y_{t+1} \mid x_t^{a_i})`.
+   $w_t^{(2)} = p(y_{t+1} \mid x_{t+1}^i) /
+   g(y_{t+1} \mid x_t^{a_i})$.
 
 When ``log_auxiliary_fn`` returns zero for all inputs, the APF
 reduces to the bootstrap filter.
 
-The implementation uses :func:`jax.lax.scan` so the full time-loop is
+The implementation uses `jax.lax.scan` so the full time-loop is
 compiled into a single XLA program.
 """
 
@@ -225,30 +226,30 @@ def auxiliary_filter(
     Args:
         key: JAX PRNG key.
         initial_sampler: Function ``(key, num_particles[, input_0]) ->
-            particles`` that draws from :math:`p(z_1)`. ``particles`` may
+            particles`` that draws from $p(z_1)$. ``particles`` may
             be a dense array or a nonempty PyTree whose array leaves all
             have leading size ``num_particles``.
         transition_sampler: Function ``(key, state[, input_t]) -> state`` that
-            draws from :math:`p(z_t \mid z_{t-1})`. It receives one
+            draws from $p(z_t \mid z_{t-1})$. It receives one
             particle PyTree and must preserve its structure, leaf shapes,
             and dtypes. smcx ``vmap``-s it internally.
         log_observation_fn: Function
             ``(emission, state[, input_t]) -> log_prob`` that evaluates the
-            observation log-density :math:`\log p(y_t \mid z_t)`.
+            observation log-density $\log p(y_t \mid z_t)$.
             Will be ``vmap``-ped over the particle dimension (second
             argument) internally.
         log_auxiliary_fn: Function
             ``(emission, state[, input_t]) -> log_prob`` that evaluates the
             look-ahead log-density
-            :math:`\log g(y_{t+1} \mid x_t)`.
+            $\log g(y_{t+1} \mid x_t)$.
             Will be ``vmap``-ped over the particle dimension (second
             argument) internally.  When this returns zero for all
             inputs the APF reduces to the bootstrap filter.
         emissions: Observed emissions, shape ``(T, D)``.
-        num_particles: Number of particles :math:`N`.
+        num_particles: Number of particles $N$.
         resampling_fn: Resampling algorithm matching the Blackjax
             signature ``(key, weights, num_samples) -> indices``.
-            Defaults to :func:`~smcx.resampling.systematic`.
+            Defaults to `smcx.resampling.systematic`.
         resampling_threshold: ESS fraction (e.g. 0.5 means resample when
             ``ESS < 0.5 * N``), or a JAX-traceable criterion
             ``(normalized_log_weights, absolute_ess, time_index) -> bool``.
@@ -264,7 +265,7 @@ def auxiliary_filter(
             while ``ess``/``log_evidence_increments`` stay full.
 
     Returns:
-        :class:`~smcx.containers.ParticleFilterPosterior` containing
+        `smcx.containers.ParticleFilterPosterior` containing
         filtered particles, log weights, ancestor indices, the marginal
         log-likelihood estimate, and ESS trace. Structured particle
         histories preserve the state PyTree and add ``(T, N)`` to every

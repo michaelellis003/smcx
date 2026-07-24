@@ -10,44 +10,44 @@ r"""Diagnostic utilities for particle filter posteriors.
 Posterior summaries (Vehtari: *report posterior summaries with
 uncertainty*; McElreath: *always report intervals, not just means*):
 
-- :func:`weighted_mean` — weighted posterior mean at each time step
-- :func:`weighted_variance` — weighted posterior variance
-- :func:`weighted_quantile` — weighted quantiles for credible
+- `smcx.weighted_mean` — weighted posterior mean at each time step
+- `smcx.weighted_variance` — weighted posterior variance
+- `smcx.weighted_quantile` — weighted quantiles for credible
   intervals
-- :func:`param_weighted_mean` — weighted parameter mean (Liu-West)
-- :func:`param_weighted_quantile` — weighted parameter quantiles
+- `smcx.param_weighted_mean` — weighted parameter mean (Liu-West)
+- `smcx.param_weighted_quantile` — weighted parameter quantiles
 
 Computational faithfulness (Vehtari: *can we trust the computation?*):
 
-- :func:`particle_diversity` — fraction of unique particles per step
-- :func:`reconstruct_trajectories` — genealogy-traced particle paths
-- :func:`log_ml_variance` — single-run log-evidence variance
-- :func:`log_ml_increments` — per-step evidence contributions
-- :func:`pareto_k_diagnostic` — per-step Pareto-k reliability
-- :func:`tail_ess` — ESS for tail quantiles
-- :func:`diagnose` — summary diagnostics with warnings
+- `smcx.particle_diversity` — fraction of unique particles per step
+- `smcx.reconstruct_trajectories` — genealogy-traced particle paths
+- `smcx.log_ml_variance` — single-run log-evidence variance
+- `smcx.log_ml_increments` — per-step evidence contributions
+- `smcx.pareto_k_diagnostic` — per-step Pareto-k reliability
+- `smcx.tail_ess` — ESS for tail quantiles
+- `smcx.diagnose` — summary diagnostics with warnings
 
 Model comparison:
 
-- :func:`log_bayes_factor` — log Bayes factor between two models
-- :func:`replicated_log_ml` — Monte Carlo variability of log-ML
-- :func:`cumulative_log_score` — running predictive log-score
+- `smcx.log_bayes_factor` — log Bayes factor between two models
+- `smcx.replicated_log_ml` — Monte Carlo variability of log-ML
+- `smcx.cumulative_log_score` — running predictive log-score
 
 Posterior predictive checks:
 
-- :func:`posterior_predictive_sample` — one-step-ahead predictions
+- `smcx.posterior_predictive_sample` — one-step-ahead predictions
 
 Scoring rules:
 
-- :func:`crps` — Continuous Ranked Probability Score
+- `smcx.crps` — Continuous Ranked Probability Score
 
 Array-returning functions are pure, stateless, and JIT-compatible for
 static shape and control arguments. Genealogy and predictive operations
 preserve structured latent-state PyTrees; Euclidean summaries require a
 dense ``(T, N, D)`` particle history. Parameter summaries accept
-:class:`~smcx.containers.LiuWestPosterior` and
-:class:`~smcx.containers.SMC2Posterior`. :func:`diagnose` converts results
-to Python scalars and strings, so it is intentionally host-only.
+`smcx.containers.LiuWestPosterior` and
+`smcx.containers.SMC2Posterior`. `smcx.diagnose` converts results to Python
+scalars and strings, so it is intentionally host-only.
 """
 
 import math
@@ -198,8 +198,8 @@ def weighted_variance(
 ) -> Float[Array, "ntime state_dim"]:
     r"""Compute the weighted variance of particles at each time step.
 
-    Uses the formula :math:`V = \sum_i w_i (x_i - \mu)^2` where
-    :math:`\mu` is the weighted mean.
+    Uses the formula $V = \sum_i w_i (x_i - \mu)^2$, where $\mu$ is the
+    weighted mean.
 
     Args:
         posterior: Particle filter posterior output.
@@ -256,10 +256,10 @@ def log_ml_increments(
 
     The marginal log-likelihood can be decomposed as:
 
-    .. math::
-
-        \log p(y_{1:T}) = \sum_{t=1}^T
-            \log p(y_t \mid y_{1:t-1})
+    $$
+    \log p(y_{1:T}) = \sum_{t=1}^T
+        \log p(y_t \mid y_{1:t-1})
+    $$
 
     This function returns the individual increments, which diagnose
     which observations are hardest for the model.
@@ -399,19 +399,19 @@ def log_ml_variance(
     r"""Estimate the variance of the log-evidence from a single run.
 
     Implements the genealogy-based estimator of Chan and Lai (2013)
-    and Lee and Whiteley (2018): with Eve variables :math:`B_t^n`
+    and Lee and Whiteley (2018): with Eve variables $B_t^n$
     tracing particle n at time t to its time-0 ancestor, the estimate
     at time t is
 
-    .. math::
-
-        \widehat{V}_t = \sum_{e} \Big( \sum_{n : B_t^n = e}
-            W_t^n \Big)^2,
+    $$
+    \widehat{V}_t = \sum_{e} \Big( \sum_{n : B_t^n = e}
+        W_t^n \Big)^2,
+    $$
 
     the sum over Eve classes of squared normalized-weight mass. For
     large N this estimates the variance of ``marginal_loglik`` up to
-    time t, and it costs one filter run where
-    :func:`replicated_log_ml` costs R. The estimate degenerates as
+    time t, and it costs one filter run where `smcx.replicated_log_ml`
+    costs R. The estimate degenerates as
     the genealogy coalesces; once a single Eve class remains the
     function returns ``inf`` for that step (the run carries no
     variance information there).
@@ -467,14 +467,14 @@ def log_bayes_factor(
 ) -> Scalar:
     r"""Compute the log Bayes factor between two models.
 
-    .. math::
-
-        \log BF_{12} = \log p(y_{1:T} \mid M_1)
-                     - \log p(y_{1:T} \mid M_2)
+    $$
+    \log BF_{12} = \log p(y_{1:T} \mid M_1)
+                 - \log p(y_{1:T} \mid M_2)
+    $$
 
     Positive values favour model 1; negative values favour model 2.
 
-    .. warning::
+    !!! warning
 
         Marginal likelihoods are sensitive to the prior in ways that
         the posterior is not.  Bayes factors evaluate priors, not
@@ -482,11 +482,10 @@ def log_bayes_factor(
         marginal likelihood is dominated by prior tails that have
         little effect on posterior inference, so a Bayes factor can
         reverse sign under prior changes that leave the posterior
-        essentially unchanged. Inspect
-        :func:`cumulative_log_score` to see when evidence differences
-        accrue, complement the comparison with a predictive criterion
-        such as :func:`crps`, and use :func:`replicated_log_ml` to
-        quantify Monte Carlo variability.
+        essentially unchanged. Inspect `smcx.cumulative_log_score` to see
+        when evidence differences accrue, complement the comparison with
+        a predictive criterion such as `smcx.crps`, and use
+        `smcx.replicated_log_ml` to quantify Monte Carlo variability.
 
     Args:
         log_ml_1: Log marginal likelihood of model 1.
@@ -505,7 +504,7 @@ def replicated_log_ml(
 ) -> Float[Array, " num_replicates"]:
     r"""Run a particle filter multiple times to assess log-ML variability.
 
-    Uses :func:`jax.vmap` over PRNG keys for efficient parallel
+    Uses `jax.vmap` over PRNG keys for efficient parallel
     evaluation.  The resulting distribution of log-ML estimates
     quantifies Monte Carlo uncertainty in the evidence.
 
@@ -572,15 +571,15 @@ def posterior_predictive_sample(
 ) -> Float[Array, "ntime num_samples emission_dim"]:
     r"""Draw one-step-ahead posterior predictive samples.
 
-    At each time step :math:`t`, we:
+    At each time step $t$, we:
 
     1. Resample particle indices from the normalised weights.
     2. Propagate each resampled state through ``transition_sampler``.
     3. Draw an emission from ``emission_sampler``.
 
     This gives iid samples from the posterior predictive
-    :math:`p(y_{t+1} \mid y_{1:t})`, which can be compared with
-    the actual observation :math:`y_{t+1}` for posterior predictive
+    $p(y_{t+1} \mid y_{1:t})$, which can be compared with the actual
+    observation $y_{t+1}$ for posterior predictive
     checking (Gelman et al., 2013, ch. 6).
 
     Args:
@@ -662,13 +661,12 @@ def crps(
 
     CRPS is a proper scoring rule for probabilistic forecasts:
 
-    .. math::
+    $$
+    \text{CRPS} = \mathbb{E}|Y - y|
+                 - \tfrac{1}{2}\,\mathbb{E}|Y - Y'|
+    $$
 
-        \text{CRPS} = \mathbb{E}|Y - y|
-                     - \tfrac{1}{2}\,\mathbb{E}|Y - Y'|
-
-    where :math:`Y, Y'` are iid predictive samples and :math:`y`
-    is the observation.
+    where $Y, Y'$ are iid predictive samples and $y$ is the observation.
 
     Args:
         predictions: iid samples from the predictive distribution.
@@ -710,7 +708,7 @@ def _fit_generalized_pareto(
     (2009) with Bayesian model averaging over a grid of candidate
     shape parameters, then applies the weakly informative prior from
     Vehtari, Simpson, Gelman, Yao, and Gabry (2024) that shrinks
-    :math:`\hat{k}` toward 0.5.
+    $\hat{k}$ toward 0.5.
 
     Matches the algorithm in NumPyro's ``_fit_generalized_pareto_impl``
     and ArviZ's ``gpdfitnew``.
@@ -836,16 +834,16 @@ def pareto_k_diagnostic(
     profile-likelihood estimator with the weakly informative prior
     from Vehtari, Simpson, Gelman, Yao, and Gabry (2024).
 
-    The shape parameter :math:`\hat{k}` indicates reliability:
+    The shape parameter $\hat{k}$ indicates reliability:
 
-    - :math:`\hat{k} < 0.5`: good; the IS estimate has finite
+    - $\hat{k} < 0.5$: good; the IS estimate has finite
       variance
-    - :math:`0.5 \le \hat{k} < 0.7`: variance is infinite, but the
+    - $0.5 \le \hat{k} < 0.7$: variance is infinite, but the
       PSIS convergence-rate results say estimates remain practically
       reliable
-    - :math:`0.7 \le \hat{k} < 1.0`: unreliable (the practical
+    - $0.7 \le \hat{k} < 1.0$: unreliable (the practical
       threshold of Vehtari et al. 2024)
-    - :math:`\hat{k} \ge 1.0`: very unreliable (infinite mean)
+    - $\hat{k} \ge 1.0$: very unreliable (infinite mean)
 
     The tail size is ``ceil(min(0.2 * N, 3 * sqrt(N)))`` order
     statistics, matching the conventions of ArviZ and NumPyro.
@@ -872,7 +870,7 @@ def tail_ess(
     For each step, each state dimension, and each tail, restrict the
     normalized weights to the particles beyond the weighted q / 1-q
     quantile of the particle *values* and compute
-    :math:`(\sum w)^2 / \sum w^2` — the effective number of particles
+    $(\sum w)^2 / \sum w^2$ — the effective number of particles
     estimating that tail. Returns the minimum over dimensions and both
     tails (in the spirit of the quantile tail-ESS of Vehtari, Gelman,
     Simpson, Carpenter & Burkner 2021).
@@ -886,7 +884,7 @@ def tail_ess(
     implementation.
 
     Args:
-        posterior: Any :class:`ParticleFilterResult`.
+        posterior: Any `smcx.containers.ParticleFilterResult`.
         q: Tail fraction (each tail is the mass beyond the weighted
             ``q`` / ``1 - q`` quantile).
 
@@ -940,16 +938,16 @@ def cumulative_log_score(
 ) -> Float[Array, " ntime"]:
     r"""Compute the cumulative one-step-ahead predictive log-score.
 
-    The log-evidence increments :math:`\log p(y_t \mid y_{1:t-1})`
+    The log-evidence increments $\log p(y_t \mid y_{1:t-1})$
     are already one-step-ahead predictive log-densities.  This
     function returns their running sum:
 
-    .. math::
+    $$
+    S_t = \sum_{s=1}^{t} \log p(y_s \mid y_{1:s-1})
+    $$
 
-        S_t = \sum_{s=1}^{t} \log p(y_s \mid y_{1:s-1})
-
-    so that :math:`S_T` equals the total marginal log-likelihood.
-    Comparing :math:`S_t` across models shows when their log Bayes
+    so that $S_T$ equals the total marginal log-likelihood.
+    Comparing $S_t$ across models shows when their log Bayes
     factor accrues. At the final time their difference is exactly the
     log Bayes factor, with the same prior sensitivity.
 
@@ -985,7 +983,7 @@ def diagnose(
 
     This convenience summary is host-only because it converts arrays
     to Python scalars and constructs warning strings. Use the individual
-    array-returning diagnostics inside :func:`jax.jit`.
+    array-returning diagnostics inside `jax.jit`.
 
     Args:
         posterior: Particle filter posterior output.

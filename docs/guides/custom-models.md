@@ -114,7 +114,10 @@ Each callback-driven algorithm asks only for behavior it can use:
 | Bootstrap | Initial cloud and transition | Observation |
 | Auxiliary | Initial cloud and transition | Observation and look-ahead |
 | Guided | Initial cloud and proposal | Proposal, transition, and observation |
+| Liu-West | Initial state and parameter clouds; state transition | Observation and look-ahead |
 | Tempered SMC | Initial cloud | Prior and likelihood |
+| SMC² | Initial parameter cloud; conditioned inner state cloud and transition | Parameter prior and observation |
+| Caller-owned runner | Initialization and step kernels | Normalized weights and evidence increments |
 
 Choose the algorithm first, then supply the callbacks shown in the table.
 smcx does not inspect a model object to discover optional capabilities.
