@@ -18,6 +18,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
+import pytest
 
 import smcx
 from smcx import log_ml_variance, reconstruct_trajectories
@@ -167,6 +168,16 @@ class TestLogMlVariance:
         lag2 = np.asarray(log_ml_variance(post, lag=2))
         assert np.isfinite(lag2).all()
         assert (lag2 >= 0).all()
+
+    def test_negative_lag_is_rejected(self):
+        post = _posterior(
+            np.zeros((2, 3, 1)),
+            np.zeros((2, 3)),
+            np.tile(np.arange(3), (2, 1)),
+        )
+
+        with pytest.raises(ValueError, match="lag must be nonnegative"):
+            log_ml_variance(post, lag=-1)
 
     def test_calibrates_against_replicates(self, lgssm_params, lgssm_data):
         """The single-run estimate agrees with replicated variance.
