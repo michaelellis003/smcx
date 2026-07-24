@@ -20,12 +20,12 @@ compiled into a single XLA program.
 """
 
 import math
-from typing import cast
+from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
 from jax import core, device_put, lax, tree, vmap
-from jaxtyping import Array, Float, Shaped
+from jaxtyping import Array, Float, Int, Shaped
 
 from smcx._utils import (
     _canonicalize_inputs,
@@ -54,6 +54,7 @@ from smcx.types import (
     InputSequence,
     LogObservationFn,
     LogObservationFnWithInput,
+    ParticleCloud,
     PRNGKeyT,
     ResamplingCriterion,
     ResamplingFn,
@@ -151,30 +152,40 @@ def bootstrap_init(
     return checkpoint, info
 
 
-def _bootstrap_step(
+class _BootstrapParticleStepResult(NamedTuple):
+    """Normalized particle update before shell-owned evidence accumulation."""
+
+    particles: ParticleCloud
+    log_weights: Float[Array, " num_particles"]
+    info: BootstrapStepInfo
+
+
+def _bootstrap_particle_step(
     step_key: PRNGKeyT,
-    checkpoint: BootstrapCheckpoint,
+    state: ParticleState,
+    current_ess: Float[Array, ""],
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
     emission_t: Float[Array, " emission_dim"],
     resampling_fn: ResamplingFn,
-    resampling_threshold: float,
+    resampling_threshold: float | ResamplingCriterion,
     input_t: Float[Array, " input_dim"] | None,
     state_signature: _TreeSignature,
-) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
-    """Apply one pure bootstrap-filter update."""
-    state = checkpoint.state
+    time_index: Int[Array, ""] | None = None,
+) -> _BootstrapParticleStepResult:
+    """Propagate, weight, and normalize one bootstrap particle cloud."""
     num_particles = state.log_weights.shape[0]
     identity = jnp.arange(num_particles, dtype=jnp.int32)
     resample_key, transition_key = jr.split(step_key)
     do_resample, ancestors = _conditional_resample(
         resample_key,
         state.log_weights,
-        checkpoint.ess,
+        current_ess,
         resampling_fn,
         resampling_threshold,
         num_particles,
         identity,
+        time_index,
     )
     resampled_particles = _gather_particles(state.particles, ancestors)
     particle_keys = jr.split(transition_key, num_particles)
@@ -197,23 +208,64 @@ def _bootstrap_step(
     _validate_state_tree(
         sample, state_signature, name="transition_sampler output"
     )
-    log_w_unnorm = jnp.where(do_resample, log_obs, state.log_weights + log_obs)
+
+    log_w_unnorm = jnp.where(
+        do_resample,
+        log_obs,
+        state.log_weights + log_obs,
+    )
     log_w_norm, log_sum = log_normalize(log_w_unnorm)
     log_ev_inc = jnp.where(
         do_resample,
         log_sum - jnp.asarray(math.log(num_particles)),
         log_sum,
     )
+    ess_t = jnp.asarray(compute_ess(log_w_norm))
+    info = BootstrapStepInfo(ancestors, ess_t, do_resample, log_ev_inc)
+    return _BootstrapParticleStepResult(propagated, log_w_norm, info)
+
+
+def _bootstrap_step(
+    step_key: PRNGKeyT,
+    checkpoint: BootstrapCheckpoint,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
+    emission_t: Float[Array, " emission_dim"],
+    resampling_fn: ResamplingFn,
+    resampling_threshold: float,
+    input_t: Float[Array, " input_dim"] | None,
+    state_signature: _TreeSignature,
+) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
+    """Apply one pure bootstrap-filter update."""
+    state = checkpoint.state
+    result = _bootstrap_particle_step(
+        step_key,
+        state,
+        checkpoint.ess,
+        transition_sampler,
+        log_observation_fn,
+        emission_t,
+        resampling_fn,
+        resampling_threshold,
+        input_t,
+        state_signature,
+    )
     log_ev_sum, correction = _neumaier_add(
         jnp.asarray(state.log_marginal_likelihood),
         checkpoint.log_evidence_compensation,
-        log_ev_inc,
+        result.info.log_evidence_increment,
     )
-    ess_t = jnp.asarray(compute_ess(log_w_norm))
-    new_state = ParticleState(propagated, log_w_norm, log_ev_sum)
-    new_checkpoint = BootstrapCheckpoint(new_state, ess_t, correction)
-    info = BootstrapStepInfo(ancestors, ess_t, do_resample, log_ev_inc)
-    return new_checkpoint, info
+    new_state = ParticleState(
+        result.particles,
+        result.log_weights,
+        log_ev_sum,
+    )
+    new_checkpoint = BootstrapCheckpoint(
+        new_state,
+        result.info.ess,
+        correction,
+    )
+    return new_checkpoint, result.info
 
 
 def bootstrap_step(
@@ -544,101 +596,41 @@ def bootstrap_filter(
             input_t = None
         else:
             step_key, y_t, input_t, time_index = args
-        k1, k2 = jr.split(step_key)
-        # Invariant: state.log_weights are normalized (logsumexp = 0).
-
-        # 1. Conditionally resample
-        do_resample, ancestors = _conditional_resample(
-            k1,
-            state.log_weights,
+        result = _bootstrap_particle_step(
+            step_key,
+            state,
             current_ess,
+            transition_sampler,
+            log_observation_fn,
+            y_t,
             resampling_fn,
             resampling_threshold,
-            num_particles,
-            identity_ancestors,
+            input_t,
+            state_signature,
             time_index,
         )
-        resampled_particles = _gather_particles(state.particles, ancestors)
-
-        # 2. Propagate through transition
-        keys = jr.split(k2, num_particles)
-        if input_t is None:
-            transition_fn = cast(TransitionSampler, transition_sampler)
-
-            def _propagate(key_i, state_i):
-                next_state = transition_fn(key_i, state_i)
-                _validate_state_tree(
-                    next_state,
-                    state_signature,
-                    name="transition_sampler output",
-                )
-                return next_state
-
-            propagated = vmap(_propagate)(keys, resampled_particles)
-        else:
-            transition_fn_u = cast(
-                TransitionSamplerWithInput, transition_sampler
-            )
-
-            def _propagate_with_input(key_i, state_i):
-                next_state = transition_fn_u(key_i, state_i, input_t)
-                _validate_state_tree(
-                    next_state,
-                    state_signature,
-                    name="transition_sampler output",
-                )
-                return next_state
-
-            propagated = vmap(_propagate_with_input)(keys, resampled_particles)
-
-        # 3. Weight by observation likelihood
-        if input_t is None:
-            observation_fn = cast(LogObservationFn, log_observation_fn)
-            log_obs = vmap(lambda z: observation_fn(y_t, z))(propagated)
-        else:
-            observation_fn_u = cast(
-                LogObservationFnWithInput, log_observation_fn
-            )
-            log_obs = vmap(lambda z: observation_fn_u(y_t, z, input_t))(
-                propagated
-            )
-
-        # Compute evidence increment and normalize.
-        # If resampled: weights were reset to uniform (1/N), so
-        #   increment = logsumexp(log_obs) - log(N)
-        # If not resampled: old normalized weights W_i sum to 1, so
-        #   increment = logsumexp(log_W + log_obs)
-        log_w_unnorm = jnp.where(
-            do_resample,
-            log_obs,
-            state.log_weights + log_obs,
-        )
-        log_w_norm, log_sum = log_normalize(log_w_unnorm)
-        log_ev_inc = jnp.where(
-            do_resample,
-            log_sum - log_n,
-            log_sum,
-        )
-
+        info = result.info
         new_state = ParticleState(
-            particles=propagated,
-            log_weights=log_w_norm,
+            particles=result.particles,
+            log_weights=result.log_weights,
             log_marginal_likelihood=(
-                state.log_marginal_likelihood + log_ev_inc
+                state.log_marginal_likelihood + info.log_evidence_increment
             ),
         )
-        ess_t: Array = jnp.asarray(compute_ess(log_w_norm))
         if store_history:
-            return (new_state, ess_t, ancestors), (
-                propagated,
-                log_w_norm,
-                ancestors,
-                ess_t,
-                log_ev_inc,
+            return (new_state, info.ess, info.ancestors), (
+                result.particles,
+                result.log_weights,
+                info.ancestors,
+                info.ess,
+                info.log_evidence_increment,
             )
         # Final-only mode: ancestors ride the carry (O(N)), the scan
         # stacks just the scalar traces.
-        return (new_state, ess_t, ancestors), (ess_t, log_ev_inc)
+        return (new_state, info.ess, info.ancestors), (
+            info.ess,
+            info.log_evidence_increment,
+        )
 
     # Run the scan over t = 1 ... T-1
     step_keys = jr.split(key, num_timesteps - 1)
