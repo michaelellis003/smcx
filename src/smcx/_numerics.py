@@ -12,7 +12,12 @@ def _neumaier_add(
     correction: Float[Array, "..."],
     value: float | Float[Array, "..."],
 ) -> tuple[Float[Array, "..."], Float[Array, "..."]]:
-    """Add one value while retaining a Neumaier correction."""
+    """Add one value while retaining a Neumaier correction.
+
+    References:
+        Neumaier, A. (1974). Rundungsfehleranalyse einiger Verfahren zur
+        Summation endlicher Summen. https://doi.org/10.1002/zamm.19740540106
+    """
     updated = total + value
     correction = correction + jnp.where(
         jnp.abs(total) >= jnp.abs(value),
