@@ -269,6 +269,45 @@ class TestSchedule:
 class TestMechanics:
     """Acceptance, determinism, degeneracy, container."""
 
+    @pytest.mark.parametrize(
+        ("drifting_name", "message"),
+        [
+            ("prior", "log_prior_fn output must have shape"),
+            ("likelihood", "log_likelihood_fn output must have shape"),
+        ],
+    )
+    def test_rejects_density_contract_drift_during_mutation(
+        self, drifting_name, message
+    ) -> None:
+        outputs = iter((jnp.asarray(0.0), jnp.zeros(2)))
+
+        def stable_density(_position):
+            return jnp.asarray(0.0)
+
+        def drifting_density(_position):
+            return next(outputs)
+
+        log_prior = (
+            drifting_density if drifting_name == "prior" else stable_density
+        )
+        log_likelihood = (
+            drifting_density
+            if drifting_name == "likelihood"
+            else stable_density
+        )
+
+        with pytest.raises(ValueError, match=message):
+            smcx.temper(
+                jr.key(46),
+                lambda _key, count: jnp.arange(count)[:, None].astype(
+                    jnp.float32
+                ),
+                log_prior,
+                log_likelihood,
+                2,
+                num_mcmc_steps=1,
+            )
+
     def test_exact_zero_uniform_does_not_accept_bad_float32_move(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
