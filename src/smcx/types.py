@@ -13,7 +13,16 @@ Core array and key aliases follow the conventions used by Dynamax
 
 from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
 
-from jaxtyping import Array, Float, Int, Int32, PRNGKeyArray, PyTree, Shaped
+from jaxtyping import (
+    Array,
+    Bool,
+    Float,
+    Int,
+    Int32,
+    PRNGKeyArray,
+    PyTree,
+    Shaped,
+)
 
 if TYPE_CHECKING:
     from smcx.containers import ParticleFilterRecord
@@ -451,6 +460,19 @@ class ResamplingFn(Protocol):
         num_samples: int,
         /,
     ) -> Int32[Array, " num_samples"]: ...
+
+
+@runtime_checkable
+class ResamplingCriterion(Protocol):
+    """Decide whether to resample one normalized particle cloud."""
+
+    def __call__(
+        self,
+        normalized_log_weights: Float[Array, " num_particles"],
+        current_ess: Float[Array, ""],
+        time_index: Int[Array, ""],
+        /,
+    ) -> bool | Bool[Array, ""]: ...
 
 
 @runtime_checkable
