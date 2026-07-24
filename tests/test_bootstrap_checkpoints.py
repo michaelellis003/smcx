@@ -137,6 +137,28 @@ def test_uncompiled_step_matches_compiled_step():
     jax.tree.map(assert_close, eager, compiled)
 
 
+@pytest.mark.parametrize("num_particles", [0, -1])
+def test_init_rejects_nonpositive_particle_count_before_callbacks(
+    num_particles,
+):
+    """Initialization validates the particle count before user callbacks."""
+
+    def forbidden_callback(*_args):
+        pytest.fail("callback executed before particle-count validation")
+
+    with pytest.raises(
+        ValueError,
+        match=rf"^num_particles must be >= 1; got {num_particles}$",
+    ):
+        smcx.bootstrap_init(
+            jr.key(1),
+            forbidden_callback,
+            forbidden_callback,
+            EMISSIONS[0],
+            num_particles,
+        )
+
+
 def test_init_and_step_raise_on_degenerate_weights():
     """Each public shell rejects an all-negative-infinity update."""
     impossible = lambda emission, state: -jnp.inf  # noqa: E731
