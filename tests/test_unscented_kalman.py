@@ -3,6 +3,8 @@
 
 """Tests for scaled unscented Kalman filtering."""
 
+import math
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -11,6 +13,29 @@ import pytest
 import smcx
 import smcx.kalman as kalman_module
 from tests import _unscented_kalman_reference as nonlinear_reference
+
+
+def _identity(state):
+    return state
+
+
+def _square(state):
+    return state**2
+
+
+def _minimal_float32_ukf(**parameters):
+    zero = jnp.zeros(1, dtype=jnp.float32)
+    one = jnp.eye(1, dtype=jnp.float32)
+    return smcx.unscented_kalman_filter(
+        zero,
+        one,
+        _identity,
+        one,
+        _identity,
+        one,
+        zero[None],
+        **parameters,
+    )
 
 
 def _assert_roundoff_close(actual, expected, *, ulps=512):
@@ -233,6 +258,18 @@ def test_input_aware_unscented_core_matches_linear_controls():
         final_state.marginal_loglik,
         exact.marginal_loglik,
     )
+    public = smcx.unscented_kalman_filter(
+        initial_mean,
+        initial_covariance,
+        transition_mean,
+        transition_covariance,
+        observation_mean,
+        observation_covariance,
+        emissions,
+        inputs=inputs,
+    )
+    for actual, expected in zip(public, exact, strict=True):
+        _assert_roundoff_close(actual, expected)
 
 
 def test_unscented_kalman_reduces_to_linear_filter():
@@ -301,23 +338,121 @@ def test_unscented_kalman_reduces_to_linear_filter():
         _assert_roundoff_close(actual, expected)
 
 
-@pytest.mark.parametrize("alpha", [1e-150, 1e-200])
-def test_unscented_filter_rejects_tiny_finite_alpha(alpha):
-    """Derived-rule overflow uses the public validation exception."""
-    zero = jnp.zeros(1, dtype=jnp.float32)
-    one = jnp.eye(1, dtype=jnp.float32)
+@pytest.mark.parametrize(
+    ("parameters", "message"),
+    [
+        ({"alpha": 0.0}, "alpha must be greater"),
+        ({"beta": math.inf}, "beta must be finite"),
+        ({"kappa": -1.0}, "state_dim.*kappa"),
+        ({"beta": -1.0}, "must be nonnegative"),
+        ({"alpha": 1e-30}, "non-finite weights"),
+        ({"alpha": 1e-200}, "non-finite weights"),
+    ],
+)
+def test_unscented_filter_rejects_invalid_rule(parameters, message):
+    """Invalid scaled-rule parameters use the public exception."""
+    with pytest.raises(ValueError, match=message):
+        _minimal_float32_ukf(**parameters)
 
-    with pytest.raises(ValueError, match="non-finite weights"):
-        smcx.unscented_kalman_filter(
-            zero,
-            one,
-            lambda state: state,
-            one,
-            lambda state: state,
-            one,
-            zero[None],
-            alpha=alpha,
-        )
+
+def test_unscented_nondefault_rule_matches_scalar_oracle():
+    """A valid negative central weight retains analytic scalar moments."""
+    posterior = smcx.unscented_kalman_filter(
+        jnp.array([0.0], dtype=jnp.float32),
+        jnp.array([[1.0]], dtype=jnp.float32),
+        _identity,
+        jnp.array([[0.1]], dtype=jnp.float32),
+        _square,
+        jnp.array([[0.75]], dtype=jnp.float32),
+        jnp.zeros((1, 1), dtype=jnp.float32),
+        alpha=0.5,
+        beta=0.0,
+        kappa=1.0,
+    )
+    expected_logpdf = -0.5 * (math.log(2.0 * math.pi) + 1.0)
+    budget = 4 * np.finfo(np.float32).eps
+
+    np.testing.assert_allclose(
+        posterior.filtered_means,
+        [[0.0]],
+        rtol=0.0,
+        atol=budget,
+    )
+    np.testing.assert_allclose(
+        posterior.filtered_covariances,
+        [[[1.0]]],
+        rtol=0.0,
+        atol=budget,
+    )
+    np.testing.assert_allclose(
+        [posterior.marginal_loglik, posterior.log_evidence_increments[0]],
+        expected_logpdf,
+        rtol=0.0,
+        atol=budget,
+    )
+
+
+def test_unscented_filter_regenerates_points_after_process_noise():
+    """Process noise reaches a nonlinear observation transform."""
+    posterior = smcx.unscented_kalman_filter(
+        jnp.array([0.0], dtype=jnp.float32),
+        jnp.array([[1.0]], dtype=jnp.float32),
+        lambda state: jnp.zeros_like(state),
+        jnp.array([[1.0]], dtype=jnp.float32),
+        _square,
+        jnp.array([[1.0]], dtype=jnp.float32),
+        jnp.zeros((2, 1), dtype=jnp.float32),
+    )
+    expected = -0.5 * (math.log(6.0 * math.pi) + 1.0 / 3.0)
+    budget = 4 * np.finfo(np.float32).eps
+
+    np.testing.assert_allclose(
+        posterior.predicted_covariances[1],
+        [[1.0]],
+        rtol=0.0,
+        atol=budget,
+    )
+    np.testing.assert_allclose(
+        posterior.log_evidence_increments,
+        [expected, expected],
+        rtol=0.0,
+        atol=budget,
+    )
+
+
+def test_unscented_float32_update_is_psd_and_accurate():
+    """Residual-sigma conditioning survives a Metal cancellation case."""
+    dtype = jnp.float32
+    covariance = jnp.array(
+        [[0.9975046, 0.04986679], [0.04986679, 0.00349542]],
+        dtype=dtype,
+    )
+    observation_matrix = jnp.array(
+        [[9.9755106, -0.0069942847], [0.69942844, 0.099755101]],
+        dtype=dtype,
+    )
+
+    def observation_mean(state):
+        return observation_matrix @ state
+
+    posterior = smcx.unscented_kalman_filter(
+        jnp.zeros(2, dtype=dtype),
+        covariance,
+        _identity,
+        jnp.eye(2, dtype=dtype),
+        observation_mean,
+        1e-8 * jnp.eye(2, dtype=dtype),
+        jnp.zeros((1, 2), dtype=dtype),
+    )
+    actual = np.asarray(posterior.filtered_covariances[0], dtype=np.float64)
+    expected = np.array([
+        [9.999998754e-11, 5.046806022e-15],
+        [5.046806022e-15, 9.990034666e-7],
+    ])
+    budget = 4 * np.finfo(np.float32).eps
+
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=budget)
+    assert np.linalg.eigvalsh((actual + actual.T) / 2).min() >= -budget
 
 
 def test_unscented_kalman_matches_independent_nonlinear_reference():
