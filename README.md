@@ -153,7 +153,7 @@ The linear Kalman and RTS outputs are independently validated against
 and
 [statsmodels 0.14.6](https://github.com/statsmodels/statsmodels/releases/tag/v0.14.6);
 the details are recorded with the
-[frozen linear fixture](tests/_kalman_reference.py).
+[frozen linear fixture](https://github.com/michaelellis003/smcx/blob/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/tests/_kalman_reference.py).
 
 The extended and unscented Kalman outputs are independently validated against
 [Stone Soup 1.9.1](https://github.com/dstl/Stone-Soup/releases/tag/v1.9.1),
@@ -163,8 +163,10 @@ and checked against
 [SciPy 1.18.0](https://github.com/scipy/scipy/releases/tag/v1.18.0)
 innovation log densities. Exact commits, environments, licenses, and
 observed differences are recorded with the frozen
-[extended](tests/_extended_kalman_reference.py) and
-[unscented](tests/_unscented_kalman_reference.py) fixtures.
+[extended](https://github.com/michaelellis003/smcx/blob/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/tests/_extended_kalman_reference.py)
+and
+[unscented](https://github.com/michaelellis003/smcx/blob/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/tests/_unscented_kalman_reference.py)
+fixtures.
 
 The auxiliary-guided runner recipe is distributionally cross-checked against
 particles 0.4's pinned

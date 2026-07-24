@@ -21,10 +21,10 @@ body:
     attributes:
       label: Environment
       description: >-
-        Include exact smcx, Python, JAX, jax-mps, and MLX versions where
-        applicable, plus the operating system and device.
+        Include exact smcx, Python, JAX, and jax-mps versions where
+        applicable, plus the operating system, accelerator backend, and device.
       placeholder: >-
-        smcx 1.6.0; Python 3.13.9; JAX ...; jax-mps ...; MLX ...; macOS ...;
-        M3 Pro
+        smcx x.y.z; Python x.y.z; JAX x.y.z; jax-mps x.y.z (if used);
+        macOS/Linux ...; CPU, GPU, or device model ...
     validations:
       required: true
