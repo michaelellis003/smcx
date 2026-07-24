@@ -5,6 +5,7 @@
 
 import math
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
@@ -164,6 +165,114 @@ class TestAuxiliaryFlatMatchesBootstrap:
         assert apf_ll == pytest.approx(bpf_ll, abs=3.0), (
             f"APF {apf_ll:.2f} vs bootstrap {bpf_ll:.2f}"
         )
+
+
+class TestAuxiliaryStepCore:
+    """The pure APF step preserves the public scan contract."""
+
+    def test_uncompiled_step_matches_public_and_compiled_scan(
+        self, lgssm_params, lgssm_data
+    ):
+        from smcx._utils import _validate_particle_cloud
+        from smcx.auxiliary import (
+            _auxiliary_step,
+            _AuxiliaryStepCarry,
+            _AuxiliaryStepInput,
+            _AuxiliaryStepOutput,
+        )
+        from smcx.containers import ParticleState
+        from smcx.resampling import systematic
+
+        _, emissions = lgssm_data
+        emissions = emissions[:2]
+        callbacks = _make_smcx_fns(lgssm_params)
+        initial_sampler, transition, observation, auxiliary = callbacks
+        key = jr.key(19)
+        num_particles = 16
+        initial = auxiliary_filter(
+            key,
+            initial_sampler,
+            transition,
+            observation,
+            auxiliary,
+            emissions[:1],
+            num_particles,
+            resampling_threshold=1.1,
+        )
+        expected = auxiliary_filter(
+            key,
+            initial_sampler,
+            transition,
+            observation,
+            auxiliary,
+            emissions,
+            num_particles,
+            resampling_threshold=1.1,
+        )
+        scan_key, _ = jr.split(key)
+        step_key = jr.split(scan_key, 1)[0]
+        state = ParticleState(
+            initial.filtered_particles[0],
+            initial.filtered_log_weights[0],
+            initial.marginal_loglik,
+        )
+        carry = _AuxiliaryStepCarry(state, initial.ancestors[0])
+        step_input = _AuxiliaryStepInput(
+            emissions[1],
+            None,
+            jnp.asarray(1, dtype=jnp.int32),
+        )
+        signature = _validate_particle_cloud(
+            state.particles,
+            num_particles,
+            name="initial_sampler output",
+        )
+
+        def advance(current, current_input, current_key):
+            return _auxiliary_step(
+                current,
+                current_input,
+                current_key,
+                transition_sampler=transition,
+                log_observation_fn=observation,
+                log_auxiliary_fn=auxiliary,
+                resampling_fn=systematic,
+                resampling_threshold=1.1,
+                log_num_particles=jnp.asarray(math.log(num_particles)),
+                state_signature=signature,
+            )
+
+        with jax.disable_jit():
+            eager = advance(carry, step_input, step_key)
+        compiled = jax.jit(advance)(carry, step_input, step_key)
+        expected_step = (
+            _AuxiliaryStepCarry(
+                ParticleState(
+                    expected.filtered_particles[1],
+                    expected.filtered_log_weights[1],
+                    expected.marginal_loglik,
+                ),
+                expected.ancestors[1],
+            ),
+            _AuxiliaryStepOutput(
+                expected.filtered_particles[1],
+                expected.filtered_log_weights[1],
+                expected.ancestors[1],
+                expected.ess[1],
+                expected.log_evidence_increments[1],
+            ),
+        )
+
+        # Fixed keys remove MC error; five f32 eps covers compiler rounding.
+        tolerance = float(5 * np.finfo(np.float32).eps)
+        for actual in (eager, compiled):
+            jax.tree.map(
+                lambda x, y: np.testing.assert_allclose(
+                    x, y, rtol=tolerance, atol=tolerance
+                ),
+                actual,
+                expected_step,
+            )
 
 
 # ---------------------------------------------------------------------------
