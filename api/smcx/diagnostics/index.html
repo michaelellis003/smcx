@@ -1,0 +1,3772 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Sequential Monte Carlo in JAX — particle filters, tempered SMC, and SMC²">
+      
+      
+        <meta name="author" content="Michael Ellis">
+      
+      
+        <link rel="canonical" href="https://michaelellis003.github.io/smcx/api/smcx/diagnostics/">
+      
+      
+        <link rel="prev" href="../containers/">
+      
+      
+        <link rel="next" href="../exceptions/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-ProperDocs 1.6.7, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>smcx.diagnostics - smcx</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#smcxdiagnostics" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="smcx" class="md-header__button md-logo" aria-label="smcx" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            smcx
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              smcx.diagnostics
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/michaelellis003/smcx" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    michaelellis003/smcx
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../guides/quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../tutorials/filtering/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Filtering a simulated series
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../guides/arviz/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  API reference
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="smcx" class="md-nav__button md-logo" aria-label="smcx" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    smcx
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/michaelellis003/smcx" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    michaelellis003/smcx
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guides/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../tutorials/filtering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filtering a simulated series
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guides/arviz/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ArviZ reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guides/custom-models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guides/stochastic-volatility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stochastic volatility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Smcx
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Smcx
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../auxiliary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.auxiliary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bootstrap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.bootstrap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../containers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.containers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.diagnostics
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#smcx.diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        diagnostics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="diagnostics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.crps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        crps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.cumulative_log_score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cumulative_log_score
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.diagnose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        diagnose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.log_bayes_factor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log_bayes_factor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.log_ml_increments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log_ml_increments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.log_ml_variance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log_ml_variance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.param_weighted_mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        param_weighted_mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.param_weighted_quantile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        param_weighted_quantile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.pareto_k_diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pareto_k_diagnostic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.particle_diversity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        particle_diversity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.posterior_predictive_sample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        posterior_predictive_sample
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.reconstruct_trajectories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reconstruct_trajectories
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.replicated_log_ml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        replicated_log_ml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.tail_ess" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tail_ess
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.weighted_mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weighted_mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.weighted_quantile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weighted_quantile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.weighted_variance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weighted_variance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../exceptions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.exceptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guided/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.guided
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kalman/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.kalman
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../liu_west/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.liu_west
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reporting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../resampling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.resampling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.runner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simulate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.simulate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../smc2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.smc2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tempering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.tempering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    smcx.weights
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#smcx.diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        diagnostics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="diagnostics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.crps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        crps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.cumulative_log_score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cumulative_log_score
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.diagnose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        diagnose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.log_bayes_factor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log_bayes_factor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.log_ml_increments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log_ml_increments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.log_ml_variance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log_ml_variance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.param_weighted_mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        param_weighted_mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.param_weighted_quantile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        param_weighted_quantile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.pareto_k_diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pareto_k_diagnostic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.particle_diversity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        particle_diversity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.posterior_predictive_sample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        posterior_predictive_sample
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.reconstruct_trajectories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reconstruct_trajectories
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.replicated_log_ml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        replicated_log_ml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.tail_ess" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tail_ess
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.weighted_mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weighted_mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.weighted_quantile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weighted_quantile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.diagnostics.weighted_variance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weighted_variance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="smcxdiagnostics">smcx.diagnostics</h1>
+
+
+<div class="doc doc-object doc-module">
+
+
+
+<h2 id="smcx.diagnostics" class="doc doc-heading">
+            <code>smcx.diagnostics</code>
+
+
+</h2>
+
+    <div class="doc doc-contents first">
+
+        <p>Diagnostic utilities for particle filter posteriors.</p>
+<p>Posterior summaries (Vehtari: <em>report posterior summaries with
+uncertainty</em>; McElreath: <em>always report intervals, not just means</em>):</p>
+<ul>
+<li>:func:<code>weighted_mean</code> — weighted posterior mean at each time step</li>
+<li>:func:<code>weighted_variance</code> — weighted posterior variance</li>
+<li>:func:<code>weighted_quantile</code> — weighted quantiles for credible
+  intervals</li>
+<li>:func:<code>param_weighted_mean</code> — weighted parameter mean (Liu-West)</li>
+<li>:func:<code>param_weighted_quantile</code> — weighted parameter quantiles</li>
+</ul>
+<p>Computational faithfulness (Vehtari: <em>can we trust the computation?</em>):</p>
+<ul>
+<li>:func:<code>particle_diversity</code> — fraction of unique particles per step</li>
+<li>:func:<code>reconstruct_trajectories</code> — genealogy-traced particle paths</li>
+<li>:func:<code>log_ml_variance</code> — single-run log-evidence variance</li>
+<li>:func:<code>log_ml_increments</code> — per-step evidence contributions</li>
+<li>:func:<code>pareto_k_diagnostic</code> — per-step Pareto-k reliability</li>
+<li>:func:<code>tail_ess</code> — ESS for tail quantiles</li>
+<li>:func:<code>diagnose</code> — summary diagnostics with warnings</li>
+</ul>
+<p>Model comparison:</p>
+<ul>
+<li>:func:<code>log_bayes_factor</code> — log Bayes factor between two models</li>
+<li>:func:<code>replicated_log_ml</code> — Monte Carlo variability of log-ML</li>
+<li>:func:<code>cumulative_log_score</code> — running predictive log-score</li>
+</ul>
+<p>Posterior predictive checks:</p>
+<ul>
+<li>:func:<code>posterior_predictive_sample</code> — one-step-ahead predictions</li>
+</ul>
+<p>Scoring rules:</p>
+<ul>
+<li>:func:<code>crps</code> — Continuous Ranked Probability Score</li>
+</ul>
+<p>All functions are pure and stateless. Genealogy and predictive
+operations preserve structured latent-state PyTrees; Euclidean summaries
+require a dense <code>(T, N, D)</code> particle history. They operate on outputs from
+:class:<code>~smcx.containers.ParticleFilterPosterior</code> or
+:class:<code>~smcx.containers.LiuWestPosterior</code>, and are
+JIT-compatible.</p>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.crps" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">crps</span><span class="p">(</span><span class="n">predictions</span><span class="p">,</span> <span class="n">observation</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the Continuous Ranked Probability Score.</p>
+<p>CRPS is a proper scoring rule for probabilistic forecasts:</p>
+<p>.. math::</p>
+<div class="language-text highlight"><pre><span></span><code>\text{CRPS} = \mathbb{E}|Y - y|
+             - \tfrac{1}{2}\,\mathbb{E}|Y - Y&#39;|
+</code></pre></div>
+<p>where :math:<code>Y, Y'</code> are iid predictive samples and :math:<code>y</code>
+is the observation.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>predictions</code>
+            </td>
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_samples&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>iid samples from the predictive distribution.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>observation</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
+
+  
+      module-attribute
+   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Observed scalar value.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
+
+  
+      module-attribute
+   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Scalar CRPS (lower is better, zero for perfect prediction).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="references" open>
+  <summary>References</summary>
+  <p>Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
+continuous probability distributions.
+https://doi.org/10.1287/mnsc.22.10.1087</p>
+<p>Gneiting, T., and Raftery, A. E. (2007). Strictly proper scoring
+rules, prediction, and estimation.
+https://doi.org/10.1198/016214506000001437</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.cumulative_log_score" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">cumulative_log_score</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the cumulative one-step-ahead predictive log-score.</p>
+<p>The log-evidence increments :math:<code>\log p(y_t \mid y_{1:t-1})</code>
+are already one-step-ahead predictive log-densities.  This
+function returns their running sum:</p>
+<p>.. math::</p>
+<div class="language-text highlight"><pre><span></span><code>S_t = \sum_{s=1}^{t} \log p(y_s \mid y_{1:s-1})
+</code></pre></div>
+<p>so that :math:<code>S_T</code> equals the total marginal log-likelihood.
+Comparing :math:<code>S_t</code> across models shows when their log Bayes
+factor accrues. At the final time their difference is exactly the
+log Bayes factor, with the same prior sensitivity.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Cumulative log-scores, shape <code>(ntime,)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="references" open>
+  <summary>References</summary>
+  <p>Gneiting, T., and Raftery, A. E. (2007). Strictly proper scoring
+rules, prediction, and estimation.
+https://doi.org/10.1198/016214506000001437</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.diagnose" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">diagnose</span><span class="p">(</span><span class="n">posterior</span><span class="p">,</span> <span class="n">ess_threshold</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">diversity_threshold</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">pareto_k_threshold</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Summarise filter health and flag potential problems.</p>
+<p>Runs a battery of diagnostics and returns a dictionary with
+scalar summaries and a list of plain-text warnings.  The
+thresholds are configurable; the defaults flag situations
+where the particle approximation is likely unreliable.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>ess_threshold</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Fraction of N below which ESS triggers a
+warning.</p>
+              </div>
+            </td>
+            <td>
+                  <code>0.1</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>diversity_threshold</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Diversity below which a warning is
+triggered.</p>
+              </div>
+            </td>
+            <td>
+                  <code>0.1</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>pareto_k_threshold</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Pareto-k above which a warning is
+triggered.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Dictionary with keys:</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <ul>
+<li><code>min_ess</code>: minimum ESS across all time steps</li>
+</ul>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <ul>
+<li><code>min_diversity</code>: minimum particle diversity</li>
+</ul>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <ul>
+<li><code>max_pareto_k</code>: maximum Pareto-k across time steps</li>
+</ul>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <ul>
+<li><code>min_tail_ess</code>: minimum tail-ESS across time steps</li>
+</ul>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <ul>
+<li><code>ess_below_threshold</code>: count of steps where
+ESS &lt; <code>ess_threshold * N</code></li>
+</ul>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <ul>
+<li><code>warnings</code>: list of diagnostic warning strings</li>
+</ul>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The posterior has structured rather than dense particles.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.log_bayes_factor" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">log_bayes_factor</span><span class="p">(</span><span class="n">log_ml_1</span><span class="p">,</span> <span class="n">log_ml_2</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the log Bayes factor between two models.</p>
+<p>.. math::</p>
+<div class="language-text highlight"><pre><span></span><code>\log BF_{12} = \log p(y_{1:T} \mid M_1)
+             - \log p(y_{1:T} \mid M_2)
+</code></pre></div>
+<p>Positive values favour model 1; negative values favour model 2.</p>
+<p>.. warning::</p>
+<div class="language-text highlight"><pre><span></span><code>Marginal likelihoods are sensitive to the prior in ways that
+the posterior is not.  Bayes factors evaluate priors, not
+posteriors (Gelman, 2023).  With weakly informative priors the
+marginal likelihood is dominated by prior tails that have
+little effect on posterior inference, so a Bayes factor can
+reverse sign under prior changes that leave the posterior
+essentially unchanged. Inspect
+:func:`cumulative_log_score` to see when evidence differences
+accrue, complement the comparison with a predictive criterion
+such as :func:`crps`, and use :func:`replicated_log_ml` to
+quantify Monte Carlo variability.
+</code></pre></div>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>log_ml_1</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
+
+  
+      module-attribute
+   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Log marginal likelihood of model 1.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>log_ml_2</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
+
+  
+      module-attribute
+   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Log marginal likelihood of model 2.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
+
+  
+      module-attribute
+   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Scalar log Bayes factor.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.log_ml_increments" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">log_ml_increments</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Extract per-step log marginal likelihood increments.</p>
+<p>The marginal log-likelihood can be decomposed as:</p>
+<p>.. math::</p>
+<div class="language-text highlight"><pre><span></span><code>\log p(y_{1:T}) = \sum_{t=1}^T
+    \log p(y_t \mid y_{1:t-1})
+</code></pre></div>
+<p>This function returns the individual increments, which diagnose
+which observations are hardest for the model.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-step evidence increments, shape <code>(ntime,)</code>.  These sum</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>to <code>posterior.marginal_loglik</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.log_ml_variance" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">log_ml_variance</span><span class="p">(</span><span class="n">posterior</span><span class="p">,</span> <span class="n">lag</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Estimate the variance of the log-evidence from a single run.</p>
+<p>Implements the genealogy-based estimator of Chan and Lai (2013)
+and Lee and Whiteley (2018): with Eve variables :math:<code>B_t^n</code>
+tracing particle n at time t to its time-0 ancestor, the estimate
+at time t is</p>
+<p>.. math::</p>
+<div class="language-text highlight"><pre><span></span><code>\widehat{V}_t = \sum_{e} \Big( \sum_{n : B_t^n = e}
+    W_t^n \Big)^2,
+</code></pre></div>
+<p>the sum over Eve classes of squared normalized-weight mass. For
+large N this estimates the variance of <code>marginal_loglik</code> up to
+time t, and it costs one filter run where
+:func:<code>replicated_log_ml</code> costs R. The estimate degenerates as
+the genealogy coalesces; once a single Eve class remains the
+function returns <code>inf</code> for that step (the run carries no
+variance information there).</p>
+<p>Passing <code>lag</code> uses the ancestor at time <code>t - lag</code> instead of
+time 0 (Olsson and Douc, 2019), trading a lag-controlled bias
+for estimates that stay usable on long series.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior with full history
+(<code>store_history=True</code>, the default).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>lag</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional fixed lag for the Olsson-Douc variant. <code>None</code>
+uses time-0 Eves (the exact Lee-Whiteley estimator).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-step variance estimates, shape <code>(ntime,)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.param_weighted_mean" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">param_weighted_mean</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the weighted mean of parameter particles at each step.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="LiuWestPosterior (smcx.containers.LiuWestPosterior)" href="../containers/#smcx.containers.LiuWestPosterior">LiuWestPosterior</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Liu-West filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime param_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Weighted parameter means, shape <code>(ntime, param_dim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.param_weighted_quantile" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">param_weighted_quantile</span><span class="p">(</span><span class="n">posterior</span><span class="p">,</span> <span class="n">q</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute weighted quantiles of parameter particles at each step.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="LiuWestPosterior (smcx.containers.LiuWestPosterior)" href="../containers/#smcx.containers.LiuWestPosterior">LiuWestPosterior</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Liu-West filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>q</code>
+            </td>
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_quantiles&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Quantile levels in [0, 1], e.g. <code>jnp.array([0.025, 0.975])</code>
+for a 95% credible interval.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_quantiles param_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Weighted quantiles, shape <code>(ntime, num_quantiles, param_dim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.pareto_k_diagnostic" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">pareto_k_diagnostic</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the Pareto-k diagnostic at each time step.</p>
+<p>Fits a generalised Pareto distribution (GPD) to the upper tail
+of the importance weights using the Zhang and Stephens (2009)
+profile-likelihood estimator with the weakly informative prior
+from Vehtari, Simpson, Gelman, Yao, and Gabry (2024).</p>
+<p>The shape parameter :math:<code>\hat{k}</code> indicates reliability:</p>
+<ul>
+<li>:math:<code>\hat{k} &lt; 0.5</code>: good; the IS estimate has finite
+  variance</li>
+<li>:math:<code>0.5 \le \hat{k} &lt; 0.7</code>: variance is infinite, but the
+  PSIS convergence-rate results say estimates remain practically
+  reliable</li>
+<li>:math:<code>0.7 \le \hat{k} &lt; 1.0</code>: unreliable (the practical
+  threshold of Vehtari et al. 2024)</li>
+<li>:math:<code>\hat{k} \ge 1.0</code>: very unreliable (infinite mean)</li>
+</ul>
+<p>The tail size is <code>ceil(min(0.2 * N, 3 * sqrt(N)))</code> order
+statistics, matching the conventions of ArviZ and NumPyro.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-step Pareto-k estimates, shape <code>(ntime,)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.particle_diversity" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">particle_diversity</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the fraction of unique particles at each time step.</p>
+<p>Particle diversity measures path degeneracy: a value near 1 means
+most particles are distinct, while near 0 means heavy duplication
+after resampling.</p>
+<p>Uses an indicator-based method (not <code>jnp.unique</code>) for JIT
+compatibility: counts the fraction of particles that differ from
+their predecessor in the sorted order.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Diversity fraction in [0, 1] at each time step,</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>shape <code>(ntime,)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.posterior_predictive_sample" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">posterior_predictive_sample</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">posterior</span><span class="p">,</span> <span class="n">transition_sampler</span><span class="p">,</span> <span class="n">emission_sampler</span><span class="p">,</span> <span class="n">num_samples</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Draw one-step-ahead posterior predictive samples.</p>
+<p>At each time step :math:<code>t</code>, we:</p>
+<ol>
+<li>Resample particle indices from the normalised weights.</li>
+<li>Propagate each resampled state through <code>transition_sampler</code>.</li>
+<li>Draw an emission from <code>emission_sampler</code>.</li>
+</ol>
+<p>This gives iid samples from the posterior predictive
+:math:<code>p(y_{t+1} \mid y_{1:t})</code>, which can be compared with
+the actual observation :math:<code>y_{t+1}</code> for posterior predictive
+checking (Gelman et al., 2013, ch. 6).</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>key</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="PRNGKeyT = PRNGKeyArray
+
+  
+      module-attribute
+   (smcx.types.PRNGKeyT)" href="../types/#smcx.types.PRNGKeyT">PRNGKeyT</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>JAX PRNG key.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>transition_sampler</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="TransitionSampler (smcx.types.TransitionSampler)" href="../types/#smcx.types.TransitionSampler">TransitionSampler</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Function <code>(key, state) -&gt; state</code>. <code>state</code>
+may be a latent-state PyTree.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>emission_sampler</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="EmissionSampler (smcx.types.EmissionSampler)" href="../types/#smcx.types.EmissionSampler">EmissionSampler</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Function <code>(key, state) -&gt; emission</code> accepting
+the same state PyTree.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>num_samples</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Number of predictive draws per time step.
+Defaults to the number of particles.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Predictive samples, shape</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>(ntime, num_samples, emission_dim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The posterior state is malformed or the transition
+changes its PyTree structure, leaf shape, or dtype.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.reconstruct_trajectories" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">reconstruct_trajectories</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Trace each surviving particle's full path through the genealogy.</p>
+<p>The filter's per-step particle clouds approximate the filtering
+distributions; the paths obtained by following each final
+particle's ancestor indices backwards approximate the smoothing
+distribution (with the usual path-degeneracy caveat: early
+segments collapse onto few distinct values as the genealogy
+coalesces). Output <code>[t, n]</code> is the state at time t of the
+lineage that ends at particle n at the final step, so weighting
+trajectories by the final-step weights gives smoothing
+expectations.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior with full history
+(<code>store_history=True</code>, the default).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleHistory = PyTree[Shaped[Array, 'ntime num_particles ...']]
+
+  
+      module-attribute
+   (smcx.types.ParticleHistory)" href="../types/#smcx.types.ParticleHistory">ParticleHistory</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A latent-state PyTree matching <code>filtered_particles</code>. Every</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleHistory = PyTree[Shaped[Array, 'ntime num_particles ...']]
+
+  
+      module-attribute
+   (smcx.types.ParticleHistory)" href="../types/#smcx.types.ParticleHistory">ParticleHistory</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>leaf has shape <code>(ntime, num_particles, ...)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.replicated_log_ml" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">replicated_log_ml</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">filter_fn</span><span class="p">,</span> <span class="n">num_replicates</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Run a particle filter multiple times to assess log-ML variability.</p>
+<p>Uses :func:<code>jax.vmap</code> over PRNG keys for efficient parallel
+evaluation.  The resulting distribution of log-ML estimates
+quantifies Monte Carlo uncertainty in the evidence.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>key</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="PRNGKeyT = PRNGKeyArray
+
+  
+      module-attribute
+   (smcx.types.PRNGKeyT)" href="../types/#smcx.types.PRNGKeyT">PRNGKeyT</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>JAX PRNG key.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>filter_fn</code>
+            </td>
+            <td>
+                  <code><span title="collections.abc.Callable">Callable</span>[[<a class="autorefs autorefs-internal" title="PRNGKeyT = PRNGKeyArray
+
+  
+      module-attribute
+   (smcx.types.PRNGKeyT)" href="../types/#smcx.types.PRNGKeyT">PRNGKeyT</a>], <a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
+
+  
+      module-attribute
+   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Function <code>(key) -&gt; scalar</code> that runs a particle
+filter and returns the marginal log-likelihood.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>num_replicates</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Number of independent filter runs.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_replicates&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Array of log-ML estimates, shape <code>(num_replicates,)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.tail_ess" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">tail_ess</span><span class="p">(</span><span class="n">posterior</span><span class="p">,</span> <span class="n">q</span><span class="o">=</span><span class="mf">0.05</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Effective particles supporting the distribution tails.</p>
+<p>For each step, each state dimension, and each tail, restrict the
+normalized weights to the particles beyond the weighted q / 1-q
+quantile of the particle <em>values</em> and compute
+:math:<code>(\sum w)^2 / \sum w^2</code> — the effective number of particles
+estimating that tail. Returns the minimum over dimensions and both
+tails (in the spirit of the quantile tail-ESS of Vehtari, Gelman,
+Simpson, Carpenter &amp; Burkner 2021).</p>
+<p>Uniform weights give roughly <code>q * N</code> (a tail only ever holds a
+<code>q</code> fraction of the mass); compare against <code>q * N</code>, not <code>N</code>.</p>
+<p>Note: this replaces the earlier smcjax quantity of the same name,
+which measured top-weight-mass concentration and did not examine
+particle values. It was carried forward from smcx's former MLX
+implementation.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Any :class:<code>ParticleFilterResult</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>q</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Tail fraction (each tail is the mass beyond the weighted
+<code>q</code> / <code>1 - q</code> quantile).</p>
+              </div>
+            </td>
+            <td>
+                  <code>0.05</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-step minimum tail-ESS, shape <code>(ntime,)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The posterior has structured rather than dense particles.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.weighted_mean" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">weighted_mean</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the weighted mean of particles at each time step.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime state_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Weighted means, shape <code>(ntime, state_dim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The posterior has structured rather than dense particles.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.weighted_quantile" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">weighted_quantile</span><span class="p">(</span><span class="n">posterior</span><span class="p">,</span> <span class="n">q</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute weighted quantiles of particles at each time step.</p>
+<p>Uses a sorted resampling approach for JIT compatibility:
+sorts particles, computes cumulative weights, and interpolates.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>q</code>
+            </td>
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_quantiles&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Quantile levels in [0, 1], e.g. <code>jnp.array([0.025, 0.975])</code>
+for a 95% credible interval.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_quantiles state_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Weighted quantiles, shape <code>(ntime, num_quantiles, state_dim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The posterior has structured rather than dense particles.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="smcx.diagnostics.weighted_variance" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">weighted_variance</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the weighted variance of particles at each time step.</p>
+<p>Uses the formula :math:<code>V = \sum_i w_i (x_i - \mu)^2</code> where
+:math:<code>\mu</code> is the weighted mean.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleFilterResult (smcx.containers.ParticleFilterResult)" href="../containers/#smcx.containers.ParticleFilterResult">ParticleFilterResult</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle filter posterior output.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime state_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Weighted variances, shape <code>(ntime, state_dim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The posterior has structured rather than dense particles.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "search.suggest", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
