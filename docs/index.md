@@ -44,7 +44,8 @@ explicit state-Jacobian callbacks. Particle-model callbacks describe one
 particle; smcx vectorizes them over the cloud.
 Every stochastic operation takes an explicit PRNG key. Bootstrap,
 auxiliary, and guided filters can carry nonempty latent-state PyTrees, and
-every filter accepts an explicit sequence of time-varying inputs.
+the Kalman and state-space particle filters accept explicit sequences of
+time-varying inputs.
 
 The linear, extended, and unscented Kalman filters and RTS smoother return
 typed Gaussian posteriors. Particle algorithms similarly expose model,
