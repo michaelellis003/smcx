@@ -128,3 +128,50 @@ def test_unscented_core_reduces_to_one_linear_filter_step():
         final_state.marginal_loglik,
         exact.marginal_loglik,
     )
+
+
+def test_unscented_kalman_reduces_to_linear_filter():
+    """Affine mean callbacks reproduce every exact-filter field."""
+    initial_mean = jnp.array([0.2, -0.1])
+    initial_covariance = jnp.array([[0.5, 0.03], [0.03, 0.4]])
+    transition_matrix = jnp.array([[0.85, 0.1], [-0.05, 0.9]])
+    transition_bias = jnp.array([0.02, -0.03])
+    transition_covariance = jnp.array([
+        [[0.08, 0.01], [0.01, 0.06]],
+        [[0.07, 0.00], [0.00, 0.05]],
+        [[0.09, -0.01], [-0.01, 0.08]],
+    ])
+    observation_matrix = jnp.array([[1.0, -0.2]])
+    observation_bias = jnp.array([0.04])
+    observation_covariance = jnp.array([[[0.3]], [[0.2]], [[0.4]], [[0.25]]])
+    emissions = jnp.array([[0.1], [-0.2], [0.3], [0.05]])
+
+    def transition_mean(state):
+        return transition_matrix @ state + transition_bias
+
+    def observation_mean(state):
+        return observation_matrix @ state + observation_bias
+
+    exact = smcx.kalman_filter(
+        initial_mean,
+        initial_covariance,
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        emissions,
+        transition_bias=transition_bias,
+        observation_bias=observation_bias,
+    )
+    unscented = smcx.unscented_kalman_filter(
+        initial_mean,
+        initial_covariance,
+        transition_mean,
+        transition_covariance,
+        observation_mean,
+        observation_covariance,
+        emissions,
+    )
+
+    for actual, expected in zip(unscented, exact, strict=True):
+        _assert_roundoff_close(actual, expected)
