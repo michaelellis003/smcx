@@ -1,16 +1,16 @@
 # smcx
 
 smcx is a [JAX](https://github.com/jax-ml/jax) library for state-space
-inference: exact linear-Gaussian filtering and smoothing, first-order
-nonlinear Gaussian filtering, particle filters, adaptive tempered SMC,
-and SMC² with a small, function-oriented API. It runs on CPU, CUDA, and
-TPU through JAX, and on Apple-silicon GPUs through the optional
+inference: exact linear-Gaussian filtering and smoothing, extended and
+unscented nonlinear Gaussian filtering, particle filters, adaptive
+tempered SMC, and SMC² with a small, function-oriented API. It runs on
+CPU, CUDA, and TPU through JAX, and on Apple-silicon GPUs through the optional
 [jax-mps](https://github.com/tillahoffmann/jax-mps) backend.
 
 Features include:
 
 - exact linear-Gaussian Kalman filtering and RTS smoothing;
-- extended Kalman filtering with explicit, replaceable Jacobian callbacks;
+- extended and scaled unscented Kalman filtering with shared mean callbacks;
 - bootstrap, auxiliary, guided, and Liu–West particle filters;
 - a public runner for caller-owned particle-filter kernels;
 - adaptive tempered SMC and nested SMC² parameter inference;
@@ -20,12 +20,13 @@ Features include:
 - structured latent-state PyTrees and explicit time-varying inputs.
 
 smcx supplies inference algorithms, not model or distribution classes.
-Linear-Gaussian models are dense arrays. Nonlinear Gaussian and particle
-models use ordinary JAX callables, so model functions, Jacobians, proposals,
-and other algorithmic pieces can be replaced independently.
-Filtering and smoothing remain separate functions joined by typed
-posterior containers, allowing research code to replace one stage
-without subclassing or rerunning the other.
+Its built-in catalog deliberately covers core families rather than every
+named variant: a new method needs concrete user or research demand and a
+credible independent implementation for validation. Linear-Gaussian models
+use dense arrays. The EKF and UKF share ordinary nonlinear mean callbacks;
+the EKF alone adds explicit Jacobians. Particle models use JAX callbacks,
+and `run_particle_filter` lets research code own the filter kernel. Typed
+posteriors keep filtering and smoothing composable without a class hierarchy.
 
 ## Installation
 
@@ -125,8 +126,9 @@ The implemented methods draw on these primary sources:
 - Exact linear-Gaussian state estimation:
   [Kalman (1960)](https://doi.org/10.1115/1.3662552) and
   [Rauch, Tung, and Striebel (1965)](https://doi.org/10.2514/3.3166).
-- First-order nonlinear Gaussian filtering:
-  [Schmidt (1966)](https://doi.org/10.1016/B978-1-4831-6716-9.50011-4).
+- Nonlinear Gaussian filtering:
+  [Schmidt (1966)](https://doi.org/10.1016/B978-1-4831-6716-9.50011-4) and
+  [Julier (2002)](https://doi.org/10.1109/ACC.2002.1025369).
 - Particle filters: [Gordon, Salmond, and Smith (1993)](https://doi.org/10.1049/ip-f-2.1993.0015),
   [Pitt and Shephard (1999)](https://doi.org/10.1080/01621459.1999.10474153),
   [Doucet, Godsill, and Andrieu (2000)](https://doi.org/10.1023/A:1008935410038),

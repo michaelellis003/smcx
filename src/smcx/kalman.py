@@ -1,17 +1,17 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-r"""Gaussian inference for linear and first-order nonlinear state-space models.
+r"""Gaussian inference for linear and nonlinear state-space models.
 
 The linear filter implements the exact covariance-form recursion of Kalman
 (1960) with a Joseph covariance update. The smoother implements the backward
-recursion of Rauch, Tung, and Striebel (1965). The extended filter applies a
-first-order Taylor approximation to nonlinear means with additive Gaussian
-noise, following Schmidt (1966).
+recursion of Rauch, Tung, and Striebel (1965). The nonlinear filters use
+either Schmidt's (1966) first-order approximation or Julier's (2002) scaled
+unscented transform for additive Gaussian noise.
 
 statsmodels and Dynamax validate the linear methods; Stone Soup and Dynamax
-validate the extended filter. They are comparison implementations, not
-implementation lineage; no code was copied or translated.
+validate the extended and unscented filters. They are comparison
+implementations, not implementation lineage; no code was copied or translated.
 
 References:
     Kalman, R. E. (1960). A New Approach to Linear Filtering and
