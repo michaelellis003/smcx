@@ -146,6 +146,83 @@ def _make_liu_west_fns():
     )
 
 
+def test_uncompiled_step_matches_public_and_compiled_scan():
+    """The pure Liu-West step preserves the fixed-key public scan."""
+    from smcx.liu_west import (
+        _liu_west_step,
+        _LiuWestStepCarry,
+        _LiuWestStepInput,
+    )
+    from smcx.resampling import systematic
+
+    callbacks = _make_conjugate_fns()
+    _, transition, observation, auxiliary, _ = callbacks
+    emissions = jnp.asarray(CONJUGATE_OBSERVATIONS[:2])[:, None]
+    key, num_particles, shrinkage = jr.key(23), 16, 0.95
+    expected = liu_west_filter(
+        key,
+        *callbacks,
+        emissions,
+        num_particles,
+        shrinkage=shrinkage,
+        resampling_threshold=1.1,
+    )
+    carry = _LiuWestStepCarry(
+        expected.filtered_particles[0],
+        expected.filtered_params[0],
+        expected.filtered_log_weights[0],
+        expected.log_evidence_increments[0],
+        expected.ancestors[0],
+    )
+    step_input = _LiuWestStepInput(
+        emissions[1], None, jnp.asarray(1, dtype=jnp.int32)
+    )
+    a = jnp.asarray(shrinkage)
+
+    def advance(current, current_input, current_key):
+        return _liu_west_step(
+            current,
+            current_input,
+            current_key,
+            transition_sampler=transition,
+            log_observation_fn=observation,
+            log_auxiliary_fn=auxiliary,
+            resampling_fn=systematic,
+            resampling_threshold=1.1,
+            log_num_particles=jnp.asarray(math.log(num_particles)),
+            shrinkage=a,
+            kernel_variance=1.0 - a**2,
+        )
+
+    step_key = jr.split(jr.split(key)[0], 1)[0]
+    with jax.disable_jit():
+        eager = advance(carry, step_input, step_key)
+    compiled = jax.jit(advance)(carry, step_input, step_key)
+    record = (
+        expected.filtered_particles[1],
+        expected.filtered_params[1],
+        expected.filtered_log_weights[1],
+        expected.ancestors[1],
+        expected.ess[1],
+        expected.log_evidence_increments[1],
+    )
+    expected_leaves = (
+        *record[:3],
+        expected.marginal_loglik,
+        record[3],
+        *record,
+    )
+    # Fixed keys remove MC error; five f32 eps covers compiler rounding.
+    tolerance = float(5 * np.finfo(np.float32).eps)
+    for actual in (eager, compiled):
+        for value, target in zip(
+            jax.tree.leaves(actual), expected_leaves, strict=True
+        ):
+            np.testing.assert_allclose(
+                value, target, rtol=tolerance, atol=tolerance
+            )
+
+
 class TestLiuWestConjugateReference:
     """Liu-West output is characterized against an exact posterior."""
 
