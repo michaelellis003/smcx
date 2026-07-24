@@ -4,6 +4,9 @@
 """Public caller-owned particle-filter runner contracts."""
 
 import math
+import os
+import subprocess
+import sys
 
 import jax
 import jax.numpy as jnp
@@ -14,6 +17,58 @@ import smcx
 
 _EMISSIONS = jnp.array([[10.0], [20.0], [30.0]])
 _INPUTS = jnp.array([1.0, 2.0, 3.0])
+_MPS_HISTORY_SCRIPT = """
+import math
+
+import jax
+import jax.numpy as jnp
+import jax.random as jr
+import numpy as np
+
+import smcx
+
+assert jax.default_backend() == 'mps'
+increments = jnp.tile(jnp.array([1e8, 1.0, -1e8]), 1_000)
+particles = jnp.zeros((1, 1), dtype=increments.dtype)
+
+
+def record(increment):
+    return smcx.ParticleFilterRecord(
+        particles,
+        jnp.zeros(1, dtype=increments.dtype),
+        jnp.zeros(1, dtype=jnp.int32),
+        increment,
+    )
+
+
+def initialize(time_index, emission, key):
+    del time_index, key
+    return particles, record(emission[0])
+
+
+def step(carry, time_index, emission, key):
+    del time_index, key
+    return carry, record(emission[0])
+
+
+posterior = smcx.run_particle_filter(
+    jr.key(20),
+    initialize,
+    step,
+    increments[:, None],
+    store_history=False,
+)
+expected_increments = np.asarray(increments)
+np.testing.assert_array_equal(
+    np.asarray(posterior.log_evidence_increments),
+    expected_increments,
+)
+expected = np.asarray(
+    math.fsum(map(float, expected_increments)),
+    dtype=expected_increments.dtype,
+)
+np.testing.assert_array_equal(np.asarray(posterior.marginal_loglik), expected)
+"""
 
 
 def _transport_callbacks(num_particles, evidence_scale=1.0):
@@ -231,6 +286,17 @@ def test_custom_runner_supports_jit_vmap_and_evidence_gradients():
         )
 
     eager = run(jr.key(12))
+    if jax.default_backend() == "mps":
+        with pytest.raises(TypeError, match="JAX transform on MPS"):
+            jax.jit(run)(jr.key(12))
+        with pytest.raises(TypeError, match="JAX transform on MPS"):
+            jax.vmap(run)(jr.split(jr.key(13), 2))
+        with pytest.raises(TypeError, match="JAX transform on MPS"):
+            jax.grad(lambda scale: run(jr.key(14), scale).marginal_loglik)(
+                jnp.asarray(1.0)
+            )
+        return
+
     compiled = jax.jit(run)(jr.key(12))
     for eager_leaf, compiled_leaf in zip(
         jax.tree.leaves(eager),
@@ -277,6 +343,22 @@ def test_runner_compensates_cancellation_in_caller_evidence():
     expected = jnp.asarray(math.fsum(map(float, emissions[:, 0])), dtype=dtype)
     assert jnp.array_equal(posterior.marginal_loglik, expected)
     assert jnp.array_equal(posterior.log_evidence_increments, emissions[:, 0])
+
+
+@pytest.mark.skipif(
+    jax.default_backend() != "mps",
+    reason="fresh-process jax-mps history regression",
+)
+def test_runner_preserves_mps_history_and_compensated_evidence():
+    """The supported Metal path must not return a corrupted scan trace."""
+    result = subprocess.run(
+        [sys.executable, "-c", _MPS_HISTORY_SCRIPT],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(

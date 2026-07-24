@@ -314,8 +314,12 @@ def test_structured_input_kernel_obeys_runner_contracts():
     key = jr.key(29)
     with jax.disable_jit():
         eager = run(key)
-    compiled = jax.jit(run)(key)
-    _assert_close(eager, compiled)
+    if jax.default_backend() == "mps":
+        with pytest.raises(TypeError, match="JAX transform on MPS"):
+            jax.jit(run)(key)
+    else:
+        compiled = jax.jit(run)(key)
+        _assert_close(eager, compiled)
     reverse_indices = jnp.arange(num_particles - 1, -1, -1, dtype=jnp.int32)
     assert jnp.array_equal(
         eager.ancestors[1:], jnp.stack([reverse_indices, reverse_indices])

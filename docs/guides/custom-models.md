@@ -250,9 +250,9 @@ step(carry, time_index, emission_t, input_t, key_t) -> (carry, record)
 ```
 
 The carry may be any JAX PyTree of arrays. Its structure, leaf shapes, and
-dtypes must remain fixed across steps because the runner uses `jax.lax.scan`.
-It is private execution state and is not included in the returned posterior.
-Each callback also returns the public standard record:
+dtypes must remain fixed across steps. It is private execution state and is
+not included in the returned posterior. Each callback also returns the public
+standard record:
 
 ```python
 smcx.ParticleFilterRecord(
@@ -270,6 +270,16 @@ evidence increments; and assembles `smcx.ParticleFilterPosterior`. The
 callbacks retain control of resampling, propagation, weighting, and the
 increment calculation. Weight normalization and ancestor-index bounds are
 callback preconditions.
+
+CPU and other backends execute the later steps in one `jax.lax.scan` and
+support wrapping the runner in JAX transformations. Until
+[smcx #38](https://github.com/michaelellis003/smcx/issues/38) closes, MPS
+instead executes one eager callback step per observation to contain an
+upstream Metal history-corruption defect. An outer `jax.jit`, `jax.vmap`, or
+gradient transform is unsupported for a multi-observation MPS run because it
+would restage those steps in one multi-step executable. The containment adds
+per-observation dispatch overhead on MPS; other backends retain the compiled
+scan.
 
 This always-resampling bootstrap kernel composes only public smcx operations
 with the `initial`, `transition`, and `log_observation` callbacks defined
