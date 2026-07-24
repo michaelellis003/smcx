@@ -134,6 +134,10 @@ def to_arviz(
 
     Returns:
         ``InferenceData`` on ArviZ 0.x or ``DataTree`` on ArviZ 1.x.
+
+    Raises:
+        ValueError: A particle-filter result retains only its final particle
+            cloud. ArviZ export requires aligned full histories.
     """
     if isinstance(posteriors, (ParticleFilterPosterior, TemperedPosterior)):
         runs = (posteriors,)
@@ -148,6 +152,15 @@ def to_arviz(
     num_chains = len(runs)
     if isinstance(runs[0], ParticleFilterPosterior):
         filter_runs = cast(tuple[ParticleFilterPosterior, ...], runs)
+        if any(
+            run.filtered_log_weights.shape[0]
+            != run.log_evidence_increments.shape[0]
+            for run in filter_runs
+        ):
+            raise ValueError(
+                "to_arviz requires full particle history; rerun the filter "
+                "with store_history=True"
+            )
         log_weights = _stack(filter_runs, "filtered_log_weights")
     else:
         tempered_runs = cast(tuple[TemperedPosterior, ...], runs)

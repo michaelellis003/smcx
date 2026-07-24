@@ -80,6 +80,18 @@ def test_weighted_cloud_keeps_raw_source_weights_in_diagnostics():
     )
 
 
+def test_final_only_filter_requires_full_history():
+    full = _filter()
+    final_only = full._replace(
+        filtered_particles=full.filtered_particles[-1:],
+        filtered_log_weights=full.filtered_log_weights[-1:],
+        ancestors=full.ancestors[-1:],
+    )
+
+    with pytest.raises(ValueError, match="store_history=True"):
+        to_arviz(final_only, key=jr.key(0))
+
+
 def test_dense_and_structured_states_have_stable_names_and_dims():
     post = _filter()
     tempered = TemperedPosterior(
