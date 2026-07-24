@@ -41,7 +41,7 @@ from smcx._utils import (
 )
 from smcx.containers import SMC2Posterior
 from smcx.exceptions import DegenerateWeightsError
-from smcx.resampling import _TINY, _below_one, systematic
+from smcx.resampling import _TINY, _below_one, _monotone_cdf, systematic
 from smcx.tempering import _chol_with_jitter, _weighted_cov_f64
 from smcx.types import (
     ParamInitialSampler,
@@ -79,10 +79,12 @@ def _batched_inner_resample(
 
     One uniform offset per filter (never a shared constant), vmapped
     right-bisect per row, with the sub-1 endpoint clamp shared with
-    ``smcx.resampling``.
+    ``smcx.resampling``. Each row also shares its monotone float32 CDF
+    repair.
     """
     cdf = jnp.cumsum(weights_2d, axis=1)
     cdf = cdf / jnp.maximum(cdf[:, -1:], _TINY)
+    cdf = _monotone_cdf(cdf)
     n_theta = weights_2d.shape[0]
     u0 = jr.uniform(key, (n_theta, 1))
     positions = jnp.minimum(

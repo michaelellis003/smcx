@@ -12,7 +12,12 @@ values with positive total mass. Data-dependent validation is skipped for
 traced values, where Python exceptions cannot be staged. Query grids are
 clamped strictly below 1 so a grid point that rounds to 1.0 in float32 cannot
 select past the final positive-weight slot. This endpoint guard is inherited
-from smcx's former MLX implementation.
+from smcx's former MLX implementation. Normalized CDFs are capped at one,
+repaired with a cumulative maximum, and given an exact unit endpoint before
+search. This can change fixed-key ancestors relative to releases that passed
+locally inverted float32 CDFs to ``searchsorted``; already-ordered seeded
+fixtures retain their draws. Numerical correctness fixes are not a promise of
+cross-version random-stream identity.
 """
 
 import jax
@@ -82,7 +87,39 @@ def _normalized_cdf(
     # all-zero fallback.
     total = cdf[-1]
     denominator = jnp.where(total > 0, total, jnp.ones_like(total))
-    return cdf / denominator
+    return _monotone_cdf(cdf / denominator)
+
+
+def _monotone_cdf(
+    cdf: Float[Array, "*batch num_particles"],
+) -> Float[Array, "*batch num_particles"]:
+    """Repair prefix-rounding inversions along the particle axis."""
+    one = jnp.ones((), dtype=cdf.dtype)
+    endpoint = cdf[..., -1:]
+    has_positive_mass = jnp.isfinite(endpoint) & (endpoint > 0)
+    bounded = jnp.where(
+        has_positive_mass,
+        jnp.minimum(cdf, one),
+        cdf,
+    )
+    # Promote the whole terminal plateau, not just its final entry. Otherwise
+    # a sub-unit rounded endpoint followed by zero weights would create
+    # artificial mass at the last (zero-weight) particle.
+    bounded = jnp.where(
+        has_positive_mass & (cdf == endpoint),
+        one,
+        bounded,
+    )
+    # ``maximum.accumulate`` has a pathological jax-mps 0.10.9 lowering.
+    # An explicit associative prefix has the same semantics and supports
+    # arbitrary leading batch axes on both maintained backends.
+    repaired = jax.lax.associative_scan(
+        jnp.maximum,
+        bounded,
+        axis=-1,
+    )
+    final = jnp.where(has_positive_mass[..., 0], one, endpoint[..., 0])
+    return repaired.at[..., -1].set(final)
 
 
 def _searchsorted_clipped(
