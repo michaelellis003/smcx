@@ -48,6 +48,14 @@ StateHistory: TypeAlias = PyTree[Shaped[Array, "ntime ..."]]
 FilterCarry: TypeAlias = PyTree[Shaped[Array, "..."]]
 """Caller-owned JAX PyTree carried by a particle-filter kernel."""
 
+
+@runtime_checkable
+class _ReplicatedLogMLFn(Protocol):
+    """Run one filter replicate and return its log marginal likelihood."""
+
+    def __call__(self, key: PRNGKeyT, /) -> Scalar: ...  # pragma: no cover
+
+
 # Static checkers see the accepted rank-one/rank-two contract. At runtime,
 # beartype must admit any rank so the public plain-Python validator can raise
 # the documented ValueError instead of a wrapper-specific type-check error.

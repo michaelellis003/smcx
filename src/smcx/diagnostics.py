@@ -51,7 +51,6 @@ to Python scalars and strings, so it is intentionally host-only.
 """
 
 import math
-from collections.abc import Callable
 from typing import Any
 
 import jax
@@ -80,6 +79,7 @@ from smcx.types import (
     PRNGKeyT,
     Scalar,
     TransitionSampler,
+    _ReplicatedLogMLFn,
 )
 from smcx.weights import normalize
 
@@ -500,7 +500,7 @@ def log_bayes_factor(
 
 def replicated_log_ml(
     key: PRNGKeyT,
-    filter_fn: Callable[[PRNGKeyT], Scalar],
+    filter_fn: _ReplicatedLogMLFn,
     num_replicates: int,
 ) -> Float[Array, " num_replicates"]:
     r"""Run a particle filter multiple times to assess log-ML variability.
