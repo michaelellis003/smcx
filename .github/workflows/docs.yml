@@ -1,11 +1,14 @@
 name: Deploy Documentation
 
 on:
-  workflow_run:
-    workflows: [Release]
-    types: [completed]
-    branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      sha:
+        description: Full SHA of a released commit to deploy
+        required: true
+        type: string
 
 # Sets permissions to allow deployment to GitHub Pages
 permissions:
@@ -13,24 +16,36 @@ permissions:
 
 jobs:
   deploy-docs:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.head_branch == 'main'
-      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          ref: ${{ github.event.release.tag_name || inputs.sha }}
+
+      - name: Verify released revision
+        env:
+          EXPECTED_SHA: >-
+            ${{ github.event_name == 'release' && github.sha || inputs.sha }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          CHECKED_OUT_SHA=$(git rev-parse HEAD)
+          PACKAGE_VERSION=$(
+            awk -F'"' '/^version = / { print $2; exit }' pyproject.toml
+          )
+          EXPECTED_TAG="${RELEASE_TAG:-v${PACKAGE_VERSION}}"
+          TAG_SHA=$(git rev-parse "${EXPECTED_TAG}^{commit}")
+          if [[ "$CHECKED_OUT_SHA" != "$EXPECTED_SHA" ]] \
+            || [[ "$EXPECTED_TAG" != "v${PACKAGE_VERSION}" ]] \
+            || [[ "$TAG_SHA" != "$CHECKED_OUT_SHA" ]]; then
+            echo '::error::Documentation revision does not match its release.'
+            exit 1
+          fi
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
-        with:
-          locked: 'false'
 
       - name: Deploy to GitHub Pages
         env:
