@@ -53,7 +53,7 @@ proposal, and resampling callbacks. These boundaries allow research code to
 replace supported pieces without adopting a class hierarchy.
 
 CPU, CUDA, and TPU use stock JAX. The optional `metal` extra uses jax-mps on
-macOS arm64; Metal is float32-only.
+macOS 14 or later on arm64; Metal is float32-only.
 
 ## Citation and license
 
