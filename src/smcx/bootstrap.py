@@ -119,9 +119,11 @@ def bootstrap_init(
         Normalized checkpoint plus identity, non-resampled time-zero details.
 
     Raises:
-        ValueError: The sampled particle cloud is structurally invalid.
+        ValueError: The particle count or sampled particle cloud is invalid.
         DegenerateWeightsError: Every initial importance weight collapses.
     """
+    if num_particles < 1:
+        raise ValueError(f"num_particles must be >= 1; got {num_particles}")
     log_n = jnp.asarray(math.log(num_particles))
     initialized = _init_standard(
         init_key,
