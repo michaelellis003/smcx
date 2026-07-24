@@ -220,6 +220,11 @@ def temper(
             "initial_sampler output must have shape (N, d) with "
             f"N={n} and d >= 1; got {particles.shape}"
         )
+    if not jnp.issubdtype(particles.dtype, jnp.floating):
+        raise ValueError(
+            "initial_sampler output must have a floating dtype; "
+            f"got {particles.dtype}"
+        )
     dim = particles.shape[1]
     scale2 = _RWM_SCALE**2 / dim
 
@@ -262,8 +267,10 @@ def temper(
             kz, ku, key = jr.split(key, 3)
             z = jr.normal(kz, (n, dim))
             prop = particles + z @ l_prop.T
-            lp = batch_prior(prop)
-            ll = batch_lik(prop)
+            lp = jnp.asarray(batch_prior(prop))
+            ll = jnp.asarray(batch_lik(prop))
+            _validate_log_density_batch(lp, n, name="log_prior_fn")
+            _validate_log_density_batch(ll, n, name="log_likelihood_fn")
             log_alpha = (lp + phi_arr * ll) - (logprior + phi_arr * loglik)
             u = jr.uniform(ku, (n,))
             log_u = jnp.log(jnp.maximum(u, jnp.finfo(u.dtype).tiny))
@@ -398,6 +405,16 @@ def temper(
             particles, acc = mutation_sweep(km, particles, jnp.asarray(phi_new))
             loglik = jnp.asarray(batch_lik(particles))
             logprior = jnp.asarray(batch_prior(particles))
+            _validate_log_density_batch(
+                loglik,
+                n,
+                name="log_likelihood_fn",
+            )
+            _validate_log_density_batch(
+                logprior,
+                n,
+                name="log_prior_fn",
+            )
         log_w = jnp.full((n,), -log_n)
 
         temps.append(phi_new)
