@@ -2,6 +2,49 @@
 
 <!-- version list -->
 
+## v1.13.7 (2026-07-24)
+
+### Bug Fixes
+
+- **runner**: Contain MPS scan history corruption
+  ([#191](https://github.com/michaelellis003/smcx/pull/191),
+  [`fe8273c`](https://github.com/michaelellis003/smcx/commit/fe8273cac4295a78e3044c2a7e2bdf7fa6efabf0))
+
+### Build System
+
+- **packaging**: Include license in release artifacts
+  ([#188](https://github.com/michaelellis003/smcx/pull/188),
+  [`ddd4d6e`](https://github.com/michaelellis003/smcx/commit/ddd4d6ef8b19568e6deaef2f74fa6438c33d0d16))
+
+### Chores
+
+- **licensing**: Restrict header updates to owned files
+  ([#189](https://github.com/michaelellis003/smcx/pull/189),
+  [`a752928`](https://github.com/michaelellis003/smcx/commit/a752928a4be876db7fabf65741a57c194d52d439))
+
+- **profiling**: Harden campaign lock ([#190](https://github.com/michaelellis003/smcx/pull/190),
+  [`e8911c8`](https://github.com/michaelellis003/smcx/commit/e8911c8ab8e11ebffe33139fdf65cd5787277302))
+
+### Continuous Integration
+
+- **dependabot**: Harden identity gate ([#186](https://github.com/michaelellis003/smcx/pull/186),
+  [`85d0b98`](https://github.com/michaelellis003/smcx/commit/85d0b989d7e5658ffe5399e26fafbc3c1d0777f6))
+
+- **docs**: Deploy released locked revision
+  ([#187](https://github.com/michaelellis003/smcx/pull/187),
+  [`365ee94`](https://github.com/michaelellis003/smcx/commit/365ee9410910ec0d1c8af7d343fa31bcb996c858))
+
+- **release**: Enforce Metal attestation reviewer
+  ([#184](https://github.com/michaelellis003/smcx/pull/184),
+  [`4240c6a`](https://github.com/michaelellis003/smcx/commit/4240c6a6238bfe49f95a6aa831f5d910669b9c7d))
+
+### Testing
+
+- **platform**: Enforce backend selector contract
+  ([#185](https://github.com/michaelellis003/smcx/pull/185),
+  [`fb9b428`](https://github.com/michaelellis003/smcx/commit/fb9b428f964838904f8b30f4bc34b68e29790192))
+
+
 ## v1.13.6 (2026-07-24)
 
 ### Bug Fixes
