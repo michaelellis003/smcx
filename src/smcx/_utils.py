@@ -413,7 +413,7 @@ def _conditional_resample(
         key: PRNG key for resampling.
         log_weights: Normalised log weights (logsumexp = 0).
         current_ess: Effective sample size of ``log_weights``.
-        resampling_fn: Blackjax-compatible resampling function.
+        resampling_fn: BlackJAX-compatible resampling function.
         resampling_threshold: ESS fraction or caller-owned criterion.
         num_particles: Number of particles N.
         identity: Identity ancestor indices ``arange(N)``.

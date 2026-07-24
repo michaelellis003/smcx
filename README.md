@@ -43,9 +43,9 @@ pip install "smcx[metal]"
 pip install "smcx[arviz]"
 ```
 
-The `metal` extra uses jax-mps and is available on macOS arm64. Metal is
-float32-only; releases are tested on a physical M-series GPU as well as
-on CPU.
+The `metal` extra uses jax-mps and is available on macOS 14 or later on
+arm64. Metal is float32-only; releases are tested on a physical M-series
+GPU as well as on CPU.
 
 ## Documentation
 

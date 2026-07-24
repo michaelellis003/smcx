@@ -16,10 +16,10 @@ uv sync
 uv run pre-commit install
 ```
 
-The test suite uses CPU and float64 by default. On Apple silicon, install
-the Metal backend with `uv sync --extra metal`; then
-`SMCX_TEST_PLATFORM=mps uv run pytest` runs the suite on the physical
-GPU in float32.
+The test suite uses CPU and float64 by default. On Apple silicon running
+macOS 14 or later, install the Metal backend with
+`uv sync --extra metal`; then `SMCX_TEST_PLATFORM=mps uv run pytest` runs
+the suite on the physical GPU in float32.
 
 ## Code changes
 

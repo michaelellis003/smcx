@@ -6,7 +6,8 @@ blocks in order in one Python session.
 
 ## The model
 
-We use a stationary AR(1) latent state with Gaussian observations,
+We use an AR(1) latent state with a standard-normal initial state and
+Gaussian observations,
 
 $$
 z_t = \rho\,z_{t-1} + \sigma_q\,\varepsilon_t, \qquad
