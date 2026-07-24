@@ -165,6 +165,186 @@ def test_bootstrap_validates_log_observation(value, message):
         )
 
 
+def _valid_then(value):
+    values = iter((jnp.asarray(0.0), value))
+
+    def callback(*_args):
+        return next(values)
+
+    return callback
+
+
+def _always(value):
+    def callback(*_args):
+        return value
+
+    return callback
+
+
+def _run_invalid_later_density(boundary, value):
+    emissions = jnp.zeros((2, 1))
+    if boundary == "bootstrap_observation":
+        return smcx.bootstrap_filter(
+            jr.key(0),
+            _initial_sampler,
+            _transition_sampler,
+            _valid_then(value),
+            emissions,
+            4,
+        )
+    if boundary.startswith("auxiliary_"):
+        observation = (
+            _valid_then(value)
+            if boundary == "auxiliary_observation"
+            else _log_observation
+        )
+        auxiliary = (
+            _always(value)
+            if boundary == "auxiliary_auxiliary"
+            else _log_observation
+        )
+        return smcx.auxiliary_filter(
+            jr.key(0),
+            _initial_sampler,
+            _transition_sampler,
+            observation,
+            auxiliary,
+            emissions,
+            4,
+        )
+    if boundary.startswith("guided_"):
+        observation = (
+            _valid_then(value)
+            if boundary == "guided_observation"
+            else _log_observation
+        )
+        transition = (
+            _always(value)
+            if boundary == "guided_transition"
+            else _log_transition
+        )
+        proposal = (
+            _always(value) if boundary == "guided_proposal" else _log_proposal
+        )
+        return smcx.guided_filter(
+            jr.key(0),
+            _initial_sampler,
+            _proposal_sampler,
+            proposal,
+            transition,
+            observation,
+            emissions,
+            4,
+        )
+    observation = (
+        _valid_then(value)
+        if boundary == "liu_west_observation"
+        else _param_log_observation
+    )
+    auxiliary = (
+        _always(value)
+        if boundary == "liu_west_auxiliary"
+        else _param_log_observation
+    )
+    return smcx.liu_west_filter(
+        jr.key(0),
+        _initial_sampler,
+        _param_transition,
+        observation,
+        auxiliary,
+        _param_initial_sampler,
+        emissions,
+        4,
+    )
+
+
+@pytest.mark.parametrize(
+    ("boundary", "callback_name"),
+    [
+        ("bootstrap_observation", "log_observation_fn"),
+        ("auxiliary_observation", "log_observation_fn"),
+        ("auxiliary_auxiliary", "log_auxiliary_fn"),
+        ("guided_observation", "log_observation_fn"),
+        ("guided_transition", "log_transition_fn"),
+        ("guided_proposal", "log_proposal_fn"),
+        ("liu_west_observation", "log_observation_fn"),
+        ("liu_west_auxiliary", "log_auxiliary_fn"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (jnp.zeros(2), "output must have shape"),
+        (jnp.asarray(0, dtype=jnp.int32), "output must have a floating dtype"),
+    ],
+)
+def test_filters_validate_later_log_density_batches(
+    boundary, callback_name, value, message
+):
+    with pytest.raises(ValueError, match=f"{callback_name} {message}"):
+        _run_invalid_later_density(boundary, value)
+
+
+@pytest.mark.parametrize("source", ["state", "parameter"])
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (jnp.zeros(4), r"shape \(num_particles, dimension\)"),
+        (jnp.zeros((4, 0)), r"shape \(num_particles, dimension\)"),
+        (jnp.zeros((4, 1), dtype=jnp.int32), "floating dtype"),
+        (jnp.zeros((5, 1)), "leading dimension num_particles=4"),
+        ([[0.0]] * 4, "must be a JAX array"),
+    ],
+)
+def test_liu_west_validates_initial_dense_clouds(source, value, message):
+    def invalid_initial(_key, _count):
+        return value
+
+    state_initial = invalid_initial if source == "state" else _initial_sampler
+    parameter_initial = (
+        invalid_initial if source == "parameter" else _param_initial_sampler
+    )
+
+    with pytest.raises(ValueError, match=message):
+        smcx.liu_west_filter(
+            jr.key(0),
+            state_initial,
+            _param_transition,
+            _param_log_observation,
+            _param_log_observation,
+            parameter_initial,
+            jnp.zeros((1, 1)),
+            4,
+        )
+
+
+@pytest.mark.parametrize(
+    ("transition_output", "message"),
+    [
+        ({"value": jnp.zeros(1)}, "PyTree structure"),
+        (jnp.zeros(2), "preserve shape"),
+        (jnp.zeros(1, dtype=jnp.int32), "preserve dtype"),
+    ],
+)
+def test_liu_west_transition_preserves_state_contract(
+    transition_output, message
+):
+    def invalid_transition(_key, _state, _params):
+        return transition_output
+
+    with pytest.raises(ValueError, match=message):
+        smcx.liu_west_filter(
+            jr.key(0),
+            _initial_sampler,
+            invalid_transition,
+            _param_log_observation,
+            _param_log_observation,
+            _param_initial_sampler,
+            jnp.zeros((2, 1)),
+            4,
+        )
+
+
 def test_liu_west_validates_shrinkage_before_callbacks():
     with pytest.raises(ValueError, match="shrinkage must be in"):
         _run_liu_west(jnp.zeros((2, 1)), 1, shrinkage=1.1)
