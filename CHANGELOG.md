@@ -2,6 +2,36 @@
 
 <!-- version list -->
 
+## v1.13.2 (2026-07-24)
+
+### Bug Fixes
+
+- **validation**: Reject malformed inference inputs
+  ([#114](https://github.com/michaelellis003/smcx/pull/114),
+  [`e570af8`](https://github.com/michaelellis003/smcx/commit/e570af8999f31bd15938696cd100c1b63ee80a6b))
+
+### Chores
+
+- **benchmarks**: Retire exploratory harnesses
+  ([#119](https://github.com/michaelellis003/smcx/pull/119),
+  [`74f1b94`](https://github.com/michaelellis003/smcx/commit/74f1b9441afba441f00a06864095868e09447a8b))
+
+- **docs**: Retire thesis notebook ([#120](https://github.com/michaelellis003/smcx/pull/120),
+  [`15d94ff`](https://github.com/michaelellis003/smcx/commit/15d94ff32d61059ecb2108cec0275b7ca9d514e1))
+
+### Refactoring
+
+- **bootstrap**: Share particle update core
+  ([#122](https://github.com/michaelellis003/smcx/pull/122),
+  [`7ba9055`](https://github.com/michaelellis003/smcx/commit/7ba905584750f833f5597dbcb1434739dc048e62))
+
+### Testing
+
+- **validation**: Cover malformed callback contracts
+  ([#121](https://github.com/michaelellis003/smcx/pull/121),
+  [`1304a61`](https://github.com/michaelellis003/smcx/commit/1304a6193b0159be499019576d694821fc011ef5))
+
+
 ## v1.13.1 (2026-07-24)
 
 ### Bug Fixes
