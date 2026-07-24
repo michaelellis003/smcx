@@ -771,9 +771,13 @@ def _fit_pareto_k(
         log_weights: Normalised log importance weights at one step.
 
     Returns:
-        Estimated shape parameter k.
+        Estimated shape parameter k, or NaN when fewer than two weights make
+        the tail fit undefined.
     """
     n = log_weights.shape[0]
+    if n < 2:
+        return jnp.asarray(jnp.nan, dtype=log_weights.dtype)
+
     # Tail count: min(20% of N, 3*sqrt(N)), at least 10.
     m = max(10, math.ceil(min(0.2 * n, 3.0 * math.sqrt(n))))
     m = min(m, n - 1)
@@ -832,7 +836,8 @@ def pareto_k_diagnostic(
         posterior: Particle filter posterior output.
 
     Returns:
-        Per-step Pareto-k estimates, shape ``(ntime,)``.
+        Per-step Pareto-k estimates, shape ``(ntime,)``. Estimates are NaN
+        when the posterior contains fewer than two particles.
     """
     return vmap(_fit_pareto_k)(posterior.filtered_log_weights)
 
