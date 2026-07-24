@@ -63,9 +63,10 @@ algorithm configuration, not implementation or hardware. The clean,
 fully-controlled number is the smcx-GPU-vs-smcx-CPU 32–34× above
 (identical code and algorithm, device the only variable).
 
-Reproduce (isolated env — `particles` pins numpy<2, conflicting with
-smcx): `uv run --no-project --with 'particles>=0.4' python
-benchmarks/smc2/particles_side.py 512 512 100 5` (last arg = reps).
+Historical source note: the retired [`particles_side.py`][particles-source]
+used an isolated `particles>=0.4` environment because that release pinned
+numpy<2. It targets the 2026 campaign environment and is preserved for audit,
+not as a current reproduction command.
 
 ## Reading the result
 
@@ -88,4 +89,9 @@ is data-dependent, like the tempering schedule).
   a tighter implementation comparison — the current baseline uses
   the `particles` default, which the table notes.
 
-Reproduce: `uv run python benchmarks/smc2/bench_smc2.py`.
+Historical source note: the retired [smcx SMC² harness][smc2-source] targets
+the MLX-era API and environment recorded above. It is preserved for audit, not
+as a current runnable benchmark.
+
+[particles-source]: https://github.com/michaelellis003/smcx/blob/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/smc2/particles_side.py
+[smc2-source]: https://github.com/michaelellis003/smcx/blob/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/smc2/bench_smc2.py

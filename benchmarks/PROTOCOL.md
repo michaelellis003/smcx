@@ -14,9 +14,11 @@ justify an MLX-native SMC library?
 ## Workloads
 
 All correctness-gated against the numpy-f64 Kalman oracle where
-linear-Gaussian; seeded data generated once and committed to
-`benchmarks/data/` (gitignored raw arrays, committed generation
-script + hashes).
+linear-Gaussian. Seeded data were generated once for the completed
+campaign. The raw arrays were gitignored and are not retained; the
+deterministic generator and executable harness remain in the
+[immutable kill-test source archive][killtest-source], and the dated
+results record the dataset hashes.
 
 1. **LGSSM-1D**: scalar AR(1) + Gaussian emission, T=100. The
    correctness anchor; resampling/memory-bound.
@@ -142,8 +144,11 @@ Python version, date. Results are dated markdown in
   compile, median-of-5, `mx.synchronize`, fresh process per cell)
   and a correctness gate (\|log Ẑ − exact\| < 0.5 on both devices).
   Chopin's `particles` runs as an external-authority baseline in an
-  isolated env (`particles_side.py`, `uv run --no-project --with
-  particles` — it pins numpy<2); it independently confirms the
-  log-evidence, with a config caveat (its default is waste-free,
-  len_chain=10). Result:
+  isolated env (the retired [`particles_side.py`][particles-source]
+  targeted `particles>=0.4`, which pinned numpy<2); it independently
+  confirms the log-evidence, with a config caveat (its default is
+  waste-free, len_chain=10). Result:
   `benchmarks/results/2026-07-15-smc2-device-benchmark.md`.
+
+[killtest-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/killtest
+[particles-source]: https://github.com/michaelellis003/smcx/blob/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/smc2/particles_side.py

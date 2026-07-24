@@ -31,10 +31,14 @@ smcx replaced its MLX core with JAX. These timings do not describe current
 smcx performance.
 
 The [one-time Dynamax integration result][dynamax-result] is retained after its
-temporary adapter was removed. Completed exploratory MLX-era scripts remain
-available in the
-[immutable source archive](https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/exploratory).
+temporary adapter was removed. Completed MLX-era scripts remain available in
+the immutable [kill-test][killtest-source], [SMC²][smc2-source], and
+[exploratory][exploratory-source] source archives. They target the former MLX
+implementation and are not current reproduction commands.
 
 [matched-profile]: results/2026-07-19-matched-optimization-profile.md
 [representation-profile]: results/2026-07-19-representation-history-profile.md
 [dynamax-result]: results/2026-07-19-dynamax-integration-validation.md
+[killtest-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/killtest
+[smc2-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/smc2
+[exploratory-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/exploratory

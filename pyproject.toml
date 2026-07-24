@@ -121,14 +121,6 @@ convention = "google"
 # Protocol stubs: the class docstring documents the contract.
 "src/smcx/types.py" = ["D102"]
 "src/smcx/containers.py" = ["D102"]
-# Kill-test harness: maintained, protocol-critical code — full lint
-# except docstrings on model closures/helpers.
-"benchmarks/killtest/*" = ["D101", "D102", "D103"]
-"benchmarks/smc2/bench_smc2.py" = ["D101", "D102", "D103"]
-# particles_side follows the `particles` API: uppercase model
-# methods (PX0/PX/PY) and a mutable default_params dict are required
-# by StateSpaceModel, not smcx style.
-"benchmarks/smc2/particles_side.py" = ["D101", "D102", "D103", "N802", "RUF012"]
 # conftest installs the jaxtyping import hook before importing smcx,
 # which forces module-level imports below code (smcjax convention).
 "tests/conftest.py" = ["E402"]
@@ -156,18 +148,11 @@ type = "github"
 upload_to_vcs_release = true
 
 [tool.ty.src]
-# Research scripts are lint/type-exempt artifacts. Killtest and the
-# SMC² particles baseline span separate venvs
-# (jax_side / particles_side import packages unresolvable here by
-# construction). The native-vs-jax-mps workers run only inside pinned
-# `uv run --no-project` environments, so their accelerator dependencies
-# are unresolvable in the project environment. The MLX-era benchmark
-# workers reference the pre-JAX API and remain as historical harness code.
 exclude = [
-    "benchmarks/killtest/**",
+    # Native-vs-jax-mps workers run only inside pinned `uv run --no-project`
+    # environments, so their accelerator dependencies are unresolvable here.
     "benchmarks/native_vs_jax_mps/jax_worker.py",
     "benchmarks/native_vs_jax_mps/mlx_worker.py",
-    "benchmarks/smc2/**",
 ]
 
 [tool.pytest.ini_options]
