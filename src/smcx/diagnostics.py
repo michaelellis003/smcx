@@ -1171,7 +1171,8 @@ def diagnose(
 
         - ``min_ess``: minimum ESS across all time steps
         - ``min_diversity``: minimum particle diversity
-        - ``max_pareto_k``: maximum Pareto-k across time steps
+        - ``max_pareto_k``: maximum finite Pareto-k across time steps,
+            or NaN when every estimate is undefined
         - ``min_tail_ess``: minimum tail-ESS across time steps
         - ``ess_below_threshold``: count of steps where
             ESS < ``ess_threshold * N``
@@ -1191,7 +1192,12 @@ def diagnose(
 
     min_ess = float(jnp.min(ess_vals))
     min_div = float(jnp.min(diversity))
-    max_k = float(jnp.max(k_hat))
+    finite_k = jnp.isfinite(k_hat)
+    undefined_k_count = int(jnp.sum(~finite_k))
+    if undefined_k_count == k_hat.size:
+        max_k = math.nan
+    else:
+        max_k = float(jnp.max(jnp.where(finite_k, k_hat, -jnp.inf)))
     min_t_ess = float(jnp.min(t_ess))
     ess_count = int(jnp.sum(ess_vals < ess_threshold * n))
 
@@ -1205,6 +1211,11 @@ def diagnose(
         warnings.append(
             f"Particle diversity fell below "
             f"{diversity_threshold:.0%} (min = {min_div:.3f})"
+        )
+    if undefined_k_count:
+        warnings.append(
+            f"Pareto-k was undefined at {undefined_k_count} step(s) "
+            f"(non-finite estimate); inspect particle weights at those steps"
         )
     if pareto_k_threshold is None:
         # Sample-size-dependent PSIS reliability threshold
