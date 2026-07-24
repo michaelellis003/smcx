@@ -353,6 +353,36 @@ class TestParamWeightedQuantile:
 class TestCRPS:
     """Tests for crps."""
 
+    @pytest.mark.parametrize(
+        ("num_samples", "value"),
+        [(100, 1e10), (1000, 1e5)],
+    )
+    def test_crps_constant_large_offset_is_exactly_zero(
+        self, num_samples, value
+    ):
+        """A perfect empirical forecast stays nonnegative at large offsets."""
+        from smcx.diagnostics import crps
+
+        predictions = jnp.full((num_samples,), value, dtype=jnp.float32)
+        result = crps(predictions, jnp.float32(value))
+        assert jnp.array_equal(result, jnp.float32(0.0))
+
+    def test_crps_is_invariant_to_represented_translation(self):
+        """Centering an already represented sample leaves CRPS unchanged."""
+        from smcx.diagnostics import crps
+
+        offset = jnp.float32(1e7)
+        shifted = (
+            jr.normal(jr.key(7), (1000,), dtype=jnp.float32) * jnp.float32(3.0)
+            + offset
+        )
+        centered = shifted - offset
+
+        shifted_score = crps(shifted, offset)
+        centered_score = crps(centered, jnp.float32(0.0))
+
+        assert jnp.array_equal(shifted_score, centered_score)
+
     def test_crps_zero_for_perfect_prediction(self):
         """CRPS = 0 when all predictions equal observation."""
         from smcx.diagnostics import crps
@@ -376,34 +406,45 @@ class TestCRPS:
         result = crps(predictions, jnp.float64(0.5))
         assert float(result) == pytest.approx(0.25, abs=1e-10)
 
-    def test_crps_large_sample_matches_formula(self):
-        """Sort-based CRPS matches brute-force on N=500.
-
-        Cross-checks that the O(N log N) implementation gives the same
-        answer as the naive O(N^2) all-pairs formula.
-        """
+    def test_crps_matches_pairwise_oracle_with_repeated_values(self):
+        """Order-statistic CRPS matches the independent pairwise identity."""
         from smcx.diagnostics import crps
 
-        key = jr.PRNGKey(77)
-        predictions = jr.normal(key, (500,))
-        obs = jnp.float64(0.5)
+        samples = [-2.0, -2.0, 0.0, 1.0, 1.0, 4.0]
+        observation = 0.25
+        n = len(samples)
+        term1 = sum(abs(x - observation) for x in samples) / n
+        term2 = sum(abs(x - y) for x in samples for y in samples) / (n * n)
+        expected = term1 - 0.5 * term2
 
-        # Brute-force reference
-        term1 = jnp.mean(jnp.abs(predictions - obs))
-        diffs = jnp.abs(predictions[:, None] - predictions[None, :])
-        term2 = jnp.mean(diffs)
-        expected = float(term1 - 0.5 * term2)
+        result = float(
+            crps(
+                jnp.asarray(samples, dtype=jnp.float32),
+                jnp.float32(observation),
+            )
+        )
+        # Five f32 eps at the score's unit scale covers the final reduction.
+        tolerance = 5.0 * float(jnp.finfo(jnp.float32).eps)
+        assert result == pytest.approx(expected, rel=0.0, abs=tolerance)
 
-        result = float(crps(predictions, obs))
-        assert result == pytest.approx(expected, abs=1e-6)
-
-    def test_crps_jit_compatible(self):
-        """CRPS should work under jax.jit."""
+    def test_crps_jit_vmap_compatible(self):
+        """CRPS batches observations and empirical forecasts under JIT."""
         from smcx.diagnostics import crps
 
-        predictions = jnp.array([1.0, 2.0, 3.0])
-        result = jax.jit(crps)(predictions, jnp.float64(2.0))
-        assert jnp.isfinite(result)
+        predictions = jnp.array([[0.0, 1.0], [1.0, 1.0]])
+        observations = jnp.array([0.5, 2.0])
+        result = jax.jit(jax.vmap(crps))(predictions, observations)
+        assert jnp.array_equal(result, jnp.array([0.25, 1.0]))
+
+    def test_crps_accepts_large_float32_sample(self):
+        """Ensemble size scaling never constructs an overflowing integer."""
+        from smcx.diagnostics import crps
+
+        result = crps(
+            jnp.zeros((100_000,), dtype=jnp.float32),
+            jnp.float32(0.0),
+        )
+        assert jnp.array_equal(result, jnp.float32(0.0))
 
 
 class TestPosteriorPredictiveSample:

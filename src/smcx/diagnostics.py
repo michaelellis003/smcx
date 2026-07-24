@@ -989,7 +989,8 @@ def crps(
     where $Y, Y'$ are iid predictive samples and $y$ is the observation.
 
     Args:
-        predictions: iid samples from the predictive distribution.
+        predictions: iid samples from the predictive distribution. The
+            empirical distribution assigns each sample equal weight.
         observation: Observed scalar value.
 
     Returns:
@@ -999,6 +1000,12 @@ def crps(
         ValueError: Predictions are not a nonempty rank-one floating array,
             or the observation is not a floating scalar.
 
+    Notes:
+        The quantile-decomposition identity is evaluated on values centered
+        at the observation. This retains :math:`O(N \log N)` complexity while
+        avoiding cancellation between raw order statistics and integer
+        scaling by :math:`N^2`.
+
     References:
         Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
         continuous probability distributions.
@@ -1007,6 +1014,10 @@ def crps(
         Gneiting, T., and Raftery, A. E. (2007). Strictly proper scoring
         rules, prediction, and estimation.
         https://doi.org/10.1198/016214506000001437
+
+        Jordan, A., Krüger, F., and Lerch, S. (2019). Evaluating
+        probabilistic forecasts with scoringRules.
+        https://doi.org/10.18637/jss.v090.i12
     """
     predictions = _require_float_vector(
         predictions,
@@ -1014,15 +1025,18 @@ def crps(
         dimension="num_samples",
     )
     obs = _require_float_scalar(observation, name="observation")
+    centered = jnp.sort(predictions - obs)
     n = predictions.shape[0]
-    # E|Y - y|
-    term1 = jnp.mean(jnp.abs(predictions - obs))
-    # E|Y - Y'| via sort-based O(N log N) identity:
-    #   E|Y-Y'| = (2 / N^2) * sum_i (2i - N + 1) * Y_{(i)}
-    y_sorted = jnp.sort(predictions)
-    i = jnp.arange(n, dtype=predictions.dtype)
-    term2 = 2.0 * jnp.sum((2.0 * i - n + 1.0) * y_sorted) / (n * n)
-    return jnp.asarray(term1 - 0.5 * term2)
+    reciprocal_n = jnp.reciprocal(jnp.asarray(n, dtype=centered.dtype))
+    midpoint_mass = (jnp.arange(n, dtype=centered.dtype) + 0.5) * reciprocal_n
+    quantile_weight = jnp.where(
+        centered < 0.0,
+        midpoint_mass,
+        jnp.maximum(1.0 - midpoint_mass, 0.0),
+    )
+    return jnp.asarray(
+        2.0 * reciprocal_n * jnp.sum(jnp.abs(centered) * quantile_weight)
+    )
 
 
 # --- Pareto-k diagnostic ---------------------------------------------------
