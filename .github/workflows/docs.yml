@@ -15,12 +15,17 @@ jobs:
   deploy-docs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv

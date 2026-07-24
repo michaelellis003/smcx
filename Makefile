@@ -1,3 +1,21 @@
+CLEAN_DIRS := \
+	.cache \
+	.hypothesis \
+	.mypy_cache \
+	.nox \
+	.pyre \
+	.pytest_cache \
+	.pytype \
+	.ruff_cache \
+	.tox \
+	build \
+	dist \
+	htmlcov \
+	site \
+	wheels
+CLEAN_FILES := .coverage coverage.xml
+PYTHON_TREES := benchmarks docs scripts src tests
+
 all: test
 
 lint: FORCE
@@ -26,6 +44,13 @@ serve-docs: FORCE
 	uv run properdocs serve
 
 clean: FORCE
-	git clean -dfx -e .venv
+	$(RM) -r $(CLEAN_DIRS)
+	$(RM) $(CLEAN_FILES)
+	find . -maxdepth 1 -type f -name '.coverage.*' -delete
+	find $(PYTHON_TREES) -type d \
+		\( -name '__pycache__' -o -name '*.egg-info' \) -prune \
+		-exec $(RM) -r {} +
+	find $(PYTHON_TREES) -type f \
+		\( -name '*.py[codz]' -o -name '*.so' \) -delete
 
 FORCE:
