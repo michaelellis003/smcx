@@ -20,10 +20,9 @@ Features include:
 - structured latent-state PyTrees and explicit time-varying inputs.
 
 smcx supplies inference algorithms, not model or distribution classes.
-Its built-in catalog deliberately covers core families rather than every
-named variant: a new method needs concrete user or research demand and a
-credible independent implementation for validation. Linear-Gaussian models
-use dense arrays. The EKF and UKF share ordinary nonlinear mean callbacks;
+Its catalog covers core families rather than every named variant; additions
+need concrete user or research demand and an independent validator.
+Linear-Gaussian models use dense arrays. The EKF and UKF share mean callbacks;
 the EKF alone adds explicit Jacobians. Particle models use JAX callbacks,
 and `run_particle_filter` lets research code own the filter kernel. Typed
 posteriors keep filtering and smoothing composable without a class hierarchy.

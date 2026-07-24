@@ -71,16 +71,17 @@ The UKF reuses the two mean functions without Jacobians:
 
 ```python
 unscented = smcx.unscented_kalman_filter(
-    jnp.zeros(2), jnp.eye(2),
-    transition_mean, 0.1 * jnp.eye(2),
+    jnp.zeros(2),
+    jnp.eye(2),
+    transition_mean,
+    0.1 * jnp.eye(2),
     observation_mean,
     jnp.array([[0.3]]),
     emissions,
 )
 ```
 
-Its symmetric `2 * state_dim + 1` rule defaults to `alpha=1.0`, `beta=2.0`,
-and `kappa=0.0`; these keyword-only parameters are its tuning seam.
+Rule defaults are `alpha=1.0`, `beta=2.0`, and `kappa=0.0`.
 
 The transition covariance may have shape `(state_dim, state_dim)` or
 `(ntime - 1, state_dim, state_dim)`. The observation covariance may have
