@@ -68,6 +68,7 @@ def test_public_api_exports_all_expected_names(package):
         "temper",
         "tail_ess",
         "to_arviz",
+        "unscented_kalman_filter",
         "weighted_mean",
         "weighted_quantile",
         "weighted_variance",
