@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.8 (2026-07-24)
+
+### Bug Fixes
+
+- **bootstrap**: Validate incremental particle count
+  ([#193](https://github.com/michaelellis003/smcx/pull/193),
+  [`dd5f5ad`](https://github.com/michaelellis003/smcx/commit/dd5f5ade753678d1acbc65dd136826dc81f48edf))
+
+
 ## v1.13.7 (2026-07-24)
 
 ### Bug Fixes
