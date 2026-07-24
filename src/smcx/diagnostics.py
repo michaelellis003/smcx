@@ -51,14 +51,15 @@ scalars and strings, so it is intentionally host-only.
 """
 
 import math
-from typing import Any
+import operator
+from typing import TYPE_CHECKING, Any, SupportsIndex, TypeAlias, cast
 
 import jax
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, tree, vmap
 from jax.core import Tracer
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Float, Int, Shaped
 
 from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
@@ -92,6 +93,88 @@ _PRIOR_K = 0.5
 
 _EXC_FLOOR = 1e-100
 """Exceedance floor below which the tail is treated as degenerate."""
+
+# Static checkers see the narrow public contracts. At runtime, the import-hook
+# type checker must admit malformed values so these public validators can raise
+# the documented errors instead of wrapper-specific type-check failures.
+if TYPE_CHECKING:
+    _DiagnosticVector: TypeAlias = Float[Array, " num_values"]
+    _DiagnosticScalar: TypeAlias = Scalar
+    _IntegerArgument: TypeAlias = int
+else:
+    _DiagnosticVector: TypeAlias = Shaped[Array, "*diagnostic_shape"]
+    _DiagnosticScalar: TypeAlias = object
+    _IntegerArgument: TypeAlias = object
+
+
+def _require_float_vector(
+    value: object,
+    *,
+    name: str,
+    dimension: str,
+) -> Array:
+    """Require one nonempty rank-one floating JAX array."""
+    if not isinstance(value, (jax.Array, Tracer)):
+        raise ValueError(f"{name} must be a JAX array")
+    if value.ndim != 1 or value.shape[0] == 0:
+        raise ValueError(
+            f"{name} must have shape ({dimension},) with "
+            f"{dimension} >= 1; got {value.shape}"
+        )
+    if not jnp.issubdtype(value.dtype, jnp.floating):
+        raise ValueError(
+            f"{name} must have a floating dtype; got {value.dtype}"
+        )
+    return value
+
+
+def _require_float_scalar(value: object, *, name: str) -> Array:
+    """Require one Python-float or JAX floating scalar."""
+    if isinstance(value, float):
+        scalar = jnp.asarray(value)
+    elif isinstance(value, (jax.Array, Tracer)):
+        scalar = value
+    else:
+        raise ValueError(f"{name} must be a floating scalar")
+    if scalar.ndim != 0 or not jnp.issubdtype(scalar.dtype, jnp.floating):
+        raise ValueError(
+            f"{name} must be a floating scalar; got shape {scalar.shape} "
+            f"and dtype {scalar.dtype}"
+        )
+    return scalar
+
+
+def _require_integer(
+    value: object,
+    *,
+    name: str,
+    minimum: int,
+    domain: str,
+) -> int:
+    """Require a static integer in the requested domain."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be {domain}; got {value!r}")
+    try:
+        integer = operator.index(cast(SupportsIndex, value))
+    except TypeError as error:
+        raise ValueError(f"{name} must be {domain}; got {value!r}") from error
+    if integer < minimum:
+        raise ValueError(f"{name} must be {domain}; got {integer}")
+    return integer
+
+
+def _validate_quantile_levels(q: object) -> Array:
+    """Validate structural and eager value contracts for quantile levels."""
+    levels = _require_float_vector(
+        q,
+        name="q",
+        dimension="num_quantiles",
+    )
+    if not isinstance(levels, Tracer) and not bool(
+        jnp.all((levels >= 0.0) & (levels <= 1.0))
+    ):
+        raise ValueError("q values must be in [0, 1]")
+    return levels
 
 
 def _require_dense_particle_history(
@@ -224,7 +307,7 @@ def weighted_variance(
 
 def weighted_quantile(
     posterior: ParticleFilterResult,
-    q: Float[Array, " num_quantiles"],
+    q: _DiagnosticVector,
 ) -> Float[Array, "ntime num_quantiles state_dim"]:
     r"""Compute weighted quantiles of particles at each time step.
 
@@ -234,14 +317,18 @@ def weighted_quantile(
     Args:
         posterior: Particle filter posterior output.
         q: Quantile levels in [0, 1], e.g. ``jnp.array([0.025, 0.975])``
-            for a 95% credible interval.
+            for a 95% credible interval. Values are checked eagerly;
+            callers passing traced levels must preserve this domain.
 
     Returns:
         Weighted quantiles, shape ``(ntime, num_quantiles, state_dim)``.
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
+        ValueError: ``q`` is not a nonempty rank-one floating array, or an
+            eager level lies outside [0, 1].
     """
+    q = _validate_quantile_levels(q)
     particles = _require_dense_particle_history(
         posterior, diagnostic="weighted_quantile"
     )
@@ -403,7 +490,7 @@ def _eve_class_mass_sq(
 
 def log_ml_variance(
     posterior: ParticleFilterResult,
-    lag: int | None = None,
+    lag: _IntegerArgument | None = None,
 ) -> Float[Array, " ntime"]:
     r"""Estimate the variance of the log-evidence from a single run.
 
@@ -444,8 +531,8 @@ def log_ml_variance(
         Per-step variance estimates, shape ``(ntime,)``.
 
     Raises:
-        ValueError: The lag is negative, or the posterior retains only its
-            final particle cloud.
+        ValueError: The lag is not a nonnegative integer, or the posterior
+            retains only its final particle cloud.
 
     References:
         Chan, H. P., and Lai, T. L. (2013). A general theory of particle
@@ -456,8 +543,13 @@ def log_ml_variance(
         Olsson, J., and Douc, R. (2019). Numerically stable online estimation
         of variance in particle filters. https://arxiv.org/abs/1701.01001
     """
-    if lag is not None and lag < 0:
-        raise ValueError("lag must be nonnegative")
+    if lag is not None:
+        lag = _require_integer(
+            lag,
+            name="lag",
+            minimum=0,
+            domain="nonnegative integer",
+        )
 
     _require_full_particle_history(
         posterior,
@@ -485,8 +577,8 @@ def log_ml_variance(
 
 
 def log_bayes_factor(
-    log_ml_1: Scalar,
-    log_ml_2: Scalar,
+    log_ml_1: _DiagnosticScalar,
+    log_ml_2: _DiagnosticScalar,
 ) -> Scalar:
     r"""Compute the log Bayes factor between two models.
 
@@ -516,14 +608,19 @@ def log_bayes_factor(
 
     Returns:
         Scalar log Bayes factor.
+
+    Raises:
+        ValueError: Either log marginal likelihood is not a floating scalar.
     """
-    return jnp.asarray(log_ml_1) - jnp.asarray(log_ml_2)
+    first = _require_float_scalar(log_ml_1, name="log_ml_1")
+    second = _require_float_scalar(log_ml_2, name="log_ml_2")
+    return first - second
 
 
 def replicated_log_ml(
     key: PRNGKeyT,
     filter_fn: _ReplicatedLogMLFn,
-    num_replicates: int,
+    num_replicates: _IntegerArgument,
 ) -> Float[Array, " num_replicates"]:
     r"""Run a particle filter multiple times to assess log-ML variability.
 
@@ -539,9 +636,26 @@ def replicated_log_ml(
 
     Returns:
         Array of log-ML estimates, shape ``(num_replicates,)``.
+
+    Raises:
+        ValueError: ``num_replicates`` is not a positive integer, or
+            ``filter_fn`` does not return a floating scalar.
     """
+    num_replicates = _require_integer(
+        num_replicates,
+        name="num_replicates",
+        minimum=1,
+        domain="a positive integer",
+    )
     keys = jr.split(key, num_replicates)
-    return jnp.asarray(vmap(filter_fn)(keys))
+
+    def _run_one(key_i: PRNGKeyT) -> Array:
+        return _require_float_scalar(
+            filter_fn(key_i),
+            name="filter_fn output",
+        )
+
+    return jnp.asarray(vmap(_run_one)(keys))
 
 
 def param_weighted_mean(
@@ -563,18 +677,24 @@ def param_weighted_mean(
 
 def param_weighted_quantile(
     posterior: LiuWestPosterior | SMC2Posterior,
-    q: Float[Array, " num_quantiles"],
+    q: _DiagnosticVector,
 ) -> Float[Array, "ntime num_quantiles param_dim"]:
     r"""Compute weighted quantiles of parameter particles at each step.
 
     Args:
         posterior: Liu-West or SMC² posterior output.
         q: Quantile levels in [0, 1], e.g. ``jnp.array([0.025, 0.975])``
-            for a 95% credible interval.
+            for a 95% credible interval. Values are checked eagerly;
+            callers passing traced levels must preserve this domain.
 
     Returns:
         Weighted quantiles, shape ``(ntime, num_quantiles, param_dim)``.
+
+    Raises:
+        ValueError: ``q`` is not a nonempty rank-one floating array, or an
+            eager level lies outside [0, 1].
     """
+    q = _validate_quantile_levels(q)
     return _weighted_quantile_field(
         posterior.filtered_log_weights,
         posterior.filtered_params,
@@ -590,7 +710,7 @@ def posterior_predictive_sample(
     posterior: ParticleFilterResult,
     transition_sampler: TransitionSampler,
     emission_sampler: EmissionSampler,
-    num_samples: int | None = None,
+    num_samples: _IntegerArgument | None = None,
 ) -> Float[Array, "ntime num_samples emission_dim"]:
     r"""Draw one-step-ahead posterior predictive samples.
 
@@ -620,13 +740,18 @@ def posterior_predictive_sample(
         ``(ntime, num_samples, emission_dim)``.
 
     Raises:
-        ValueError: ``num_samples`` is less than one, the posterior state is
-            malformed, the transition changes its PyTree contract, or the
-            emission is not a nonempty floating vector.
+        ValueError: ``num_samples`` is not a positive integer, the posterior
+            state is malformed, the transition changes its PyTree contract,
+            or the emission is not a nonempty floating vector.
     """
+    if num_samples is not None:
+        num_samples = _require_integer(
+            num_samples,
+            name="num_samples",
+            minimum=1,
+            domain=">= 1 (a positive integer)",
+        )
     ntime, n_particles = posterior.filtered_log_weights.shape
-    if num_samples is not None and num_samples < 1:
-        raise ValueError(f"num_samples must be >= 1; got {num_samples}")
     num_samples = n_particles if num_samples is None else num_samples
 
     def _sample_one_step(
@@ -677,8 +802,8 @@ def posterior_predictive_sample(
 
 
 def crps(
-    predictions: Float[Array, " num_samples"],
-    observation: Scalar,
+    predictions: _DiagnosticVector,
+    observation: _DiagnosticScalar,
 ) -> Scalar:
     r"""Compute the Continuous Ranked Probability Score.
 
@@ -698,6 +823,10 @@ def crps(
     Returns:
         Scalar CRPS (lower is better, zero for perfect prediction).
 
+    Raises:
+        ValueError: Predictions are not a nonempty rank-one floating array,
+            or the observation is not a floating scalar.
+
     References:
         Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
         continuous probability distributions.
@@ -707,7 +836,12 @@ def crps(
         rules, prediction, and estimation.
         https://doi.org/10.1198/016214506000001437
     """
-    obs = jnp.asarray(observation)
+    predictions = _require_float_vector(
+        predictions,
+        name="predictions",
+        dimension="num_samples",
+    )
+    obs = _require_float_scalar(observation, name="observation")
     n = predictions.shape[0]
     # E|Y - y|
     term1 = jnp.mean(jnp.abs(predictions - obs))
@@ -918,7 +1052,10 @@ def tail_ess(
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
+        ValueError: ``q`` is not finite and in (0, 0.5].
     """
+    if not math.isfinite(q) or not 0.0 < q <= 0.5:
+        raise ValueError(f"q must be finite and in (0, 0.5]; got {q!r}")
     qs = jnp.array([q, 1.0 - q])
     particles = _require_dense_particle_history(
         posterior, diagnostic="tail_ess"
