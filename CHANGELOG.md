@@ -2,6 +2,21 @@
 
 <!-- version list -->
 
+## v1.11.0 (2026-07-24)
+
+### Features
+
+- **kalman**: Expose scaled unscented filter
+  ([#105](https://github.com/michaelellis003/smcx/pull/105),
+  [`b3a5aec`](https://github.com/michaelellis003/smcx/commit/b3a5aecb361e8f92fbe20ac90174cf3ff1054a00))
+
+### Refactoring
+
+- **kalman**: Share nonlinear filter inputs
+  ([#104](https://github.com/michaelellis003/smcx/pull/104),
+  [`6a785c5`](https://github.com/michaelellis003/smcx/commit/6a785c5ce941733e8ff553fff55f72c03f264a11))
+
+
 ## v1.10.0 (2026-07-24)
 
 ### Features
