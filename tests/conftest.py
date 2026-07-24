@@ -8,19 +8,78 @@ import os
 # The suite runs on CPU by default so results are deterministic across
 # machines and unaffected by an installed `metal` extra (jax-mps
 # registers at higher priority than CPU). Set SMCX_TEST_PLATFORM=mps to
-# run the suite on the Apple-GPU backend explicitly. Must
-# happen before any JAX import triggers initialization.
-os.environ.setdefault(
-    "JAX_PLATFORMS", os.environ.get("SMCX_TEST_PLATFORM", "cpu")
-)
+# run the suite on the Apple-GPU backend explicitly. Validate and set
+# both backend and precision before any JAX import triggers
+# initialization.
+_PLATFORM_X64 = {"cpu": True, "mps": False}
+_TRUE_VALUES = {"1", "on", "t", "true", "y", "yes"}
+_FALSE_VALUES = {"0", "f", "false", "n", "no", "off"}
 
-# Configure JAX to use 64-bit floats for higher precision in tests —
-# on CPU only: the Metal backend has no float64 (jax-mps/MLX limit),
-# so the SMCX_TEST_PLATFORM=mps run stays in float32.
+
+def _parse_jax_boolean(name: str, value: str) -> bool:
+    normalized = value.lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise RuntimeError(
+        f"Invalid {name}={value!r}; expected a JAX boolean value"
+    )
+
+
+_selected_platform = os.environ.get("SMCX_TEST_PLATFORM", "cpu")
+if _selected_platform not in _PLATFORM_X64:
+    raise RuntimeError(
+        "Invalid SMCX_TEST_PLATFORM="
+        f'{_selected_platform!r}; expected "cpu" or "mps"'
+    )
+
+_inherited_platform = os.environ.get("JAX_PLATFORMS")
+if (
+    _inherited_platform is not None
+    and _inherited_platform != _selected_platform
+):
+    raise RuntimeError(
+        "JAX_PLATFORMS conflicts with selected test platform: "
+        f"expected {_selected_platform!r}, got {_inherited_platform!r}"
+    )
+
+_expected_x64 = _PLATFORM_X64[_selected_platform]
+_inherited_x64 = os.environ.get("JAX_ENABLE_X64")
+if (
+    _inherited_x64 is not None
+    and _parse_jax_boolean("JAX_ENABLE_X64", _inherited_x64) != _expected_x64
+):
+    raise RuntimeError(
+        "JAX_ENABLE_X64 conflicts with selected test platform: "
+        f"{_selected_platform!r} requires "
+        f"{str(_expected_x64).lower()}"
+    )
+
+os.environ["JAX_PLATFORMS"] = _selected_platform
+os.environ["JAX_ENABLE_X64"] = str(_expected_x64).lower()
+
 import jax
 
-if os.environ["JAX_PLATFORMS"] == "cpu":
-    jax.config.update("jax_enable_x64", True)
+_actual_backend = jax.default_backend()
+_actual_devices = jax.devices()
+_actual_x64 = bool(jax.config.read("jax_enable_x64"))
+
+if _actual_backend != _selected_platform:
+    raise RuntimeError(
+        f"JAX selected {_actual_backend!r}, expected {_selected_platform!r}"
+    )
+if not _actual_devices or any(
+    device.platform != _selected_platform for device in _actual_devices
+):
+    raise RuntimeError(
+        f"JAX devices {_actual_devices!r} do not match {_selected_platform!r}"
+    )
+if _actual_x64 != _expected_x64:
+    raise RuntimeError(
+        f"JAX x64 is {_actual_x64}, expected {_expected_x64} on "
+        f"{_selected_platform!r}"
+    )
 
 # Install the jaxtyping import hook BEFORE importing smcx so that all
 # jaxtyped annotations are validated at runtime during tests.
@@ -35,6 +94,16 @@ import pytest
 
 import smcx
 from tests._lgssm_reference import EMISSIONS, STATES
+
+
+def pytest_report_header(config: pytest.Config) -> str:
+    """Report the backend contract exercised by this test process."""
+    del config
+    return (
+        f"JAX backend: {_actual_backend}; "
+        f"JAX devices: {_actual_devices}; "
+        f"JAX x64: {_actual_x64}"
+    )
 
 
 def _mvn_sample(key, mean, cov, shape=()):
