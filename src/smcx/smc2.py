@@ -25,6 +25,7 @@ not jittable; the batched inner kernels are jitted.
 import math
 from typing import cast
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 from jax import jit, vmap
@@ -101,7 +102,7 @@ def smc2(
     initial_sampler: ParamInitialStateSampler,
     transition_sampler: ParamTransitionSampler,
     log_observation_fn: ParamLogObservationFn,
-    emissions: Float[Array, "ntime emission_dim"],
+    emissions: Float[Array, " ntime"] | Float[Array, "ntime emission_dim"],
     num_theta: int,
     num_x: int,
     *,
@@ -142,9 +143,28 @@ def smc2(
         An :class:`~smcx.containers.SMC2Posterior`.
 
     Raises:
+        ValueError: Counts, thresholds, emissions, or initial parameter
+            particles are structurally invalid.
         DegenerateWeightsError: The outer weights collapse (every
             parameter particle assigned an all--inf inner likelihood).
     """
+    if emissions.ndim not in (1, 2):
+        raise ValueError(
+            "emissions must have shape (T,) or (T, emission_dim); "
+            f"got ndim={emissions.ndim}"
+        )
+    if emissions.shape[0] == 0:
+        raise ValueError("emissions must contain at least one row")
+    if num_theta < 1:
+        raise ValueError(f"num_theta must be >= 1; got {num_theta}")
+    if num_x < 1:
+        raise ValueError(f"num_x must be >= 1; got {num_x}")
+    if not 0.0 <= ess_threshold <= 1.0:
+        raise ValueError(
+            f"ess_threshold must be in the interval [0, 1]; got {ess_threshold}"
+        )
+    if num_pmmh_steps < 0:
+        raise ValueError(f"num_pmmh_steps must be >= 0; got {num_pmmh_steps}")
     if emissions.ndim == 1:
         emissions = emissions[:, None]
     n_time = emissions.shape[0]
@@ -152,6 +172,16 @@ def smc2(
 
     k_theta, k_loop = jr.split(key)
     theta = param_initial_sampler(k_theta, num_theta)
+    if not isinstance(theta, jax.Array):
+        raise ValueError(
+            "param_initial_sampler output must be a JAX array with "
+            "shape (num_theta, param_dim)"
+        )
+    if theta.ndim != 2 or theta.shape[0] != num_theta or theta.shape[1] == 0:
+        raise ValueError(
+            "param_initial_sampler output must have shape "
+            f"({num_theta}, param_dim) with param_dim >= 1; got {theta.shape}"
+        )
     d_theta = theta.shape[-1]
     scale2 = _RWM_SCALE**2 / d_theta
     batch_prior = vmap(log_prior_fn)

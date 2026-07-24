@@ -24,12 +24,14 @@ The adaptive schedule is host-driven (bisection reads ESS values), so
 import math
 from typing import cast
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 from jax import jit, lax, vmap
 from jaxtyping import Array, Float
 
+from smcx._utils import _validate_log_density_batch
 from smcx.containers import TemperedPosterior
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import systematic
@@ -191,6 +193,12 @@ def temper(
         raise ValueError(f"num_particles must be >= 1; got {num_particles}")
     if num_mcmc_steps < 1:
         raise ValueError(f"num_mcmc_steps must be >= 1; got {num_mcmc_steps}")
+    if not 0.0 < target_ess <= 1.0:
+        raise ValueError(
+            f"target_ess must be in the interval (0, 1]; got {target_ess}"
+        )
+    if max_stages < 1:
+        raise ValueError(f"max_stages must be >= 1; got {max_stages}")
     if (mutation_init_fn is None) != (mutation_step_fn is None):
         raise ValueError(
             "mutation_init_fn and mutation_step_fn must be supplied together"
@@ -199,6 +207,19 @@ def temper(
     log_n = math.log(n)
     key, k_init = jr.split(key)
     particles = initial_sampler(k_init, n)
+    if not isinstance(particles, jax.Array):
+        raise ValueError(
+            "initial_sampler output must be a JAX array with shape (N, d)"
+        )
+    if (
+        particles.ndim != 2
+        or particles.shape[0] != n
+        or particles.shape[1] == 0
+    ):
+        raise ValueError(
+            "initial_sampler output must have shape (N, d) with "
+            f"N={n} and d >= 1; got {particles.shape}"
+        )
     dim = particles.shape[1]
     scale2 = _RWM_SCALE**2 / dim
 
@@ -208,6 +229,16 @@ def temper(
     loglik: Float[Array, " num_particles"] = jnp.asarray(batch_lik(particles))
     logprior: Float[Array, " num_particles"] = jnp.asarray(
         batch_prior(particles)
+    )
+    _validate_log_density_batch(
+        loglik,
+        n,
+        name="log_likelihood_fn",
+    )
+    _validate_log_density_batch(
+        logprior,
+        n,
+        name="log_prior_fn",
     )
     log_w = jnp.full((n,), -log_n)  # normalized (LSE == 0)
 
