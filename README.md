@@ -154,13 +154,16 @@ and
 the details are recorded with the
 [frozen linear fixture](tests/_kalman_reference.py).
 
-The extended Kalman outputs are independently validated against
+The extended and unscented Kalman outputs are independently validated against
 [Stone Soup 1.9.1](https://github.com/dstl/Stone-Soup/releases/tag/v1.9.1),
-cross-checked with Dynamax 1.0.2, and checked against
+cross-checked with
+[Dynamax 1.0.2](https://github.com/probml/dynamax/releases/tag/1.0.2),
+and checked against
 [SciPy 1.18.0](https://github.com/scipy/scipy/releases/tag/v1.18.0)
 innovation log densities. Exact commits, environments, licenses, and
-observed differences are recorded with the
-[frozen nonlinear fixture](tests/_extended_kalman_reference.py).
+observed differences are recorded with the frozen
+[extended](tests/_extended_kalman_reference.py) and
+[unscented](tests/_unscented_kalman_reference.py) fixtures.
 
 These projects are numerical comparison implementations, not code
 lineage; no implementation code was copied or translated.
