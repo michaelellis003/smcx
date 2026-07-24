@@ -31,6 +31,7 @@ import numpy as np
 from jax import jit, lax, vmap
 from jaxtyping import Array, Float
 
+from smcx._numerics import _neumaier_add
 from smcx._utils import _validate_log_density_batch
 from smcx.containers import TemperedPosterior
 from smcx.exceptions import DegenerateWeightsError
@@ -372,14 +373,7 @@ def temper(
         # --- reweight; increment at the reweight stage --------------
         lw_norm, log_sum = log_normalize(log_w + delta * loglik)
         stage_ess = float(compute_ess(lw_norm))
-        # Neumaier-compensated evidence accumulation.
-        t = total + log_sum
-        comp = comp + jnp.where(
-            jnp.abs(total) >= jnp.abs(log_sum),
-            (total - t) + log_sum,
-            (log_sum - t) + total,
-        )
-        total = t
+        total, comp = _neumaier_add(total, comp, log_sum)
 
         # --- adapt the default proposal from the weighted cloud ------
         if mutation_sweep is None:

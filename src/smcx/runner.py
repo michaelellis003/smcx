@@ -10,6 +10,7 @@ import jax.random as jr
 from jax import lax, tree
 from jaxtyping import Array
 
+from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _canonicalize_inputs,
     _particle_time_axis,
@@ -121,19 +122,6 @@ def _validate_record(
         increment,
     )
     return canonical, signature
-
-
-def _neumaier_add(
-    total: Array, correction: Array, value: Array
-) -> tuple[Array, Array]:
-    """Add one value while retaining a Neumaier correction."""
-    updated = total + value
-    correction = correction + jnp.where(
-        jnp.abs(total) >= jnp.abs(value),
-        (total - updated) + value,
-        (value - updated) + total,
-    )
-    return updated, correction
 
 
 def run_particle_filter(
