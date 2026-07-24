@@ -129,6 +129,36 @@ jobs:
       - name: Check lockfile is up to date
         run: uv lock --check
 
+  release-control:
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify physical-Metal release reviewer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          curl --fail-with-body --silent --show-error \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/release" \
+            | jq --exit-status '
+                any(
+                  .protection_rules[];
+                  .type == "required_reviewers"
+                  and .prevent_self_review == false
+                  and any(
+                    .reviewers[];
+                    .type == "User"
+                    and .reviewer.login == "michaelellis003"
+                  )
+                )
+              '
+
   pytest-macos:
     runs-on: macos-latest
     timeout-minutes: 15
@@ -146,8 +176,8 @@ jobs:
         run: uv run pytest -v --durations=0
 
   # Exercise the jax-mps path when the hosted runner exposes Metal.
-  # The release-environment approval attests the authoritative local
-  # M-series run when a virtualized runner has no GPU.
+  # The configured release-environment reviewer attests the authoritative
+  # local M-series run when a virtualized runner has no GPU.
   gpu-smoke:
     runs-on: macos-latest
     timeout-minutes: 20
@@ -262,6 +292,7 @@ jobs:
       - pytest
       - coverage
       - lock-check
+      - release-control
       - pytest-macos
       - gpu-smoke
       - build
