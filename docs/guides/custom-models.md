@@ -357,18 +357,16 @@ ancestors = jax.lax.cond(
     lambda: jnp.arange(num_particles, dtype=jnp.int32),
 )
 parents = jax.tree.map(lambda leaf: leaf[ancestors], previous_particles)
-particles = jax.vmap(
-    lambda key_i, parent: proposal(key_i, parent, emission_t)
-)(particle_keys, parents)
+particles = jax.vmap(lambda key_i, parent: proposal(key_i, parent, emission_t))(
+    particle_keys, parents
+)
 log_g = jax.vmap(lambda state: log_observation(emission_t, state))(particles)
 log_f = jax.vmap(log_transition)(particles, parents)
-log_q = jax.vmap(
-    lambda state, parent: log_proposal(emission_t, state, parent)
-)(particles, parents)
-log_step = log_g + log_f - log_q
-log_scores = jnp.where(
-    do_resample, log_step - log_m[ancestors], W + log_step
+log_q = jax.vmap(lambda state, parent: log_proposal(emission_t, state, parent))(
+    particles, parents
 )
+log_step = log_g + log_f - log_q
+log_scores = jnp.where(do_resample, log_step - log_m[ancestors], W + log_step)
 log_weights, second_total = smcx.log_normalize(log_scores)
 increment = jnp.where(
     do_resample,
