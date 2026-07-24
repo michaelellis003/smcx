@@ -51,6 +51,7 @@ from smcx._utils import (
     _validate_filter_inputs,
     _validate_log_density_batch,
     _validate_particle_cloud,
+    _validate_resampling_threshold,
     _validate_state_tree,
 )
 from smcx.containers import LiuWestPosterior
@@ -391,6 +392,8 @@ def liu_west_filter(
         resampling_fn: Resampling algorithm.  Defaults to systematic.
         resampling_threshold: ESS fraction, or a JAX-traceable criterion
             ``(normalized_log_weights, absolute_ess, time_index) -> bool``.
+            Numeric values must be finite and nonnegative; zero disables
+            resampling and values above one force it at every update.
             The callback receives the first-stage weights and ESS at the
             zero-based emission indices 1 through T - 1.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
@@ -410,9 +413,10 @@ def liu_west_filter(
         DegenerateWeightsError: A particle-weight stage cannot be normalized
             (eager execution only; under ``jax.jit`` its nonfinite signal
             propagates).
-        ValueError: Inputs, particle count, shrinkage, callback output, or a
-            criterion result is structurally invalid.
+        ValueError: Inputs, particle count, shrinkage, the numeric threshold,
+            callback output, or a criterion result is structurally invalid.
     """
+    _validate_resampling_threshold(resampling_threshold)
     num_timesteps = _validate_filter_inputs(emissions, num_particles)
     if not 0.0 < shrinkage < 1.0:
         raise ValueError(

@@ -51,6 +51,7 @@ from smcx._utils import (
     _TreeSignature,
     _validate_filter_inputs,
     _validate_log_density_batch,
+    _validate_resampling_threshold,
     _validate_state_tree,
 )
 from smcx.containers import ParticleFilterPosterior, ParticleState
@@ -269,6 +270,8 @@ def auxiliary_filter(
         resampling_threshold: ESS fraction (e.g. 0.5 means resample when
             ``ESS < 0.5 * N``), or a JAX-traceable criterion
             ``(normalized_log_weights, absolute_ess, time_index) -> bool``.
+            Numeric values must be finite and nonnegative; zero disables
+            resampling and values above one force it at every update.
             The callback receives the first-stage weights and ESS at the
             zero-based emission indices 1 through T - 1.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
@@ -291,11 +294,12 @@ def auxiliary_filter(
         DegenerateWeightsError: A particle-weight stage cannot be normalized
             (eager execution only; under ``jax.jit`` its nonfinite signal
             propagates).
-        ValueError: Inputs are malformed, a criterion result is not a scalar
-            Boolean, the initial state tree is empty or has a wrong leading
-            axis, a transition changes its state contract, or a log-density
-            callback output is malformed.
+        ValueError: Inputs or the numeric threshold are malformed, a
+            criterion result is not a scalar Boolean, the initial state tree
+            is empty or has a wrong leading axis, a transition changes its
+            state contract, or a log-density callback output is malformed.
     """
+    _validate_resampling_threshold(resampling_threshold)
     num_timesteps = _validate_filter_inputs(emissions, num_particles)
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)

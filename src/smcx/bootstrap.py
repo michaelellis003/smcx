@@ -46,6 +46,7 @@ from smcx._utils import (
     _validate_filter_inputs,
     _validate_log_density_batch,
     _validate_particle_cloud,
+    _validate_resampling_threshold,
     _validate_state_tree,
 )
 from smcx.containers import (
@@ -353,14 +354,16 @@ def bootstrap_step(
             scalar with at least float32 precision.
         emission_t: Current observation ``y[t]``.
         resampling_fn: Particle resampling algorithm.
-        resampling_threshold: ESS resampling threshold as a particle fraction.
+        resampling_threshold: Finite, nonnegative ESS fraction. Zero disables
+            resampling; values above one force it at every update.
         input_t: Optional ``inputs[t]`` reaching the transition and density.
 
     Returns:
         Updated normalized checkpoint and current-step diagnostics.
 
     Raises:
-        ValueError: The checkpoint or propagated state is malformed.
+        ValueError: The threshold, checkpoint, or propagated state is
+            malformed.
         DegenerateWeightsError: Checkpoint evidence is nonfinite or updated
             importance weights cannot normalize.
 
@@ -369,6 +372,7 @@ def bootstrap_step(
         and evidence state. Under a JAX transform, those data-dependent
         checks are skipped and malformed values propagate into the result.
     """
+    _validate_resampling_threshold(resampling_threshold)
     state_signature = _validate_checkpoint(checkpoint)
 
     def body(carry, args):
@@ -425,7 +429,8 @@ def bootstrap_update(
             scalar with at least float32 precision.
         emissions_chunk: Consecutive observations after the checkpoint.
         resampling_fn: Particle resampling algorithm.
-        resampling_threshold: ESS resampling threshold as a particle fraction.
+        resampling_threshold: Finite, nonnegative ESS fraction. Zero disables
+            resampling; values above one force it at every update.
         inputs: Optional inputs aligned one-for-one with the chunk.
         store_history: Whether to retain every chunk particle cloud.
 
@@ -435,11 +440,12 @@ def bootstrap_update(
 
     Raises:
         TypeError: The host shell is called with traced checkpoint arrays.
-        ValueError: The checkpoint, chunk, keys, inputs, or transition output
-            is malformed.
+        ValueError: The threshold, checkpoint, chunk, keys, inputs, or
+            transition output is malformed.
         DegenerateWeightsError: Checkpoint evidence is nonfinite or cumulative
             importance weights cannot normalize.
     """
+    _validate_resampling_threshold(resampling_threshold)
     num_steps = emissions_chunk.shape[0]
     if num_steps == 0:
         raise ValueError("emissions_chunk must contain at least one row")
@@ -619,6 +625,8 @@ def bootstrap_filter(
         resampling_threshold: ESS fraction (e.g. 0.5 means resample when
             ``ESS < 0.5 * N``), or a JAX-traceable criterion
             ``(normalized_log_weights, absolute_ess, time_index) -> bool``.
+            Numeric values must be finite and nonnegative; zero disables
+            resampling and values above one force it at every update.
             Time is the zero-based emission index from 1 through T - 1.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)``. The latter becomes ``(T, 1)``. ``inputs[0]``
@@ -642,11 +650,12 @@ def bootstrap_filter(
         DegenerateWeightsError: A particle-weight stage cannot be normalized
             (eager execution only; under ``jax.jit`` its nonfinite signal
             propagates).
-        ValueError: Inputs are malformed, a criterion result is not a scalar
-            Boolean, the initial state tree is empty or has a wrong leading
-            axis, a transition changes its state contract, or an observation
-            callback output is malformed.
+        ValueError: Inputs or the numeric threshold are malformed, a
+            criterion result is not a scalar Boolean, the initial state tree
+            is empty or has a wrong leading axis, a transition changes its
+            state contract, or an observation callback output is malformed.
     """
+    _validate_resampling_threshold(resampling_threshold)
     num_timesteps = _validate_filter_inputs(emissions, num_particles)
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
