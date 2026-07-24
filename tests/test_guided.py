@@ -3,6 +3,8 @@
 
 """Tests for :func:`smcx.guided_filter` against an exact LGSSM oracle."""
 
+import math
+
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -10,6 +12,10 @@ import numpy as np
 import pytest
 
 import smcx
+import smcx.guided as guided_module
+from smcx._utils import _validate_particle_cloud
+from smcx.containers import ParticleState
+from smcx.resampling import systematic
 from tests._kalman import kalman_1d
 
 A, Q, R = 0.9, 0.25, 1.0
@@ -82,6 +88,121 @@ def _misspecified_proposal():
         )
 
     return sample, log_q
+
+
+def _step_case():
+    num_particles = 8
+    root_key = jr.key(41)
+    sample, log_q = _optimal_proposal()
+    first = smcx.guided_filter(
+        root_key,
+        _init,
+        sample,
+        log_q,
+        _log_trans,
+        _logobs,
+        Y[:1],
+        num_particles,
+    )
+    full = smcx.guided_filter(
+        root_key,
+        _init,
+        sample,
+        log_q,
+        _log_trans,
+        _logobs,
+        Y[:2],
+        num_particles,
+    )
+    step_root, _ = jr.split(root_key)
+    step_key = jr.split(step_root, 1)[0]
+    carry = guided_module._GuidedCarry(
+        ParticleState(
+            first.filtered_particles[0],
+            first.filtered_log_weights[0],
+            first.marginal_loglik,
+        ),
+        first.ess[0],
+        first.ancestors[0],
+    )
+    step_input = guided_module._GuidedStepInput(
+        step_key,
+        Y[1],
+        None,
+        jnp.asarray(1, dtype=jnp.int32),
+    )
+    signature = _validate_particle_cloud(
+        first.filtered_particles[0],
+        num_particles,
+        name="initial particles",
+    )
+
+    def apply_step(step_carry, inputs_t):
+        return guided_module._guided_step(
+            step_carry,
+            inputs_t,
+            proposal_sampler=sample,
+            log_proposal_fn=log_q,
+            log_transition_fn=_log_trans,
+            log_observation_fn=_logobs,
+            resampling_fn=systematic,
+            resampling_threshold=0.5,
+            state_signature=signature,
+            log_num_particles=jnp.asarray(math.log(num_particles)),
+        )
+
+    return apply_step, carry, step_input, full
+
+
+def _assert_compiled_close(actual, expected):
+    actual_array = np.asarray(actual)
+    expected_array = np.asarray(expected)
+    if np.issubdtype(actual_array.dtype, np.integer):
+        np.testing.assert_array_equal(actual_array, expected_array)
+        return
+    # Fixed keys remove MC error. The longest reduction has eight terms,
+    # so 64 ulps covers eager-versus-compiled elementary-function rounding.
+    scale = max(1.0, float(np.max(np.abs(expected_array))))
+    tolerance = 64 * np.finfo(actual_array.dtype).eps * scale
+    np.testing.assert_allclose(
+        actual_array,
+        expected_array,
+        rtol=0.0,
+        atol=tolerance,
+    )
+
+
+def test_uncompiled_guided_step_matches_public_two_step_run():
+    """The pure guided core preserves the one-shot key schedule."""
+    apply_step, carry, step_input, full = _step_case()
+
+    next_carry, output = apply_step(carry, step_input)
+
+    np.testing.assert_array_equal(
+        output.particles,
+        full.filtered_particles[1],
+    )
+    np.testing.assert_array_equal(output.ancestors, full.ancestors[1])
+    _assert_compiled_close(output.log_weights, full.filtered_log_weights[1])
+    _assert_compiled_close(output.ess, full.ess[1])
+    _assert_compiled_close(
+        output.log_evidence_increment,
+        full.log_evidence_increments[1],
+    )
+    _assert_compiled_close(
+        next_carry.state.log_marginal_likelihood,
+        full.marginal_loglik,
+    )
+
+
+def test_guided_step_compiled_matches_uncompiled():
+    """Compilation preserves every field of the pure guided step."""
+    apply_step, carry, step_input, _ = _step_case()
+
+    eager = apply_step(carry, step_input)
+    compiled = jax.jit(apply_step)(carry, step_input)
+
+    jax.tree.map(_assert_compiled_close, eager, compiled)
 
 
 class TestGuidedReducesToBootstrap:
