@@ -105,6 +105,9 @@ jobs:
           # Exercise the oldest and newest supported Python versions.
           python-version: ${{ matrix.python-version }}
 
+      - name: Check profiling lock contract
+        run: uv run python -m benchmarks.profiling.check_locking
+
       - name: Run tests
         run: uv run pytest -v --durations=0
 
@@ -205,6 +208,9 @@ jobs:
         with:
           # macos-latest may ship a newer, untested system Python.
           python-version: "3.13"
+
+      - name: Check profiling lock contract
+        run: uv run python -m benchmarks.profiling.check_locking
 
       - name: Run tests
         run: uv run pytest -v --durations=0

@@ -490,6 +490,30 @@ to the first parameter-dimension cell. Before inferential measurement:
   CPU profiler trace, or StableHLO census. Concurrent processes fail before
   device work rather than contaminating the Apple shared-SoC measurement.
 
+### 2026-07-24 — same-user profiling-lock safety amendment
+
+The host-wide wording above is superseded. Profiling tools use one stable lock
+at `/tmp/smcx-<uid>-profiling-campaign.lock`, so campaigns launched by the
+same numeric user ID on one host exclude each other; campaigns owned by
+different users do not. This avoids leaving a permanent, private lock owned by
+one account at a path that every other account must open.
+
+The final path component is opened with `O_NOFOLLOW` and creation mode `0600`.
+Before either `flock` or file mutation, `fstat` must confirm that the opened
+descriptor names a regular file owned by the current UID, with exact mode
+`0600` and exactly one hard link. Any failed check aborts with the path and the
+rejected property in the diagnostic. The acquired file records the holder PID
+and is never unlinked on release, preserving one stable inode for later
+campaigns. CI runs the focused, non-pytest contract check with:
+
+```bash
+uv run python -m benchmarks.profiling.check_locking
+```
+
+The check rejects a symlink and verifies that its target bytes are unchanged.
+It also retains the cross-process contention diagnostic, private creation
+mode, hard-link rejection, and stable-inode behavior.
+
 ### 2026-07-19 — post-failure integration validation correction
 
 The first integration campaign showed that never resampling for the 100-step

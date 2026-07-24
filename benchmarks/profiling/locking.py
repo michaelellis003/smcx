@@ -1,31 +1,42 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Host-wide mutual exclusion for profiling campaigns."""
+"""Same-user, host-local mutual exclusion for profiling campaigns."""
 
 import errno
 import fcntl
 import os
+import stat
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Self, TextIO
 
-DEFAULT_CAMPAIGN_LOCK_PATH: Final = Path("/tmp/smcx-profiling-campaign.lock")
+_LOCK_MODE: Final = 0o600
+DEFAULT_CAMPAIGN_LOCK_PATH: Final = Path(
+    f"/tmp/smcx-{os.getuid()}-profiling-campaign.lock"
+)
 
 
 class ConcurrentCampaignError(RuntimeError):
-    """Raised when another profiling campaign holds the host lock."""
+    """Raised when another same-user campaign holds the host-local lock."""
+
+
+class UnsafeCampaignLockError(RuntimeError):
+    """Raised when a profiling lock path fails its safety contract."""
 
 
 class HostCampaignLock:
-    """Nonblocking advisory lock shared by profiling processes on one host.
+    """Nonblocking advisory lock shared by one user's processes on a host.
 
     The lock file is intentionally never unlinked: deleting a live advisory
     lock file could let another process lock a new inode at the same path.
-    A successful acquisition replaces any stale file content with its PID.
+    A safe lock is a regular file owned by the current UID, has mode ``0600``
+    and exactly one hard link, and is opened without following a final
+    symlink. A successful acquisition replaces any stale file content with
+    its PID.
 
     Args:
-        path: Stable lock-file path shared by every campaign on the host.
+        path: Stable lock-file path shared by this user's campaigns.
     """
 
     def __init__(
@@ -43,7 +54,7 @@ class HostCampaignLock:
         return self._holder_pid
 
     def acquire(self) -> Self:
-        """Acquire the host lock without waiting.
+        """Acquire this user's host-local lock without waiting.
 
         Returns:
             This acquired lock instance.
@@ -51,15 +62,12 @@ class HostCampaignLock:
         Raises:
             ConcurrentCampaignError: Another process holds the lock.
             RuntimeError: This instance already owns the lock.
+            UnsafeCampaignLockError: The lock path cannot be used safely.
         """
         if self._file is not None:
             raise RuntimeError("profiling campaign lock is already acquired")
 
-        descriptor = os.open(
-            self.path,
-            os.O_CREAT | os.O_RDWR,
-            0o666,
-        )
+        descriptor = _open_lock_descriptor(self.path)
         try:
             lock_file = os.fdopen(
                 descriptor,
@@ -88,7 +96,7 @@ class HostCampaignLock:
                 else "holder PID unavailable"
             )
             raise ConcurrentCampaignError(
-                "Cannot acquire host-wide profiling campaign lock at "
+                "Cannot acquire same-user profiling campaign lock at "
                 f"{self.path}: another profiling campaign is already "
                 f"running ({holder})."
             ) from None
@@ -137,6 +145,59 @@ class HostCampaignLock:
         """Release the lock even when the campaign raises."""
         del exception_type, exception, traceback
         self.release()
+
+
+def _open_lock_descriptor(path: Path) -> int:
+    """Open and validate a lock descriptor without following a symlink."""
+    try:
+        descriptor = os.open(
+            path,
+            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+            _LOCK_MODE,
+        )
+    except OSError as error:
+        if error.errno in {errno.ELOOP, errno.EMLINK}:
+            reason = "the path is a symbolic link"
+        else:
+            reason = error.strerror or f"operating-system error {error.errno}"
+        raise UnsafeCampaignLockError(
+            f"Cannot safely open profiling campaign lock at {path}: {reason}."
+        ) from None
+
+    try:
+        _validate_lock_descriptor(descriptor, path)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+def _validate_lock_descriptor(descriptor: int, path: Path) -> None:
+    """Reject a descriptor that could alias or expose another file."""
+    metadata = os.fstat(descriptor)
+    owner_uid = os.getuid()
+    mode = stat.S_IMODE(metadata.st_mode)
+    problems: list[str] = []
+    if not stat.S_ISREG(metadata.st_mode):
+        problems.append(
+            f"it is not a regular file ({stat.filemode(metadata.st_mode)})"
+        )
+    if metadata.st_uid != owner_uid:
+        problems.append(
+            f"owner UID is {metadata.st_uid}, expected current UID {owner_uid}"
+        )
+    if mode != _LOCK_MODE:
+        problems.append(f"mode is {mode:04o}, expected mode 0600")
+    if metadata.st_nlink != 1:
+        problems.append(
+            f"it has {metadata.st_nlink} hard links, expected exactly one "
+            "hard link"
+        )
+    if problems:
+        raise UnsafeCampaignLockError(
+            f"Refusing unsafe profiling campaign lock at {path}: "
+            f"{'; '.join(problems)}."
+        )
 
 
 def _read_holder_pid(lock_file: TextIO) -> int | None:
