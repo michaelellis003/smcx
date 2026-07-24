@@ -20,9 +20,9 @@ https://github.com/statsmodels/statsmodels/blob/40e6a84d26ac74623c6b94b718f0987e
 
 The same model was independently evaluated with Dynamax 1.0.2 at commit
 ``a216d7feec0d025560a0a194ed5abab538648375``. Its maximum absolute
-differences from the canonical arrays are recorded below. The roughly
-1e-9 covariance differences are expected because Dynamax's PSD solver
-adds ``1e-9 I``.
+differences from the canonical arrays were at most ``2.7e-9``. The
+roughly 1e-9 covariance differences are expected because Dynamax's PSD
+solver adds ``1e-9 I``.
 
 Repository (MIT):
 https://github.com/probml/dynamax
@@ -49,25 +49,6 @@ run the smcx tests.
 """
 
 import numpy as np
-
-REFERENCE_METADATA = {
-    "canonical_package": "statsmodels",
-    "canonical_version": "0.14.6",
-    "canonical_commit": "40e6a84d26ac74623c6b94b718f0987ef0351c53",
-    "crosscheck_package": "dynamax",
-    "crosscheck_version": "1.0.2",
-    "crosscheck_commit": "a216d7feec0d025560a0a194ed5abab538648375",
-}
-
-DYNAMAX_MAX_ABS_DIFFS = {
-    "predicted_means": 3.26893928592753e-10,
-    "predicted_covariances": 1.0923089377445905e-09,
-    "filtered_means": 3.644584911643989e-10,
-    "filtered_covariances": 1.2754513001311807e-09,
-    "smoothed_means": 1.0572736297564944e-09,
-    "smoothed_covariances": 1.6980152284240546e-09,
-    "marginal_loglik": 2.6724968904545676e-09,
-}
 
 INITIAL_MEAN = np.array([0.35, -0.25], dtype=np.float64)
 
