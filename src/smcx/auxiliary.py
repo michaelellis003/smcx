@@ -29,12 +29,12 @@ compiled into a single XLA program.
 """
 
 import math
-from typing import cast
+from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax, vmap
-from jaxtyping import Array, Float
+from jax import lax, tree, vmap
+from jaxtyping import Array, Float, Int
 
 from smcx._utils import (
     _canonicalize_inputs,
@@ -45,6 +45,7 @@ from smcx._utils import (
     _prepend,
     _prepend_particle_history,
     _raise_if_degenerate,
+    _TreeSignature,
     _validate_filter_inputs,
     _validate_log_density_batch,
     _validate_state_tree,
@@ -57,6 +58,7 @@ from smcx.types import (
     InputSequence,
     LogObservationFn,
     LogObservationFnWithInput,
+    ParticleCloud,
     PRNGKeyT,
     ResamplingCriterion,
     ResamplingFn,
@@ -65,6 +67,143 @@ from smcx.types import (
 )
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
+
+
+class _AuxiliaryStepCarry(NamedTuple):
+    """Dynamic state carried between auxiliary-filter scan steps."""
+
+    state: ParticleState
+    ancestors: Int[Array, " num_particles"]
+
+
+class _AuxiliaryStepInput(NamedTuple):
+    """Observation-aligned inputs for one auxiliary-filter step."""
+
+    emission: Float[Array, " emission_dim"]
+    input_t: Float[Array, " input_dim"] | None
+    time_index: Int[Array, ""]
+
+
+class _AuxiliaryStepOutput(NamedTuple):
+    """Normalized particle record emitted by one auxiliary-filter step."""
+
+    particles: ParticleCloud
+    log_weights: Float[Array, " num_particles"]
+    ancestors: Int[Array, " num_particles"]
+    ess: Float[Array, ""]
+    log_evidence_increment: Float[Array, ""]
+
+
+def _auxiliary_step(
+    carry: _AuxiliaryStepCarry,
+    inputs_t: _AuxiliaryStepInput,
+    key_t: PRNGKeyT,
+    *,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
+    log_auxiliary_fn: LogObservationFn | LogObservationFnWithInput,
+    resampling_fn: ResamplingFn,
+    resampling_threshold: float | ResamplingCriterion,
+    log_num_particles: Float[Array, ""],
+    state_signature: _TreeSignature,
+) -> tuple[_AuxiliaryStepCarry, _AuxiliaryStepOutput]:
+    """Apply one pure auxiliary-filter update."""
+    state = carry.state
+    emission_t, input_t, time_index = inputs_t
+    num_particles = state.log_weights.shape[0]
+    identity = jnp.arange(num_particles, dtype=jnp.int32)
+    resample_key, transition_key = jr.split(key_t)
+
+    if input_t is None:
+        auxiliary_fn = cast(LogObservationFn, log_auxiliary_fn)
+        log_aux = cast(
+            Array,
+            vmap(auxiliary_fn, in_axes=(None, 0))(emission_t, state.particles),
+        )
+    else:
+        auxiliary_fn_u = cast(LogObservationFnWithInput, log_auxiliary_fn)
+        log_aux = cast(
+            Array,
+            vmap(auxiliary_fn_u, in_axes=(None, 0, None))(
+                emission_t, state.particles, input_t
+            ),
+        )
+    _validate_log_density_batch(
+        log_aux,
+        num_particles,
+        name="log_auxiliary_fn",
+    )
+    log_first_stage = state.log_weights + log_aux
+    log_first_norm, log_first_sum = log_normalize(log_first_stage)
+    first_ess = jnp.asarray(compute_ess(log_first_norm))
+
+    do_resample, ancestors = _conditional_resample(
+        resample_key,
+        log_first_norm,
+        first_ess,
+        resampling_fn,
+        resampling_threshold,
+        num_particles,
+        identity,
+        time_index,
+    )
+    resampled_particles = _gather_particles(state.particles, ancestors)
+    log_aux_ancestors = log_aux[ancestors]
+    particle_keys = jr.split(transition_key, num_particles)
+
+    if input_t is None:
+        transition_fn = cast(TransitionSampler, transition_sampler)
+        observation_fn = cast(LogObservationFn, log_observation_fn)
+        propagated = vmap(transition_fn)(particle_keys, resampled_particles)
+        log_obs = vmap(observation_fn, in_axes=(None, 0))(
+            emission_t, propagated
+        )
+    else:
+        transition_fn_u = cast(TransitionSamplerWithInput, transition_sampler)
+        observation_fn_u = cast(LogObservationFnWithInput, log_observation_fn)
+        propagated = vmap(transition_fn_u, in_axes=(0, 0, None))(
+            particle_keys, resampled_particles, input_t
+        )
+        log_obs = vmap(observation_fn_u, in_axes=(None, 0, None))(
+            emission_t, propagated, input_t
+        )
+    sample = tree.map(lambda leaf: leaf[0], propagated)
+    _validate_state_tree(
+        sample, state_signature, name="transition_sampler output"
+    )
+    _validate_log_density_batch(
+        cast(Array, log_obs),
+        num_particles,
+        name="log_observation_fn",
+    )
+
+    log_second_stage = log_obs - log_aux_ancestors
+    log_w_unnorm = jnp.where(
+        do_resample,
+        log_second_stage,
+        state.log_weights + log_obs,
+    )
+    log_w_norm, log_sum = log_normalize(log_w_unnorm)
+    log_ev_inc = jnp.where(
+        do_resample,
+        log_first_sum + log_sum - log_num_particles,
+        log_sum,
+    )
+    new_state = ParticleState(
+        particles=propagated,
+        log_weights=log_w_norm,
+        log_marginal_likelihood=(state.log_marginal_likelihood + log_ev_inc),
+    )
+    ess_t = jnp.asarray(compute_ess(log_w_norm))
+    new_carry = _AuxiliaryStepCarry(new_state, ancestors)
+    output = _AuxiliaryStepOutput(
+        propagated,
+        log_w_norm,
+        ancestors,
+        ess_t,
+        log_ev_inc,
+    )
+    return new_carry, output
 
 
 def auxiliary_filter(
@@ -175,155 +314,29 @@ def auxiliary_filter(
     )
 
     # --- Scan body for t = 1, ..., T-1 -------------------------------------
-    def _step(
-        carry: tuple[ParticleState, Array],
-        args: tuple[Array, ...],
-    ):
-        state, _prev_ancestors = carry
+    def _step(carry: _AuxiliaryStepCarry, args: tuple[Array, ...]):
         if inputs_arr is None:
             step_key, y_t, time_index = args
             input_t = None
         else:
             step_key, y_t, input_t, time_index = args
-        k1, k2 = jr.split(step_key)
-        # Invariant: state.log_weights are normalized (logsumexp = 0).
-
-        # 1. First-stage weights: combine current weights with
-        #    look-ahead g(y_{t+1} | x_t)
-        if input_t is None:
-            auxiliary_fn = cast(LogObservationFn, log_auxiliary_fn)
-            log_aux = cast(
-                Array,
-                vmap(lambda z: auxiliary_fn(y_t, z))(state.particles),
-            )
-        else:
-            auxiliary_fn_u = cast(LogObservationFnWithInput, log_auxiliary_fn)
-            log_aux = cast(
-                Array,
-                vmap(lambda z: auxiliary_fn_u(y_t, z, input_t))(
-                    state.particles
-                ),
-            )
-        _validate_log_density_batch(
-            log_aux,
-            num_particles,
-            name="log_auxiliary_fn",
+        next_carry, output = _auxiliary_step(
+            carry,
+            _AuxiliaryStepInput(y_t, input_t, time_index),
+            step_key,
+            transition_sampler=transition_sampler,
+            log_observation_fn=log_observation_fn,
+            log_auxiliary_fn=log_auxiliary_fn,
+            resampling_fn=resampling_fn,
+            resampling_threshold=resampling_threshold,
+            log_num_particles=log_n,
+            state_signature=state_signature,
         )
-        log_first_stage = state.log_weights + log_aux
-
-        # Normalise first-stage weights for resampling
-        log_first_norm, log_first_sum = log_normalize(log_first_stage)
-        first_ess: Array = jnp.asarray(compute_ess(log_first_norm))
-
-        # 2. Conditionally resample using first-stage weights
-        do_resample, ancestors = _conditional_resample(
-            k1,
-            log_first_norm,
-            first_ess,
-            resampling_fn,
-            resampling_threshold,
-            num_particles,
-            identity_ancestors,
-            time_index,
-        )
-        resampled_particles = _gather_particles(state.particles, ancestors)
-
-        # Store the look-ahead values for ancestors (needed for
-        # second-stage correction)
-        log_aux_ancestors = log_aux[ancestors]
-
-        # 3. Propagate through transition
-        keys = jr.split(k2, num_particles)
-        if input_t is None:
-            transition_fn = cast(TransitionSampler, transition_sampler)
-
-            def _propagate(key_i, state_i):
-                next_state = transition_fn(key_i, state_i)
-                _validate_state_tree(
-                    next_state,
-                    state_signature,
-                    name="transition_sampler output",
-                )
-                return next_state
-
-            propagated = vmap(_propagate)(keys, resampled_particles)
-        else:
-            transition_fn_u = cast(
-                TransitionSamplerWithInput, transition_sampler
-            )
-
-            def _propagate_with_input(key_i, state_i):
-                next_state = transition_fn_u(key_i, state_i, input_t)
-                _validate_state_tree(
-                    next_state,
-                    state_signature,
-                    name="transition_sampler output",
-                )
-                return next_state
-
-            propagated = vmap(_propagate_with_input)(keys, resampled_particles)
-
-        # 4. Second-stage weights: observation / look-ahead adjustment
-        if input_t is None:
-            observation_fn = cast(LogObservationFn, log_observation_fn)
-            log_obs = vmap(lambda z: observation_fn(y_t, z))(propagated)
-        else:
-            observation_fn_u = cast(
-                LogObservationFnWithInput, log_observation_fn
-            )
-            log_obs = vmap(lambda z: observation_fn_u(y_t, z, input_t))(
-                propagated
-            )
-        _validate_log_density_batch(
-            cast(Array, log_obs),
-            num_particles,
-            name="log_observation_fn",
-        )
-        log_second_stage = log_obs - log_aux_ancestors
-
-        # Compute evidence increment and normalize.
-        # If resampled: first-stage weights were used for resampling,
-        #   the evidence increment is the product of two factors:
-        #   (a) E_W[g] = sum_i W_i * g_i  (first-stage normaliser)
-        #   (b) (1/N) sum_j w_j^(2)       (mean second-stage weight)
-        # If not resampled: standard importance weighting,
-        #   increment = logsumexp(log_w_old + log_obs)
-        log_w_unnorm = jnp.where(
-            do_resample,
-            log_second_stage,
-            state.log_weights + log_obs,
-        )
-        log_w_norm, log_sum = log_normalize(log_w_unnorm)
-
-        # log_first_sum = logsumexp(log_w_norm_old + log_aux)
-        #   = log(sum W_i g_i) = log E_W[g]  (no 1/N needed)
-        # log_sum for second stage = logsumexp(log_second_stage)
-        #   so mean = log_sum - log_n
-        log_ev_inc_resample = log_first_sum + log_sum - log_n
-        log_ev_inc_no_resample = log_sum
-        log_ev_inc = jnp.where(
-            do_resample, log_ev_inc_resample, log_ev_inc_no_resample
-        )
-
-        new_state = ParticleState(
-            particles=propagated,
-            log_weights=log_w_norm,
-            log_marginal_likelihood=(
-                state.log_marginal_likelihood + log_ev_inc
-            ),
-        )
-        ess_t: Array = jnp.asarray(compute_ess(log_w_norm))
         if store_history:
-            return (new_state, ancestors), (
-                propagated,
-                log_w_norm,
-                ancestors,
-                ess_t,
-                log_ev_inc,
-            )
+            return next_carry, output
         # In final-only mode, ancestors ride the carry (O(N)) and the
         # scan stacks just the scalar traces.
-        return (new_state, ancestors), (ess_t, log_ev_inc)
+        return next_carry, (output.ess, output.log_evidence_increment)
 
     # Run the scan over t = 1 ... T-1
     step_keys = jr.split(key, num_timesteps - 1)
@@ -333,29 +346,24 @@ def auxiliary_filter(
         if inputs_arr is None
         else (step_keys, emissions[1:], inputs_arr[1:], time_indices)
     )
-    init_carry = (init_state, identity_ancestors)
+    init_carry = _AuxiliaryStepCarry(init_state, identity_ancestors)
     if store_history:
-        (
-            (final_state, _),
-            (
-                particles_rest,
-                log_w_rest,
-                ancestors_rest,
-                ess_rest,
-                log_ev_inc_rest,
-            ),
-        ) = lax.scan(_step, init_carry, scan_inputs)
-        all_particles = _prepend_particle_history(particles_0, particles_rest)
-        all_log_w = _prepend(log_w_0, log_w_rest)
-        all_ancestors = _prepend(identity_ancestors, ancestors_rest)
+        final_carry, outputs = lax.scan(_step, init_carry, scan_inputs)
+        all_particles = _prepend_particle_history(
+            particles_0, outputs.particles
+        )
+        all_log_w = _prepend(log_w_0, outputs.log_weights)
+        all_ancestors = _prepend(identity_ancestors, outputs.ancestors)
+        ess_rest = outputs.ess
+        log_ev_inc_rest = outputs.log_evidence_increment
     else:
-        (
-            (final_state, final_ancestors),
-            (ess_rest, log_ev_inc_rest),
-        ) = lax.scan(_step, init_carry, scan_inputs)
-        all_particles = _particle_time_axis(final_state.particles)
-        all_log_w = final_state.log_weights[None]
-        all_ancestors = final_ancestors[None]
+        final_carry, (ess_rest, log_ev_inc_rest) = lax.scan(
+            _step, init_carry, scan_inputs
+        )
+        all_particles = _particle_time_axis(final_carry.state.particles)
+        all_log_w = final_carry.state.log_weights[None]
+        all_ancestors = final_carry.ancestors[None]
+    final_state = final_carry.state
     ess_0_arr: Array = jnp.asarray(ess_0)
     all_ess = _prepend(ess_0_arr, ess_rest)
     all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
