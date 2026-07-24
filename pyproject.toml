@@ -115,19 +115,6 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 # Tests use class-based grouping; method docstrings are noisy. LGSSM
 # tests keep the literature's matrix notation (F, Q, H, R, P0).
-# Example notebooks keep the thesis's mathematical notation
-# (Gamma, EPS), pedagogical lambdas, and per-section imports.
-"docs/examples/*.ipynb" = [
-    "N806",
-    "N803",
-    "D103",
-    "E731",
-    "E741",
-    "E402",
-    "B905",
-    "RUF059",
-    "E501",
-]
 "tests/*" = ["D102", "D103", "D104", "N806", "N803"]
 # The version fallback try/except is standard packaging boilerplate.
 "src/smcx/__init__.py" = ["RUF067"]
@@ -177,9 +164,6 @@ upload_to_vcs_release = true
 # are unresolvable in the project environment. The MLX-era benchmark
 # workers reference the pre-JAX API and remain as historical harness code.
 exclude = [
-    # Example notebooks: runtime-verified by execution; *fns unpacking
-    # and blackjax's own stubs defeat static arity analysis.
-    "docs/examples/**",
     "benchmarks/killtest/**",
     "benchmarks/native_vs_jax_mps/jax_worker.py",
     "benchmarks/native_vs_jax_mps/mlx_worker.py",
