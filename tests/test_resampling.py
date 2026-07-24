@@ -124,6 +124,28 @@ class TestContract:
 
         np.testing.assert_array_equal(ancestor, np.array([0]))
 
+    @pytest.mark.skipif(
+        not jax.config.read("jax_enable_x64"),
+        reason="float64 endpoint contract",
+    )
+    def test_public_systematic_preserves_float64_tail_mass(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The endpoint guard must not hide valid float64 tail mass."""
+
+        def tail_uniform(key):
+            del key
+            return jnp.array(0.99999999, dtype=jnp.float64)
+
+        monkeypatch.setattr(jax.random, "uniform", tail_uniform)
+        ancestor = systematic(
+            jr.PRNGKey(84),
+            jnp.array([0.99999998, 0.00000002], dtype=jnp.float64),
+            1,
+        )
+
+        np.testing.assert_array_equal(ancestor, np.array([1]))
+
     def test_systematic_uniform_weights_select_every_particle_once(
         self,
     ) -> None:
