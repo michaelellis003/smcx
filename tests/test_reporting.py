@@ -5,6 +5,7 @@
 
 import subprocess
 import sys
+import warnings
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -47,22 +48,35 @@ def test_independent_runs_map_to_chain_and_draw_dimensions():
     post = _filter()
     other = post._replace(filtered_particles=post.filtered_particles + 100.0)
     one = _group(to_arviz(post, key=jr.key(1), num_draws=5), "posterior")
-    two = _group(
-        to_arviz([post, other], key=jr.key(1), num_draws=5), "posterior"
-    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = to_arviz([post, other], key=jr.key(1), num_draws=5)
+    two = _group(result, "posterior")
+    diagnostics = _group(result, "particle_diagnostics")
     assert one["theta"].shape == (1, 5, 2, 1)
     assert two["theta"].shape == (2, 5, 2, 1)
     assert np.all(two["theta"].values[1] >= 100)
+    assert diagnostics["ess"].dims == ("run", "time")
+    assert diagnostics["log_weights"].dims == ("run", "time", "particle")
+    assert not [
+        warning
+        for warning in caught
+        if "chain dimension" in str(warning.message)
+    ]
 
 
-def test_weighted_cloud_keeps_raw_source_weights_in_sample_stats():
+def test_weighted_cloud_keeps_raw_source_weights_in_diagnostics():
     result = to_arviz(_filter(), key=jr.key(0), num_draws=3)
-    stats = _group(result, "sample_stats")
+    diagnostics = _group(result, "particle_diagnostics")
     assert _group(result, "posterior").sizes["draw"] == 3
-    assert stats["log_weights"].dims[-2:] == ("particle", "time")
+    assert diagnostics["log_weights"].dims == (
+        "run",
+        "time",
+        "particle",
+    )
     np.testing.assert_allclose(
-        stats["log_weights"].values[0, 0],
-        np.asarray(_filter().filtered_log_weights).T,
+        diagnostics["log_weights"].values[0],
+        np.asarray(_filter().filtered_log_weights),
     )
 
 
@@ -78,7 +92,7 @@ def test_dense_and_structured_states_have_stable_names_and_dims():
     )
     dense_result = to_arviz(tempered, key=jr.key(2), num_draws=3)
     dense = _group(dense_result, "posterior")
-    dense_stats = _group(dense_result, "sample_stats")
+    dense_diagnostics = _group(dense_result, "particle_diagnostics")
     tree = {"position": jnp.repeat(post.filtered_particles, 2, axis=-1)}
     structured_post = post._replace(filtered_particles=tree)
     structured = _group(
@@ -91,8 +105,8 @@ def test_dense_and_structured_states_have_stable_names_and_dims():
         "posterior",
     )
     assert dense["theta"].shape == (1, 3, 1)
-    assert dense_stats["log_weights"].dims[-1] == "particle"
-    assert dense_stats["temperatures"].dims[-1] == "stage"
+    assert dense_diagnostics["log_weights"].dims == ("run", "particle")
+    assert dense_diagnostics["temperatures"].dims == ("run", "stage")
     assert structured["x"].dims == ("chain", "draw", "time", "axis")
 
 
@@ -100,9 +114,9 @@ def test_filter_metadata_and_observations_land_in_standard_groups():
     result = to_arviz(
         _filter(), key=jr.key(3), emissions=jnp.array([[1.0], [2.0]])
     )
-    stats = _group(result, "sample_stats")
-    assert stats["ess"].dims == ("chain", "draw", "time")
-    assert {"pareto_k", "log_evidence_increments"} <= set(stats.data_vars)
+    diagnostics = _group(result, "particle_diagnostics")
+    assert diagnostics["ess"].dims == ("run", "time")
+    assert {"pareto_k", "log_evidence_increments"} <= set(diagnostics.data_vars)
     assert _group(result, "posterior").attrs["marginal_loglik"] == [1.25]
     assert _group(result, "observed_data")["emissions"].shape == (2, 1)
 

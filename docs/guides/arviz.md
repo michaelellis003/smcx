@@ -30,7 +30,7 @@ reproducible.
 | Group or attribute | Contents |
 | --- | --- |
 | `posterior` | Resampled particle values |
-| `sample_stats` | Source log weights and algorithm diagnostics |
+| `particle_diagnostics` | Source log weights and algorithm diagnostics |
 | `observed_data` | Emissions, when supplied |
 | `unconstrained_posterior` | Aligned u-space values, when supplied |
 | `posterior.attrs["marginal_loglik"]` | Evidence estimate for each run |
@@ -39,6 +39,12 @@ Particle-filter output has dimensions `(chain, draw, time, ...)`. Each time
 slice is a filtering marginal $p(x_t \mid y_{0:t})$; draws with the same index
 across time do not form a joint trajectory. Use `reconstruct_trajectories`
 when ancestry is needed.
+
+The `particle_diagnostics` group describes the source particle clouds, not
+the resampled posterior draws. Its leading dimension is `run`, followed by
+`time` for particle filters or `stage` for tempered SMC; source log weights
+also have a `particle` dimension. These values are stored once per run rather
+than repeated across `draw`.
 
 Structured particle states use their PyTree paths as variable names. Supply
 `var_names` to rename them and `dims` to label event dimensions. Values passed
