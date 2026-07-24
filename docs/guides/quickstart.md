@@ -103,6 +103,11 @@ The filter and smoother are independent pieces: a compatible
 `GaussianFilterPosterior` produced by research code can be passed to
 `rts_smoother` directly.
 
+The linear filter permits finite symmetric positive-semidefinite initial and
+transition covariances, while its observation covariance must be positive
+definite. The smoother also requires each positive-time predicted covariance
+to be positive definite because the backward recursion factors it.
+
 ## Run a particle filter
 
 The bootstrap filter proposes from the transition and weights by the

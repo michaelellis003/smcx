@@ -355,6 +355,62 @@ def test_unscented_filter_rejects_invalid_rule(parameters, message):
         _minimal_float32_ukf(**parameters)
 
 
+@pytest.mark.parametrize(
+    ("argument", "value", "message"),
+    [
+        (
+            "initial_covariance",
+            jnp.array([[-1.0]], dtype=jnp.float32),
+            "initial_covariance must be positive definite",
+        ),
+        (
+            "initial_covariance",
+            jnp.array([[0.0]], dtype=jnp.float32),
+            "initial_covariance must be positive definite",
+        ),
+        (
+            "transition_covariance",
+            jnp.array([[0.0]], dtype=jnp.float32),
+            "transition_covariance must be positive definite",
+        ),
+        (
+            "observation_covariance",
+            jnp.array([[0.0]], dtype=jnp.float32),
+            "observation_covariance must be positive definite",
+        ),
+        (
+            "initial_covariance",
+            jnp.array([[jnp.nan]], dtype=jnp.float32),
+            "initial_covariance must contain only finite values",
+        ),
+        (
+            "transition_covariance",
+            jnp.array([[jnp.inf]], dtype=jnp.float32),
+            "transition_covariance must contain only finite values",
+        ),
+    ],
+)
+def test_unscented_filter_rejects_invalid_covariance(
+    argument,
+    value,
+    message,
+):
+    """Every covariance factored by the UKF must be positive definite."""
+    model = {
+        "initial_mean": jnp.zeros(1, dtype=jnp.float32),
+        "initial_covariance": jnp.eye(1, dtype=jnp.float32),
+        "transition_mean_fn": _identity,
+        "transition_covariance": jnp.eye(1, dtype=jnp.float32),
+        "observation_mean_fn": _identity,
+        "observation_covariance": jnp.eye(1, dtype=jnp.float32),
+        "emissions": jnp.zeros((2, 1), dtype=jnp.float32),
+    }
+    model[argument] = value
+
+    with pytest.raises(ValueError, match=message):
+        smcx.unscented_kalman_filter(**model)
+
+
 def test_unscented_nondefault_rule_matches_scalar_oracle():
     """A valid negative central weight retains analytic scalar moments."""
     posterior = smcx.unscented_kalman_filter(

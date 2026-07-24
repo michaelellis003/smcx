@@ -438,6 +438,55 @@ def test_extended_kalman_rejects_misaligned_arrays(argument, value, message):
         smcx.extended_kalman_filter(**model)
 
 
+@pytest.mark.parametrize(
+    ("argument", "value", "message"),
+    [
+        (
+            "initial_covariance",
+            jnp.array([[-1.0]]),
+            "initial_covariance must be positive semidefinite",
+        ),
+        (
+            "transition_covariance",
+            jnp.array([[jnp.nan]]),
+            "transition_covariance must contain only finite values",
+        ),
+        (
+            "transition_covariance",
+            jnp.array([[jnp.inf]]),
+            "transition_covariance must contain only finite values",
+        ),
+        (
+            "observation_covariance",
+            jnp.array([[0.0]]),
+            "observation_covariance must be positive definite",
+        ),
+    ],
+)
+def test_extended_kalman_rejects_invalid_covariance(
+    argument,
+    value,
+    message,
+):
+    """The EKF rejects invalid concrete model covariances."""
+    model = _valid_extended_model()
+    model[argument] = value
+
+    with pytest.raises(ValueError, match=message):
+        smcx.extended_kalman_filter(**model)
+
+
+def test_extended_kalman_accepts_semidefinite_state_covariances():
+    """The EKF permits deterministic prior and transition components."""
+    model = _valid_extended_model()
+    model["initial_covariance"] = jnp.zeros((1, 1))
+    model["transition_covariance"] = jnp.zeros((1, 1))
+
+    posterior = smcx.extended_kalman_filter(**model)
+
+    assert jnp.all(jnp.isfinite(posterior.filtered_covariances))
+
+
 @pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
 def test_extended_kalman_rejects_low_precision(dtype):
     """Unsupported Cholesky dtypes fail cleanly at the public boundary."""

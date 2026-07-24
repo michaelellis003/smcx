@@ -89,6 +89,14 @@ shape `(observation_dim, observation_dim)` or
 `(ntime, observation_dim, observation_dim)`. All arrays and callback outputs
 share one float32 or float64 dtype.
 
+All covariance arrays are finite and symmetric. The EKF permits positive
+semidefinite prior and transition covariances, including deterministic state
+components, and requires a positive-definite observation covariance. The UKF
+requires all three covariances to be positive definite because it also takes
+Cholesky square roots of state covariances. These value checks run at eager
+Python entry and are skipped when the arrays are tracers inside a JAX
+transformation.
+
 With `inputs=...`, every supplied callback accepts `(state, input_t)`.
 `inputs[t]` reaches the observation at `t` and the transition into `t`;
 `inputs[0]` does not transform the supplied prior. A rank-one input sequence
