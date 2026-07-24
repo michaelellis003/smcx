@@ -58,9 +58,9 @@ x_true, y = simulate_sv(0)
 emissions = jnp.asarray(y)[:, None]
 ```
 
-We simulate with NumPy rather than `smcx.simulate` only to keep the
-true latent path `x_true` for scoring at the end; the model closures
-below are what the filter sees.
+This example uses NumPy to generate one fixed tutorial data set. The
+latent path `x_true` is retained only for scoring at the end; the model
+closures below are what the filter sees.
 
 ## Model closures with a parameter argument
 
@@ -127,7 +127,8 @@ parameter toward the ensemble mean and adding jitter of variance
 $h^2 = 1 - a^2$ times the ensemble covariance. The construction is
 variance-matched: it fights degeneracy without inflating the
 marginal parameter posterior. Values near $0.97$–$0.99$ are typical;
-smaller $a$ shrinks harder.
+smaller $a$ shrinks harder and adds more kernel noise, while larger $a$
+shrinks less and adds less noise.
 
 ## Read the parameter posterior
 
@@ -154,8 +155,7 @@ $\phi = 0.95$ the log-variance mixes slowly, so four hundred
 observations carry only modest information about its long-run mean,
 and the Liu-West kernel adds a known, non-vanishing approximation
 bias on top. The honest reading is the interval, not the point —
-across independent simulations the 90% band covers $\mu$ reliably,
-which is the behavior we want from an online parameter posterior.
+the interval communicates the uncertainty in this run.
 
 ## Score the volatility track
 
@@ -179,9 +179,9 @@ locating $\mu$ at the same time, in one forward pass.
 - Liu-West is labeled approximate for a reason (the shrinkage bias
   above). When the parameter posterior matters more than online
   operation, an offline SMC sampler over the parameter — smcx's
-  [`temper`](../api/smcx/index.md) — trades the single pass for lower bias,
+  [`temper`](../api/smcx/index.md) — targets a static posterior offline,
   and [`smc2`](../api/smcx/index.md) nests a full particle filter inside it
-  for exact pseudo-marginal parameter inference.
+  for pseudo-marginal parameter inference.
 - The parameter here is unconstrained, which suits the Gaussian
   jitter. For a bounded parameter such as $\phi \in (-1, 1)$, learn
   it on an unconstrained scale (for instance $\operatorname{arctanh}

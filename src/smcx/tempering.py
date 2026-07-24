@@ -4,16 +4,16 @@
 r"""Adaptive tempered SMC for static targets.
 
 Anneals from the prior to the posterior
-:math:`\pi_\phi \propto p(x)\, L(x)^\phi` along an adaptive schedule
+$\pi_\phi \propto p(x)\, L(x)^\phi$ along an adaptive schedule
 [Del Moral, Doucet & Jasra, 2006]: the next temperature solves
 ``ESS(phi) = target_ess * N`` by bisection on the *resident*
 log-likelihood vector — a deterministic solve with no fresh sampling.
 Each stage reweights by
-:math:`\ell \cdot \Delta\phi` (evidence increment at the reweight,
+$\ell \cdot \Delta\phi$ (evidence increment at the reweight,
 pre-move — the Del Moral et al. collapse), resamples, and applies a
-:math:`\pi_{\phi'}`-invariant mutation. By default this is random-walk
+$\pi_{\phi'}$-invariant mutation. By default this is random-walk
 Metropolis with proposal covariance
-:math:`2.38^2/d \cdot \hat\Sigma` from the *weighted* pre-resample cloud
+$2.38^2/d \cdot \hat\Sigma$ from the *weighted* pre-resample cloud
 (Roberts & Rosenthal, 2001) — two-pass in float64 on the host
 (single-pass cancels catastrophically at ordinary posterior offsets).
 
@@ -167,7 +167,7 @@ def temper(
             for each stage's temperature increment.
         resampling_fn: Resampler applied at every
             stage — the schedule drives ESS to the target by
-            construction).
+            construction.
         mutation_init_fn: Optional
             ``(position, tempered_logdensity_fn) -> state`` callback.
             State must be a JAX PyTree with a dense ``position`` field.
@@ -178,9 +178,9 @@ def temper(
         max_stages: Safety cap on the number of stages.
 
     Returns:
-        :class:`~smcx.containers.TemperedPosterior` with equal-weight
-        posterior draws, the log-evidence estimate, and per-stage
-        temperature/ESS/acceptance traces.
+        `smcx.containers.TemperedPosterior` with an equal-weight particle
+        approximation to the posterior, the log-evidence estimate, and
+        per-stage temperature/ESS/acceptance traces.
 
     Raises:
         ValueError: Particle or mutation counts are invalid, callback pairing

@@ -325,7 +325,7 @@ def _init_standard(
     """Initialise a standard (bootstrap/auxiliary) filter at t=0.
 
     Samples from the prior, weights by the first observation, and
-    builds the initial :class:`ParticleState`.
+    builds the initial `smcx.containers.ParticleState`.
 
     Args:
         init_key: PRNG key for initialisation.
@@ -455,12 +455,11 @@ def _conditional_resample(
 
 
 def _raise_if_degenerate(marginal_loglik) -> None:
-    """Raise :class:`DegenerateWeightsError` on a collapsed filter.
+    """Raise `smcx.DegenerateWeightsError` on a collapsed filter.
 
-    Host-side check: fires only in eager execution. Under a user
-    ``jax.jit`` the value is a tracer and the check is skipped — the
-    ``-inf``/NaN marginal propagates instead (see the exception's
-    docstring).
+    This eager shell check rejects a checked evidence state of ``-inf`` or
+    NaN. Under a user ``jax.jit`` the value is a tracer, so the check is
+    skipped and the non-finite value propagates instead.
     """
     from jax.core import Tracer
 

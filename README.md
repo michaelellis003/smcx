@@ -105,9 +105,10 @@ containers are JAX PyTrees.
 ## Citation
 
 If smcx contributes to academic work, cite the release used. The
-repository's **Cite this repository** menu is generated from
+repository's **Cite this repository** menu uses the base metadata in
 [`CITATION.cff`](https://github.com/michaelellis003/smcx/blob/main/CITATION.cff)
-and provides BibTeX and APA entries.
+to provide BibTeX and APA entries. Include the release tag or version and
+release date in the final citation.
 
 ## Sources and attribution
 

@@ -4,7 +4,7 @@
 r"""SMC² — nested parameter inference for state-space models.
 
 ``num_theta`` parameter particles form an outer SMC sampler; each
-carries an ``num_x``-particle inner bootstrap filter whose unbiased
+carries a ``num_x``-particle inner bootstrap filter whose unbiased
 likelihood estimate drives the outer weights. As each datum arrives
 every inner filter advances one step, its incremental likelihood
 updates the outer weights, and when the outer ESS degrades the
@@ -145,13 +145,13 @@ def smc2(
             final parameter cloud is returned (time axis length 1).
 
     Returns:
-        An :class:`~smcx.containers.SMC2Posterior`.
+        An `smcx.containers.SMC2Posterior`.
 
     Raises:
         ValueError: Counts, emissions, or a callback output is structurally
             invalid.
         DegenerateWeightsError: The outer weights collapse (every
-            parameter particle assigned an all--inf inner likelihood).
+            parameter particle is assigned an inner likelihood of ``-inf``).
     """
     if emissions.ndim not in (1, 2):
         raise ValueError(

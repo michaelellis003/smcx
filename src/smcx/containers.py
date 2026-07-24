@@ -7,7 +7,7 @@
 
 """Containers for particle filter state and posteriors.
 
-All containers are :class:`~typing.NamedTuple` subclasses so they are
+All containers are `typing.NamedTuple` subclasses so they are
 registered as JAX PyTrees by default.
 """
 
@@ -22,13 +22,12 @@ from smcx.types import ParticleCloud, ParticleHistory, Scalar
 class ParticleFilterResult(Protocol):
     r"""Structural type for any particle filter posterior.
 
-    Both :class:`ParticleFilterPosterior` and
-    :class:`LiuWestPosterior` satisfy this protocol, so diagnostic
+    Both `smcx.containers.ParticleFilterPosterior` and
+    `smcx.containers.LiuWestPosterior` satisfy this protocol, so diagnostic
     functions can accept either without type errors.
 
     Attributes:
-        marginal_loglik: Scalar estimate of
-            :math:`\log p(y_{1:T})`.
+        marginal_loglik: Scalar estimate of $\log p(y_{1:T})$.
         filtered_particles: Latent-state PyTree with every leaf shaped
             ``(ntime, num_particles, ...)``.
         filtered_log_weights: Normalised log weights at each step,
@@ -127,8 +126,7 @@ class ParticleFilterPosterior(NamedTuple):
     time-indexed arrays.
 
     Attributes:
-        marginal_loglik: Scalar estimate of
-            :math:`\log p(y_{1:T})`.
+        marginal_loglik: Scalar estimate of $\log p(y_{1:T})$.
         filtered_particles: Latent-state PyTree with every leaf shaped
             ``(ntime, num_particles, ...)``. A dense state remains one
             array of shape ``(ntime, num_particles, state_dim)``.
@@ -155,7 +153,7 @@ class GaussianFilterPosterior(NamedTuple):
     r"""Gaussian filtering output.
 
     Attributes:
-        marginal_loglik: :math:`\log p(y_{1:T})` as computed by the
+        marginal_loglik: $\log p(y_{1:T})$ as computed by the
             filtering method.
         predicted_means: Means before conditioning at each step,
             shape ``(ntime, state_dim)``.
@@ -184,7 +182,7 @@ class GaussianSmootherPosterior(NamedTuple):
     one self-contained posterior without rerunning the forward pass.
 
     Attributes:
-        marginal_loglik: :math:`\log p(y_{1:T})` as computed by the
+        marginal_loglik: $\log p(y_{1:T})$ as computed by the
             filtering method.
         predicted_means: Means before conditioning at each step.
         predicted_covariances: Covariances before conditioning at each step.
@@ -210,13 +208,12 @@ class GaussianSmootherPosterior(NamedTuple):
 class LiuWestPosterior(NamedTuple):
     r"""Full output of a Liu-West particle filter run.
 
-    Extends :class:`ParticleFilterPosterior` with parameter samples.
+    Extends `smcx.containers.ParticleFilterPosterior` with parameter samples.
     The Liu-West filter (Liu & West, 2001) jointly estimates latent
     states and static parameters using kernel density smoothing.
 
     Attributes:
-        marginal_loglik: Scalar estimate of
-            :math:`\log p(y_{1:T})`.
+        marginal_loglik: Scalar estimate of $\log p(y_{1:T})$.
         filtered_particles: Particle values at each time step,
             shape ``(ntime, num_particles, state_dim)``.
         filtered_log_weights: Normalized log weights at each step,
@@ -244,10 +241,10 @@ class LiuWestPosterior(NamedTuple):
 class TemperedPosterior(NamedTuple):
     """Tempered-SMC output.
 
-    ``particles`` are equal-weight draws from the target (final
-    resample + pi-invariant moves), so ``log_weights`` is uniform —
-    kept for interface symmetry and Rao-Blackwell reminders: compute
-    summaries from weighted clouds when you have them.
+    ``particles`` form an equal-weight particle approximation to the target
+    after the final resample and invariant moves, so ``log_weights`` is
+    uniform. The field is kept for interface symmetry and as a reminder to
+    compute summaries from weighted clouds when they are available.
     ``marginal_loglik`` is the Neumaier-compensated log-evidence
     estimate.
     """
@@ -264,7 +261,7 @@ class SMC2Posterior(NamedTuple):
     """SMC² posterior over static parameters.
 
     The outer layer is an SMC sampler over ``num_theta`` parameter
-    particles; each carries an ``num_x``-particle inner filter whose
+    particles; each carries a ``num_x``-particle inner filter whose
     unbiased likelihood estimate drives the outer weights.
     ``filtered_params`` is the parameter cloud and
     ``filtered_log_weights`` its normalized outer log-weights at each

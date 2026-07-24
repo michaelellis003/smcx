@@ -12,7 +12,7 @@ by drawing from the initial, transition, and emission distributions
 sequentially.  Uses the same callback interface as the particle
 filters so that model definitions are reusable.
 
-The implementation uses :func:`jax.lax.scan` so the full time-loop is
+The implementation uses `jax.lax.scan` so the full time-loop is
 compiled into a single XLA program.
 """
 
@@ -61,16 +61,16 @@ def simulate(
     Args:
         key: JAX PRNG key.
         initial_sampler: Function ``(key[, input_0]) -> state`` that
-            draws one state from :math:`p(z_1)`. The state may be a dense
+            draws one state from $p(z_1)$. The state may be a dense
             array or a nonempty PyTree of arrays.
         transition_sampler: Function ``(key, state[, input_t]) -> state`` that
-            draws from :math:`p(z_t \mid z_{t-1})` and preserves the
+            draws from $p(z_t \mid z_{t-1})$ and preserves the
             state's PyTree structure, leaf shapes, and dtypes.
         emission_sampler: Function ``(key, state[, input_t]) -> emission`` that
-            draws from the emission distribution
-            :math:`p(y_t \mid z_t)`. It returns a nonempty floating vector
+            draws from the emission distribution $p(y_t \mid z_t)$. It
+            returns a nonempty floating vector
             with shape and dtype fixed across time.
-        num_timesteps: Number of time steps :math:`T` to simulate.
+        num_timesteps: Number of time steps $T$ to simulate.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)``. Input zero reaches initialization and the first
             emission; each later input reaches its aligned transition and

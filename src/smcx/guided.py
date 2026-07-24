@@ -4,11 +4,11 @@
 r"""Guided (proposal-based) particle filter.
 
 The guided filter propagates through a user proposal
-:math:`q(z_t \mid z_{t-1}, y_t)` — which, unlike the bootstrap
+$q(z_t \mid z_{t-1}, y_t)$ — which, unlike the bootstrap
 transition prior, can see the current observation — and corrects with
 the general importance weight
-:math:`w \propto g(y_t \mid z_t)\, f(z_t \mid z_{t-1}) /
-q(z_t \mid z_{t-1}, y_t)` [Doucet, Godsill & Andrieu, 2000].
+$w \propto g(y_t \mid z_t)\, f(z_t \mid z_{t-1}) /
+q(z_t \mid z_{t-1}, y_t)$ [Doucet, Godsill & Andrieu, 2000].
 Approximate proposals (EKF/UKF/Laplace) MUST use this general
 formula — the predictive-likelihood shortcut is exact only for the
 locally optimal proposal. With ``q = f`` the filter reduces to
@@ -212,12 +212,12 @@ def guided_filter(
     Args:
         key: JAX PRNG key.
         initial_sampler: ``(key, num_particles[, input_0]) -> particles``
-            drawing from :math:`p(z_1)`. ``particles`` may be a dense
+            drawing from $p(z_1)$. ``particles`` may be a dense
             array or a nonempty PyTree whose array leaves all have leading
             size ``num_particles``.
         proposal_sampler: Per-particle
             ``(key, z_prev, y_t[, input_t]) -> z_t``
-            drawing from :math:`q(z_t \mid z_{t-1}, y_t)`. It receives
+            drawing from $q(z_t \mid z_{t-1}, y_t)$. It receives
             one particle PyTree and must preserve its structure, leaf
             shapes, and dtypes. smcx ``vmap``-s it internally.
         log_proposal_fn: Per-particle
@@ -225,12 +225,12 @@ def guided_filter(
             density.
         log_transition_fn: Per-particle
             ``(z_t, z_prev[, input_t]) -> scalar`` log transition
-            density :math:`\log f`.
+            density $\log f$.
         log_observation_fn: Per-particle
             ``(y_t, z_t[, input_t]) -> scalar`` log observation density
-            :math:`\log g`.
+            $\log g$.
         emissions: Observations with leading time dimension.
-        num_particles: Number of particles :math:`N`.
+        num_particles: Number of particles $N$.
         resampling_fn: Resampler with signature
             ``(key, weights, num_samples) -> indices``.
         resampling_threshold: ESS fraction, or a JAX-traceable criterion
@@ -246,7 +246,7 @@ def guided_filter(
             while ``ess``/``log_evidence_increments`` stay full.
 
     Returns:
-        :class:`~smcx.containers.ParticleFilterPosterior`. Structured
+        `smcx.containers.ParticleFilterPosterior`. Structured
         particle histories preserve the state PyTree and add ``(T, N)``
         to every leaf.
 

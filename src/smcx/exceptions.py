@@ -7,13 +7,12 @@ __all__ = ["DegenerateWeightsError"]
 
 
 class DegenerateWeightsError(ValueError):
-    """All particle weights collapsed to zero (log-weights all -inf).
+    """A checked particle-weight or evidence state is ``-inf`` or NaN.
 
-    Raised by the filter entry points after the scan completes, when
-    the marginal log-likelihood comes back ``-inf`` or NaN. Detection
-    is host-side, so it fires only in eager execution: inside a
-    user ``jax.jit`` the marginal simply carries the ``-inf``/NaN
-    through (pure functions signal degeneracy; they cannot raise).
+    Public algorithms raise at their eager shell boundaries, which may be
+    initialization, an intermediate stage, or the end of a scan. Inside a
+    user ``jax.jit``, traced values propagate instead because transformed
+    pure functions cannot raise from data-dependent checks.
     Catch this in pseudo-marginal outer loops (e.g. PMMH) to reject
     the proposal that caused it.
     """

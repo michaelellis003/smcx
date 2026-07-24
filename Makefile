@@ -38,10 +38,10 @@ test: lint FORCE
 	uv run pytest -v
 
 docs: FORCE
-	uv run properdocs build --strict
+	JAX_PLATFORMS=cpu uv run properdocs build --strict
 
 serve-docs: FORCE
-	uv run properdocs serve
+	JAX_PLATFORMS=cpu uv run properdocs serve
 
 clean: FORCE
 	$(RM) -r $(CLEAN_DIRS)

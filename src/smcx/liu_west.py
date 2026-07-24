@@ -11,18 +11,18 @@ The Liu-West filter (Liu & West, 2001) extends the auxiliary particle
 filter to estimate static model parameters alongside latent states.
 Parameters are propagated using kernel density smoothing:
 
-.. math::
+$$
+\phi_t^i = a \phi_{t-1}^{a_i}
+         + (1 - a) \bar{\phi}_{t-1}
+         + h \, \varepsilon^i, \quad
+\varepsilon^i \sim \mathcal{N}(0, V_{t-1})
+$$
 
-    \phi_t^i = a \phi_{t-1}^{a_i}
-             + (1 - a) \bar{\phi}_{t-1}
-             + h \, \varepsilon^i, \quad
-    \varepsilon^i \sim \mathcal{N}(0, V_{t-1})
+where $a$ is the shrinkage parameter, $\bar{\phi}$ is the weighted
+parameter mean, $V$ is the weighted parameter covariance, and
+$h^2 = 1 - a^2$.
 
-where :math:`a` is the shrinkage parameter, :math:`\bar{\phi}` is the
-weighted parameter mean, :math:`V` is the weighted parameter covariance,
-and :math:`h^2 = 1 - a^2`.
-
-The implementation uses :func:`jax.lax.scan` so the full time-loop is
+The implementation uses `jax.lax.scan` so the full time-loop is
 compiled into a single XLA program.
 
 References:
@@ -359,22 +359,19 @@ def liu_west_filter(
             prior parameter distribution. Returns a nonempty floating array
             of shape ``(num_particles, param_dim)``.
         emissions: Observed emissions, shape ``(T, D)``.
-        num_particles: Number of particles :math:`N`.
-        shrinkage: Shrinkage parameter :math:`a \in (0, 1)`.
-            Controls the balance between the kernel smoothing
-            exploration and prior concentration.  Higher values
-            give tighter parameter posteriors.
+        num_particles: Number of particles $N$.
+        shrinkage: Shrinkage parameter $a \in (0, 1)$. Larger values apply
+            less shrinkage toward the ensemble mean and inject less kernel
+            noise; smaller values apply more of both.
 
-            .. warning::
+            !!! warning
 
-                The shrinkage parameter has no generative
-                interpretation: it introduces artificial dynamics
-                into the parameter evolution that do not correspond
-                to any probabilistic model.  Results can be
-                sensitive to this choice.  We recommend running the
-                filter under several values (e.g. 0.95, 0.975,
-                0.99) and reporting the range of posterior and
-                evidence estimates.
+                The shrinkage parameter has no generative interpretation:
+                it introduces artificial dynamics into the parameter
+                evolution that do not correspond to any probabilistic
+                model. Results can be sensitive to this choice. Run the
+                filter under several values (e.g. 0.95, 0.975, 0.99) and
+                report the range of posterior and evidence estimates.
         resampling_fn: Resampling algorithm.  Defaults to systematic.
         resampling_threshold: ESS fraction, or a JAX-traceable criterion
             ``(normalized_log_weights, absolute_ess, time_index) -> bool``.
@@ -389,7 +386,7 @@ def liu_west_filter(
             full.
 
     Returns:
-        :class:`~smcx.containers.LiuWestPosterior` containing
+        `smcx.containers.LiuWestPosterior` containing
         filtered particles, parameters, log weights, ancestor indices,
         the marginal log-likelihood estimate, and ESS trace.
 
