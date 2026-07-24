@@ -47,12 +47,7 @@ from smcx.diagnostics import (
 )
 from smcx.exceptions import DegenerateWeightsError
 from smcx.guided import guided_filter
-from smcx.kalman import (
-    extended_kalman_filter,
-    kalman_filter,
-    rts_smoother,
-    unscented_kalman_filter,
-)
+from smcx.kalman import extended_kalman_filter, kalman_filter, rts_smoother
 from smcx.liu_west import liu_west_filter
 from smcx.reporting import to_arviz
 from smcx.resampling import (
@@ -123,7 +118,6 @@ __all__ = [
     "tail_ess",
     "temper",
     "to_arviz",
-    "unscented_kalman_filter",
     "weighted_mean",
     "weighted_quantile",
     "weighted_variance",
