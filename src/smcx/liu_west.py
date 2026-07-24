@@ -58,6 +58,7 @@ from smcx.types import (
     ParamTransitionSampler,
     ParamTransitionSamplerWithInput,
     PRNGKeyT,
+    ResamplingCriterion,
     ResamplingFn,
 )
 from smcx.weights import ess as compute_ess
@@ -140,7 +141,7 @@ def liu_west_filter(
     num_particles: int,
     shrinkage: float = 0.95,
     resampling_fn: ResamplingFn = systematic,
-    resampling_threshold: float = 0.5,
+    resampling_threshold: float | ResamplingCriterion = 0.5,
     *,
     inputs: InputSequence | None = None,
     store_history: bool = True,
@@ -186,7 +187,10 @@ def liu_west_filter(
                 0.99) and reporting the range of posterior and
                 evidence estimates.
         resampling_fn: Resampling algorithm.  Defaults to systematic.
-        resampling_threshold: ESS fraction triggering resampling.
+        resampling_threshold: ESS fraction, or a JAX-traceable criterion
+            ``(normalized_log_weights, absolute_ess, time_index) -> bool``.
+            The callback receives the first-stage weights and ESS at the
+            zero-based emission indices 1 through T - 1.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)``. Inputs follow ``params`` in every callback;
             the parameter initializer remains input-independent.
@@ -201,8 +205,8 @@ def liu_west_filter(
         the marginal log-likelihood estimate, and ESS trace.
 
     Raises:
-        ValueError: ``inputs`` is not rank one or two, or its leading
-            dimension does not match ``emissions``.
+        ValueError: ``inputs`` is malformed or a criterion result is not a
+            scalar Boolean.
     """
     inputs_arr = (
         None
@@ -249,10 +253,10 @@ def liu_west_filter(
     ):
         particles, params, log_weights, log_ml, _prev_anc = carry
         if inputs_arr is None:
-            step_key, y_t = args
+            step_key, y_t, time_index = args
             input_t = None
         else:
-            step_key, y_t, input_t = args
+            step_key, y_t, input_t, time_index = args
         k1, k2, k3 = jr.split(step_key, 3)
 
         # Weighted parameter moments for kernel smoothing
@@ -285,15 +289,15 @@ def liu_west_filter(
         first_ess: Array = jnp.asarray(compute_ess(log_first_norm))
 
         # 2. Conditionally resample
-        threshold = resampling_threshold * num_particles
         do_resample, ancestors = _conditional_resample(
             k1,
             log_first_norm,
             first_ess,
             resampling_fn,
-            threshold,
+            resampling_threshold,
             num_particles,
             identity_ancestors,
+            time_index,
         )
 
         # 3. Propagate params via kernel smoothing + propagate states
@@ -379,10 +383,11 @@ def liu_west_filter(
 
     init_carry = (particles_0, params_0, log_w_0, log_ev_0, identity_ancestors)
     step_keys = jr.split(key, emissions.shape[0] - 1)
+    time_indices = jnp.arange(1, emissions.shape[0], dtype=jnp.int32)
     scan_inputs = (
-        (step_keys, emissions[1:])
+        (step_keys, emissions[1:], time_indices)
         if inputs_arr is None
-        else (step_keys, emissions[1:], inputs_arr[1:])
+        else (step_keys, emissions[1:], inputs_arr[1:], time_indices)
     )
 
     if store_history:

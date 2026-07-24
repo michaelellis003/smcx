@@ -197,6 +197,37 @@ posterior = smcx.bootstrap_filter(
 The factory belongs to the application. An auxiliary or guided factory can
 return the extra callbacks required by that algorithm.
 
+## Choose when to resample
+
+The four state-space particle filters accept either an ESS fraction or a
+caller-owned resampling criterion in `resampling_threshold`. The callback
+receives normalized log weights, the corresponding absolute ESS, and the
+zero-based emission index:
+
+```python
+def every_fifth_step(log_weights, current_ess, time_index):
+    del log_weights, current_ess
+    return time_index % 5 == 0
+
+
+posterior = smcx.bootstrap_filter(
+    jr.key(0),
+    initial,
+    transition,
+    log_observation,
+    emissions,
+    num_particles=4_096,
+    resampling_threshold=every_fifth_step,
+)
+```
+
+The result must be a Python Boolean or scalar JAX Boolean. The callback runs
+for time indices 1 through T - 1 and can be traced as part of the filter.
+Bootstrap and guided filters supply their carried weights and ESS. Auxiliary
+and Liu–West filters instead supply the normalized first-stage weights and
+their ESS, because those are the quantities governing ancestor selection.
+The numeric default `0.5` retains the strict rule `ESS < 0.5 * N`.
+
 ## Compose a particle-filter kernel
 
 Use `smcx.run_particle_filter` when a built-in filter does not provide the

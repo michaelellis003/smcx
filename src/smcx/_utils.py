@@ -30,6 +30,7 @@ from smcx.types import (
     ParticleCloud,
     ParticleHistory,
     PRNGKeyT,
+    ResamplingCriterion,
     ResamplingFn,
     StateHistory,
     StateTree,
@@ -339,30 +340,53 @@ def _conditional_resample(
     log_weights: Float[Array, " num_particles"],
     current_ess: Float[Array, ""],
     resampling_fn: ResamplingFn,
-    threshold: float,
+    resampling_threshold: float | ResamplingCriterion,
     num_particles: int,
     identity: Int[Array, " num_particles"],
+    time_index: Int[Array, ""] | None = None,
 ) -> tuple[Array, Int[Array, " num_particles"]]:
-    """Conditionally resample particles based on ESS.
+    """Conditionally resample particles using a float or callback rule.
 
-    Resamples only when the precomputed effective sample size falls
-    below the threshold.
+    A float resamples when the precomputed effective sample size falls
+    below that fraction of the particle count.
 
     Args:
         key: PRNG key for resampling.
         log_weights: Normalised log weights (logsumexp = 0).
         current_ess: Effective sample size of ``log_weights``.
         resampling_fn: Blackjax-compatible resampling function.
-        threshold: Absolute ESS threshold (e.g. ``0.5 * N``).
+        resampling_threshold: ESS fraction or caller-owned criterion.
         num_particles: Number of particles N.
         identity: Identity ancestor indices ``arange(N)``.
+        time_index: Zero-based emission index for a callable criterion.
 
     Returns:
         Tuple of ``(do_resample, ancestors)`` where *do_resample*
         is a boolean scalar and *ancestors* are the resampled (or
         identity) indices.
     """
-    do_resample: Array = jnp.asarray(current_ess < threshold)
+    if callable(resampling_threshold):
+        if time_index is None:
+            raise ValueError(
+                "a callable resampling criterion requires a time index"
+            )
+        criterion = cast(ResamplingCriterion, resampling_threshold)
+        raw_decision = criterion(log_weights, current_ess, time_index)
+    else:
+        raw_decision = current_ess < resampling_threshold * num_particles
+    try:
+        do_resample: Array = jnp.asarray(raw_decision)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "resampling criterion must return a scalar Boolean"
+        ) from error
+    if do_resample.ndim != 0 or not jnp.issubdtype(
+        do_resample.dtype, jnp.bool_
+    ):
+        raise ValueError(
+            "resampling criterion must return a scalar Boolean; "
+            f"got shape {do_resample.shape} and dtype {do_resample.dtype}"
+        )
     ancestors = lax.cond(
         do_resample,
         lambda: resampling_fn(key, normalize(log_weights), num_particles),

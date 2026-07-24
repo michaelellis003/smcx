@@ -56,6 +56,7 @@ from smcx.types import (
     LogObservationFn,
     LogObservationFnWithInput,
     PRNGKeyT,
+    ResamplingCriterion,
     ResamplingFn,
     TransitionSampler,
     TransitionSamplerWithInput,
@@ -73,7 +74,7 @@ def auxiliary_filter(
     emissions: Float[Array, "ntime emission_dim"],
     num_particles: int,
     resampling_fn: ResamplingFn = systematic,
-    resampling_threshold: float = 0.5,
+    resampling_threshold: float | ResamplingCriterion = 0.5,
     *,
     inputs: InputSequence | None = None,
     store_history: bool = True,
@@ -107,9 +108,11 @@ def auxiliary_filter(
         resampling_fn: Resampling algorithm matching the Blackjax
             signature ``(key, weights, num_samples) -> indices``.
             Defaults to :func:`~smcx.resampling.systematic`.
-        resampling_threshold: Fraction of ``num_particles`` below
-            which resampling is triggered (e.g. 0.5 means resample
-            when ``ESS < 0.5 * N``).
+        resampling_threshold: ESS fraction (e.g. 0.5 means resample when
+            ``ESS < 0.5 * N``), or a JAX-traceable criterion
+            ``(normalized_log_weights, absolute_ess, time_index) -> bool``.
+            The callback receives the first-stage weights and ESS at the
+            zero-based emission indices 1 through T - 1.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)``. Input zero reaches initialization; each later
             input reaches the transition, observation, and auxiliary
@@ -127,9 +130,9 @@ def auxiliary_filter(
         leaf.
 
     Raises:
-        ValueError: Inputs are malformed, the initial state tree is empty
-            or has a wrong leading axis, or a transition changes the state
-            structure, leaf shape, or dtype.
+        ValueError: Inputs are malformed, a criterion result is not a scalar
+            Boolean, the initial state tree is empty or has a wrong leading
+            axis, or a transition changes its structure, leaf shape, or dtype.
     """
     inputs_arr = (
         None
@@ -176,10 +179,10 @@ def auxiliary_filter(
     ):
         state, _prev_ancestors = carry
         if inputs_arr is None:
-            step_key, y_t = args
+            step_key, y_t, time_index = args
             input_t = None
         else:
-            step_key, y_t, input_t = args
+            step_key, y_t, input_t, time_index = args
         k1, k2 = jr.split(step_key)
         # Invariant: state.log_weights are normalized (logsumexp = 0).
 
@@ -206,15 +209,15 @@ def auxiliary_filter(
         first_ess: Array = jnp.asarray(compute_ess(log_first_norm))
 
         # 2. Conditionally resample using first-stage weights
-        threshold = resampling_threshold * num_particles
         do_resample, ancestors = _conditional_resample(
             k1,
             log_first_norm,
             first_ess,
             resampling_fn,
-            threshold,
+            resampling_threshold,
             num_particles,
             identity_ancestors,
+            time_index,
         )
         resampled_particles = _gather_particles(state.particles, ancestors)
 
@@ -312,10 +315,11 @@ def auxiliary_filter(
 
     # Run the scan over t = 1 ... T-1
     step_keys = jr.split(key, emissions.shape[0] - 1)
+    time_indices = jnp.arange(1, emissions.shape[0], dtype=jnp.int32)
     scan_inputs = (
-        (step_keys, emissions[1:])
+        (step_keys, emissions[1:], time_indices)
         if inputs_arr is None
-        else (step_keys, emissions[1:], inputs_arr[1:])
+        else (step_keys, emissions[1:], inputs_arr[1:], time_indices)
     )
     init_carry = (init_state, identity_ancestors)
     if store_history:
