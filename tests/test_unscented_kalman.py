@@ -10,9 +10,10 @@ import pytest
 
 import smcx
 import smcx.kalman as kalman_module
+from tests import _unscented_kalman_reference as nonlinear_reference
 
 
-def _assert_roundoff_close(actual, expected):
+def _assert_roundoff_close(actual, expected, *, ulps=512):
     """Compare one well-conditioned result within an f32/f64 budget."""
     actual_array = np.asarray(actual)
     expected_array = np.asarray(expected, dtype=actual_array.dtype)
@@ -21,7 +22,7 @@ def _assert_roundoff_close(actual, expected):
         actual_array,
         expected_array,
         rtol=0.0,
-        atol=512 * np.finfo(actual_array.dtype).eps * scale,
+        atol=ulps * np.finfo(actual_array.dtype).eps * scale,
     )
 
 
@@ -317,3 +318,46 @@ def test_unscented_filter_rejects_tiny_finite_alpha(alpha):
             zero[None],
             alpha=alpha,
         )
+
+
+def test_unscented_kalman_matches_independent_nonlinear_reference():
+    """Every posterior field matches the Stone Soup UKF oracle."""
+    reference = nonlinear_reference
+
+    def transition_mean(state):
+        return jnp.stack((
+            0.82 * state[0] + 0.18 * state[1] + 0.05 * jnp.sin(state[0]),
+            -0.12 * state[0] + 0.90 * state[1] + 0.04 * state[0] * state[1],
+        ))
+
+    def observation_mean(state):
+        return jnp.stack((
+            state[0] + 0.10 * state[1] ** 2,
+            0.65 * state[1] + 0.12 * jnp.sin(state[0]),
+        ))
+
+    posterior = smcx.unscented_kalman_filter(
+        jnp.asarray(reference.INITIAL_MEAN),
+        jnp.asarray(reference.INITIAL_COVARIANCE),
+        transition_mean,
+        jnp.asarray(reference.TRANSITION_COVARIANCE),
+        observation_mean,
+        jnp.asarray(reference.OBSERVATION_COVARIANCE),
+        jnp.asarray(reference.EMISSIONS),
+        alpha=reference.ALPHA,
+        beta=reference.BETA,
+        kappa=reference.KAPPA,
+    )
+    expected_fields = (
+        reference.MARGINAL_LOG_LIKELIHOOD,
+        reference.PREDICTED_MEANS,
+        reference.PREDICTED_COVARIANCES,
+        reference.FILTERED_MEANS,
+        reference.FILTERED_COVARIANCES,
+        reference.LOG_EVIDENCE_INCREMENTS,
+    )
+
+    # Five 2x2 steps have innovation condition number below 2.62.
+    # 256*eps*scale covers the observed operation depth on CPU and Metal.
+    for actual, expected in zip(posterior, expected_fields, strict=True):
+        _assert_roundoff_close(actual, expected, ulps=256)
