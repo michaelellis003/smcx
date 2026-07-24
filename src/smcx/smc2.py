@@ -32,6 +32,7 @@ from jax import jit, vmap
 from jax.core import Tracer
 from jaxtyping import Array, Float
 
+from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _validate_initial_state,
     _validate_log_density_batch,
@@ -69,15 +70,6 @@ def _normalize_rows(log_w: Array) -> tuple[Array, Array]:
     """Row-wise log-normalize; returns (normalized, per-row LSE)."""
     lse = _lse_rows(log_w)
     return log_w - lse[:, None], lse
-
-
-def _neumaier_add(total: Array, comp: Array, x: Array) -> tuple[Array, Array]:
-    """One Neumaier compensated-summation step (branchless where)."""
-    t = total + x
-    comp = comp + jnp.where(
-        jnp.abs(total) >= jnp.abs(x), (total - t) + x, (x - t) + total
-    )
-    return t, comp
 
 
 def _batched_inner_resample(

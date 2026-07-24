@@ -27,6 +27,7 @@ import jax.random as jr
 from jax import core, device_put, lax, tree, vmap
 from jaxtyping import Array, Float, Int, Shaped
 
+from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
@@ -64,19 +65,6 @@ from smcx.types import (
 )
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
-
-
-def _neumaier_add(
-    total: Array, correction: Array, value: Array
-) -> tuple[Array, Array]:
-    """Add one value while retaining a Neumaier correction."""
-    updated = total + value
-    correction = correction + jnp.where(
-        jnp.abs(total) >= jnp.abs(value),
-        (total - updated) + value,
-        (value - updated) + total,
-    )
-    return updated, correction
 
 
 def _validate_checkpoint(checkpoint: BootstrapCheckpoint) -> _TreeSignature:

@@ -38,6 +38,7 @@ from jax import lax, vmap
 from jax.scipy.linalg import solve_triangular
 from jaxtyping import Array, Float, Shaped
 
+from smcx._numerics import _neumaier_add
 from smcx._utils import _canonicalize_inputs
 from smcx.containers import GaussianFilterPosterior, GaussianSmootherPosterior
 from smcx.types import (
@@ -122,21 +123,6 @@ def _symmetrize(
 ) -> Float[Array, "state_dim state_dim"]:
     """Remove roundoff asymmetry from a covariance matrix."""
     return 0.5 * (covariance + covariance.T)
-
-
-def _neumaier_add(
-    total: Float[Array, ""],
-    compensation: Float[Array, ""],
-    value: Float[Array, ""],
-) -> tuple[Float[Array, ""], Float[Array, ""]]:
-    """Add one evidence increment with Neumaier compensation."""
-    updated = total + value
-    compensation = compensation + jnp.where(
-        jnp.abs(total) >= jnp.abs(value),
-        (total - updated) + value,
-        (value - updated) + total,
-    )
-    return updated, compensation
 
 
 def _condition(
