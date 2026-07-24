@@ -53,7 +53,7 @@ FilterCarry: TypeAlias = PyTree[Shaped[Array, "..."]]
 class _ReplicatedLogMLFn(Protocol):
     """Run one filter replicate and return its log marginal likelihood."""
 
-    def __call__(self, key: PRNGKeyT, /) -> Scalar: ...
+    def __call__(self, key: PRNGKeyT, /) -> Scalar: ...  # pragma: no cover
 
 
 # Static checkers see the accepted rank-one/rank-two contract. At runtime,
