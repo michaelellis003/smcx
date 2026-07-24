@@ -35,8 +35,10 @@ docs/research/perf-analysis.md:
   process per cell.
 - smcx @ 30c3898 (mlx 0.32.0, Python 3.13.9); smcjax v1.1.0 @
   e93d527 (jax 0.6.2 CPU, x64 off, one jitted program). R=20 per
-  primary cell; k=3 one-sided-Jensen gates; datasets per
-  benchmarks/data/meta.json.
+  primary cell; k=3 one-sided-Jensen gates. The datasets matched the
+  hashes in the original result and came from the generator in the
+  [immutable kill-test source archive][killtest-source]; generated
+  data were gitignored and are not retained.
 
 ## Timing (median [min, IQR] seconds; speedup = JAX/MLX-GPU)
 
@@ -130,3 +132,5 @@ docs/research/perf-analysis.md:
   memory, oracle-verified SMC runs **3–8× faster than a strong
   12-core JAX-CPU baseline at 10⁵–10⁶ particles across
   resampling-bound, compute-bound, and multivariate workloads**.
+
+[killtest-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/killtest

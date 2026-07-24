@@ -147,3 +147,14 @@ Python version, date. Results are dated markdown in
   log-evidence, with a config caveat (its default is waste-free,
   len_chain=10). Result:
   `benchmarks/results/2026-07-15-smc2-device-benchmark.md`.
+- 2026-07-24 (archival): after smcx migrated from MLX to JAX, the
+  completed kill-test and SMC² executable harnesses were retired from
+  the current tree. This protocol and the dated results remain. The
+  retired code is preserved in the immutable [kill-test][killtest-source]
+  and [SMC²][smc2-source] source archives; those scripts target the
+  former MLX API and are not current reproduction commands. Raw
+  `benchmarks/data/` arrays were gitignored and were never retained;
+  the result files record their hashes and campaign environments.
+
+[killtest-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/killtest
+[smc2-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/smc2

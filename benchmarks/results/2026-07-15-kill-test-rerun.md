@@ -15,8 +15,10 @@ matched, oracle-verified accuracy.
   Sequential sides (JAX finished before MLX started).
 - smcx @ b6ecd3f (mlx 0.32.0, Python 3.13.9); smcjax v1.1.0 @
   e93d527 (jax/jaxlib 0.6.2 CPU, x64 disabled, whole filter jitted,
-  cpu_count=12). Same datasets as 2026-07-14 (sha256 verified
-  unchanged against benchmarks/data/meta.json).
+  cpu_count=12). The datasets matched the 2026-07-14 hashes at run
+  time. Generated data were gitignored and are not retained; the
+  deterministic generator remains in the [immutable kill-test source
+  archive][killtest-source].
 - Per the 2026-07-15 protocol amendment: added `store_history=False`
   arm (ADR-0011), **report-only** — primary comparison is
   full-history on both sides.
@@ -152,3 +154,5 @@ re-run with the fixes landed.
 
 Superseded by the optimized-implementation run:
 [2026-07-15-kill-test-optimized.md](2026-07-15-kill-test-optimized.md).
+
+[killtest-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/killtest
