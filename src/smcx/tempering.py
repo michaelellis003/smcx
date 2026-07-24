@@ -266,7 +266,8 @@ def temper(
             ll = batch_lik(prop)
             log_alpha = (lp + phi_arr * ll) - (logprior + phi_arr * loglik)
             u = jr.uniform(ku, (n,))
-            accept = jnp.log(jnp.maximum(u, 1e-300)) < log_alpha
+            log_u = jnp.log(jnp.maximum(u, jnp.finfo(u.dtype).tiny))
+            accept = log_u < log_alpha
             particles = jnp.where(accept[:, None], prop, particles)
             loglik = jnp.where(accept, ll, loglik)
             logprior = jnp.where(accept, lp, logprior)

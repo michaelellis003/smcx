@@ -269,6 +269,44 @@ class TestSchedule:
 class TestMechanics:
     """Acceptance, determinism, degeneracy, container."""
 
+    def test_exact_zero_uniform_does_not_accept_bad_float32_move(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def init(_key, _num_particles):
+            return jnp.array([[0.0], [1.0]], dtype=jnp.float32)
+
+        def log_prior(x):
+            return -1e6 * jnp.sum(x**2)
+
+        def log_likelihood(_x):
+            return jnp.array(0.0, dtype=jnp.float32)
+
+        def zero_uniform(_key, shape=(), dtype=None):
+            return jnp.zeros(shape, dtype=dtype)
+
+        def unit_normal(_key, shape):
+            return jnp.ones(shape, dtype=jnp.float32)
+
+        monkeypatch.setattr(jr, "uniform", zero_uniform)
+        monkeypatch.setattr(jr, "normal", unit_normal)
+        with jax.enable_x64(False):
+            posterior = smcx.temper(
+                jr.key(45),
+                init,
+                log_prior,
+                log_likelihood,
+                2,
+            )
+
+        np.testing.assert_array_equal(
+            posterior.particles,
+            np.array([[0.0], [1.0]], dtype=np.float32),
+        )
+        np.testing.assert_array_equal(
+            posterior.acceptance_rates,
+            np.array([0.0], dtype=np.float32),
+        )
+
     def test_acceptance_rates_sane(self):
         post = _run(4)
         acc = np.array(post.acceptance_rates)
