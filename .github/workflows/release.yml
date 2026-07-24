@@ -22,8 +22,9 @@ jobs:
       github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Approval attests that gpu-smoke ran on a Metal-enabled runner or
-    # that the full suite passed on a physical M-series GPU.
+    # The release environment requires an authorized reviewer. Approval
+    # attests that gpu-smoke ran on Metal or that the full suite passed
+    # on a physical M-series GPU.
     environment: release
     steps:
       - name: Checkout
