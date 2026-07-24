@@ -148,6 +148,15 @@ for w in report["warnings"]:
 For this run, no warnings are returned. The diagnostics describe the particle
 weights; they do not measure the Monte Carlo variance of the evidence estimate.
 
+For model comparison, `smcx.cumulative_log_score(posterior)` reconstructs
+every predictive-score prefix with the same float32 Neumaier compensation
+used by compensated filter totals. This is a fixed-input numerical correction:
+prefixes can differ from earlier releases that used an ordinary cumulative
+sum, particularly for long or cancellation-heavy traces; the returned shape,
+dtype, and JIT contract are unchanged. Following
+[NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html),
+smcx treats the change as a clear bug fix.
+
 ## Cut the variance with a guided proposal
 
 The bootstrap proposal ignores the current observation. The guided
