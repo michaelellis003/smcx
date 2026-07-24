@@ -189,22 +189,19 @@ def test_composition_preserves_named_filter_reductions(
             num_particles,
             resampling_threshold=resampling_threshold,
         )
-    callbacks = _auxiliary_guided_callbacks(
-        *map(
-            _without_input,
-            (
-                _guided._init,
-                proposal,
-                log_q,
-                _guided._log_trans,
-                _guided._logobs,
-                auxiliary,
-            ),
-        ),
+    initialize, step = _auxiliary_guided_callbacks(
+        _without_input(_guided._init),
+        _without_input(proposal),
+        _without_input(log_q),
+        _without_input(_guided._log_trans),
+        _without_input(_guided._logobs),
+        _without_input(auxiliary),
         num_particles,
         resampling_threshold=resampling_threshold,
     )
-    actual = smcx.run_particle_filter(jr.key(7), *callbacks, _EMISSIONS[:6])
+    actual = smcx.run_particle_filter(
+        jr.key(7), initialize, step, _EMISSIONS[:6]
+    )
     _assert_close(actual, expected)
 
 
@@ -222,25 +219,20 @@ def test_optimal_composition_matches_kalman_target():
         exact_means[-1],
         exact_vars[-1] + exact_means[-1] ** 2,
     ])
-    callbacks = _auxiliary_guided_callbacks(
-        *map(
-            _without_input,
-            (
-                _guided._init,
-                _OPTIMAL_SAMPLE,
-                _LOG_OPTIMAL,
-                _guided._log_trans,
-                _guided._logobs,
-                _predictive_auxiliary,
-            ),
-        ),
+    initialize, step = _auxiliary_guided_callbacks(
+        _without_input(_guided._init),
+        _without_input(_OPTIMAL_SAMPLE),
+        _without_input(_LOG_OPTIMAL),
+        _without_input(_guided._log_trans),
+        _without_input(_guided._logobs),
+        _without_input(_predictive_auxiliary),
         512,
         resampling_threshold=1.1,
     )
     rows = []
     for seed in range(12):
         posterior = smcx.run_particle_filter(
-            jr.key(seed), *callbacks, _EMISSIONS
+            jr.key(seed), initialize, step, _EMISSIONS
         )
         weights = np.exp(posterior.filtered_log_weights[-1])
         particles = np.asarray(posterior.filtered_particles[-1, :, 0])
@@ -297,7 +289,7 @@ def test_structured_input_kernel_obeys_runner_contracts():
         del key, weights
         return jnp.arange(count - 1, -1, -1, dtype=jnp.int32)
 
-    callbacks = _auxiliary_guided_callbacks(
+    initialize, step = _auxiliary_guided_callbacks(
         initial,
         proposal,
         log_q,
@@ -312,7 +304,8 @@ def test_structured_input_kernel_obeys_runner_contracts():
     def run(key, store_history=True):
         return smcx.run_particle_filter(
             key,
-            *callbacks,
+            initialize,
+            step,
             emissions,
             inputs=inputs,
             store_history=store_history,
