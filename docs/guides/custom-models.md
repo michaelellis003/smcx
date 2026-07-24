@@ -9,13 +9,16 @@ linear-Gaussian models instead use the dense-array interface shown in the
 
 ## Compose a nonlinear Gaussian filter
 
-The extended Kalman filter separates a nonlinear model into four ordinary
-JAX callables:
+The extended and unscented Kalman filters share two ordinary mean callbacks.
+The extended filter additionally takes explicit Jacobians:
 
 ```text
+# EKF and UKF
 transition_mean(state) -> state_mean
-transition_jacobian(state) -> (state_dim, state_dim)
 observation_mean(state) -> observation_mean
+
+# EKF only
+transition_jacobian(state) -> (state_dim, state_dim)
 observation_jacobian(state) -> (observation_dim, state_dim)
 ```
 
@@ -64,23 +67,38 @@ posterior = smcx.extended_kalman_filter(
 )
 ```
 
+The UKF reuses the two mean functions without Jacobians:
+
+```python
+unscented = smcx.unscented_kalman_filter(
+    jnp.zeros(2),
+    jnp.eye(2),
+    transition_mean,
+    0.1 * jnp.eye(2),
+    observation_mean,
+    jnp.array([[0.3]]),
+    emissions,
+)
+```
+
+Rule defaults are `alpha=1.0`, `beta=2.0`, and `kappa=0.0`.
+
 The transition covariance may have shape `(state_dim, state_dim)` or
 `(ntime - 1, state_dim, state_dim)`. The observation covariance may have
 shape `(observation_dim, observation_dim)` or
 `(ntime, observation_dim, observation_dim)`. All arrays and callback outputs
 share one float32 or float64 dtype.
 
-With `inputs=...`, all four callbacks instead accept `(state, input_t)`.
+With `inputs=...`, every supplied callback accepts `(state, input_t)`.
 `inputs[t]` reaches the observation at `t` and the transition into `t`;
 `inputs[0]` does not transform the supplied prior. A rank-one input sequence
 is presented to callbacks as a length-one vector. When compiling a complete
-filter, close the four Python callbacks over in a `jax.jit` wrapper rather
+filter, close the callbacks over in a `jax.jit` wrapper rather
 than passing them as dynamic array arguments.
 
-Separate mean and Jacobian callbacks make analytic, autodifferentiated, and
-experimental linearizations independently replaceable. The same
-function-oriented boundary lets research code compare these pieces without a
-model hierarchy.
+Use the EKF to supply a local linearization; use the UKF to apply the fixed
+scaled sigma-point rule. Shared means let research code compare them without
+a model hierarchy or general sigma-point plug-in layer.
 
 ## Choose particle callbacks for the algorithm
 

@@ -1,8 +1,8 @@
 # smcx
 
 smcx provides state-space inference algorithms for JAX: exact
-linear-Gaussian filtering and smoothing, first-order nonlinear Gaussian
-filtering, particle filters, adaptive tempered SMC, and SMC². It is a
+linear-Gaussian filtering and smoothing, extended and unscented nonlinear
+Gaussian filtering, particle filters, adaptive tempered SMC, and SMC². It is a
 function-oriented inference library, not a modeling framework.
 
 ## Installation
@@ -38,17 +38,18 @@ pip install "smcx[arviz]"
 
 ## Model boundary
 
-Linear-Gaussian models enter as dense arrays. The extended Kalman filter
-takes separate nonlinear mean and state-Jacobian callbacks. Particle-model
-callbacks describe one particle; smcx vectorizes them over the cloud.
+Linear-Gaussian models enter as dense arrays. The extended and unscented
+Kalman filters share nonlinear mean callbacks; the extended filter adds
+explicit state-Jacobian callbacks. Particle-model callbacks describe one
+particle; smcx vectorizes them over the cloud.
 Every stochastic operation takes an explicit PRNG key. Bootstrap,
 auxiliary, and guided filters can carry nonempty latent-state PyTrees, and
 every filter accepts an explicit sequence of time-varying inputs.
 
-The linear Kalman filter, extended Kalman filter, and RTS smoother return
+The linear, extended, and unscented Kalman filters and RTS smoother return
 typed Gaussian posteriors. Particle algorithms similarly expose model,
-proposal, and resampling callbacks. These boundaries allow research code
-to replace supported pieces without adopting a class hierarchy.
+proposal, and resampling callbacks. These boundaries allow research code to
+replace supported pieces without adopting a class hierarchy.
 
 CPU, CUDA, and TPU use stock JAX. The optional `metal` extra uses jax-mps on
 macOS arm64; Metal is float32-only.
