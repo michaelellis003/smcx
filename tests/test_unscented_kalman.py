@@ -371,7 +371,7 @@ def test_unscented_nondefault_rule_matches_scalar_oracle():
     )
     expected_logpdf = -0.5 * (math.log(2.0 * math.pi) + 1.0)
     # Four f32 eps covers the scalar transform and log-density operation depth.
-    budget = 4 * np.finfo(np.float32).eps
+    budget = float(4 * np.finfo(np.float32).eps)
 
     np.testing.assert_allclose(
         posterior.filtered_means,
@@ -406,7 +406,7 @@ def test_unscented_filter_regenerates_points_after_process_noise():
     )
     expected = -0.5 * (math.log(6.0 * math.pi) + 1.0 / 3.0)
     # Four f32 eps covers both scalar transform and log-density evaluations.
-    budget = 4 * np.finfo(np.float32).eps
+    budget = float(4 * np.finfo(np.float32).eps)
 
     np.testing.assert_allclose(
         posterior.predicted_covariances[1],
@@ -453,9 +453,9 @@ def test_unscented_float32_update_is_psd_and_accurate():
     ])
     eps = np.finfo(np.float32).eps
     # CPU/MPS errors are <=5.19e-8; 2*eps/3 retains 53% forward-error margin.
-    accuracy_budget = 2 * eps / 3
+    accuracy_budget = float(2 * eps / 3)
     # Sixteen ulps at the posterior scale covers covariance eigensolver error.
-    psd_budget = 16 * eps * np.linalg.norm(expected, ord=2)
+    psd_budget = float(16 * eps * np.linalg.norm(expected, ord=2))
 
     np.testing.assert_allclose(
         actual,
