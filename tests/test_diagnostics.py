@@ -6,12 +6,14 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 import pytest
 
 from smcx.bootstrap import bootstrap_filter
 from smcx.containers import (
     LiuWestPosterior,
     ParticleFilterPosterior,
+    ParticleFilterRecord,
     SMC2Posterior,
 )
 from smcx.diagnostics import (
@@ -28,6 +30,7 @@ from smcx.diagnostics import (
     weighted_quantile,
     weighted_variance,
 )
+from smcx.runner import run_particle_filter
 from tests.conftest import _mvn_logpdf, _mvn_sample
 
 
@@ -80,6 +83,42 @@ def _make_posterior():
         filtered_log_weights=jnp.full((3, n), -jnp.log(n)),
         ancestors=jnp.broadcast_to(jnp.arange(n), (3, n)),
         ess=jnp.full((3,), float(n)),
+        log_evidence_increments=increments,
+    )
+
+
+def _neumaier_prefix_oracle(values: np.ndarray) -> np.ndarray:
+    """Return sequential f32 Neumaier prefixes from NumPy scalars."""
+    values = np.asarray(values)
+    cast = values.dtype.type
+    total = cast(0.0)
+    correction = cast(0.0)
+    prefixes = np.empty_like(values)
+    for index, value in enumerate(values):
+        updated = cast(total + value)
+        if abs(total) >= abs(value):
+            lost = cast(cast(total - updated) + value)
+        else:
+            lost = cast(cast(value - updated) + total)
+        correction = cast(correction + lost)
+        total = updated
+        prefixes[index] = cast(total + correction)
+    return prefixes
+
+
+def _posterior_for_increment_contract(
+    increments: jax.Array,
+) -> ParticleFilterPosterior:
+    """Build a valid final-only posterior with compensated evidence."""
+    increments = jnp.asarray(increments)
+    prefixes = _neumaier_prefix_oracle(np.asarray(increments))
+    num_timesteps = increments.shape[0]
+    return ParticleFilterPosterior(
+        marginal_loglik=jnp.asarray(prefixes[-1]),
+        filtered_particles=jnp.zeros((1, 1, 1), dtype=increments.dtype),
+        filtered_log_weights=jnp.zeros((1, 1), dtype=increments.dtype),
+        ancestors=jnp.zeros((1, 1), dtype=jnp.int32),
+        ess=jnp.ones((num_timesteps,), dtype=increments.dtype),
         log_evidence_increments=increments,
     )
 
@@ -674,6 +713,48 @@ class TestCumulativeLogScore:
             assert float(result[-1]) == pytest.approx(
                 float(pf_post.marginal_loglik), rel=1e-5
             )
+
+    def test_cumulative_log_score_compensates_runner_cancellation(self):
+        increments = jnp.tile(
+            jnp.array([1e8, 1.0, -1e8], dtype=jnp.float32), 64
+        )
+        particles = jnp.zeros((1, 1), dtype=increments.dtype)
+
+        def record(increment):
+            return ParticleFilterRecord(
+                particles,
+                jnp.zeros(1, dtype=increments.dtype),
+                jnp.zeros(1, dtype=jnp.int32),
+                increment,
+            )
+
+        def initialize(time_index, emission, key):
+            del time_index, key
+            return particles, record(emission[0])
+
+        def step(carry, time_index, emission, key):
+            del time_index, key
+            return carry, record(emission[0])
+
+        posterior = run_particle_filter(
+            jr.key(23),
+            initialize,
+            step,
+            increments[:, None],
+            store_history=False,
+        )
+        result = jax.jit(cumulative_log_score)(posterior)
+        expected = _neumaier_prefix_oracle(np.asarray(increments))
+        assert jnp.array_equal(result, jnp.asarray(expected))
+        assert jnp.array_equal(result[-1], posterior.marginal_loglik)
+
+    def test_cumulative_log_score_preserves_long_constant_prefixes(self):
+        increments = jnp.full((100_000,), -300.1, dtype=jnp.float32)
+        posterior = _posterior_for_increment_contract(increments)
+        result = cumulative_log_score(posterior)
+        expected = _neumaier_prefix_oracle(np.asarray(increments))
+        assert jnp.array_equal(result, jnp.asarray(expected))
+        assert jnp.array_equal(result[-1], posterior.marginal_loglik)
 
     def test_cumulative_log_score_monotone_structure(
         self, lgssm_params, lgssm_data
