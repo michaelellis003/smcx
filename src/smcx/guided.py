@@ -17,12 +17,13 @@ the ``f/q`` cancellation is mathematical, not bitwise; tested).
 """
 
 import math
-from typing import cast
+from functools import partial
+from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, vmap
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Int
 
 from smcx._utils import (
     _canonicalize_inputs,
@@ -33,6 +34,7 @@ from smcx._utils import (
     _prepend,
     _prepend_particle_history,
     _raise_if_degenerate,
+    _TreeSignature,
     _validate_filter_inputs,
     _validate_log_density_batch,
     _validate_state_tree,
@@ -49,14 +51,145 @@ from smcx.types import (
     LogProposalFnWithInput,
     LogTransitionFn,
     LogTransitionFnWithInput,
+    ParticleCloud,
     PRNGKeyT,
     ProposalSampler,
     ProposalSamplerWithInput,
     ResamplingCriterion,
     ResamplingFn,
+    StateTree,
 )
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
+
+
+class _GuidedCarry(NamedTuple):
+    state: ParticleState
+    ess: Float[Array, ""]
+    ancestors: Int[Array, " num_particles"]
+
+
+class _GuidedStepInput(NamedTuple):
+    emission: Float[Array, " emission_dim"]
+    model_input: Float[Array, " input_dim"] | None
+    time_index: Int[Array, ""]
+
+
+class _GuidedStepOutput(NamedTuple):
+    particles: ParticleCloud
+    log_weights: Float[Array, " num_particles"]
+    ancestors: Int[Array, " num_particles"]
+    ess: Float[Array, ""]
+    log_evidence_increment: Float[Array, ""]
+
+
+def _guided_step(
+    carry: _GuidedCarry,
+    inputs_t: _GuidedStepInput,
+    key_t: PRNGKeyT,
+    *,
+    proposal_sampler: ProposalSampler | ProposalSamplerWithInput,
+    log_proposal_fn: LogProposalFn | LogProposalFnWithInput,
+    log_transition_fn: LogTransitionFn | LogTransitionFnWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
+    resampling_fn: ResamplingFn,
+    resampling_threshold: float | ResamplingCriterion,
+    state_signature: _TreeSignature,
+    log_num_particles: Float[Array, ""],
+) -> tuple[_GuidedCarry, _GuidedStepOutput]:
+    """Resample, propose, and reweight one guided particle cloud."""
+    state, current_ess, _ = carry
+    y_t, input_t, time_index = inputs_t
+    num_particles = state.log_weights.shape[0]
+    identity = jnp.arange(num_particles, dtype=jnp.int32)
+    resampling_key, proposal_key = jr.split(key_t)
+    do_resample, ancestors = _conditional_resample(
+        resampling_key,
+        state.log_weights,
+        current_ess,
+        resampling_fn,
+        resampling_threshold,
+        num_particles,
+        identity,
+        time_index,
+    )
+    parents = _gather_particles(state.particles, ancestors)
+    keys = jr.split(proposal_key, num_particles)
+
+    if input_t is None:
+        proposal_fn = cast(ProposalSampler, proposal_sampler)
+
+        def propose(key_i: PRNGKeyT, state_i: StateTree) -> StateTree:
+            next_state = proposal_fn(key_i, state_i, y_t)
+            _validate_state_tree(
+                next_state,
+                state_signature,
+                name="proposal_sampler output",
+            )
+            return next_state
+
+        propagated = vmap(propose)(keys, parents)
+        observation_fn = cast(LogObservationFn, log_observation_fn)
+        transition_fn = cast(LogTransitionFn, log_transition_fn)
+        proposal_density = cast(LogProposalFn, log_proposal_fn)
+        log_g = vmap(lambda z: observation_fn(y_t, z))(propagated)
+        log_f = vmap(transition_fn)(propagated, parents)
+        log_q = vmap(lambda z_new, z_old: proposal_density(y_t, z_new, z_old))(
+            propagated, parents
+        )
+    else:
+        proposal_fn_u = cast(ProposalSamplerWithInput, proposal_sampler)
+
+        def propose_with_input(
+            key_i: PRNGKeyT, state_i: StateTree
+        ) -> StateTree:
+            next_state = proposal_fn_u(key_i, state_i, y_t, input_t)
+            _validate_state_tree(
+                next_state,
+                state_signature,
+                name="proposal_sampler output",
+            )
+            return next_state
+
+        propagated = vmap(propose_with_input)(keys, parents)
+        observation_fn_u = cast(LogObservationFnWithInput, log_observation_fn)
+        transition_fn_u = cast(LogTransitionFnWithInput, log_transition_fn)
+        proposal_density_u = cast(LogProposalFnWithInput, log_proposal_fn)
+        log_g = vmap(lambda z: observation_fn_u(y_t, z, input_t))(propagated)
+        log_f = vmap(transition_fn_u, in_axes=(0, 0, None))(
+            propagated, parents, input_t
+        )
+        log_q = vmap(
+            lambda z_new, z_old: proposal_density_u(y_t, z_new, z_old, input_t)
+        )(propagated, parents)
+
+    for name, values in (
+        ("log_observation_fn", log_g),
+        ("log_transition_fn", log_f),
+        ("log_proposal_fn", log_q),
+    ):
+        _validate_log_density_batch(
+            cast(Array, values), num_particles, name=name
+        )
+    log_w_step = log_g + log_f - log_q
+    log_w_unnorm = jnp.where(
+        do_resample,
+        log_w_step,
+        state.log_weights + log_w_step,
+    )
+    log_w_norm, log_sum = log_normalize(log_w_unnorm)
+    log_ev_inc = jnp.where(do_resample, log_sum - log_num_particles, log_sum)
+    next_state = ParticleState(
+        particles=propagated,
+        log_weights=log_w_norm,
+        log_marginal_likelihood=(state.log_marginal_likelihood + log_ev_inc),
+    )
+    ess_t: Array = jnp.asarray(compute_ess(log_w_norm))
+    next_carry = _GuidedCarry(next_state, ess_t, ancestors)
+    output = _GuidedStepOutput(
+        propagated, log_w_norm, ancestors, ess_t, log_ev_inc
+    )
+    return next_carry, output
 
 
 def guided_filter(
@@ -162,163 +295,58 @@ def guided_filter(
         )
     )
 
-    # --- Scan body for t = 1, ..., T-1 -------------------------------------
-    def _step(
-        carry: tuple[ParticleState, Array, Array],
-        args: tuple[Array, ...],
-    ):
-        state, current_ess, _prev_ancestors = carry
-        if inputs_arr is None:
-            step_key, y_t, time_index = args
-            input_t = None
-        else:
-            step_key, y_t, input_t, time_index = args
-        k1, k2 = jr.split(step_key)
-
-        # 1. Conditionally resample on the carried weights.
-        do_resample, ancestors = _conditional_resample(
-            k1,
-            state.log_weights,
-            current_ess,
-            resampling_fn,
-            resampling_threshold,
-            num_particles,
-            identity_ancestors,
-            time_index,
-        )
-        parents = _gather_particles(state.particles, ancestors)
-
-        # 2. Propagate through the proposal (sees y_t).
-        keys = jr.split(k2, num_particles)
-        if input_t is None:
-            proposal_fn = cast(ProposalSampler, proposal_sampler)
-
-            def _propose(key_i, state_i):
-                next_state = proposal_fn(key_i, state_i, y_t)
-                _validate_state_tree(
-                    next_state,
-                    state_signature,
-                    name="proposal_sampler output",
-                )
-                return next_state
-
-            propagated = vmap(_propose)(keys, parents)
-        else:
-            proposal_fn_u = cast(ProposalSamplerWithInput, proposal_sampler)
-
-            def _propose_with_input(key_i, state_i):
-                next_state = proposal_fn_u(key_i, state_i, y_t, input_t)
-                _validate_state_tree(
-                    next_state,
-                    state_signature,
-                    name="proposal_sampler output",
-                )
-                return next_state
-
-            propagated = vmap(_propose_with_input)(keys, parents)
-
-        # 3. General guided weight: log g + log f - log q.
-        if input_t is None:
-            observation_fn = cast(LogObservationFn, log_observation_fn)
-            transition_fn = cast(LogTransitionFn, log_transition_fn)
-            proposal_density = cast(LogProposalFn, log_proposal_fn)
-            log_g = vmap(lambda z: observation_fn(y_t, z))(propagated)
-            log_f = vmap(transition_fn)(propagated, parents)
-            log_q = vmap(
-                lambda z_new, z_old: proposal_density(y_t, z_new, z_old)
-            )(propagated, parents)
-        else:
-            observation_fn_u = cast(
-                LogObservationFnWithInput, log_observation_fn
-            )
-            transition_fn_u = cast(LogTransitionFnWithInput, log_transition_fn)
-            proposal_density_u = cast(LogProposalFnWithInput, log_proposal_fn)
-            log_g = vmap(lambda z: observation_fn_u(y_t, z, input_t))(
-                propagated
-            )
-            log_f = vmap(transition_fn_u, in_axes=(0, 0, None))(
-                propagated, parents, input_t
-            )
-            log_q = vmap(
-                lambda z_new, z_old: proposal_density_u(
-                    y_t, z_new, z_old, input_t
-                )
-            )(propagated, parents)
-        _validate_log_density_batch(
-            cast(Array, log_g),
-            num_particles,
-            name="log_observation_fn",
-        )
-        _validate_log_density_batch(
-            cast(Array, log_f),
-            num_particles,
-            name="log_transition_fn",
-        )
-        _validate_log_density_batch(
-            cast(Array, log_q),
-            num_particles,
-            name="log_proposal_fn",
-        )
-        log_w_step = log_g + log_f - log_q
-
-        log_w_unnorm = jnp.where(
-            do_resample,
-            log_w_step,
-            state.log_weights + log_w_step,
-        )
-        log_w_norm, log_sum = log_normalize(log_w_unnorm)
-        log_ev_inc = jnp.where(do_resample, log_sum - log_n, log_sum)
-
-        new_state = ParticleState(
-            particles=propagated,
-            log_weights=log_w_norm,
-            log_marginal_likelihood=(
-                state.log_marginal_likelihood + log_ev_inc
-            ),
-        )
-        ess_t: Array = jnp.asarray(compute_ess(log_w_norm))
-        if store_history:
-            return (new_state, ess_t, ancestors), (
-                propagated,
-                log_w_norm,
-                ancestors,
-                ess_t,
-                log_ev_inc,
-            )
-        # In final-only mode, ancestors ride the carry (O(N)) and the
-        # scan stacks just the scalar traces.
-        return (new_state, ess_t, ancestors), (ess_t, log_ev_inc)
-
     step_keys = jr.split(key, num_timesteps - 1)
     time_indices = jnp.arange(1, num_timesteps, dtype=jnp.int32)
-    scan_inputs = (
-        (step_keys, emissions[1:], time_indices)
-        if inputs_arr is None
-        else (step_keys, emissions[1:], inputs_arr[1:], time_indices)
+    model_inputs = None if inputs_arr is None else inputs_arr[1:]
+    step_inputs = _GuidedStepInput(emissions[1:], model_inputs, time_indices)
+    scan_inputs = (step_inputs, step_keys)
+    step = partial(
+        _guided_step,
+        proposal_sampler=proposal_sampler,
+        log_proposal_fn=log_proposal_fn,
+        log_transition_fn=log_transition_fn,
+        log_observation_fn=log_observation_fn,
+        resampling_fn=resampling_fn,
+        resampling_threshold=resampling_threshold,
+        state_signature=state_signature,
+        log_num_particles=log_n,
     )
-    init_carry = (init_state, ess_0, identity_ancestors)
+
+    def scan_step(
+        carry: _GuidedCarry,
+        inputs_and_key: tuple[_GuidedStepInput, PRNGKeyT],
+    ) -> tuple[_GuidedCarry, _GuidedStepOutput]:
+        inputs_t, key_t = inputs_and_key
+        return step(carry, inputs_t, key_t)
+
+    init_carry = _GuidedCarry(init_state, ess_0, identity_ancestors)
     if store_history:
-        (
-            (final_state, _, _),
-            (
-                particles_rest,
-                log_w_rest,
-                ancestors_rest,
-                ess_rest,
-                log_ev_inc_rest,
-            ),
-        ) = lax.scan(_step, init_carry, scan_inputs)
-        all_particles = _prepend_particle_history(particles_0, particles_rest)
-        all_log_w = _prepend(log_w_0, log_w_rest)
-        all_ancestors = _prepend(identity_ancestors, ancestors_rest)
+        final_carry, outputs = lax.scan(scan_step, init_carry, scan_inputs)
+        all_particles = _prepend_particle_history(
+            particles_0, outputs.particles
+        )
+        all_log_w = _prepend(log_w_0, outputs.log_weights)
+        all_ancestors = _prepend(identity_ancestors, outputs.ancestors)
+        ess_rest = outputs.ess
+        log_ev_inc_rest = outputs.log_evidence_increment
     else:
-        (
-            (final_state, _, final_ancestors),
-            (ess_rest, log_ev_inc_rest),
-        ) = lax.scan(_step, init_carry, scan_inputs)
-        all_particles = _particle_time_axis(final_state.particles)
-        all_log_w = final_state.log_weights[None]
-        all_ancestors = final_ancestors[None]
+
+        def final_only_step(
+            carry: _GuidedCarry,
+            inputs_and_key: tuple[_GuidedStepInput, PRNGKeyT],
+        ) -> tuple[_GuidedCarry, tuple[Array, Array]]:
+            next_carry, output = scan_step(carry, inputs_and_key)
+            return next_carry, (output.ess, output.log_evidence_increment)
+
+        final_carry, (ess_rest, log_ev_inc_rest) = lax.scan(
+            final_only_step,
+            init_carry,
+            scan_inputs,
+        )
+        all_particles = _particle_time_axis(final_carry.state.particles)
+        all_log_w = final_carry.state.log_weights[None]
+        all_ancestors = final_carry.ancestors[None]
+    final_state = final_carry.state
     all_ess = _prepend(jnp.asarray(ess_0), ess_rest)
     all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
 
