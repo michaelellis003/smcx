@@ -2,6 +2,27 @@
 
 <!-- version list -->
 
+## v1.12.0 (2026-07-24)
+
+### Bug Fixes
+
+- **reporting**: Preserve particle diagnostic dimensions
+  ([#107](https://github.com/michaelellis003/smcx/pull/107),
+  [`e6b0e47`](https://github.com/michaelellis003/smcx/commit/e6b0e47eb5350309d36a397ada8486109d925598))
+
+### Features
+
+- **resampling**: Accept caller-owned criteria
+  ([#108](https://github.com/michaelellis003/smcx/pull/108),
+  [`6d7c340`](https://github.com/michaelellis003/smcx/commit/6d7c340e471a9a2a9edd14bd427668d4c44fba97))
+
+### Testing
+
+- **kalman**: Validate unscented filter independently
+  ([#106](https://github.com/michaelellis003/smcx/pull/106),
+  [`0225dfb`](https://github.com/michaelellis003/smcx/commit/0225dfb2d4713f4952e55a31e63ef6a4fc827775))
+
+
 ## v1.11.0 (2026-07-24)
 
 ### Features
