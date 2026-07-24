@@ -340,6 +340,47 @@ posterior stores every particle record. With `store_history=False`, its
 particle, weight, and ancestor histories contain only the final record; ESS
 and evidence increments remain available for every time step.
 
+## Combine auxiliary selection with a guided proposal
+
+The same runner can combine an auxiliary look-ahead `log_m` with a proposal
+`q` that sees the current emission. Keep normalized carried log weights `W`
+and use this core inside the step callback:
+
+```python
+log_first, first_total = smcx.log_normalize(W + log_m)
+do_resample = smcx.ess(log_first) < threshold * num_particles
+ancestors = jax.lax.cond(
+    do_resample,
+    lambda: resampling_fn(
+        resample_key, smcx.normalize(log_first), num_particles
+    ),
+    lambda: jnp.arange(num_particles, dtype=jnp.int32),
+)
+parents = jax.tree.map(lambda leaf: leaf[ancestors], previous_particles)
+particles = jax.vmap(lambda key_i, parent: proposal(key_i, parent, emission_t))(
+    particle_keys, parents
+)
+log_g = jax.vmap(lambda state: log_observation(emission_t, state))(particles)
+log_f = jax.vmap(log_transition)(particles, parents)
+log_q = jax.vmap(lambda state, parent: log_proposal(emission_t, state, parent))(
+    particles, parents
+)
+log_step = log_g + log_f - log_q
+log_scores = jnp.where(do_resample, log_step - log_m[ancestors], W + log_step)
+log_weights, second_total = smcx.log_normalize(log_scores)
+increment = jnp.where(
+    do_resample,
+    first_total + second_total - jnp.log(num_particles),
+    second_total,
+)
+```
+
+Return `particles`, `log_weights`, `ancestors`, and `increment` in a
+`ParticleFilterRecord`. The look-ahead correction appears only after
+first-stage resampling; without resampling, the ordinary guided score is
+`W + log(g) + log(f) - log(q)`. In an input-aware step, pass the aligned
+`input_t` to the look-ahead, proposal, and all three density callbacks.
+
 ## Write input-aware callbacks explicitly
 
 Time-varying inputs use distinct callback signatures. At time zero,
