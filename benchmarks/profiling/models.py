@@ -229,67 +229,6 @@ def _jax_normal_logpdf(
     )
 
 
-def guided_log_weight_terms(
-    model: LGSSM,
-    emission: Float[Array, "..."],
-    propagated: Float[Array, "..."],
-    previous: Float[Array, "..."],
-    input_t: Float[Array, " input_dim"],
-) -> tuple[
-    Float[Array, "..."],
-    Float[Array, "..."],
-    Float[Array, "..."],
-    Float[Array, ""],
-]:
-    """Return the exact guided correction and predictive potential.
-
-    For the locally optimal proposal, ``log_g + log_f - log_q`` is the
-    predictive log likelihood and therefore does not depend on the sampled
-    propagated state.  Keeping all four terms visible makes that identity a
-    unit-testable workload invariant.
-    """
-    emission_value = jnp.ravel(jnp.asarray(emission, dtype=jnp.float32))[0]
-    previous_value = jnp.ravel(jnp.asarray(previous, dtype=jnp.float32))[0]
-    input_value = jnp.ravel(jnp.asarray(input_t, dtype=jnp.float32))[0]
-    coefficient = jnp.asarray(model.a, dtype=jnp.float32)
-    input_coefficient = jnp.asarray(model.b, dtype=jnp.float32)
-    transition_variance = jnp.asarray(model.q, dtype=jnp.float32)
-    observation_variance = jnp.asarray(model.r, dtype=jnp.float32)
-    transition_mean = (
-        coefficient * previous_value + input_coefficient * input_value
-    )
-    proposal_variance = (
-        transition_variance
-        * observation_variance
-        / (transition_variance + observation_variance)
-    )
-    proposal_mean = (
-        observation_variance * transition_mean
-        + transition_variance * emission_value
-    ) / (transition_variance + observation_variance)
-
-    propagated_array = jnp.asarray(propagated, dtype=jnp.float32)
-    log_g = _jax_normal_logpdf(
-        emission_value,
-        propagated_array,
-        observation_variance,
-    )
-    log_f = _jax_normal_logpdf(
-        propagated_array,
-        transition_mean,
-        transition_variance,
-    )
-    log_q = _jax_normal_logpdf(
-        propagated_array, proposal_mean, proposal_variance
-    )
-    log_predictive = _jax_normal_logpdf(
-        emission_value,
-        transition_mean,
-        transition_variance + observation_variance,
-    )
-    return log_g, log_f, log_q, log_predictive
-
-
 def make_lgssm_callbacks(model: LGSSM) -> LGSSMCallbacks:
     """Build local JAX callbacks for the L1 filter workloads."""
     initial_mean = jnp.asarray(model.m0, dtype=jnp.float32)

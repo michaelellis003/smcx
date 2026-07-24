@@ -168,28 +168,14 @@ def campaign_identity() -> dict[str, Any]:
     }
 
 
-INFERENCE_ALGORITHMS = (
-    "bootstrap",
-    "auxiliary",
-    "guided",
-    "liu_west",
-    "temper",
-    "smc2",
-)
 RESAMPLERS = (
     "systematic",
     "stratified",
     "multinomial",
     "residual",
 )
-# Resamplers are independently timed public algorithms in this campaign, so
-# the coverage contract includes them alongside the six inference entry
-# points.  The narrower tuple remains available to callers that need the
-# distinction.
-ALGORITHMS = INFERENCE_ALGORITHMS + RESAMPLERS
 
 PLATFORMS = ("cpu", "mps")
-EXECUTION_MODES = ("whole_program_jit", "host_shell")
 
 
 class Profile(NamedTuple):
