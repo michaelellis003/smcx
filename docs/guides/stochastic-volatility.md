@@ -130,6 +130,11 @@ marginal parameter posterior. Values near $0.97$–$0.99$ are typical;
 smaller $a$ shrinks harder and adds more kernel noise, while larger $a$
 shrinks less and adds less noise.
 
+The covariance calculation stays in centered coordinates and uses a
+positive-semidefinite spectral square root without a fixed diagonal boost.
+Consequently, a parameter direction with no represented spread receives no
+artificial drift, and the propagated parameter cloud retains its input dtype.
+
 ## Read the parameter posterior
 
 `param_weighted_mean` and `param_weighted_quantile` summarize the

@@ -148,6 +148,113 @@ def _make_liu_west_fns():
     )
 
 
+def _run_covariance_case(
+    parameter_cloud: jax.Array,
+) -> lw.LiuWestPosterior:
+    """Run one Liu-West propagation for a supplied parameter cloud."""
+    dtype = parameter_cloud.dtype
+    num_particles = parameter_cloud.shape[0]
+
+    def initial_sampler(key, n):
+        del key
+        return jnp.zeros((n, 1), dtype=dtype)
+
+    def param_initial_sampler(key, n):
+        del key
+        assert n == num_particles
+        return parameter_cloud
+
+    def transition_sampler(key, state, params):
+        del key, params
+        return state
+
+    def log_density(emission, state, params):
+        del emission, state, params
+        return jnp.asarray(0.0, dtype=dtype)
+
+    return liu_west_filter(
+        key=jr.key(129),
+        initial_sampler=initial_sampler,
+        transition_sampler=transition_sampler,
+        log_observation_fn=log_density,
+        log_auxiliary_fn=log_density,
+        param_initial_sampler=param_initial_sampler,
+        emissions=jnp.zeros((2, 1), dtype=dtype),
+        num_particles=num_particles,
+        shrinkage=0.95,
+        resampling_threshold=0.0,
+    )
+
+
+class TestLiuWestCovarianceKernel:
+    """Parameter perturbations preserve represented covariance support."""
+
+    def test_float32_zero_spread_does_not_drift(self):
+        cloud = jnp.zeros((17, 2), dtype=jnp.float32)
+
+        actual = _run_covariance_case(cloud).filtered_params[-1]
+
+        assert actual.dtype == cloud.dtype
+        np.testing.assert_array_equal(actual, cloud)
+
+    def test_translated_constant_does_not_create_spread(self):
+        cloud = jnp.full((1_000, 2), 1e10, dtype=jnp.float32)
+
+        actual = _run_covariance_case(cloud).filtered_params[-1]
+
+        assert actual.dtype == cloud.dtype
+        np.testing.assert_array_equal(actual, cloud)
+
+    def test_rank_deficient_cloud_stays_in_its_support(self):
+        first = jnp.array([9_990.0, 10_000.0, 10_010.0], jnp.float32)
+        cloud = jnp.stack((first, 0.5 * first), axis=1)
+
+        actual = _run_covariance_case(cloud).filtered_params[-1]
+
+        assert jnp.all(jnp.isfinite(actual))
+        # Sixteen eps cover eigensolver and matrix-product rounding.
+        tolerance = float(16 * np.finfo(np.float32).eps * np.max(np.abs(cloud)))
+        np.testing.assert_allclose(
+            actual[:, 1],
+            0.5 * actual[:, 0],
+            rtol=0.0,
+            atol=tolerance,
+        )
+
+    def test_near_singular_cloud_remains_finite(self):
+        first = jnp.array(
+            [9_990.0, 10_000.0, 10_010.0, 10_020.0],
+            jnp.float32,
+        )
+        second = 0.5 * first
+        second = second.at[-1].add(jnp.float32(0.01))
+        cloud = jnp.stack((first, second), axis=1)
+
+        actual = _run_covariance_case(cloud).filtered_params[-1]
+
+        assert actual.dtype == cloud.dtype
+        assert jnp.all(jnp.isfinite(actual))
+
+    def test_ordinary_spread_preserves_kernel_variance(self):
+        pattern = jnp.array(
+            [[-1.0, -2.0], [-1.0, 2.0], [1.0, -2.0], [1.0, 2.0]],
+            jnp.float32,
+        )
+        cloud = jnp.tile(pattern, (5_000, 1))
+
+        actual = _run_covariance_case(cloud).filtered_params[-1]
+        noise = np.asarray(actual - jnp.float32(0.95) * cloud)
+        second_moment = np.mean(noise**2, axis=0)
+        expected = (1.0 - 0.95**2) * np.array([1.0, 4.0])
+        # For Gaussian noise, SE(sample second moment) =
+        # sqrt(2 / N) * variance. Five SE is the stochastic-test gate.
+        estimator_se = np.sqrt(2.0 / cloud.shape[0]) * expected
+        np.testing.assert_array_less(
+            np.abs(second_moment - expected),
+            5 * estimator_se,
+        )
+
+
 def test_uncompiled_step_matches_compiled_scan():
     _, transition, observation, auxiliary, _ = _make_conjugate_fns()
     num_particles, shrinkage = 16, jnp.asarray(0.95)
