@@ -222,7 +222,7 @@ def run_particle_filter(
         isinstance(leaf, core.Tracer)
         for leaf in tree.leaves((key, emissions, inputs_arr, carry_0, record_0))
     )
-    if use_mps_loop and transformed:
+    if use_mps_loop and transformed:  # pragma: no cover - MPS-only
         raise TypeError(
             "run_particle_filter cannot run under a JAX transform on MPS"
         )
@@ -283,7 +283,7 @@ def run_particle_filter(
         increment_0,
         correction_0,
     )
-    if use_mps_loop:
+    if use_mps_loop:  # pragma: no cover - exercised by Metal gate
         # Remove this containment under smcx#38 after a fixed jax-mps release.
         runner_carry = initial_runner_carry
         records = []
