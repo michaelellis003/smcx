@@ -143,8 +143,8 @@ def smc2(
         An :class:`~smcx.containers.SMC2Posterior`.
 
     Raises:
-        ValueError: Counts, thresholds, emissions, or initial parameter
-            particles are structurally invalid.
+        ValueError: Counts, emissions, or initial parameter particles are
+            structurally invalid.
         DegenerateWeightsError: The outer weights collapse (every
             parameter particle assigned an all--inf inner likelihood).
     """
@@ -159,10 +159,6 @@ def smc2(
         raise ValueError(f"num_theta must be >= 1; got {num_theta}")
     if num_x < 1:
         raise ValueError(f"num_x must be >= 1; got {num_x}")
-    if not 0.0 <= ess_threshold <= 1.0:
-        raise ValueError(
-            f"ess_threshold must be in the interval [0, 1]; got {ess_threshold}"
-        )
     if num_pmmh_steps < 0:
         raise ValueError(f"num_pmmh_steps must be >= 0; got {num_pmmh_steps}")
     if emissions.ndim == 1:
