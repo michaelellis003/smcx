@@ -60,6 +60,7 @@ from jax import lax, tree, vmap
 from jax.core import Tracer
 from jaxtyping import Array, Float, Int
 
+from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
     _gather_particles,
     _validate_emission,
@@ -986,7 +987,7 @@ def cumulative_log_score(
         rules, prediction, and estimation.
         https://doi.org/10.1198/016214506000001437
     """
-    return jnp.cumsum(posterior.log_evidence_increments)
+    return _neumaier_prefix_sum(posterior.log_evidence_increments)
 
 
 # --- Diagnostic summary ----------------------------------------------------
