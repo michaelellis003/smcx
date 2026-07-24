@@ -19,7 +19,7 @@ uncertainty*; McElreath: *always report intervals, not just means*):
 
 Computational faithfulness (Vehtari: *can we trust the computation?*):
 
-- `smcx.particle_diversity` — fraction of unique particles per step
+- `smcx.particle_diversity` — fraction of surviving time-zero lineages
 - `smcx.reconstruct_trajectories` — genealogy-traced particle paths
 - `smcx.log_ml_variance` — single-run log-evidence variance
 - `smcx.log_ml_increments` — per-step evidence contributions
@@ -277,40 +277,48 @@ def log_ml_increments(
 def particle_diversity(
     posterior: ParticleFilterResult,
 ) -> Float[Array, " ntime"]:
-    r"""Compute the fraction of unique particles at each time step.
+    r"""Compute the fraction of surviving time-zero particle lineages.
 
-    Particle diversity measures path degeneracy: a value near 1 means
-    most particles are distinct, while near 0 means heavy duplication
-    after resampling.
+    The diagnostic composes parent indices across time to obtain each
+    particle's time-zero ancestor, or Eve index. A value near 1 means
+    most initial lineages survive; a value near 0 means the particle
+    paths have coalesced onto few initial lineages. It does not measure
+    uniqueness of current state values or only the latest parent array.
 
     Uses an indicator-based method (not ``jnp.unique``) for JIT
-    compatibility: counts the fraction of particles that differ from
-    their predecessor in the sorted order.
+    compatibility.
 
     Args:
-        posterior: Particle filter posterior output.
+        posterior: Particle filter posterior with full history
+            (``store_history=True``, the default).
 
     Returns:
-        Diversity fraction in [0, 1] at each time step,
-        shape ``(ntime,)``.
+        Fraction of represented time-zero lineages in [0, 1] at each
+        time step, shape ``(ntime,)``. The first value is one by
+        construction.
+
+    Raises:
+        ValueError: The posterior retains only its final particle cloud.
     """
-    ancestors = posterior.ancestors  # (ntime, num_particles)
-    num_particles = ancestors.shape[1]
+    _require_full_particle_history(
+        posterior,
+        diagnostic="particle_diversity",
+    )
+    eves = _eve_indices(posterior.ancestors)
+    num_particles = eves.shape[1]
 
     def _diversity_one_step(
-        anc: Int[Array, " num_particles"],
+        eve: Int[Array, " num_particles"],
     ) -> Float[Array, ""]:
-        """Count fraction of unique ancestors at one time step."""
-        sorted_anc = jnp.sort(anc)
-        # First element is always unique; subsequent are unique if
-        # different from predecessor
+        """Count represented time-zero lineages at one time step."""
+        sorted_eve = jnp.sort(eve)
         is_unique = jnp.concatenate([
             jnp.array([True]),
-            sorted_anc[1:] != sorted_anc[:-1],
+            sorted_eve[1:] != sorted_eve[:-1],
         ])
         return jnp.sum(is_unique) / num_particles
 
-    return vmap(_diversity_one_step)(ancestors)
+    return vmap(_diversity_one_step)(eves)
 
 
 def reconstruct_trajectories(

@@ -181,6 +181,36 @@ class TestLogMLIncrements:
 class TestParticleDiversity:
     """Tests for particle_diversity."""
 
+    def test_tracks_cumulative_time_zero_lineages(self):
+        """State values and one-step parents do not define path diversity."""
+        num_particles = 4
+        particles = jnp.array([
+            [[0.0], [0.0], [0.0], [0.0]],
+            [[1.0], [2.0], [3.0], [4.0]],
+            [[5.0], [6.0], [7.0], [8.0]],
+        ])
+        ancestors = jnp.array(
+            [
+                [0, 1, 2, 3],
+                [0, 0, 0, 1],
+                [1, 2, 1, 2],
+            ],
+            dtype=jnp.int32,
+        )
+        posterior = ParticleFilterPosterior(
+            marginal_loglik=jnp.asarray(0.0),
+            filtered_particles=particles,
+            filtered_log_weights=jnp.full(
+                (3, num_particles), -jnp.log(num_particles)
+            ),
+            ancestors=ancestors,
+            ess=jnp.full((3,), float(num_particles)),
+            log_evidence_increments=jnp.zeros(3),
+        )
+
+        expected = jnp.array([1.0, 0.5, 0.25])
+        assert jnp.array_equal(particle_diversity(posterior), expected)
+
     def test_particle_diversity_bounded(self, lgssm_params, lgssm_data):
         """Diversity should be in [0, 1] at every time step."""
         pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=1_000)

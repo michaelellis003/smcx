@@ -94,6 +94,7 @@ def test_still_satisfies_protocol():
 @pytest.mark.parametrize(
     "diagnostic",
     [
+        smcx.particle_diversity,
         smcx.reconstruct_trajectories,
         smcx.log_ml_variance,
         smcx.diagnose,
