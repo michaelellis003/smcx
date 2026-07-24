@@ -779,9 +779,10 @@ def _fit_pareto_k(
     via the Zhang and Stephens (2009) profile-likelihood estimator
     with the Vehtari et al. (2024) weakly informative prior.
 
-    The tail sample is the top
-    ``M = ceil(min(0.2 * N, 3 * sqrt(N)))`` order statistics,
-    following ArviZ and NumPyro conventions.
+    The tail sample uses
+    ``M = min(max(10, ceil(min(0.2 * N, 3 * sqrt(N)))), N - 1)``
+    order statistics. The central heuristic follows ArviZ and NumPyro;
+    smcx adds the explicit small-sample floor and cap.
 
     Args:
         log_weights: Normalised log importance weights at one step.
@@ -845,8 +846,9 @@ def pareto_k_diagnostic(
       threshold of Vehtari et al. 2024)
     - $\hat{k} \ge 1.0$: very unreliable (infinite mean)
 
-    The tail size is ``ceil(min(0.2 * N, 3 * sqrt(N)))`` order
-    statistics, matching the conventions of ArviZ and NumPyro.
+    The tail size is
+    ``min(max(10, ceil(min(0.2 * N, 3 * sqrt(N)))), N - 1)`` order
+    statistics, including the small-sample floor and cap.
 
     Args:
         posterior: Particle filter posterior output.

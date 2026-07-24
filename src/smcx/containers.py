@@ -26,6 +26,10 @@ class ParticleFilterResult(Protocol):
     `smcx.containers.LiuWestPosterior` satisfy this protocol, so diagnostic
     functions can accept either without type errors.
 
+    With full history, every time axis below has length T. For a final-only
+    result, particle, weight, and ancestor histories have length one while
+    ESS and evidence increments retain length T.
+
     Attributes:
         marginal_loglik: Scalar estimate of $\log p(y_{1:T})$.
         filtered_particles: Latent-state PyTree with every leaf shaped
@@ -124,6 +128,10 @@ class ParticleFilterPosterior(NamedTuple):
     Follows the Dynamax ``PosteriorGSSMFiltered`` convention of storing
     the marginal log-likelihood as a scalar summary alongside the
     time-indexed arrays.
+
+    With ``store_history=False``, particle, weight, and ancestor histories
+    contain only the final row; ESS and evidence increments still cover all
+    T observations.
 
     Attributes:
         marginal_loglik: Scalar estimate of $\log p(y_{1:T})$.
