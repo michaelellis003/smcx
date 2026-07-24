@@ -34,7 +34,7 @@ import math
 from typing import NamedTuple, cast
 
 import jax.numpy as jnp
-from jax import lax
+from jax import lax, vmap
 from jax.scipy.linalg import solve_triangular
 from jaxtyping import Array, Float, Shaped
 
@@ -94,6 +94,14 @@ class _SmootherState(NamedTuple):
 
     mean: Float[Array, " state_dim"]
     covariance: Float[Array, "state_dim state_dim"]
+
+
+class _ScaledUnscentedRule(NamedTuple):
+    """Stable coefficients for one symmetric scaled unscented rule."""
+
+    sigma_scale: Float[Array, ""]
+    off_center_weight: Float[Array, ""]
+    covariance_rank_one_weight: Float[Array, ""]
 
 
 def _symmetrize(
@@ -314,6 +322,237 @@ def _check_callback_array(
         raise ValueError(
             f"{name} must have shape {expected_shape}; got {value.shape}"
         )
+
+
+def _scaled_unscented_rule(
+    state_dim: int,
+    dtype: jnp.dtype,
+    alpha: float,
+    beta: float,
+    kappa: float,
+) -> _ScaledUnscentedRule:
+    """Validate and construct a symmetric scaled unscented rule."""
+    parameters = (("alpha", alpha), ("beta", beta), ("kappa", kappa))
+    for name, value in parameters:
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be finite")
+    if alpha <= 0.0:
+        raise ValueError("alpha must be greater than zero")
+    if state_dim + kappa <= 0.0:
+        raise ValueError("state_dim + kappa must be greater than zero")
+    alpha_squared = alpha * alpha
+    if alpha_squared * kappa + state_dim * beta < 0.0:
+        raise ValueError(
+            "alpha**2 * kappa + state_dim * beta must be nonnegative"
+        )
+    scale_squared = alpha_squared * (state_dim + kappa)
+    off_center_weight = 0.5 / scale_squared
+    central_mean_weight = (scale_squared - state_dim) / scale_squared
+    central_covariance_weight = central_mean_weight + 1.0 - alpha_squared + beta
+    covariance_rank_one_weight = off_center_weight**2 * (beta - alpha_squared)
+    derived = (
+        scale_squared,
+        off_center_weight,
+        central_mean_weight,
+        central_covariance_weight,
+        covariance_rank_one_weight,
+    )
+    dtype_info = jnp.finfo(dtype)
+    if scale_squared < float(dtype_info.smallest_subnormal) or any(
+        not math.isfinite(value) or abs(value) > float(dtype_info.max)
+        for value in derived
+    ):
+        raise ValueError(
+            f"alpha, beta, and kappa produce non-finite weights in {dtype}"
+        )
+    return _ScaledUnscentedRule(
+        jnp.asarray(math.sqrt(scale_squared), dtype=dtype),
+        jnp.asarray(off_center_weight, dtype=dtype),
+        jnp.asarray(covariance_rank_one_weight, dtype=dtype),
+    )
+
+
+def _sigma_points(
+    mean: Float[Array, " state_dim"],
+    covariance: Float[Array, "state_dim state_dim"],
+    rule: _ScaledUnscentedRule,
+) -> Float[Array, "num_sigma state_dim"]:
+    """Generate center-first, column-oriented symmetric sigma points."""
+    factor = jnp.linalg.cholesky(_symmetrize(covariance))
+    offsets = (rule.sigma_scale * factor).T
+    return jnp.concatenate((
+        mean[None],
+        mean[None] + offsets,
+        mean[None] - offsets,
+    ))
+
+
+def _unscented_moments(
+    values: Float[Array, "num_sigma value_dim"],
+    rule: _ScaledUnscentedRule,
+) -> tuple[
+    Float[Array, " value_dim"],
+    Float[Array, "value_dim value_dim"],
+]:
+    """Evaluate scaled-rule moments with center-relative arithmetic."""
+    center = values[0]
+    num_pairs = (values.shape[0] - 1) // 2
+    positive_deltas = values[1 : num_pairs + 1] - center
+    negative_deltas = values[num_pairs + 1 :] - center
+    delta_sum = (positive_deltas + negative_deltas).sum(axis=0)
+    mean = center + rule.off_center_weight * delta_sum
+    covariance = rule.off_center_weight * (
+        jnp.einsum(
+            "ij,ik->jk",
+            positive_deltas,
+            positive_deltas,
+        )
+        + jnp.einsum(
+            "ij,ik->jk",
+            negative_deltas,
+            negative_deltas,
+        )
+    ) + rule.covariance_rank_one_weight * jnp.outer(delta_sum, delta_sum)
+    return mean, _symmetrize(covariance)
+
+
+def _unscented_cross_covariance(
+    state_points: Float[Array, "num_sigma state_dim"],
+    transformed_points: Float[Array, "num_sigma value_dim"],
+    rule: _ScaledUnscentedRule,
+) -> Float[Array, "state_dim value_dim"]:
+    """Form a paired cross covariance without subtractive centering."""
+    state_dim = state_points.shape[1]
+    offsets = 0.5 * (
+        state_points[1 : state_dim + 1] - state_points[state_dim + 1 :]
+    )
+    transformed_differences = (
+        transformed_points[1 : state_dim + 1]
+        - transformed_points[state_dim + 1 :]
+    )
+    return rule.off_center_weight * offsets.T @ transformed_differences
+
+
+def _unscented_condition(
+    predicted_mean: Float[Array, " state_dim"],
+    predicted_covariance: Float[Array, "state_dim state_dim"],
+    observation_mean_fn: ObservationMeanFn,
+    observation_covariance: Float[Array, "observation_dim observation_dim"],
+    observation: Float[Array, " observation_dim"],
+    rule: _ScaledUnscentedRule,
+) -> tuple[
+    Float[Array, " state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, ""],
+]:
+    """Condition one Gaussian using a scaled unscented observation."""
+    state_points = _sigma_points(
+        predicted_mean,
+        predicted_covariance,
+        rule,
+    )
+    observation_points = vmap(observation_mean_fn)(state_points)
+    _check_callback_array(
+        observation_points,
+        (state_points.shape[0], observation.shape[0]),
+        "observation_mean_fn output",
+        predicted_mean.dtype,
+    )
+    observation_mean, transformed_covariance = _unscented_moments(
+        observation_points,
+        rule,
+    )
+    cross_covariance = _unscented_cross_covariance(
+        state_points,
+        observation_points,
+        rule,
+    )
+    innovation_covariance = _symmetrize(
+        transformed_covariance + observation_covariance
+    )
+    innovation_cholesky = jnp.linalg.cholesky(innovation_covariance)
+    lower_solution = solve_triangular(
+        innovation_cholesky,
+        cross_covariance.T,
+        lower=True,
+    )
+    gain = solve_triangular(
+        innovation_cholesky.T,
+        lower_solution,
+        lower=False,
+    ).T
+    residual = observation - observation_mean
+    filtered_mean = predicted_mean + gain @ residual
+    corrected_points = state_points - observation_points @ gain.T
+    _, residual_covariance = _unscented_moments(corrected_points, rule)
+    filtered_covariance = _symmetrize(
+        residual_covariance + gain @ observation_covariance @ gain.T
+    )
+    whitened_residual = solve_triangular(
+        innovation_cholesky,
+        residual,
+        lower=True,
+    )
+    observation_dim = residual.shape[0]
+    log_two_pi = jnp.asarray(math.log(2.0 * math.pi), dtype=residual.dtype)
+    log_evidence_increment = -0.5 * (
+        observation_dim * log_two_pi
+        + 2.0 * jnp.log(jnp.diag(innovation_cholesky)).sum()
+        + whitened_residual @ whitened_residual
+    )
+    return filtered_mean, filtered_covariance, log_evidence_increment
+
+
+def _unscented_filter_step(
+    state: _FilterState,
+    args: _ExtendedFilterStepInput,
+    transition_mean_fn: TransitionMeanFn,
+    observation_mean_fn: ObservationMeanFn,
+    rule: _ScaledUnscentedRule,
+) -> tuple[_FilterState, _FilterStepOutput]:
+    """Apply one pure unscented Kalman predict-and-condition step."""
+    state_points = _sigma_points(state.mean, state.covariance, rule)
+    transition_points = vmap(transition_mean_fn)(state_points)
+    _check_callback_array(
+        transition_points,
+        state_points.shape,
+        "transition_mean_fn output",
+        state.mean.dtype,
+    )
+    predicted_mean, transformed_covariance = _unscented_moments(
+        transition_points,
+        rule,
+    )
+    predicted_covariance = _symmetrize(
+        transformed_covariance + args.transition_covariance
+    )
+    filtered_mean, filtered_covariance, increment = _unscented_condition(
+        predicted_mean,
+        predicted_covariance,
+        observation_mean_fn,
+        args.observation_covariance,
+        args.emission,
+        rule,
+    )
+    evidence, compensation = _neumaier_add(
+        state.marginal_loglik,
+        state.log_evidence_compensation,
+        increment,
+    )
+    next_state = _FilterState(
+        filtered_mean,
+        filtered_covariance,
+        evidence,
+        compensation,
+    )
+    output = _FilterStepOutput(
+        predicted_mean,
+        predicted_covariance,
+        filtered_mean,
+        filtered_covariance,
+        increment,
+    )
+    return next_state, output
 
 
 def _extended_filter_step(
@@ -888,6 +1127,173 @@ def extended_kalman_filter(
             state_0,
             scan_inputs_u,
         )
+    predicted_means = jnp.concatenate((
+        initial_mean[None],
+        rest.predicted_mean,
+    ))
+    predicted_covariances = jnp.concatenate((
+        initial_covariance[None],
+        rest.predicted_covariance,
+    ))
+    filtered_means = jnp.concatenate((
+        filtered_mean_0[None],
+        rest.filtered_mean,
+    ))
+    filtered_covariances = jnp.concatenate((
+        filtered_covariance_0[None],
+        rest.filtered_covariance,
+    ))
+    increments = jnp.concatenate((
+        increment_0[None],
+        rest.log_evidence_increment,
+    ))
+    return GaussianFilterPosterior(
+        final_state.marginal_loglik + final_state.log_evidence_compensation,
+        predicted_means,
+        predicted_covariances,
+        filtered_means,
+        filtered_covariances,
+        increments,
+    )
+
+
+def unscented_kalman_filter(
+    initial_mean: Shaped[Array, "*initial_mean_shape"],
+    initial_covariance: Shaped[Array, "*initial_covariance_shape"],
+    transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
+    transition_covariance: Shaped[Array, "*transition_covariance_shape"],
+    observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
+    observation_covariance: Shaped[Array, "*observation_covariance_shape"],
+    emissions: Shaped[Array, "*emissions_shape"],
+    *,
+    alpha: float = 1.0,
+    beta: float = 2.0,
+    kappa: float = 0.0,
+    inputs: InputSequence | None = None,
+) -> GaussianFilterPosterior:
+    r"""Run a scaled unscented Kalman filter.
+
+    The model has nonlinear conditional means and additive Gaussian noise:
+
+    .. math::
+
+        x_0 &\sim N(m_0, P_0),\\
+        x_t &= f(x_{t-1}, u_t) + q_t,\\
+        y_t &= h(x_t, u_t) + r_t.
+
+    The default symmetric ``2d + 1`` rule uses
+    ``(alpha, beta, kappa) = (1, 2, 0)``.
+
+    Args:
+        initial_mean: Prior mean for ``x[0]``, shape ``(state_dim,)``.
+        initial_covariance: Prior covariance for ``x[0]``.
+        transition_mean_fn: Nonlinear state transition mean.
+        transition_covariance: Static transition covariance or a timed
+            array with leading length ``ntime - 1``.
+        observation_mean_fn: Nonlinear observation mean.
+        observation_covariance: Static observation covariance or a timed
+            array with leading length ``ntime``.
+        emissions: Observations with shape ``(ntime, observation_dim)``.
+        alpha: Sigma-point spread parameter.
+        beta: Covariance correction parameter.
+        kappa: Secondary sigma-point scaling parameter.
+        inputs: Optional exogenous inputs.
+
+    Returns:
+        Approximate Gaussian filtering moments and innovation evidence.
+
+    Raises:
+        ValueError: An array, callback output, or rule parameter is invalid.
+
+    Note:
+        Arrays must share a float32 or float64 dtype. Covariances must be
+        finite, symmetric, and positive definite. Missing observations are
+        not supported.
+    """
+    if inputs is not None:
+        raise NotImplementedError("input-aware unscented filtering")
+    if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
+        raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
+    if emissions.ndim != 2 or emissions.shape[0] == 0:
+        raise ValueError(
+            "emissions must have shape (T, observation_dim) with T > 0"
+        )
+    num_timesteps, observation_dim = emissions.shape
+    state_dim = initial_mean.shape[0]
+    if observation_dim == 0:
+        raise ValueError("emissions must have observation_dim > 0")
+    dtype = initial_mean.dtype
+    named_arrays = (
+        ("initial_mean", initial_mean),
+        ("initial_covariance", initial_covariance),
+        ("transition_covariance", transition_covariance),
+        ("observation_covariance", observation_covariance),
+        ("emissions", emissions),
+    )
+    for name, value in named_arrays:
+        expected_dtype = None if name == "initial_mean" else dtype
+        _check_float_array(value, name, expected_dtype)
+    if initial_covariance.shape != (state_dim, state_dim):
+        raise ValueError(
+            "initial_covariance must have shape "
+            f"({state_dim}, {state_dim}); got {initial_covariance.shape}"
+        )
+    transition_covariances = _time_matrix(
+        transition_covariance,
+        num_timesteps - 1,
+        state_dim,
+        state_dim,
+        "transition_covariance",
+    )
+    observation_covariances = _time_matrix(
+        observation_covariance,
+        num_timesteps,
+        observation_dim,
+        observation_dim,
+        "observation_covariance",
+    )
+    rule = _scaled_unscented_rule(
+        state_dim,
+        dtype,
+        alpha,
+        beta,
+        kappa,
+    )
+    transition_fn = cast(TransitionMeanFn, transition_mean_fn)
+    observation_fn = cast(ObservationMeanFn, observation_mean_fn)
+    filtered_mean_0, filtered_covariance_0, increment_0 = _unscented_condition(
+        initial_mean,
+        initial_covariance,
+        observation_fn,
+        observation_covariances[0],
+        emissions[0],
+        rule,
+    )
+    state_0 = _FilterState(
+        filtered_mean_0,
+        filtered_covariance_0,
+        increment_0,
+        jnp.zeros_like(increment_0),
+    )
+    scan_inputs = _ExtendedFilterStepInput(
+        emissions[1:],
+        transition_covariances,
+        observation_covariances[1:],
+    )
+
+    def _step(
+        state: _FilterState,
+        args: _ExtendedFilterStepInput,
+    ) -> tuple[_FilterState, _FilterStepOutput]:
+        return _unscented_filter_step(
+            state,
+            args,
+            transition_fn,
+            observation_fn,
+            rule,
+        )
+
+    final_state, rest = lax.scan(_step, state_0, scan_inputs)
     predicted_means = jnp.concatenate((
         initial_mean[None],
         rest.predicted_mean,
