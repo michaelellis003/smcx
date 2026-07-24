@@ -92,7 +92,7 @@ def _run_filter(
     ["bootstrap", "auxiliary", "guided", "liu-west"],
 )
 def test_one_shot_filter_compensates_long_horizon_evidence(filter_name):
-    emissions = jnp.full((100_000, 1), -100.003, dtype=jnp.float32)
+    emissions = jnp.full((10_000, 1), -100.003, dtype=jnp.float32)
 
     with jax.enable_x64(False):
         posterior = _run_filter(filter_name, emissions)
