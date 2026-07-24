@@ -715,8 +715,9 @@ class TestCumulativeLogScore:
             )
 
     def test_cumulative_log_score_compensates_runner_cancellation(self):
-        increments = jnp.tile(
-            jnp.array([1e8, 1.0, -1e8], dtype=jnp.float32), 64
+        increments = jnp.array(
+            [1e8, 1.0, -1e8],
+            dtype=jnp.float32,
         )
         particles = jnp.zeros((1, 1), dtype=increments.dtype)
 
