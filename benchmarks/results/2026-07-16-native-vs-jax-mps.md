@@ -164,11 +164,15 @@ through its op-patched MLX dispatch, while native smcx runs one compiled step in
 a Python loop. The op census is consistent with a materialization-and-overhead
 mechanism, but the plugin exposes no compiled-executable text
 (`compile().as_text()` returns none), so this stays a plausible mechanism, not a
-proven compiler-causality claim. The trace bundles with full StableHLO text
-and provenance are committed under
-`benchmarks/results/2026-07-16-native-vs-jax-mps/traces/`.
+proven compiler-causality claim. The trace bundles with full StableHLO text and
+provenance were committed with this report and remain available in the
+[immutable result archive][native-results-archive].
 
-## Reproduction
+## Archived reproduction
+
+The commands below reproduce the run from a checkout of immutable commit
+[`ac9572d`][native-harness-archive]. The executable harness is no longer part
+of the current source tree.
 
 ```bash
 # Full matrix (525 fresh processes; AC power, idle machine):
@@ -184,12 +188,23 @@ JAX_PLATFORMS=mps uv run --no-project --python 3.13 \
 #   add --capture-ir to the jax_worker command above.
 ```
 
-The merged per-process JSON (manifest plus all 525 records) is committed as
-`benchmarks/results/2026-07-16-native-vs-jax-mps/merged.json`, and the four
-StableHLO/provenance trace bundles under the sibling `traces/` directory. The
-verdict machinery, correctness gates, and balanced ordering are covered by
-`tests/test_native_vs_jax_mps_benchmark.py` and
-`tests/test_native_vs_jax_mps_report.py`.
+The raw artifacts are preserved at that immutable commit. The former
+benchmark-specific tests are likewise historical and remain in the
+[pre-migration test archive][native-tests-archive]; they do not validate
+current smcx. The audited SHA256 values of the removed raw artifacts are:
+
+- `merged.json`
+  `c79f3b8d9669fc474919a8fe62b10053cf5d8c106cfbf95525ae95b696b7cac8`
+- `tuned_lgssm_nohist.json`
+  `9c651b9ec7653d7e4df1ba1727a1215dc038c204ae03a557f8642f01080e5595`
+- `traces/lgssm_pf_n1000000_jax_mps_sync_ir.json`
+  `8010a4d7963c27615a24eef360e85b47dc9a6f926af20cb9f19b02af21bcfb1a`
+- `traces/lgssm_pf_n10000_jax_mps_sync_ir.json`
+  `8bbee4a7c17809ac3fc278e7ed178d89fca52afa85ea9897b2ddedae9988bcfe`
+- `traces/random_n10000000_jax_mps_sync_ir.json`
+  `afd7afc8aacea6085a0ac93119426c3f0d78a86db79b73b66b63f93fa1f550b0`
+- `traces/random_n10000_jax_mps_sync_ir.json`
+  `16ee2a6283cc8957f19d6f0823a6cc124912680f5f18ea3798afe81e177ef982`
 
 ## Addendum — 2026-07-16: tuned-JAX counter-experiment and scan correction
 
@@ -227,8 +242,9 @@ N=10^5 reflects jax-mps's roughly 0.15 s per-run floor, which dominates until
 the arrays are large enough to hide it; native has no such floor. Quote this
 experiment as "roughly 1.5-6x with less memory on the strongest fair JAX
 implementation we could write," not the 60x above, whenever the comparison is
-about backends rather than about shipped libraries. The raw records and
-summary are committed as `tuned_lgssm_nohist.json` beside this report.
+about backends rather than about shipped libraries. The raw records and summary
+remain available as `tuned_lgssm_nohist.json` in the
+[immutable result archive][native-results-archive].
 
 ### The scan memory number was our artifact
 
@@ -241,3 +257,7 @@ eval-every-4 cadence, peak memory falls from 200.7 MB to 12.0 MB, a factor of
 16.7 that matches the reported blowup. The SCAN timing comparison stands; the
 memory column for SCAN should be disregarded. The motif is retained unchanged
 because the protocol froze it, and this note is the correction.
+
+[native-harness-archive]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/native_vs_jax_mps
+[native-results-archive]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/results/2026-07-16-native-vs-jax-mps
+[native-tests-archive]: https://github.com/michaelellis003/smcx/tree/9bba1c57281a363fe69a71b3f108a2996bf03a18/tests
