@@ -90,6 +90,9 @@ jobs:
         run: uv run pytest -v --durations=0
 
   coverage:
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -109,7 +112,9 @@ jobs:
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7.0.0
         continue-on-error: true
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          slug: michaelellis003/smcx
+          use_oidc: true
 
   lock-check:
     runs-on: ubuntu-latest
