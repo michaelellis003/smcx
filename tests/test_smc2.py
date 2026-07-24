@@ -175,6 +175,137 @@ class TestStructure:
             )
 
 
+class TestCallbackValidation:
+    """Malformed SMC² callback outputs fail at the public boundary."""
+
+    @staticmethod
+    def _run(
+        *,
+        param_init=None,
+        log_prior=None,
+        inner_init=None,
+        inner_trans=None,
+        inner_logobs=None,
+        ess_threshold=0.0,
+    ):
+        defaults = _model()
+        return smcx.smc2(
+            jr.key(20),
+            defaults[0] if param_init is None else param_init,
+            defaults[1] if log_prior is None else log_prior,
+            defaults[2] if inner_init is None else inner_init,
+            defaults[3] if inner_trans is None else inner_trans,
+            defaults[4] if inner_logobs is None else inner_logobs,
+            jnp.zeros((2, 1)),
+            2,
+            2,
+            ess_threshold=ess_threshold,
+        )
+
+    def test_parameter_initializer_requires_floating_cloud(self):
+        def integer_params(key, count):
+            del key
+            return jnp.ones((count, 1), dtype=jnp.int32)
+
+        with pytest.raises(
+            ValueError,
+            match="param_initial_sampler output must have a floating dtype",
+        ):
+            self._run(param_init=integer_params)
+
+    @pytest.mark.parametrize(
+        ("inner_init", "message"),
+        [
+            (
+                lambda key, count, theta: [jnp.zeros(count, dtype=theta.dtype)],
+                "initial_sampler output must be a JAX array",
+            ),
+            (
+                lambda key, count, theta: jnp.zeros(
+                    (count + 1, 1), dtype=theta.dtype
+                ),
+                "initial_sampler output.*num_particles=2",
+            ),
+            (
+                lambda key, count, theta: jnp.zeros(count, dtype=theta.dtype),
+                "initial_sampler output must have shape",
+            ),
+            (
+                lambda key, count, theta: jnp.zeros(
+                    (count, 0), dtype=theta.dtype
+                ),
+                "initial_sampler output must have shape",
+            ),
+        ],
+    )
+    def test_inner_initializer_requires_dense_particle_cloud(
+        self, inner_init, message
+    ):
+        with pytest.raises(ValueError, match=message):
+            self._run(inner_init=inner_init)
+
+    @pytest.mark.parametrize(
+        ("inner_trans", "message"),
+        [
+            (
+                lambda key, state, theta: {"state": state},
+                "transition_sampler output must preserve.*PyTree structure",
+            ),
+            (
+                lambda key, state, theta: jnp.concatenate([state, state]),
+                "transition_sampler output.*preserve shape",
+            ),
+            (
+                lambda key, state, theta: state.astype(jnp.int32),
+                "transition_sampler output.*preserve dtype",
+            ),
+        ],
+    )
+    def test_transition_preserves_initial_state_contract(
+        self, inner_trans, message
+    ):
+        with pytest.raises(ValueError, match=message):
+            self._run(inner_trans=inner_trans)
+
+    @pytest.mark.parametrize(
+        ("inner_logobs", "message"),
+        [
+            (
+                lambda emission, state, theta: jnp.zeros(2),
+                r"log_observation_fn output must have shape \(4,\)",
+            ),
+            (
+                lambda emission, state, theta: jnp.asarray(0, dtype=jnp.int32),
+                "log_observation_fn output must have a floating dtype",
+            ),
+        ],
+    )
+    def test_observation_density_returns_floating_batch(
+        self, inner_logobs, message
+    ):
+        with pytest.raises(ValueError, match=message):
+            self._run(inner_logobs=inner_logobs)
+
+    @pytest.mark.parametrize(
+        ("log_prior", "message"),
+        [
+            (
+                lambda theta: jnp.zeros(2),
+                r"log_prior_fn output must have shape \(2,\)",
+            ),
+            (
+                lambda theta: jnp.asarray(0, dtype=jnp.int32),
+                "log_prior_fn output must have a floating dtype",
+            ),
+        ],
+    )
+    def test_rejuvenation_prior_returns_floating_batch(
+        self, log_prior, message
+    ):
+        with pytest.raises(ValueError, match=message):
+            self._run(log_prior=log_prior, ess_threshold=1.1)
+
+
 class TestCallbackFreshness:
     """Public calls observe current callback-object behavior."""
 

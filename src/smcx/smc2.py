@@ -29,8 +29,15 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 from jax import jit, vmap
+from jax.core import Tracer
 from jaxtyping import Array, Float
 
+from smcx._utils import (
+    _validate_initial_state,
+    _validate_log_density_batch,
+    _validate_particle_cloud,
+    _validate_state_tree,
+)
 from smcx.containers import SMC2Posterior
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import _TINY, _below_one, systematic
@@ -119,15 +126,18 @@ def smc2(
     Args:
         key: JAX PRNG key.
         param_initial_sampler: ``(key, num_theta) -> (num_theta,
-            param_dim)`` prior draw over the static parameters.
+            param_dim)`` floating prior draw over the static parameters.
         log_prior_fn: ``(theta) -> scalar`` parameter log-prior;
-            vmapped internally (used in the PMMH accept ratio).
+            vmapped internally (used in the PMMH accept ratio). Must
+            return a floating scalar.
         initial_sampler: inner ``(key, num_x, theta) -> (num_x,
-            state_dim)`` drawing the initial cloud given a parameter.
+            state_dim)`` drawing a dense JAX array given a parameter.
         transition_sampler: inner ``(key, state, theta) -> state``,
-            per-particle; vmapped internally.
+            per-particle; vmapped internally. Must preserve the initial
+            state shape and dtype.
         log_observation_fn: inner ``(emission, state, theta) ->
-            scalar``, per-particle; vmapped internally.
+            scalar``, per-particle; vmapped internally. Must return a
+            floating scalar.
         emissions: Observations ``(T, D)`` (or ``(T,)``,
             canonicalized).
         num_theta: Number of outer parameter particles.
@@ -146,8 +156,8 @@ def smc2(
         An :class:`~smcx.containers.SMC2Posterior`.
 
     Raises:
-        ValueError: Counts, emissions, or initial parameter particles are
-            structurally invalid.
+        ValueError: Counts, emissions, or a callback output is structurally
+            invalid.
         DegenerateWeightsError: The outer weights collapse (every
             parameter particle assigned an all--inf inner likelihood).
     """
@@ -181,10 +191,20 @@ def smc2(
             "param_initial_sampler output must have shape "
             f"({num_theta}, param_dim) with param_dim >= 1; got {theta.shape}"
         )
+    if not jnp.issubdtype(theta.dtype, jnp.floating):
+        raise ValueError(
+            "param_initial_sampler output must have a floating dtype; "
+            f"got {theta.dtype}"
+        )
     d_theta = theta.shape[-1]
     scale2 = _RWM_SCALE**2 / d_theta
-    batch_prior = vmap(log_prior_fn)
     log_n_x = math.log(num_x)
+
+    def batch_prior(th: Array) -> Array:
+        """Evaluate and validate the parameter-prior batch."""
+        values = cast(Array, vmap(log_prior_fn)(th))
+        _validate_log_density_batch(values, num_theta, name="log_prior_fn")
+        return values
 
     # --- batched inner kernels (flatten -> single vmap) ---------------
     @jit
@@ -199,11 +219,32 @@ def smc2(
     ]:
         k_init = jr.split(k0, num_theta)
         inner = vmap(lambda k, p: initial_sampler(k, num_x, p))(k_init, th)
+        if not isinstance(inner, (jax.Array, Tracer)):
+            raise ValueError(
+                "initial_sampler output must be a JAX array with "
+                "shape (num_x, state_dim)"
+            )
+        _validate_particle_cloud(
+            inner[0],
+            num_x,
+            name="initial_sampler output",
+        )
+        if inner.ndim != 3 or inner.shape[-1] == 0:
+            raise ValueError(
+                "initial_sampler output must have shape "
+                f"({num_x}, state_dim) with state_dim >= 1; "
+                f"got {inner.shape[1:]}"
+            )
         flat = inner.reshape(-1, inner.shape[-1])
         th_flat = jnp.repeat(th, num_x, axis=0)
         flat_log_g = cast(
             Float[Array, " flat_particle"],
             vmap(lambda s, p: log_observation_fn(y0, s, p))(flat, th_flat),
+        )
+        _validate_log_density_batch(
+            flat_log_g,
+            num_theta * num_x,
+            name="log_observation_fn",
         )
         log_g = flat_log_g.reshape(num_theta, num_x)
         inner_log_w, log_g_lse = _normalize_rows(log_g)
@@ -227,14 +268,33 @@ def smc2(
         keys_flat = jr.split(kt, num_theta * num_x)
         flat = parents.reshape(-1, parents.shape[-1])
         th_flat = jnp.repeat(th, num_x, axis=0)
-        moved = vmap(lambda k, s, p: transition_sampler(k, s, p))(
-            keys_flat, flat, th_flat
-        ).reshape(num_theta, num_x, -1)
+
+        def move_one(key_i: PRNGKeyT, state_i: Array, params_i: Array) -> Array:
+            state_signature = _validate_initial_state(
+                state_i,
+                name="inner state",
+            )
+            next_state = transition_sampler(key_i, state_i, params_i)
+            _validate_state_tree(
+                next_state,
+                state_signature,
+                name="transition_sampler output",
+            )
+            return next_state
+
+        moved = vmap(move_one)(keys_flat, flat, th_flat).reshape(
+            num_theta, num_x, -1
+        )
         flat_log_g = cast(
             Float[Array, " flat_particle"],
             vmap(lambda s, p: log_observation_fn(y_t, s, p))(
                 moved.reshape(-1, moved.shape[-1]), th_flat
             ),
+        )
+        _validate_log_density_batch(
+            flat_log_g,
+            num_theta * num_x,
+            name="log_observation_fn",
         )
         log_g = flat_log_g.reshape(num_theta, num_x)
         inner_log_w, log_g_lse = _normalize_rows(log_g)
