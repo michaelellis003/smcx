@@ -106,6 +106,21 @@ def _require_dense_particle_history(
     return particles
 
 
+def _require_full_particle_history(
+    posterior: ParticleFilterResult,
+    *,
+    diagnostic: str,
+) -> None:
+    """Reject final-only storage for diagnostics that need every time step."""
+    history_steps = posterior.filtered_log_weights.shape[0]
+    trace_steps = posterior.log_evidence_increments.shape[0]
+    if history_steps != trace_steps:
+        raise ValueError(
+            f"{diagnostic} requires full particle history; rerun the filter "
+            "with store_history=True"
+        )
+
+
 def _weighted_mean_field(
     log_weights: Float[Array, "ntime num_particles"],
     field: Float[Array, "ntime num_particles dim"],
@@ -314,7 +329,14 @@ def reconstruct_trajectories(
     Returns:
         A latent-state PyTree matching ``filtered_particles``. Every
         leaf has shape ``(ntime, num_particles, ...)``.
+
+    Raises:
+        ValueError: The posterior retains only its final particle cloud.
     """
+    _require_full_particle_history(
+        posterior,
+        diagnostic="reconstruct_trajectories",
+    )
     ancestors = posterior.ancestors
     num_particles = ancestors.shape[1]
     final_idx = jnp.arange(num_particles, dtype=ancestors.dtype)
@@ -400,7 +422,14 @@ def log_ml_variance(
 
     Returns:
         Per-step variance estimates, shape ``(ntime,)``.
+
+    Raises:
+        ValueError: The posterior retains only its final particle cloud.
     """
+    _require_full_particle_history(
+        posterior,
+        diagnostic="log_ml_variance",
+    )
     ancestors = posterior.ancestors
     ntime, num_particles = ancestors.shape
 
@@ -953,7 +982,9 @@ def diagnose(
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
+        ValueError: The posterior retains only its final particle cloud.
     """
+    _require_full_particle_history(posterior, diagnostic="diagnose")
     _require_dense_particle_history(posterior, diagnostic="diagnose")
     n = posterior.filtered_log_weights.shape[1]
     ess_vals = posterior.ess

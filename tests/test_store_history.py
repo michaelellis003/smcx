@@ -13,6 +13,7 @@ import math
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
+import pytest
 
 import smcx
 
@@ -88,6 +89,21 @@ def test_final_step_matches_full_history_run():
 
 def test_still_satisfies_protocol():
     assert isinstance(_run(False), smcx.ParticleFilterResult)
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        smcx.reconstruct_trajectories,
+        smcx.log_ml_variance,
+        smcx.diagnose,
+    ],
+)
+def test_full_history_diagnostics_reject_final_only(diagnostic):
+    posterior = _run(False, n=32)
+
+    with pytest.raises(ValueError, match="store_history=True"):
+        diagnostic(posterior)
 
 
 def test_guided_and_auxiliary_final_only():

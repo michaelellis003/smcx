@@ -338,7 +338,9 @@ Initialization receives time zero and the first emission. The step callback
 then receives times one through `ntime - 1`. With `store_history=True`, the
 posterior stores every particle record. With `store_history=False`, its
 particle, weight, and ancestor histories contain only the final record; ESS
-and evidence increments remain available for every time step.
+and evidence increments remain available for every time step. Trajectory
+reconstruction, genealogy-based variance, the combined diagnostic summary,
+and ArviZ export require the default full history.
 
 ## Combine auxiliary selection with a guided proposal
 

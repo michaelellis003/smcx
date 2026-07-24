@@ -25,6 +25,11 @@ multiple chains. `num_draws` controls how many equal-weight draws are
 resampled from each particle cloud; the key makes that resampling
 reproducible.
 
+Particle-filter export requires the default `store_history=True`. A
+final-only result keeps the full ESS and evidence traces but only one particle
+cloud, so those arrays do not share an ArviZ `time` dimension. Rerun with full
+history before exporting.
+
 ## Groups
 
 | Group or attribute | Contents |
