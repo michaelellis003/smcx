@@ -193,10 +193,10 @@ class TestParticleDiversity:
 
 
 class TestDiagnosticsJIT:
-    """All diagnostics should be JIT-compatible."""
+    """Array-returning diagnostics should be JIT-compatible."""
 
     def test_diagnostics_jit_compatible(self, lgssm_params, lgssm_data):
-        """Diagnostics compile and run under jax.jit."""
+        """Array diagnostics compile and run under jax.jit."""
         pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=500)
 
         jax.jit(weighted_mean)(pf_post)

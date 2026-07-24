@@ -41,12 +41,13 @@ Scoring rules:
 
 - :func:`crps` — Continuous Ranked Probability Score
 
-All functions are pure and stateless. Genealogy and predictive
-operations preserve structured latent-state PyTrees; Euclidean summaries
-require a dense ``(T, N, D)`` particle history. They operate on outputs from
-:class:`~smcx.containers.ParticleFilterPosterior` or
-:class:`~smcx.containers.LiuWestPosterior`, and are
-JIT-compatible.
+Array-returning functions are pure, stateless, and JIT-compatible for
+static shape and control arguments. Genealogy and predictive operations
+preserve structured latent-state PyTrees; Euclidean summaries require a
+dense ``(T, N, D)`` particle history. Parameter summaries accept
+:class:`~smcx.containers.LiuWestPosterior` and
+:class:`~smcx.containers.SMC2Posterior`. :func:`diagnose` converts results
+to Python scalars and strings, so it is intentionally host-only.
 """
 
 import math
@@ -66,7 +67,11 @@ from smcx._utils import (
     _validate_state_tree,
     _weighted_quantile_1d,
 )
-from smcx.containers import LiuWestPosterior, ParticleFilterResult
+from smcx.containers import (
+    LiuWestPosterior,
+    ParticleFilterResult,
+    SMC2Posterior,
+)
 from smcx.types import (
     EmissionSampler,
     ParticleCloud,
@@ -424,8 +429,12 @@ def log_ml_variance(
         Per-step variance estimates, shape ``(ntime,)``.
 
     Raises:
-        ValueError: The posterior retains only its final particle cloud.
+        ValueError: The lag is negative, or the posterior retains only its
+            final particle cloud.
     """
+    if lag is not None and lag < 0:
+        raise ValueError("lag must be nonnegative")
+
     _require_full_particle_history(
         posterior,
         diagnostic="log_ml_variance",
@@ -513,12 +522,12 @@ def replicated_log_ml(
 
 
 def param_weighted_mean(
-    posterior: LiuWestPosterior,
+    posterior: LiuWestPosterior | SMC2Posterior,
 ) -> Float[Array, "ntime param_dim"]:
     r"""Compute the weighted mean of parameter particles at each step.
 
     Args:
-        posterior: Liu-West filter posterior output.
+        posterior: Liu-West or SMC² posterior output.
 
     Returns:
         Weighted parameter means, shape ``(ntime, param_dim)``.
@@ -530,13 +539,13 @@ def param_weighted_mean(
 
 
 def param_weighted_quantile(
-    posterior: LiuWestPosterior,
+    posterior: LiuWestPosterior | SMC2Posterior,
     q: Float[Array, " num_quantiles"],
 ) -> Float[Array, "ntime num_quantiles param_dim"]:
     r"""Compute weighted quantiles of parameter particles at each step.
 
     Args:
-        posterior: Liu-West filter posterior output.
+        posterior: Liu-West or SMC² posterior output.
         q: Quantile levels in [0, 1], e.g. ``jnp.array([0.025, 0.975])``
             for a 95% credible interval.
 
@@ -964,6 +973,10 @@ def diagnose(
     scalar summaries and a list of plain-text warnings.  The
     thresholds are configurable; the defaults flag situations
     where the particle approximation is likely unreliable.
+
+    This convenience summary is host-only because it converts arrays
+    to Python scalars and constructs warning strings. Use the individual
+    array-returning diagnostics inside :func:`jax.jit`.
 
     Args:
         posterior: Particle filter posterior output.
