@@ -310,6 +310,7 @@ class TestPosteriorPredictiveSample:
     @pytest.mark.parametrize(
         ("emission", "message"),
         [
+            ([0.0], "must be a JAX array"),
             (jnp.asarray(0.0), "shape \\(emission_dim,\\)"),
             (jnp.empty((0,)), "shape \\(emission_dim,\\)"),
             (jnp.asarray([0], dtype=jnp.int32), "floating dtype"),

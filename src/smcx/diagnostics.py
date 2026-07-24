@@ -594,10 +594,9 @@ def posterior_predictive_sample(
             emission is not a nonempty floating vector.
     """
     ntime, n_particles = posterior.filtered_log_weights.shape
-    if num_samples is None:
-        num_samples = n_particles
-    if num_samples < 1:
+    if num_samples is not None and num_samples < 1:
         raise ValueError(f"num_samples must be >= 1; got {num_samples}")
+    num_samples = n_particles if num_samples is None else num_samples
 
     def _sample_one_step(
         log_weights_t: Float[Array, " num_particles"],
