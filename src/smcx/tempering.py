@@ -7,7 +7,9 @@ Anneals from the prior to the posterior
 $\pi_\phi \propto p(x)\, L(x)^\phi$ along an adaptive schedule
 [Del Moral, Doucet & Jasra, 2006]: the next temperature solves
 ``ESS(phi) = target_ess * N`` by bisection on the *resident*
-log-likelihood vector — a deterministic solve with no fresh sampling.
+log-likelihood vector when that target lies before ``phi = 1``. The
+terminal stage may instead stop above the target ESS. The solve is
+deterministic and uses no fresh sampling.
 Each stage reweights by
 $\ell \cdot \Delta\phi$ (evidence increment at the reweight,
 pre-move — the Del Moral et al. collapse), resamples, and applies a
@@ -163,11 +165,11 @@ def temper(
         num_particles: Number of particles N.
         num_mcmc_steps: RWM sweeps per temperature stage. Five may under-mix
             in moderate or high dimensions.
-        target_ess: The bisection solves ``ESS = target_ess * N``
-            for each stage's temperature increment.
+        target_ess: The bisection solves ``ESS = target_ess * N`` for
+            nonterminal stages. The terminal jump to ``phi = 1`` may finish
+            above the target.
         resampling_fn: Resampler applied at every
-            stage — the schedule drives ESS to the target by
-            construction.
+            stage.
         mutation_init_fn: Optional
             ``(position, tempered_logdensity_fn) -> state`` callback.
             State must be a JAX PyTree with a dense ``position`` field.
