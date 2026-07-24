@@ -780,3 +780,144 @@ class TestLiuWestInputs:
         expected = jnp.broadcast_to(jnp.array([1.0, 3.0, 6.0])[:, None], (3, 4))
         assert jnp.array_equal(post.filtered_particles[:, :, 0], expected)
         assert post.marginal_loglik == pytest.approx(0.0)
+
+
+class TestLiuWestInitialJointLaw:
+    """Initial states may condition on their aligned parameter particles."""
+
+    @staticmethod
+    def _transition(key, state, params):
+        del key, params
+        return state
+
+    @staticmethod
+    def _flat_log_density(emission, state, params):
+        del emission, state
+        return 0.0 * params[0]
+
+    def test_parameter_cloud_conditions_initial_states_under_jit(self):
+        """Parameters are sampled first and remain aligned with states."""
+        num_particles = 8
+
+        def param_initial_sampler(key, n):
+            return jr.uniform(key, (n, 1))
+
+        def param_initial_state_sampler(key, n, params):
+            return params + jr.normal(key, (n, 1))
+
+        @jax.jit
+        def run(key):
+            return liu_west_filter(
+                key=key,
+                initial_sampler=None,
+                transition_sampler=self._transition,
+                log_observation_fn=self._flat_log_density,
+                log_auxiliary_fn=self._flat_log_density,
+                param_initial_sampler=param_initial_sampler,
+                emissions=jnp.zeros((1, 1)),
+                num_particles=num_particles,
+                param_initial_state_sampler=param_initial_state_sampler,
+            )
+
+        key = jr.key(12)
+        posterior = run(key)
+        _, init_key = jr.split(key)
+        state_key, param_key = jr.split(init_key)
+        expected_params = param_initial_sampler(param_key, num_particles)
+        expected_states = param_initial_state_sampler(
+            state_key,
+            num_particles,
+            expected_params,
+        )
+
+        assert jnp.array_equal(posterior.filtered_params[0], expected_params)
+        # One fused addition may differ across eager/compiled backends;
+        # five float32 eps is the repository's cross-CPU/Metal budget.
+        tolerance = float(5 * np.finfo(np.float32).eps)
+        np.testing.assert_allclose(
+            posterior.filtered_particles[0],
+            expected_states,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+
+    def test_input_reaches_parameter_conditioned_initial_state(self):
+        """The t=0 input follows the aligned parameter cloud."""
+
+        def param_initial_sampler(key, n):
+            del key
+            dtype = jnp.asarray(0.0).dtype
+            return jnp.arange(n, dtype=dtype)[:, None]
+
+        def param_initial_state_sampler(key, n, params, input_t):
+            del key, n
+            return params + input_t[0]
+
+        posterior = liu_west_filter(
+            key=jr.key(3),
+            initial_sampler=None,
+            transition_sampler=lambda key, state, params, input_t: state,
+            log_observation_fn=(
+                lambda emission, state, params, input_t: 0.0 * state[0]
+            ),
+            log_auxiliary_fn=(
+                lambda emission, state, params, input_t: 0.0 * state[0]
+            ),
+            param_initial_sampler=param_initial_sampler,
+            emissions=jnp.zeros((1, 1)),
+            num_particles=4,
+            inputs=jnp.asarray([2.5]),
+            param_initial_state_sampler=param_initial_state_sampler,
+        )
+
+        expected_params = jnp.arange(4, dtype=jnp.asarray(0.0).dtype)[:, None]
+        assert jnp.array_equal(posterior.filtered_params[0], expected_params)
+        assert jnp.array_equal(
+            posterior.filtered_particles[0], expected_params + 2.5
+        )
+
+    @pytest.mark.parametrize(
+        ("initial_sampler", "param_initial_state_sampler"),
+        [
+            (lambda key, n: jnp.zeros((n, 1)), lambda key, n, params: params),
+            (None, None),
+        ],
+    )
+    def test_requires_exactly_one_initial_state_sampler(
+        self,
+        initial_sampler,
+        param_initial_state_sampler,
+    ):
+        """Independent and conditioned initializers are mutually exclusive."""
+        with pytest.raises(ValueError, match="exactly one"):
+            liu_west_filter(
+                key=jr.key(1),
+                initial_sampler=initial_sampler,
+                transition_sampler=self._transition,
+                log_observation_fn=self._flat_log_density,
+                log_auxiliary_fn=self._flat_log_density,
+                param_initial_sampler=lambda key, n: jnp.zeros((n, 1)),
+                emissions=jnp.zeros((1, 1)),
+                num_particles=4,
+                param_initial_state_sampler=param_initial_state_sampler,
+            )
+
+    def test_validates_parameter_conditioned_initial_state_output(self):
+        """The conditioned callback obeys the dense state-cloud contract."""
+        with pytest.raises(
+            ValueError,
+            match="param_initial_state_sampler output must have shape",
+        ):
+            liu_west_filter(
+                key=jr.key(2),
+                initial_sampler=None,
+                transition_sampler=self._transition,
+                log_observation_fn=self._flat_log_density,
+                log_auxiliary_fn=self._flat_log_density,
+                param_initial_sampler=lambda key, n: jnp.zeros((n, 1)),
+                emissions=jnp.zeros((1, 1)),
+                num_particles=4,
+                param_initial_state_sampler=(
+                    lambda key, n, params: jnp.zeros(n)
+                ),
+            )

@@ -10,6 +10,10 @@ r"""Liu-West particle filter for joint state-parameter estimation.
 
 The Liu-West filter (Liu & West, 2001) extends the auxiliary particle
 filter to estimate static model parameters alongside latent states.
+The initial particle cloud represents the joint prior
+$p(\phi)\,p(x_0 \mid \phi)$; the state prior may therefore be sampled
+from either a parameter-independent callback or an explicitly
+parameter-conditioned callback.
 Parameters are propagated using kernel density smoothing:
 
 $$
@@ -67,6 +71,8 @@ from smcx.types import (
     DenseInitialSampler,
     DenseInitialSamplerWithInput,
     InputSequence,
+    ParamCloudInitialStateSampler,
+    ParamCloudInitialStateSamplerWithInput,
     ParamInitialSampler,
     ParamLogObservationFn,
     ParamLogObservationFnWithInput,
@@ -203,24 +209,29 @@ def _validate_dense_initial_cloud(
 
 def _init_liu_west(
     init_key: PRNGKeyT,
-    initial_sampler: DenseInitialSampler | DenseInitialSamplerWithInput,
+    initial_sampler: DenseInitialSampler | DenseInitialSamplerWithInput | None,
     param_initial_sampler: ParamInitialSampler,
     log_observation_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
     first_emission: Array,
     num_particles: int,
     input_t: Float[Array, " input_dim"] | None = None,
+    param_initial_state_sampler: ParamCloudInitialStateSampler
+    | ParamCloudInitialStateSamplerWithInput
+    | None = None,
 ) -> tuple[Array, Array, Array, Array, Array, Array, _TreeSignature]:
     """Initialise Liu-West filter at t=0.
 
     Args:
         init_key: PRNG key for initialisation.
-        initial_sampler: State prior sampler.
+        initial_sampler: Parameter-independent state prior sampler.
         param_initial_sampler: Parameter prior sampler.
         log_observation_fn: Observation log-density.
         first_emission: First observation y_0.
         num_particles: Number of particles N.
         input_t: Optional t=0 input passed to the state initializer
             and after parameters to the observation callback.
+        param_initial_state_sampler: Optional state prior sampler that
+            receives the aligned parameter cloud before the optional input.
 
     Returns:
         Tuple of (particles_0, params_0, log_w_0, log_ev_0, ess_0,
@@ -228,23 +239,51 @@ def _init_liu_west(
     """
     log_n = jnp.asarray(math.log(num_particles))
     k_z, k_p = jr.split(init_key)
-    if input_t is None:
-        state_init = cast(DenseInitialSampler, initial_sampler)
-        particles_0 = state_init(k_z, num_particles)
+    if param_initial_state_sampler is None:
+        if input_t is None:
+            state_init = cast(DenseInitialSampler, initial_sampler)
+            particles_0 = state_init(k_z, num_particles)
+        else:
+            state_init_u = cast(DenseInitialSamplerWithInput, initial_sampler)
+            particles_0 = state_init_u(k_z, num_particles, input_t)
+        params_0 = param_initial_sampler(k_p, num_particles)
+        state_name = "initial_sampler output"
     else:
-        state_init_u = cast(DenseInitialSamplerWithInput, initial_sampler)
-        particles_0 = state_init_u(k_z, num_particles, input_t)
-    params_0 = param_initial_sampler(k_p, num_particles)
+        params_0 = param_initial_sampler(k_p, num_particles)
+        _validate_dense_initial_cloud(
+            params_0,
+            num_particles,
+            name="param_initial_sampler output",
+        )
+        if input_t is None:
+            param_state_init = cast(
+                ParamCloudInitialStateSampler,
+                param_initial_state_sampler,
+            )
+            particles_0 = param_state_init(k_z, num_particles, params_0)
+        else:
+            param_state_init_u = cast(
+                ParamCloudInitialStateSamplerWithInput,
+                param_initial_state_sampler,
+            )
+            particles_0 = param_state_init_u(
+                k_z,
+                num_particles,
+                params_0,
+                input_t,
+            )
+        state_name = "param_initial_state_sampler output"
     state_signature = _validate_dense_initial_cloud(
         particles_0,
         num_particles,
-        name="initial_sampler output",
+        name=state_name,
     )
-    _validate_dense_initial_cloud(
-        params_0,
-        num_particles,
-        name="param_initial_sampler output",
-    )
+    if param_initial_state_sampler is None:
+        _validate_dense_initial_cloud(
+            params_0,
+            num_particles,
+            name="param_initial_sampler output",
+        )
 
     if input_t is None:
         observation_fn = cast(ParamLogObservationFn, log_observation_fn)
@@ -413,7 +452,7 @@ def _liu_west_step(
 
 def liu_west_filter(
     key: PRNGKeyT,
-    initial_sampler: DenseInitialSampler | DenseInitialSamplerWithInput,
+    initial_sampler: DenseInitialSampler | DenseInitialSamplerWithInput | None,
     transition_sampler: ParamTransitionSampler
     | ParamTransitionSamplerWithInput,
     log_observation_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
@@ -426,6 +465,9 @@ def liu_west_filter(
     resampling_threshold: float | ResamplingCriterion = 0.5,
     *,
     inputs: InputSequence | None = None,
+    param_initial_state_sampler: ParamCloudInitialStateSampler
+    | ParamCloudInitialStateSamplerWithInput
+    | None = None,
     store_history: bool = True,
 ) -> LiuWestPosterior:
     r"""Run a Liu-West particle filter (Liu & West, 2001).
@@ -437,8 +479,9 @@ def liu_west_filter(
     Args:
         key: JAX PRNG key.
         initial_sampler: Function ``(key, num_particles[, input_0]) ->
-            particles`` that draws a nonempty floating array of shape
-            ``(num_particles, state_dim)``.
+            particles`` that draws a parameter-independent state prior as a
+            nonempty floating array of shape ``(num_particles, state_dim)``.
+            Set to ``None`` when using ``param_initial_state_sampler``.
         transition_sampler: Function
             ``(key, state, params[, input_t]) -> state`` that draws from
             the transition distribution while preserving the initial state
@@ -480,6 +523,11 @@ def liu_west_filter(
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)``. Inputs follow ``params`` in every callback;
             the parameter initializer remains input-independent.
+        param_initial_state_sampler: Optional
+            ``(key, num_particles, params[, input_0]) -> particles`` callback.
+            The filter samples and validates the parameter cloud first, then
+            passes the whole aligned cloud to this callback. Supply exactly
+            one of this callback and ``initial_sampler``.
         store_history: When False, only the final step's
             particle/param/weight/ancestor arrays are returned (time
             axis length 1); ``ess``/``log_evidence_increments`` stay
@@ -494,14 +542,20 @@ def liu_west_filter(
         DegenerateWeightsError: A particle-weight stage cannot be normalized
             (eager execution only; under ``jax.jit`` its nonfinite signal
             propagates).
-        ValueError: Inputs, particle count, shrinkage, the numeric threshold,
-            callback output, or a criterion result is structurally invalid.
+        ValueError: Initializer selection, inputs, particle count, shrinkage,
+            the numeric threshold, callback output, or a criterion result is
+            structurally invalid.
     """
     _validate_resampling_threshold(resampling_threshold)
     num_timesteps = _validate_filter_inputs(emissions, num_particles)
     if not 0.0 < shrinkage < 1.0:
         raise ValueError(
             f"shrinkage must be in the open interval (0, 1); got {shrinkage}"
+        )
+    if (initial_sampler is None) == (param_initial_state_sampler is None):
+        raise ValueError(
+            "exactly one of initial_sampler and "
+            "param_initial_state_sampler must be supplied"
         )
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
@@ -524,6 +578,7 @@ def liu_west_filter(
             log_observation_fn,
             emissions[0],
             num_particles,
+            param_initial_state_sampler=param_initial_state_sampler,
         )
         if inputs_arr is None
         else _init_liu_west(
@@ -534,6 +589,7 @@ def liu_west_filter(
             emissions[0],
             num_particles,
             inputs_arr[0],
+            param_initial_state_sampler,
         )
     )
     kernel_dtype = jnp.promote_types(params_0.dtype, jnp.float32)
