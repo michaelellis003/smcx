@@ -416,23 +416,28 @@ def log_ml_variance(
         W_t^n \Big)^2,
     $$
 
-    the sum over Eve classes of squared normalized-weight mass. For
-    large N this estimates the variance of ``marginal_loglik`` up to
-    time t, and it costs one filter run where `smcx.replicated_log_ml`
-    costs R. The estimate degenerates as
-    the genealogy coalesces; once a single Eve class remains the
-    function returns ``inf`` for that step (the run carries no
-    variance information there).
+    the sum over Eve classes of squared normalized-weight mass. Under
+    multinomial resampling, for large N this estimates the variance of
+    ``marginal_loglik`` up to time t, and it costs one filter run where
+    `smcx.replicated_log_ml` costs R. `ParticleFilterResult` does not record
+    its resampling scheme, so callers must establish that precondition.
+    Results from systematic, stratified, residual, or custom resampling are
+    uncalibrated genealogy heuristics.
 
-    Passing ``lag`` uses the ancestor at time ``t - lag`` instead of
-    time 0 (Olsson and Douc, 2019), trading a lag-controlled bias
-    for estimates that stay usable on long series.
+    The estimate degenerates as the genealogy coalesces; once a single Eve
+    class remains the function returns ``inf`` for that step (the run carries
+    no variance information there).
+
+    Passing ``lag`` uses the ancestor at time ``t - lag`` instead of time 0.
+    This ancestry-window heuristic is motivated by fixed-lag variance
+    estimation, but smcx has no independent calibration result for applying
+    it to this log-normalizer class-mass formula. Treat lagged values as
+    exploratory diagnostics rather than calibrated variance estimates.
 
     Args:
         posterior: Particle filter posterior with full history
             (``store_history=True``, the default).
-        lag: Optional fixed lag for the Olsson-Douc variant. ``None``
-            uses time-0 Eves (the exact Lee-Whiteley estimator).
+        lag: Optional ancestry-window lag. ``None`` uses time-0 Eves.
 
     Returns:
         Per-step variance estimates, shape ``(ntime,)``.
@@ -440,6 +445,15 @@ def log_ml_variance(
     Raises:
         ValueError: The lag is negative, or the posterior retains only its
             final particle cloud.
+
+    References:
+        Chan, H. P., and Lai, T. L. (2013). A general theory of particle
+        filters in hidden Markov models and some applications.
+        https://arxiv.org/abs/1312.5114
+        Lee, A., and Whiteley, N. (2018). Variance estimation in the particle
+        filter. https://doi.org/10.1093/biomet/asy028
+        Olsson, J., and Douc, R. (2019). Numerically stable online estimation
+        of variance in particle filters. https://arxiv.org/abs/1701.01001
     """
     if lag is not None and lag < 0:
         raise ValueError("lag must be nonnegative")
