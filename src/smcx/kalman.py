@@ -9,9 +9,9 @@ recursion of Rauch, Tung, and Striebel (1965). The nonlinear filters use
 either Schmidt's (1966) first-order approximation or Julier's (2002) scaled
 unscented transform for additive Gaussian noise.
 
-statsmodels and Dynamax validate the linear methods; Stone Soup and Dynamax
-validate the extended and unscented filters. They are comparison
-implementations, not implementation lineage; no code was copied or translated.
+statsmodels and Dynamax validate the linear methods. Stone Soup and Dynamax
+provide independent numerical comparisons for the nonlinear filters. They are
+not implementation lineage; no code was copied or translated.
 
 References:
     Kalman, R. E. (1960). A New Approach to Linear Filtering and
@@ -416,11 +416,23 @@ def _scaled_unscented_rule(
         raise ValueError(
             "alpha**2 * kappa + state_dim * beta must be nonnegative"
         )
+    dtype_info = jnp.finfo(dtype)
     scale_squared = alpha_squared * (state_dim + kappa)
+    if not math.isfinite(scale_squared) or scale_squared < float(
+        dtype_info.smallest_subnormal
+    ):
+        raise ValueError(
+            f"alpha, beta, and kappa produce non-finite weights in {dtype}"
+        )
     off_center_weight = 0.5 / scale_squared
     central_mean_weight = (scale_squared - state_dim) / scale_squared
     central_covariance_weight = central_mean_weight + 1.0 - alpha_squared + beta
-    covariance_rank_one_weight = off_center_weight**2 * (beta - alpha_squared)
+    correction = beta - alpha_squared
+    covariance_rank_one_weight = (
+        off_center_weight * off_center_weight * correction
+        if correction
+        else 0.0
+    )
     derived = (
         scale_squared,
         off_center_weight,
@@ -428,8 +440,7 @@ def _scaled_unscented_rule(
         central_covariance_weight,
         covariance_rank_one_weight,
     )
-    dtype_info = jnp.finfo(dtype)
-    if scale_squared < float(dtype_info.smallest_subnormal) or any(
+    if any(
         not math.isfinite(value) or abs(value) > float(dtype_info.max)
         for value in derived
     ):
@@ -1252,9 +1263,9 @@ def unscented_kalman_filter(
 
     The symmetric ``2d + 1`` rule defaults to
     ``(alpha, beta, kappa) = (1, 2, 0)``. Its default covariance weights
-    are nonnegative; center-relative arithmetic and a residual-sigma Joseph
-    update preserve that positive-semidefinite construction in finite
-    precision.
+    are nonnegative. Center-relative arithmetic and a residual-sigma update
+    avoid a subtractive covariance update; positive semidefiniteness remains
+    subject to floating-point roundoff.
 
     Args:
         initial_mean: Prior mean for ``x[0]``, shape ``(state_dim,)``.
