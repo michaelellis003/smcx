@@ -67,6 +67,25 @@ jobs:
       - name: Check license headers
         run: uv run python scripts/update_headers.py --check
 
+      - name: Check license-header discovery
+        shell: bash
+        run: |
+          mkdir -p .tox/license-fixture env/license-fixture
+          printf 'ignored = True\n' > .tox/license-fixture/ignored.py
+          printf 'ignored = True\n' > env/license-fixture/ignored.py
+          cp .tox/license-fixture/ignored.py .tox/license-fixture/expected.txt
+          uv run python scripts/update_headers.py --check
+          cmp .tox/license-fixture/expected.txt .tox/license-fixture/ignored.py
+          cmp .tox/license-fixture/expected.txt env/license-fixture/ignored.py
+
+          printf 'owned = True\n' > owned_license_probe.py
+          if output="$(uv run python scripts/update_headers.py --check 2>&1)"
+          then
+            echo 'Expected an untracked, nonignored Python file to fail.'
+            exit 1
+          fi
+          printf '%s\n' "$output" | grep -F 'owned_license_probe.py'
+
   pytest:
     runs-on: ubuntu-latest
     timeout-minutes: 15
