@@ -185,6 +185,67 @@ def _make_smc2_posterior() -> SMC2Posterior:
     )
 
 
+def _make_large_offset_posterior() -> ParticleFilterPosterior:
+    """Return base, translated, and constant represented float32 clouds."""
+    num_particles = 1_000
+    base = jnp.tile(
+        jnp.array([-2_048.0, -1_024.0, 2_048.0, 4_096.0], jnp.float32),
+        num_particles // 4,
+    )
+    offset = jnp.asarray(1e10, jnp.float32)
+    particles = jnp.stack((
+        base,
+        offset + base,
+        jnp.full_like(base, offset),
+    ))[:, :, None]
+    log_weights = jnp.full(
+        (3, num_particles),
+        -jnp.log(jnp.asarray(num_particles, jnp.float32)),
+    )
+    return ParticleFilterPosterior(
+        marginal_loglik=jnp.asarray(0.0, jnp.float32),
+        filtered_particles=particles,
+        filtered_log_weights=log_weights,
+        ancestors=jnp.broadcast_to(
+            jnp.arange(num_particles, dtype=jnp.int32),
+            (3, num_particles),
+        ),
+        ess=jnp.full((3,), float(num_particles), jnp.float32),
+        log_evidence_increments=jnp.zeros(3, jnp.float32),
+    )
+
+
+def _numpy_weighted_moments(
+    posterior: ParticleFilterPosterior,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute float64 oracle moments from represented posterior values."""
+    values = np.asarray(posterior.filtered_particles, dtype=np.float64)
+    log_weights = np.asarray(posterior.filtered_log_weights, dtype=np.float64)
+    weights = np.exp(log_weights - log_weights.max(axis=1, keepdims=True))
+    weights /= weights.sum(axis=1, keepdims=True)
+    means = np.sum(weights[:, :, None] * values, axis=1)
+    variances = np.sum(
+        weights[:, :, None] * (values - means[:, None, :]) ** 2,
+        axis=1,
+    )
+    return means, variances
+
+
+def _assert_translation_stable_means(
+    actual: np.ndarray,
+    expected: np.ndarray,
+) -> None:
+    """Check base, translated, and constant float32 means."""
+    assert actual.dtype == np.float32
+    # Four eps each covers weight normalization and the centered reduction.
+    tolerance = float(8 * np.finfo(np.float32).eps)
+    np.testing.assert_allclose(actual[0], expected[0], rtol=tolerance, atol=0.0)
+    # The translated output must ultimately round at its absolute scale.
+    atol = float(np.spacing(np.abs(np.float32(expected[1, 0]))))
+    np.testing.assert_allclose(actual[1], expected[1], rtol=0.0, atol=atol)
+    np.testing.assert_array_equal(actual[2], expected.astype(np.float32)[2])
+
+
 class TestWeightedMean:
     """Tests for weighted_mean."""
 
@@ -192,6 +253,14 @@ class TestWeightedMean:
         posterior = _make_posterior()
         expected = jnp.array([[0.0], [100.0], [-100.0]])
         assert jnp.array_equal(weighted_mean(posterior), expected)
+
+    def test_large_translation_matches_represented_float64_oracle(self):
+        posterior = _make_large_offset_posterior()
+        expected, _ = _numpy_weighted_moments(posterior)
+
+        actual = np.asarray(weighted_mean(posterior))
+
+        _assert_translation_stable_means(actual, expected)
 
 
 class TestWeightedVariance:
@@ -201,6 +270,21 @@ class TestWeightedVariance:
         """With uniform weights, matches unweighted variance."""
         result = weighted_variance(_make_posterior())
         assert jnp.array_equal(result, jnp.full((3, 1), 341.0))
+
+    def test_large_translation_preserves_represented_central_moment(self):
+        posterior = _make_large_offset_posterior()
+        _, expected = _numpy_weighted_moments(posterior)
+
+        actual = np.asarray(weighted_variance(posterior))
+
+        assert actual.dtype == np.float32
+        # Eight eps each budgets normalization, the centered mean, squaring,
+        # and the final reduction: 4 operations * 8 eps = 32 eps.
+        tolerance = float(32 * np.finfo(np.float32).eps)
+        np.testing.assert_allclose(
+            actual[:2], expected[:2], rtol=tolerance, atol=0.0
+        )
+        np.testing.assert_array_equal(actual[2], np.zeros(1, np.float32))
 
 
 class TestWeightedQuantile:
@@ -354,6 +438,22 @@ class TestParamWeightedMean:
         result = param_weighted_mean(post)
         expected = jnp.array([[0.0], [10.0], [-10.0]])
         assert jnp.allclose(result, expected, rtol=0.0, atol=1e-6)
+
+    def test_large_translation_matches_represented_float64_oracle(self):
+        from smcx.diagnostics import param_weighted_mean
+
+        posterior = _make_large_offset_posterior()
+        expected, _ = _numpy_weighted_moments(posterior)
+        liu_west = LiuWestPosterior(
+            *posterior,
+            filtered_params=posterior.filtered_particles,
+        )
+
+        for actual in (
+            param_weighted_mean(liu_west),
+            jax.jit(param_weighted_mean)(liu_west),
+        ):
+            _assert_translation_stable_means(np.asarray(actual), expected)
 
     def test_smc2_parameter_summaries(self):
         from smcx.diagnostics import (

@@ -3,7 +3,8 @@
 
 # Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
 # Apache-2.0. Modified: corrected Pareto-k and tail-ESS semantics,
-# genealogy and scoring diagnostics, and structured-state support.
+# genealogy and scoring diagnostics, translation-stable moments, and
+# structured-state support.
 
 r"""Diagnostic utilities for particle filter posteriors.
 
@@ -359,11 +360,19 @@ def _validate_particle_result_axes(
     return axes
 
 
+def _normalized_linear_weights(
+    log_weights: Float[Array, "ntime num_particles"],
+) -> Float[Array, "ntime num_particles"]:
+    """Return linear weights with their reduction residual removed."""
+    weights = vmap(normalize)(log_weights)
+    return weights / jnp.sum(weights, axis=1, keepdims=True)
+
+
 def _weighted_mean_field(
     log_weights: Float[Array, "ntime num_particles"],
     field: Float[Array, "ntime num_particles dim"],
 ) -> Float[Array, "ntime dim"]:
-    """Compute weighted mean of a (ntime, N, D) field.
+    """Compute an anchor-centered weighted mean of a (T, N, D) field.
 
     Args:
         log_weights: Log weights, shape ``(ntime, num_particles)``.
@@ -372,8 +381,22 @@ def _weighted_mean_field(
     Returns:
         Weighted means, shape ``(ntime, D)``.
     """
-    weights = vmap(normalize)(log_weights)
-    return jnp.einsum("tn,tnd->td", weights, field)
+    weights = _normalized_linear_weights(log_weights)
+    anchors = field[:, 0, :]
+    offsets = field - anchors[:, None, :]
+    return anchors + jnp.sum(weights[:, :, None] * offsets, axis=1)
+
+
+def _weighted_variance_field(
+    log_weights: Float[Array, "ntime num_particles"],
+    field: Float[Array, "ntime num_particles dim"],
+) -> Float[Array, "ntime dim"]:
+    """Compute a weighted variance entirely in shifted coordinates."""
+    weights = _normalized_linear_weights(log_weights)
+    offsets = field - field[:, :1, :]
+    offset_means = jnp.sum(weights[:, :, None] * offsets, axis=1)
+    deviations = offsets - offset_means[:, None, :]
+    return jnp.sum(weights[:, :, None] * deviations**2, axis=1)
 
 
 def _weighted_quantile_field(
@@ -410,6 +433,9 @@ def weighted_mean(
 ) -> Float[Array, "ntime state_dim"]:
     r"""Compute the weighted mean of particles at each time step.
 
+    The reduction is shifted by one particle before summation, so common
+    translations do not amplify floating-point weight-normalization error.
+
     Args:
         posterior: Particle filter posterior output.
 
@@ -419,6 +445,11 @@ def weighted_mean(
     Raises:
         TypeError: The posterior has structured rather than dense particles.
         ValueError: Consumed posterior arrays are malformed or misaligned.
+
+    References:
+        Chan, T. F., Golub, G. H., and LeVeque, R. J. (1983).
+        Algorithms for computing the sample variance: Analysis and
+        recommendations. https://doi.org/10.1080/00031305.1983.10483115
     """
     particles = _require_dense_particle_history(
         posterior, diagnostic="weighted_mean"
@@ -432,7 +463,9 @@ def weighted_variance(
     r"""Compute the weighted variance of particles at each time step.
 
     Uses the formula $V = \sum_i w_i (x_i - \mu)^2$, where $\mu$ is the
-    weighted mean.
+    weighted mean. Both $\mu$ and the deviations are computed in coordinates
+    shifted by one particle, avoiding reconstruction of the rounded absolute
+    mean inside the central-moment calculation.
 
     Args:
         posterior: Particle filter posterior output.
@@ -443,15 +476,19 @@ def weighted_variance(
     Raises:
         TypeError: The posterior has structured rather than dense particles.
         ValueError: Consumed posterior arrays are malformed or misaligned.
+
+    References:
+        Pébay, P., Terriberry, T. B., Kolla, H., and Bennett, J. (2016).
+        Numerically stable, scalable formulas for parallel and online
+        computation of higher-order multivariate central moments with
+        arbitrary weights. https://doi.org/10.1007/s00180-015-0637-z
     """
     particles = _require_dense_particle_history(
         posterior, diagnostic="weighted_variance"
     )
-    means = _weighted_mean_field(posterior.filtered_log_weights, particles)
-    deviations = particles - means[:, None, :]
-    return _weighted_mean_field(
+    return _weighted_variance_field(
         posterior.filtered_log_weights,
-        deviations**2,
+        particles,
     )
 
 
@@ -831,6 +868,8 @@ def param_weighted_mean(
     posterior: LiuWestPosterior | SMC2Posterior,
 ) -> Float[Array, "ntime param_dim"]:
     r"""Compute the weighted mean of parameter particles at each step.
+
+    Uses the same anchor-centered reduction as `weighted_mean`.
 
     Args:
         posterior: Liu-West or SMC² posterior output.
