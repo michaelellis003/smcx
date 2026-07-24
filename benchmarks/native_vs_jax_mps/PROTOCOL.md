@@ -4,6 +4,12 @@
 their original text and are dated. A full run made before an amendment cannot
 be silently reinterpreted under the amended criterion.*
 
+> **Archive status (2026-07-24).** The protocol below remains unchanged
+> historical evidence. Its retired executable
+> [harness][native-harness-archive] and audited
+> [raw outputs][native-results-archive] are preserved at immutable commit
+> `ac9572d`.
+
 ## Question
 
 For representative Apple-silicon probabilistic-computing motifs, does a
@@ -210,3 +216,6 @@ after a local M-series run.
   streams need not match; the R=20 Kalman gate establishes distributional
   correctness. The source is retained with the results, so contributors can
   challenge or improve the JAX arm.
+
+[native-harness-archive]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/native_vs_jax_mps
+[native-results-archive]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/results/2026-07-16-native-vs-jax-mps

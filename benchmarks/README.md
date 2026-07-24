@@ -28,7 +28,9 @@ The [MLX kill-test protocol](PROTOCOL.md), its
 [native-MLX versus jax-mps protocol](native_vs_jax_mps/PROTOCOL.md) and
 [result](results/2026-07-16-native-vs-jax-mps.md) record decisions made before
 smcx replaced its MLX core with JAX. These timings do not describe current
-smcx performance.
+smcx performance. The retired [harness][native-harness-archive] and
+[audited raw outputs][native-results-archive] remain available at immutable
+commit `ac9572d`.
 
 The [one-time Dynamax integration result][dynamax-result] is retained after its
 temporary adapter was removed. Completed MLX-era scripts remain available in
@@ -42,3 +44,5 @@ implementation and are not current reproduction commands.
 [killtest-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/killtest
 [smc2-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/smc2
 [exploratory-source]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/exploratory
+[native-harness-archive]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/native_vs_jax_mps
+[native-results-archive]: https://github.com/michaelellis003/smcx/tree/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/benchmarks/results/2026-07-16-native-vs-jax-mps

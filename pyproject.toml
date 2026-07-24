@@ -75,6 +75,7 @@ dev = [
     "ruff>=0.15.9",
     "ty>=0.0.29",
 ]
+
 [tool.ruff]
 # Target version enables modern syntax upgrades where possible
 target-version = "py311"
@@ -135,14 +136,6 @@ type = "github"
 
 [tool.semantic_release.publish]
 upload_to_vcs_release = true
-
-[tool.ty.src]
-exclude = [
-    # Native-vs-jax-mps workers run only inside pinned `uv run --no-project`
-    # environments, so their accelerator dependencies are unresolvable here.
-    "benchmarks/native_vs_jax_mps/jax_worker.py",
-    "benchmarks/native_vs_jax_mps/mlx_worker.py",
-]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
