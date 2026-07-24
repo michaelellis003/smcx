@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.13.4 (2026-07-24)
+
+### Bug Fixes
+
+- **diagnostics**: Align parameter and lag contracts
+  ([#140](https://github.com/michaelellis003/smcx/pull/140),
+  [`420487b`](https://github.com/michaelellis003/smcx/commit/420487b067f9df187b27217b69a025bc47c17e4a))
+
+- **resampling**: Validate public structural inputs
+  ([#139](https://github.com/michaelellis003/smcx/pull/139),
+  [`bca028c`](https://github.com/michaelellis003/smcx/commit/bca028c62e129052777e9a1103dddd4798e1279f))
+
+
 ## v1.13.3 (2026-07-24)
 
 ### Bug Fixes
