@@ -19,10 +19,15 @@ from jaxtyping import Array, Float, Int32
 
 from smcx.types import PRNGKeyT
 
-# Largest float32 below 1 (see module docstring).
-_BELOW_ONE = 1.0 - 2.0**-24
 # Avoids a zero denominator in the exponential-spacing construction.
 _TINY = 1e-30
+
+
+def _below_one(dtype: jnp.dtype) -> Array:
+    """Return the largest representable value below one for ``dtype``."""
+    one = jnp.ones((), dtype=dtype)
+    half_epsilon = jnp.asarray(jnp.finfo(dtype).eps / 2, dtype=dtype)
+    return one - half_epsilon
 
 
 def _scale_by_max(
@@ -74,7 +79,7 @@ def systematic(
     """
     u0 = jax.random.uniform(key)
     grid = (u0 + jnp.arange(num_samples)) / num_samples
-    queries = jnp.minimum(grid, _BELOW_ONE)
+    queries = jnp.minimum(grid, _below_one(weights.dtype))
     return _searchsorted_clipped(_normalized_cdf(weights), queries)
 
 
@@ -95,7 +100,7 @@ def stratified(
     """
     v = jax.random.uniform(key, (num_samples,))
     grid = (jnp.arange(num_samples) + v) / num_samples
-    queries = jnp.minimum(grid, _BELOW_ONE)
+    queries = jnp.minimum(grid, _below_one(weights.dtype))
     return _searchsorted_clipped(_normalized_cdf(weights), queries)
 
 
@@ -126,7 +131,10 @@ def multinomial(
     # The explicit associative prefix has the same semantics and stays O(N)
     # on both supported backends.
     s = jax.lax.associative_scan(jnp.maximum, jnp.cumsum(e))
-    queries = jnp.minimum(s[:-1] / jnp.maximum(s[-1], _TINY), _BELOW_ONE)
+    queries = jnp.minimum(
+        s[:-1] / jnp.maximum(s[-1], _TINY),
+        _below_one(weights.dtype),
+    )
     return _searchsorted_clipped(_normalized_cdf(weights), queries)
 
 
@@ -178,7 +186,8 @@ def residual(
     # statistics here would bias that selected suffix toward larger CDF
     # values: an arbitrary fixed subset is iid only before sorting.
     rem_queries = jnp.minimum(
-        jax.random.uniform(key, (m,), dtype=weights.dtype), _BELOW_ONE
+        jax.random.uniform(key, (m,), dtype=weights.dtype),
+        _below_one(weights.dtype),
     )
     rem_idx = _searchsorted_clipped(_normalized_cdf(residual_w), rem_queries)
     return jnp.where(positions < n_det, det_idx, rem_idx)

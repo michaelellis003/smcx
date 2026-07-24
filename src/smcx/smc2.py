@@ -33,7 +33,7 @@ from jaxtyping import Array, Float
 
 from smcx.containers import SMC2Posterior
 from smcx.exceptions import DegenerateWeightsError
-from smcx.resampling import _BELOW_ONE, _TINY, systematic
+from smcx.resampling import _TINY, _below_one, systematic
 from smcx.tempering import _chol_with_jitter, _weighted_cov_f64
 from smcx.types import (
     ParamInitialSampler,
@@ -86,7 +86,10 @@ def _batched_inner_resample(
     cdf = cdf / jnp.maximum(cdf[:, -1:], _TINY)
     n_theta = weights_2d.shape[0]
     u0 = jr.uniform(key, (n_theta, 1))
-    positions = jnp.minimum((jnp.arange(n_x) + u0) / n_x, _BELOW_ONE)
+    positions = jnp.minimum(
+        (jnp.arange(n_x) + u0) / n_x,
+        _below_one(weights_2d.dtype),
+    )
 
     def _row(cdf_row, q_row):
         idx = jnp.searchsorted(cdf_row, q_row, side="right")

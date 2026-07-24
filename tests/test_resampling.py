@@ -125,7 +125,7 @@ class TestContract:
         np.testing.assert_array_equal(ancestor, np.array([0]))
 
     @pytest.mark.skipif(
-        not jax.config.x64_enabled,
+        not jax.config.read("jax_enable_x64"),
         reason="float64 endpoint contract",
     )
     def test_public_systematic_preserves_float64_tail_mass(
