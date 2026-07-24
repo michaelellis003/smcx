@@ -1,6 +1,6 @@
 [project]
 name = "smcx"
-version = "1.12.0"
+version = "1.13.0"
 description = "State-space inference in JAX: Kalman and particle filters, tempered SMC, and SMC2 across CPU and accelerators"
 readme = "README.md"
 authors = [

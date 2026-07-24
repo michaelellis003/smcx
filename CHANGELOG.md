@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.0 (2026-07-24)
+
+### Features
+
+- **tempering**: Accept caller-owned mutation kernels
+  ([#109](https://github.com/michaelellis003/smcx/pull/109),
+  [`f449935`](https://github.com/michaelellis003/smcx/commit/f4499357c3b1053554f82d0160d9e7b7c4000af7))
+
+
 ## v1.12.0 (2026-07-24)
 
 ### Bug Fixes
