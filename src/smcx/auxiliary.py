@@ -36,6 +36,7 @@ import jax.random as jr
 from jax import lax, tree, vmap
 from jaxtyping import Array, Float, Int
 
+from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
@@ -73,6 +74,7 @@ class _AuxiliaryStepCarry(NamedTuple):
     """Dynamic state carried between auxiliary-filter scan steps."""
 
     state: ParticleState
+    log_evidence_compensation: Float[Array, ""]
     ancestors: Int[Array, " num_particles"]
 
 
@@ -189,13 +191,18 @@ def _auxiliary_step(
         log_first_sum + log_sum - log_num_particles,
         log_sum,
     )
+    log_evidence, correction = _neumaier_add(
+        jnp.asarray(state.log_marginal_likelihood),
+        carry.log_evidence_compensation,
+        log_ev_inc,
+    )
     new_state = ParticleState(
         particles=propagated,
         log_weights=log_w_norm,
-        log_marginal_likelihood=(state.log_marginal_likelihood + log_ev_inc),
+        log_marginal_likelihood=log_evidence,
     )
     ess_t = jnp.asarray(compute_ess(log_w_norm))
-    new_carry = _AuxiliaryStepCarry(new_state, ancestors)
+    new_carry = _AuxiliaryStepCarry(new_state, correction, ancestors)
     output = _AuxiliaryStepOutput(
         propagated,
         log_w_norm,
@@ -348,7 +355,11 @@ def auxiliary_filter(
         if inputs_arr is None
         else (step_keys, emissions[1:], inputs_arr[1:], time_indices)
     )
-    init_carry = _AuxiliaryStepCarry(init_state, identity_ancestors)
+    init_carry = _AuxiliaryStepCarry(
+        init_state,
+        jnp.zeros_like(log_ev_0),
+        identity_ancestors,
+    )
     if store_history:
         final_carry, outputs = lax.scan(_step, init_carry, scan_inputs)
         all_particles = _prepend_particle_history(
@@ -369,11 +380,15 @@ def auxiliary_filter(
     ess_0_arr: Array = jnp.asarray(ess_0)
     all_ess = _prepend(ess_0_arr, ess_rest)
     all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
+    final_log_evidence = (
+        final_state.log_marginal_likelihood
+        + final_carry.log_evidence_compensation
+    )
 
-    _raise_if_degenerate(final_state.log_marginal_likelihood)
+    _raise_if_degenerate(final_log_evidence)
 
     return ParticleFilterPosterior(
-        marginal_loglik=final_state.log_marginal_likelihood,
+        marginal_loglik=final_log_evidence,
         filtered_particles=all_particles,
         filtered_log_weights=all_log_w,
         ancestors=all_ancestors,

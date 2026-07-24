@@ -11,6 +11,7 @@ import jax.random as jr
 import numpy as np
 import pytest
 
+from smcx._numerics import _neumaier_add
 from smcx.auxiliary import auxiliary_filter
 from smcx.bootstrap import bootstrap_filter
 from tests._lgssm_reference import EXACT_LOG_LIKELIHOOD, REFERENCE_TIMES
@@ -199,7 +200,11 @@ def test_uncompiled_step_matches_public_and_compiled_scan(
         expected.filtered_log_weights[0],
         expected.log_evidence_increments[0],
     )
-    carry = _AuxiliaryStepCarry(state, expected.ancestors[0])
+    carry = _AuxiliaryStepCarry(
+        state,
+        jnp.zeros_like(state.log_marginal_likelihood),
+        expected.ancestors[0],
+    )
     step_input = _AuxiliaryStepInput(
         emissions[1], None, jnp.asarray(1, dtype=jnp.int32)
     )
@@ -226,9 +231,15 @@ def test_uncompiled_step_matches_public_and_compiled_scan(
         eager = advance(carry, step_input, step_key)
     compiled = jax.jit(advance)(carry, step_input, step_key)
     record = tuple(field[1] for field in expected[1:])
+    expected_total, expected_correction = _neumaier_add(
+        expected.log_evidence_increments[0],
+        jnp.zeros_like(expected.log_evidence_increments[0]),
+        expected.log_evidence_increments[1],
+    )
     expected_leaves = (
         *record[:2],
-        expected.marginal_loglik,
+        expected_total,
+        expected_correction,
         record[2],
         *record,
     )

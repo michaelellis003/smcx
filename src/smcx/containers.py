@@ -127,7 +127,9 @@ class ParticleFilterPosterior(NamedTuple):
 
     Follows the Dynamax ``PosteriorGSSMFiltered`` convention of storing
     the marginal log-likelihood as a scalar summary alongside the
-    time-indexed arrays.
+    time-indexed arrays. ``marginal_loglik`` uses Neumaier-compensated
+    accumulation; an ordinary floating-point reduction of the retained
+    increments can therefore differ on long series.
 
     With ``store_history=False``, particle, weight, and ancestor histories
     contain only the final row; ESS and evidence increments still cover all
@@ -145,7 +147,7 @@ class ParticleFilterPosterior(NamedTuple):
         ess: Effective sample size at each time step,
             shape ``(ntime,)``.
         log_evidence_increments: Per-step log marginal likelihood
-            increments, shape ``(ntime,)``.  These sum to
+            increments, shape ``(ntime,)``. Their compensated sum is
             ``marginal_loglik``.
     """
 
@@ -219,6 +221,7 @@ class LiuWestPosterior(NamedTuple):
     Extends `smcx.containers.ParticleFilterPosterior` with parameter samples.
     The Liu-West filter (Liu & West, 2001) jointly estimates latent
     states and static parameters using kernel density smoothing.
+    ``marginal_loglik`` uses Neumaier-compensated accumulation.
 
     Attributes:
         marginal_loglik: Scalar estimate of $\log p(y_{1:T})$.
@@ -231,7 +234,7 @@ class LiuWestPosterior(NamedTuple):
         ess: Effective sample size at each time step,
             shape ``(ntime,)``.
         log_evidence_increments: Per-step log marginal likelihood
-            increments, shape ``(ntime,)``.  These sum to
+            increments, shape ``(ntime,)``. Their compensated sum is
             ``marginal_loglik``.
         filtered_params: Parameter samples at each time step,
             shape ``(ntime, num_particles, param_dim)``.
