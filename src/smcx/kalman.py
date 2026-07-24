@@ -34,7 +34,7 @@ import math
 from typing import NamedTuple, cast
 
 import jax.numpy as jnp
-from jax import lax
+from jax import lax, vmap
 from jax.scipy.linalg import solve_triangular
 from jaxtyping import Array, Float, Shaped
 
@@ -94,6 +94,14 @@ class _SmootherState(NamedTuple):
 
     mean: Float[Array, " state_dim"]
     covariance: Float[Array, "state_dim state_dim"]
+
+
+class _ScaledUnscentedRule(NamedTuple):
+    """Stable coefficients for one symmetric scaled unscented rule."""
+
+    sigma_scale: Float[Array, ""]
+    off_center_weight: Float[Array, ""]
+    covariance_rank_one_weight: Float[Array, ""]
 
 
 def _symmetrize(
@@ -314,6 +322,237 @@ def _check_callback_array(
         raise ValueError(
             f"{name} must have shape {expected_shape}; got {value.shape}"
         )
+
+
+def _scaled_unscented_rule(
+    state_dim: int,
+    dtype: jnp.dtype,
+    alpha: float,
+    beta: float,
+    kappa: float,
+) -> _ScaledUnscentedRule:
+    """Validate and construct a symmetric scaled unscented rule."""
+    parameters = (("alpha", alpha), ("beta", beta), ("kappa", kappa))
+    for name, value in parameters:
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be finite")
+    if alpha <= 0.0:
+        raise ValueError("alpha must be greater than zero")
+    if state_dim + kappa <= 0.0:
+        raise ValueError("state_dim + kappa must be greater than zero")
+    alpha_squared = alpha * alpha
+    if alpha_squared * kappa + state_dim * beta < 0.0:
+        raise ValueError(
+            "alpha**2 * kappa + state_dim * beta must be nonnegative"
+        )
+    scale_squared = alpha_squared * (state_dim + kappa)
+    off_center_weight = 0.5 / scale_squared
+    central_mean_weight = (scale_squared - state_dim) / scale_squared
+    central_covariance_weight = central_mean_weight + 1.0 - alpha_squared + beta
+    covariance_rank_one_weight = off_center_weight**2 * (beta - alpha_squared)
+    derived = (
+        scale_squared,
+        off_center_weight,
+        central_mean_weight,
+        central_covariance_weight,
+        covariance_rank_one_weight,
+    )
+    dtype_info = jnp.finfo(dtype)
+    if scale_squared < float(dtype_info.smallest_subnormal) or any(
+        not math.isfinite(value) or abs(value) > float(dtype_info.max)
+        for value in derived
+    ):
+        raise ValueError(
+            f"alpha, beta, and kappa produce non-finite weights in {dtype}"
+        )
+    return _ScaledUnscentedRule(
+        jnp.asarray(math.sqrt(scale_squared), dtype=dtype),
+        jnp.asarray(off_center_weight, dtype=dtype),
+        jnp.asarray(covariance_rank_one_weight, dtype=dtype),
+    )
+
+
+def _sigma_points(
+    mean: Float[Array, " state_dim"],
+    covariance: Float[Array, "state_dim state_dim"],
+    rule: _ScaledUnscentedRule,
+) -> Float[Array, "num_sigma state_dim"]:
+    """Generate center-first, column-oriented symmetric sigma points."""
+    factor = jnp.linalg.cholesky(_symmetrize(covariance))
+    offsets = (rule.sigma_scale * factor).T
+    return jnp.concatenate((
+        mean[None],
+        mean[None] + offsets,
+        mean[None] - offsets,
+    ))
+
+
+def _unscented_moments(
+    values: Float[Array, "num_sigma value_dim"],
+    rule: _ScaledUnscentedRule,
+) -> tuple[
+    Float[Array, " value_dim"],
+    Float[Array, "value_dim value_dim"],
+]:
+    """Evaluate scaled-rule moments with center-relative arithmetic."""
+    center = values[0]
+    num_pairs = (values.shape[0] - 1) // 2
+    positive_deltas = values[1 : num_pairs + 1] - center
+    negative_deltas = values[num_pairs + 1 :] - center
+    delta_sum = (positive_deltas + negative_deltas).sum(axis=0)
+    mean = center + rule.off_center_weight * delta_sum
+    covariance = rule.off_center_weight * (
+        jnp.einsum(
+            "ij,ik->jk",
+            positive_deltas,
+            positive_deltas,
+        )
+        + jnp.einsum(
+            "ij,ik->jk",
+            negative_deltas,
+            negative_deltas,
+        )
+    ) + rule.covariance_rank_one_weight * jnp.outer(delta_sum, delta_sum)
+    return mean, _symmetrize(covariance)
+
+
+def _unscented_cross_covariance(
+    state_points: Float[Array, "num_sigma state_dim"],
+    transformed_points: Float[Array, "num_sigma value_dim"],
+    rule: _ScaledUnscentedRule,
+) -> Float[Array, "state_dim value_dim"]:
+    """Form a paired cross covariance without subtractive centering."""
+    state_dim = state_points.shape[1]
+    offsets = 0.5 * (
+        state_points[1 : state_dim + 1] - state_points[state_dim + 1 :]
+    )
+    transformed_differences = (
+        transformed_points[1 : state_dim + 1]
+        - transformed_points[state_dim + 1 :]
+    )
+    return rule.off_center_weight * offsets.T @ transformed_differences
+
+
+def _unscented_condition(
+    predicted_mean: Float[Array, " state_dim"],
+    predicted_covariance: Float[Array, "state_dim state_dim"],
+    observation_mean_fn: ObservationMeanFn,
+    observation_covariance: Float[Array, "observation_dim observation_dim"],
+    observation: Float[Array, " observation_dim"],
+    rule: _ScaledUnscentedRule,
+) -> tuple[
+    Float[Array, " state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, ""],
+]:
+    """Condition one Gaussian using a scaled unscented observation."""
+    state_points = _sigma_points(
+        predicted_mean,
+        predicted_covariance,
+        rule,
+    )
+    observation_points = vmap(observation_mean_fn)(state_points)
+    _check_callback_array(
+        observation_points,
+        (state_points.shape[0], observation.shape[0]),
+        "observation_mean_fn output",
+        predicted_mean.dtype,
+    )
+    observation_mean, transformed_covariance = _unscented_moments(
+        observation_points,
+        rule,
+    )
+    cross_covariance = _unscented_cross_covariance(
+        state_points,
+        observation_points,
+        rule,
+    )
+    innovation_covariance = _symmetrize(
+        transformed_covariance + observation_covariance
+    )
+    innovation_cholesky = jnp.linalg.cholesky(innovation_covariance)
+    lower_solution = solve_triangular(
+        innovation_cholesky,
+        cross_covariance.T,
+        lower=True,
+    )
+    gain = solve_triangular(
+        innovation_cholesky.T,
+        lower_solution,
+        lower=False,
+    ).T
+    residual = observation - observation_mean
+    filtered_mean = predicted_mean + gain @ residual
+    corrected_points = state_points - observation_points @ gain.T
+    _, residual_covariance = _unscented_moments(corrected_points, rule)
+    filtered_covariance = _symmetrize(
+        residual_covariance + gain @ observation_covariance @ gain.T
+    )
+    whitened_residual = solve_triangular(
+        innovation_cholesky,
+        residual,
+        lower=True,
+    )
+    observation_dim = residual.shape[0]
+    log_two_pi = jnp.asarray(math.log(2.0 * math.pi), dtype=residual.dtype)
+    log_evidence_increment = -0.5 * (
+        observation_dim * log_two_pi
+        + 2.0 * jnp.log(jnp.diag(innovation_cholesky)).sum()
+        + whitened_residual @ whitened_residual
+    )
+    return filtered_mean, filtered_covariance, log_evidence_increment
+
+
+def _unscented_filter_step(
+    state: _FilterState,
+    args: _ExtendedFilterStepInput,
+    transition_mean_fn: TransitionMeanFn,
+    observation_mean_fn: ObservationMeanFn,
+    rule: _ScaledUnscentedRule,
+) -> tuple[_FilterState, _FilterStepOutput]:
+    """Apply one pure unscented Kalman predict-and-condition step."""
+    state_points = _sigma_points(state.mean, state.covariance, rule)
+    transition_points = vmap(transition_mean_fn)(state_points)
+    _check_callback_array(
+        transition_points,
+        state_points.shape,
+        "transition_mean_fn output",
+        state.mean.dtype,
+    )
+    predicted_mean, transformed_covariance = _unscented_moments(
+        transition_points,
+        rule,
+    )
+    predicted_covariance = _symmetrize(
+        transformed_covariance + args.transition_covariance
+    )
+    filtered_mean, filtered_covariance, increment = _unscented_condition(
+        predicted_mean,
+        predicted_covariance,
+        observation_mean_fn,
+        args.observation_covariance,
+        args.emission,
+        rule,
+    )
+    evidence, compensation = _neumaier_add(
+        state.marginal_loglik,
+        state.log_evidence_compensation,
+        increment,
+    )
+    next_state = _FilterState(
+        filtered_mean,
+        filtered_covariance,
+        evidence,
+        compensation,
+    )
+    output = _FilterStepOutput(
+        predicted_mean,
+        predicted_covariance,
+        filtered_mean,
+        filtered_covariance,
+        increment,
+    )
+    return next_state, output
 
 
 def _extended_filter_step(
