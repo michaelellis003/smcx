@@ -2,6 +2,48 @@
 
 <!-- version list -->
 
+## v1.13.3 (2026-07-24)
+
+### Bug Fixes
+
+- **diagnostics**: Handle singleton Pareto estimates
+  ([#135](https://github.com/michaelellis003/smcx/pull/135),
+  [`abc986f`](https://github.com/michaelellis003/smcx/commit/abc986f7862d5a66d481da928ae67c7e5481c031))
+
+- **reporting**: Preserve adaptive tempering stages
+  ([#137](https://github.com/michaelellis003/smcx/pull/137),
+  [`2bbe5e4`](https://github.com/michaelellis003/smcx/commit/2bbe5e42e6282e9e3322c6a598f00594d46645ae))
+
+- **resampling**: Preserve dtype-specific tail mass
+  ([#134](https://github.com/michaelellis003/smcx/pull/134),
+  [`b8a847e`](https://github.com/michaelellis003/smcx/commit/b8a847ede4d929f0c3c205d8996235c9e22947b7))
+
+- **tempering**: Use a representable acceptance floor
+  ([#138](https://github.com/michaelellis003/smcx/pull/138),
+  [`ba26a74`](https://github.com/michaelellis003/smcx/commit/ba26a747a53be36782a889f5d3bc51f050130b3e))
+
+### Chores
+
+- **benchmarks**: Archive native MLX comparison harness
+  ([#127](https://github.com/michaelellis003/smcx/pull/127),
+  [`45cf05b`](https://github.com/michaelellis003/smcx/commit/45cf05b2977a50baa1fccf2bb07e1a5619fea9f6))
+
+- **benchmarks**: Retire MLX harnesses ([#125](https://github.com/michaelellis003/smcx/pull/125),
+  [`54c50c6`](https://github.com/michaelellis003/smcx/commit/54c50c651d881d6a831023cf9612a65857eea788))
+
+- **deps**: Bump actions/checkout from 7.0.0 to 7.0.1
+  ([#123](https://github.com/michaelellis003/smcx/pull/123),
+  [`19127b0`](https://github.com/michaelellis003/smcx/commit/19127b00284656f8f4a76263557ff269bd779569))
+
+- **deps**: Bump pypa/gh-action-pypi-publish from 1.14.0 to 1.14.1
+  ([#124](https://github.com/michaelellis003/smcx/pull/124),
+  [`7910a5f`](https://github.com/michaelellis003/smcx/commit/7910a5ffd8f22f54b9ae265bf3d4f7e3e84e053f))
+
+- **docs**: Remove retired notebook environment
+  ([#126](https://github.com/michaelellis003/smcx/pull/126),
+  [`da70ddf`](https://github.com/michaelellis003/smcx/commit/da70ddff453ec6aebddb6820fa5a661817e383c9))
+
+
 ## v1.13.2 (2026-07-24)
 
 ### Bug Fixes
