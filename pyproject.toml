@@ -134,9 +134,6 @@ convention = "google"
 # Protocol stubs: the class docstring documents the contract.
 "src/smcx/types.py" = ["D102"]
 "src/smcx/containers.py" = ["D102"]
-# Preserved research/verification scripts (see docs/research/*),
-# not library code — exempt from library-grade lint.
-"benchmarks/exploratory/*" = ["ALL"]
 # Kill-test harness: maintained, protocol-critical code — full lint
 # except docstrings on model closures/helpers.
 "benchmarks/killtest/*" = ["D101", "D102", "D103"]
@@ -183,7 +180,6 @@ exclude = [
     # Example notebooks: runtime-verified by execution; *fns unpacking
     # and blackjax's own stubs defeat static arity analysis.
     "docs/examples/**",
-    "benchmarks/exploratory/**",
     "benchmarks/killtest/**",
     "benchmarks/native_vs_jax_mps/jax_worker.py",
     "benchmarks/native_vs_jax_mps/mlx_worker.py",
