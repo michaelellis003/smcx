@@ -52,6 +52,51 @@ class TestSimulateOutputShapes:
         assert emissions.shape == (20, 1)
 
 
+@pytest.mark.parametrize(
+    ("emission", "message"),
+    [
+        ([0.0], "must be a JAX array"),
+        (jnp.asarray(0.0), "shape \\(emission_dim,\\)"),
+        (jnp.empty((0,)), "shape \\(emission_dim,\\)"),
+        (jnp.asarray([0], dtype=jnp.int32), "floating dtype"),
+    ],
+)
+def test_simulate_rejects_invalid_initial_emission(emission, message):
+    """The first emission establishes a nonempty floating vector contract."""
+    with pytest.raises(ValueError, match=message):
+        simulate(
+            jr.key(0),
+            lambda _key: jnp.zeros(1),
+            lambda _key, state: state,
+            lambda _key, _state: emission,
+            num_timesteps=1,
+        )
+
+
+@pytest.mark.parametrize(
+    ("later_emission", "message"),
+    [
+        (jnp.zeros(2), "preserve shape"),
+        (jnp.zeros(1, dtype=jnp.int32), "preserve dtype"),
+    ],
+)
+def test_simulate_rejects_emission_contract_drift(later_emission, message):
+    """Later emissions preserve the first emission's shape and dtype."""
+    emissions = iter((jnp.zeros(1), later_emission))
+
+    def emission_sampler(_key, _state):
+        return next(emissions)
+
+    with pytest.raises(ValueError, match=message):
+        simulate(
+            jr.key(0),
+            lambda _key: jnp.zeros(1),
+            lambda _key, state: state,
+            emission_sampler,
+            num_timesteps=2,
+        )
+
+
 def test_simulate_applies_callbacks_in_time_order():
     """The initial state is emitted before transitions begin."""
 

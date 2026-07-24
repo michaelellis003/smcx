@@ -26,6 +26,7 @@ from smcx._utils import (
     _canonicalize_inputs,
     _prepend,
     _prepend_state_history,
+    _validate_emission,
     _validate_initial_state,
     _validate_state_tree,
 )
@@ -67,7 +68,8 @@ def simulate(
             state's PyTree structure, leaf shapes, and dtypes.
         emission_sampler: Function ``(key, state[, input_t]) -> emission`` that
             draws from the emission distribution
-            :math:`p(y_t \mid z_t)`.
+            :math:`p(y_t \mid z_t)`. It returns a nonempty floating vector
+            with shape and dtype fixed across time.
         num_timesteps: Number of time steps :math:`T` to simulate.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)``. Input zero reaches initialization and the first
@@ -82,8 +84,8 @@ def simulate(
 
     Raises:
         ValueError: ``num_timesteps`` is less than one, inputs are malformed,
-            the initial state tree is empty, or a transition changes the
-            state structure, leaf shape, or dtype.
+            the initial state tree is empty, a transition changes the state
+            structure, or an emission has an invalid shape or dtype.
     """
     if num_timesteps < 1:
         raise ValueError(f"num_timesteps must be >= 1; got {num_timesteps}")
@@ -104,6 +106,9 @@ def simulate(
             z_0, name="initial_sampler output"
         )
         y_0 = emission_fn(k_y0, z_0)
+        emission_signature = _validate_emission(
+            y_0, name="emission_sampler output"
+        )
 
         def _step(
             z_prev: StateTree,
@@ -117,6 +122,11 @@ def simulate(
                 name="transition_sampler output",
             )
             y_t = emission_fn(k_y, z_t)
+            _validate_state_tree(
+                y_t,
+                emission_signature,
+                name="emission_sampler output",
+            )
             return z_t, (z_t, y_t)
 
         _, (states_rest, emissions_rest) = lax.scan(_step, z_0, step_keys)
@@ -129,6 +139,9 @@ def simulate(
             z_0, name="initial_sampler output"
         )
         y_0 = emission_fn_u(k_y0, z_0, inputs_arr[0])
+        emission_signature = _validate_emission(
+            y_0, name="emission_sampler output"
+        )
 
         def _step_with_input(
             z_prev: StateTree,
@@ -143,6 +156,11 @@ def simulate(
                 name="transition_sampler output",
             )
             y_t = emission_fn_u(k_y, z_t, input_t)
+            _validate_state_tree(
+                y_t,
+                emission_signature,
+                name="emission_sampler output",
+            )
             return z_t, (z_t, y_t)
 
         _, (states_rest, emissions_rest) = lax.scan(

@@ -196,6 +196,24 @@ def _validate_initial_state(state: object, *, name: str) -> _TreeSignature:
     return _array_tree_signature(state, name=name)
 
 
+def _validate_emission(emission: object, *, name: str) -> _TreeSignature:
+    """Require one nonempty floating emission vector."""
+    if not isinstance(emission, (jax.Array, Tracer)):
+        raise ValueError(
+            f"{name} must be a JAX array with shape (emission_dim,)"
+        )
+    if emission.ndim != 1 or emission.shape[0] == 0:
+        raise ValueError(
+            f"{name} must have shape (emission_dim,) with emission_dim >= 1; "
+            f"got {emission.shape}"
+        )
+    if not jnp.issubdtype(emission.dtype, jnp.floating):
+        raise ValueError(
+            f"{name} must have a floating dtype; got {emission.dtype}"
+        )
+    return _validate_initial_state(emission, name=name)
+
+
 def _gather_particles(
     particles: ParticleCloud,
     ancestors: Int[Array, " num_samples"],

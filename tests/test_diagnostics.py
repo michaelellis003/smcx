@@ -338,6 +338,38 @@ class TestCRPS:
 class TestPosteriorPredictiveSample:
     """Tests for posterior_predictive_sample."""
 
+    @pytest.mark.parametrize(
+        ("emission", "message"),
+        [
+            ([0.0], "must be a JAX array"),
+            (jnp.asarray(0.0), "shape \\(emission_dim,\\)"),
+            (jnp.empty((0,)), "shape \\(emission_dim,\\)"),
+            (jnp.asarray([0], dtype=jnp.int32), "floating dtype"),
+        ],
+    )
+    def test_rejects_invalid_emission(self, emission, message):
+        """Predictive emissions are nonempty floating vectors."""
+        with pytest.raises(ValueError, match=message):
+            posterior_predictive_sample(
+                jr.key(0),
+                _make_posterior(),
+                lambda _key, state: state,
+                lambda _key, _state: emission,
+                num_samples=2,
+            )
+
+    @pytest.mark.parametrize("num_samples", [0, -1])
+    def test_num_samples_must_be_positive(self, num_samples):
+        """An explicit predictive sample count must be positive."""
+        with pytest.raises(ValueError, match="num_samples must be >= 1"):
+            posterior_predictive_sample(
+                jr.key(0),
+                _make_posterior(),
+                lambda _key, state: state,
+                lambda _key, state: state,
+                num_samples=num_samples,
+            )
+
     def test_shape(self, lgssm_params):
         """Output shape is (ntime, num_samples, emission_dim)."""
         pf_post = _make_posterior()
