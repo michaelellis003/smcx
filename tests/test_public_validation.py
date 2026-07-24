@@ -389,9 +389,17 @@ def _run_temper(initial_sampler=_initial_sampler, **kwargs):
             {},
             "must be a JAX array",
         ),
+        (
+            lambda _key, count: jnp.zeros((count, 1), dtype=jnp.int32),
+            {},
+            "initial_sampler output must have a floating dtype",
+        ),
     ],
 )
-def test_temper_validates_public_structure(initial_sampler, kwargs, message):
+def test_temper_validates_public_structure(
+    monkeypatch, initial_sampler, kwargs, message
+):
+    monkeypatch.setattr(jaxtyping_config, "jaxtyping_disable", True)
     with pytest.raises(ValueError, match=message):
         _run_temper(initial_sampler, **kwargs)
 
