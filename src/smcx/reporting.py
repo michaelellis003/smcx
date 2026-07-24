@@ -72,6 +72,8 @@ def _construct_arviz(
     groups: dict[str, dict[str, np.ndarray]],
     dimensions: dict[str, list[str]],
     attrs: dict[str, dict[str, Any]],
+    diagnostics: dict[str, np.ndarray],
+    diagnostic_dimensions: dict[str, list[str]],
 ) -> Any:
     """Construct the installed ArviZ generation's native result."""
     try:
@@ -83,9 +85,16 @@ def _construct_arviz(
             'to_arviz requires ArviZ; install it with pip install "smcx[arviz]"'
         ) from error
 
+    xarray: Any = importlib.import_module("xarray")
+    diagnostic_group = xarray.Dataset({
+        name: (("run", *diagnostic_dimensions[name]), values)
+        for name, values in diagnostics.items()
+    })
     if not arviz.__version__.startswith("0."):
         arviz_base: Any = importlib.import_module("arviz_base")
-        return arviz_base.from_dict(groups, dims=dimensions, attrs=attrs)
+        result = arviz_base.from_dict(groups, dims=dimensions, attrs=attrs)
+        result["particle_diagnostics"] = diagnostic_group
+        return result
 
     supported = dict(groups)
     u_group = supported.pop("unconstrained_posterior", None)
@@ -96,6 +105,7 @@ def _construct_arviz(
     )
     if u_group is not None:
         result.add_groups({"unconstrained_posterior": u_group}, dims=dimensions)
+    result.add_groups({"particle_diagnostics": diagnostic_group})
     return result
 
 
@@ -156,17 +166,17 @@ def to_arviz(
         ).reshape(num_chains, ntime, draws)
         values = [run.filtered_particles for run in filter_runs]
         stats = {
-            "log_weights": jnp.swapaxes(log_weights, 1, 2)[:, None],
-            "ess": _stack(filter_runs, "ess")[:, None],
+            "log_weights": log_weights,
+            "ess": _stack(filter_runs, "ess"),
             "pareto_k": jnp.stack([
                 pareto_k_diagnostic(run) for run in filter_runs
-            ])[:, None],
+            ]),
             "log_evidence_increments": _stack(
                 filter_runs, "log_evidence_increments"
-            )[:, None],
+            ),
         }
         stat_dims = {name: ["time"] for name in stats}
-        stat_dims["log_weights"] = ["particle", "time"]
+        stat_dims["log_weights"] = ["time", "particle"]
         timed = True
     else:
         if draws == num_particles:
@@ -179,12 +189,10 @@ def to_arviz(
             )
         values = [run.particles for run in tempered_runs]
         stats = {
-            "log_weights": log_weights[:, None],
-            "temperatures": _stack(tempered_runs, "temperatures")[:, None],
-            "ess": _stack(tempered_runs, "ess")[:, None],
-            "acceptance_rates": _stack(tempered_runs, "acceptance_rates")[
-                :, None
-            ],
+            "log_weights": log_weights,
+            "temperatures": _stack(tempered_runs, "temperatures"),
+            "ess": _stack(tempered_runs, "ess"),
+            "acceptance_rates": _stack(tempered_runs, "acceptance_rates"),
         }
         stat_dims = {name: ["stage"] for name in stats}
         stat_dims["log_weights"] = ["particle"]
@@ -195,7 +203,6 @@ def to_arviz(
     )
     groups = {
         "posterior": posterior_group,
-        "sample_stats": {name: _host(value) for name, value in stats.items()},
     }
     if unconstrained is not None:
         u_values = (
@@ -211,10 +218,11 @@ def to_arviz(
         dimensions.update(u_dims)
     if emissions is not None:
         groups["observed_data"] = {"emissions": _host(emissions)}
-    dimensions.update(stat_dims)
     evidence = _host(jnp.stack([run.marginal_loglik for run in runs])).tolist()
     return _construct_arviz(
         groups,
         dimensions,
         {"posterior": {"marginal_loglik": evidence}},
+        {name: _host(value) for name, value in stats.items()},
+        stat_dims,
     )
