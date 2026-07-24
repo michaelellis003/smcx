@@ -34,6 +34,7 @@ from smcx._utils import (
     _prepend_particle_history,
     _raise_if_degenerate,
     _validate_filter_inputs,
+    _validate_log_density_batch,
     _validate_state_tree,
 )
 from smcx.containers import ParticleFilterPosterior, ParticleState
@@ -121,7 +122,8 @@ def guided_filter(
             only; under ``jax.jit`` the ``-inf`` marginal propagates).
         ValueError: Inputs are malformed, a criterion result is not a scalar
             Boolean, the initial state tree is empty or has a wrong leading
-            axis, or a proposal changes its structure, leaf shape, or dtype.
+            axis, a proposal changes its state contract, or a log-density
+            callback output is malformed.
     """
     num_timesteps = _validate_filter_inputs(emissions, num_particles)
     inputs_arr = (
@@ -242,6 +244,21 @@ def guided_filter(
                     y_t, z_new, z_old, input_t
                 )
             )(propagated, parents)
+        _validate_log_density_batch(
+            cast(Array, log_g),
+            num_particles,
+            name="log_observation_fn",
+        )
+        _validate_log_density_batch(
+            cast(Array, log_f),
+            num_particles,
+            name="log_transition_fn",
+        )
+        _validate_log_density_batch(
+            cast(Array, log_q),
+            num_particles,
+            name="log_proposal_fn",
+        )
         log_w_step = log_g + log_f - log_q
 
         log_w_unnorm = jnp.where(

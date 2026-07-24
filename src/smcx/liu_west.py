@@ -45,8 +45,11 @@ from smcx._utils import (
     _conditional_resample,
     _prepend,
     _raise_if_degenerate,
+    _TreeSignature,
     _validate_filter_inputs,
     _validate_log_density_batch,
+    _validate_particle_cloud,
+    _validate_state_tree,
 )
 from smcx.containers import LiuWestPosterior
 from smcx.resampling import systematic
@@ -70,6 +73,35 @@ from smcx.weights import log_normalize, normalize
 _Carry = tuple[Array, Array, Array, Array, Array]
 
 
+def _validate_dense_initial_cloud(
+    values: object,
+    num_particles: int,
+    *,
+    name: str,
+) -> _TreeSignature:
+    """Require one nonempty floating matrix with a particle axis."""
+    signature = _validate_particle_cloud(
+        values,
+        num_particles,
+        name=name,
+    )
+    if signature.paths != ("<root>",):
+        raise ValueError(
+            f"{name} must be a JAX array with shape (num_particles, dimension)"
+        )
+    array = cast(Array, values)
+    if array.ndim != 2 or array.shape[1] == 0:
+        raise ValueError(
+            f"{name} must have shape (num_particles, dimension) with "
+            f"dimension >= 1; got {array.shape}"
+        )
+    if not jnp.issubdtype(array.dtype, jnp.floating):
+        raise ValueError(
+            f"{name} must have a floating dtype; got {array.dtype}"
+        )
+    return signature
+
+
 def _init_liu_west(
     init_key: PRNGKeyT,
     initial_sampler: DenseInitialSampler | DenseInitialSamplerWithInput,
@@ -78,7 +110,7 @@ def _init_liu_west(
     first_emission: Array,
     num_particles: int,
     input_t: Float[Array, " input_dim"] | None = None,
-) -> tuple[Array, Array, Array, Array, Array, Array]:
+) -> tuple[Array, Array, Array, Array, Array, Array, _TreeSignature]:
     """Initialise Liu-West filter at t=0.
 
     Args:
@@ -93,7 +125,7 @@ def _init_liu_west(
 
     Returns:
         Tuple of (particles_0, params_0, log_w_0, log_ev_0, ess_0,
-        identity_ancestors).
+        identity_ancestors, state_signature).
     """
     log_n = jnp.asarray(math.log(num_particles))
     k_z, k_p = jr.split(init_key)
@@ -104,6 +136,16 @@ def _init_liu_west(
         state_init_u = cast(DenseInitialSamplerWithInput, initial_sampler)
         particles_0 = state_init_u(k_z, num_particles, input_t)
     params_0 = param_initial_sampler(k_p, num_particles)
+    state_signature = _validate_dense_initial_cloud(
+        particles_0,
+        num_particles,
+        name="initial_sampler output",
+    )
+    _validate_dense_initial_cloud(
+        params_0,
+        num_particles,
+        name="param_initial_sampler output",
+    )
 
     if input_t is None:
         observation_fn = cast(ParamLogObservationFn, log_observation_fn)
@@ -133,7 +175,15 @@ def _init_liu_west(
     log_ev_0 = log_sum_0 - log_n
     ess_0 = jnp.asarray(compute_ess(log_w_0))
     identity = jnp.arange(num_particles, dtype=jnp.int32)
-    return particles_0, params_0, log_w_0, log_ev_0, ess_0, identity
+    return (
+        particles_0,
+        params_0,
+        log_w_0,
+        log_ev_0,
+        ess_0,
+        identity,
+        state_signature,
+    )
 
 
 def liu_west_filter(
@@ -162,10 +212,12 @@ def liu_west_filter(
     Args:
         key: JAX PRNG key.
         initial_sampler: Function ``(key, num_particles[, input_0]) ->
-            particles`` that draws from the initial state distribution.
+            particles`` that draws a nonempty floating array of shape
+            ``(num_particles, state_dim)``.
         transition_sampler: Function
             ``(key, state, params[, input_t]) -> state`` that draws from
-            the transition distribution.
+            the transition distribution while preserving the initial state
+            shape and dtype.
         log_observation_fn: Function
             ``(emission, state, params[, input_t]) -> log_prob`` that
             evaluates the observation log-density.
@@ -174,8 +226,8 @@ def liu_west_filter(
             evaluates the look-ahead log-density.
         param_initial_sampler: Function
             ``(key, num_particles) -> params`` that draws from the
-            prior parameter distribution.  Returns array of shape
-            ``(num_particles, param_dim)``.
+            prior parameter distribution. Returns a nonempty floating array
+            of shape ``(num_particles, param_dim)``.
         emissions: Observed emissions, shape ``(T, D)``.
         num_particles: Number of particles :math:`N`.
         shrinkage: Shrinkage parameter :math:`a \in (0, 1)`.
@@ -235,6 +287,7 @@ def liu_west_filter(
         log_ev_0,
         ess_0,
         identity_ancestors,
+        state_signature,
     ) = (
         _init_liu_west(
             init_key,
@@ -295,6 +348,11 @@ def liu_west_filter(
                     particles, shrunk
                 ),
             )
+        _validate_log_density_batch(
+            log_aux,
+            num_particles,
+            name="log_auxiliary_fn",
+        )
         log_first_norm, log_first_sum = log_normalize(log_weights + log_aux)
         first_ess: Array = jnp.asarray(compute_ess(log_first_norm))
 
@@ -322,7 +380,17 @@ def liu_west_filter(
         keys = jr.split(k3, num_particles)
         if input_t is None:
             transition_fn = cast(ParamTransitionSampler, transition_sampler)
-            propagated = vmap(transition_fn)(
+
+            def _propagate(key_i, state_i, param_i):
+                next_state = transition_fn(key_i, state_i, param_i)
+                _validate_state_tree(
+                    next_state,
+                    state_signature,
+                    name="transition_sampler output",
+                )
+                return next_state
+
+            propagated = vmap(_propagate)(
                 keys,
                 particles[ancestors],
                 new_params,
@@ -331,11 +399,20 @@ def liu_west_filter(
             transition_fn_u = cast(
                 ParamTransitionSamplerWithInput, transition_sampler
             )
-            propagated = vmap(transition_fn_u, in_axes=(0, 0, 0, None))(
+
+            def _propagate_with_input(key_i, state_i, param_i):
+                next_state = transition_fn_u(key_i, state_i, param_i, input_t)
+                _validate_state_tree(
+                    next_state,
+                    state_signature,
+                    name="transition_sampler output",
+                )
+                return next_state
+
+            propagated = vmap(_propagate_with_input)(
                 keys,
                 particles[ancestors],
                 new_params,
-                input_t,
             )
 
         # 4. Second-stage weights
@@ -357,6 +434,11 @@ def liu_west_filter(
                     propagated, new_params
                 ),
             )
+        _validate_log_density_batch(
+            log_obs,
+            num_particles,
+            name="log_observation_fn",
+        )
         log_w_unnorm = jnp.where(
             do_resample,
             log_obs - log_aux[ancestors],

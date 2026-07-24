@@ -38,6 +38,7 @@ from smcx._utils import (
     _raise_if_degenerate,
     _TreeSignature,
     _validate_filter_inputs,
+    _validate_log_density_batch,
     _validate_particle_cloud,
     _validate_state_tree,
 )
@@ -207,6 +208,11 @@ def _bootstrap_particle_step(
     sample = tree.map(lambda leaf: leaf[0], propagated)
     _validate_state_tree(
         sample, state_signature, name="transition_sampler output"
+    )
+    _validate_log_density_batch(
+        cast(Array, log_obs),
+        num_particles,
+        name="log_observation_fn",
     )
 
     log_w_unnorm = jnp.where(
@@ -546,7 +552,8 @@ def bootstrap_filter(
     Raises:
         ValueError: Inputs are malformed, a criterion result is not a scalar
             Boolean, the initial state tree is empty or has a wrong leading
-            axis, or a transition changes its structure, leaf shape, or dtype.
+            axis, a transition changes its state contract, or an observation
+            callback output is malformed.
     """
     num_timesteps = _validate_filter_inputs(emissions, num_particles)
     inputs_arr = (
