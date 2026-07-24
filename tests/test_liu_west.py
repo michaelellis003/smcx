@@ -15,6 +15,7 @@ import jax.random as jr
 import numpy as np
 import pytest
 
+import smcx.liu_west as lw
 from smcx.liu_west import liu_west_filter
 from tests.conftest import _mvn_logpdf, _mvn_sample
 
@@ -144,6 +145,47 @@ def _make_liu_west_fns():
         log_auxiliary_fn,
         param_initial_sampler,
     )
+
+
+def test_uncompiled_step_matches_compiled_scan():
+    _, transition, observation, auxiliary, _ = _make_conjugate_fns()
+    num_particles, shrinkage = 16, jnp.asarray(0.95)
+    carry = lw._LiuWestStepCarry(
+        jnp.zeros((num_particles, 1)),
+        jnp.linspace(-1.0, 1.0, num_particles)[:, None],
+        jnp.full(num_particles, -math.log(num_particles)),
+        jnp.asarray(0.0),
+        jnp.arange(num_particles, dtype=jnp.int32),
+    )
+    signature = lw._validate_dense_initial_cloud(carry.particles, 16, name="x")
+
+    def advance(current):
+        return lw._liu_west_step(
+            current,
+            lw._LiuWestStepInput(jnp.asarray([0.5]), None, jnp.int32(1)),
+            jr.key(23),
+            transition_sampler=transition,
+            log_observation_fn=observation,
+            log_auxiliary_fn=auxiliary,
+            resampling_fn=lw.systematic,
+            resampling_threshold=1.1,
+            log_num_particles=jnp.asarray(math.log(num_particles)),
+            shrinkage=shrinkage,
+            kernel_variance=1.0 - shrinkage**2,
+            state_signature=signature,
+        )
+
+    with jax.disable_jit():
+        eager = advance(carry)
+    compiled = jax.jit(advance)(carry)
+    # Fixed-key tolerance is five float32 eps for CPU/Metal rounding.
+    tolerance = float(5 * np.finfo(np.float32).eps)
+    for actual, expected in zip(
+        jax.tree.leaves(eager), jax.tree.leaves(compiled), strict=True
+    ):
+        np.testing.assert_allclose(
+            actual, expected, rtol=tolerance, atol=tolerance
+        )
 
 
 class TestLiuWestConjugateReference:
