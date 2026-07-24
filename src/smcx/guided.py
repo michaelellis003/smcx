@@ -33,6 +33,7 @@ from smcx._utils import (
     _prepend,
     _prepend_particle_history,
     _raise_if_degenerate,
+    _validate_filter_inputs,
     _validate_state_tree,
 )
 from smcx.containers import ParticleFilterPosterior, ParticleState
@@ -122,10 +123,9 @@ def guided_filter(
             Boolean, the initial state tree is empty or has a wrong leading
             axis, or a proposal changes its structure, leaf shape, or dtype.
     """
+    num_timesteps = _validate_filter_inputs(emissions, num_particles)
     inputs_arr = (
-        None
-        if inputs is None
-        else _canonicalize_inputs(inputs, emissions.shape[0])
+        None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
     )
     key, init_key = jr.split(key)
     log_n = jnp.asarray(math.log(num_particles))
@@ -272,8 +272,8 @@ def guided_filter(
         # scan stacks just the scalar traces.
         return (new_state, ess_t, ancestors), (ess_t, log_ev_inc)
 
-    step_keys = jr.split(key, emissions.shape[0] - 1)
-    time_indices = jnp.arange(1, emissions.shape[0], dtype=jnp.int32)
+    step_keys = jr.split(key, num_timesteps - 1)
+    time_indices = jnp.arange(1, num_timesteps, dtype=jnp.int32)
     scan_inputs = (
         (step_keys, emissions[1:], time_indices)
         if inputs_arr is None

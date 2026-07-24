@@ -45,6 +45,42 @@ _StateHistoryTail: TypeAlias = PyTree[Shaped[Array, "remaining_time ..."]]
 _SampledCloud: TypeAlias = PyTree[Shaped[Array, "num_samples ..."]]
 
 
+def _validate_filter_inputs(
+    emissions: Float[Array, "ntime emission_dim"],
+    num_particles: int,
+) -> int:
+    """Validate the common structural inputs of a particle filter."""
+    if emissions.ndim != 2:
+        raise ValueError(
+            "emissions must have shape (T, emission_dim); "
+            f"got ndim={emissions.ndim}"
+        )
+    num_timesteps = emissions.shape[0]
+    if num_timesteps == 0:
+        raise ValueError("emissions must contain at least one row")
+    if num_particles < 1:
+        raise ValueError(f"num_particles must be >= 1; got {num_particles}")
+    return num_timesteps
+
+
+def _validate_log_density_batch(
+    values: Array,
+    num_particles: int,
+    *,
+    name: str,
+) -> None:
+    """Require one floating log-density value per particle."""
+    if values.shape != (num_particles,):
+        raise ValueError(
+            f"{name} output must have shape ({num_particles},); "
+            f"got {values.shape}"
+        )
+    if not jnp.issubdtype(values.dtype, jnp.floating):
+        raise ValueError(
+            f"{name} output must have a floating dtype; got {values.dtype}"
+        )
+
+
 def _prepend(first: Array, rest: Array) -> Array:
     """Prepend a single leading slice to an array along axis 0.
 
@@ -314,6 +350,11 @@ def _init_standard(
             Array,
             vmap(lambda z: obs_fn_u(first_emission, z, input_t))(particles_0),
         )
+    _validate_log_density_batch(
+        log_obs_0,
+        num_particles,
+        name="log_observation_fn",
+    )
     log_w_0, log_sum_0 = log_normalize(log_obs_0)
     log_ev_0 = log_sum_0 - log_n
     ess_0: Array = jnp.asarray(compute_ess(log_w_0))

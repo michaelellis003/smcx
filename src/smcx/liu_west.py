@@ -45,6 +45,8 @@ from smcx._utils import (
     _conditional_resample,
     _prepend,
     _raise_if_degenerate,
+    _validate_filter_inputs,
+    _validate_log_density_batch,
 )
 from smcx.containers import LiuWestPosterior
 from smcx.resampling import systematic
@@ -122,6 +124,11 @@ def _init_liu_west(
             ),
         )
 
+    _validate_log_density_batch(
+        log_obs_0,
+        num_particles,
+        name="log_observation_fn",
+    )
     log_w_0, log_sum_0 = log_normalize(log_obs_0)
     log_ev_0 = log_sum_0 - log_n
     ess_0 = jnp.asarray(compute_ess(log_w_0))
@@ -205,13 +212,16 @@ def liu_west_filter(
         the marginal log-likelihood estimate, and ESS trace.
 
     Raises:
-        ValueError: ``inputs`` is malformed or a criterion result is not a
-            scalar Boolean.
+        ValueError: Inputs, particle count, shrinkage, callback output, or a
+            criterion result is structurally invalid.
     """
+    num_timesteps = _validate_filter_inputs(emissions, num_particles)
+    if not 0.0 < shrinkage < 1.0:
+        raise ValueError(
+            f"shrinkage must be in the open interval (0, 1); got {shrinkage}"
+        )
     inputs_arr = (
-        None
-        if inputs is None
-        else _canonicalize_inputs(inputs, emissions.shape[0])
+        None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
     )
     key, init_key = jr.split(key)
     log_n = jnp.asarray(math.log(num_particles))
@@ -382,8 +392,8 @@ def liu_west_filter(
         return new_carry, (ess_t, log_ev_inc)
 
     init_carry = (particles_0, params_0, log_w_0, log_ev_0, identity_ancestors)
-    step_keys = jr.split(key, emissions.shape[0] - 1)
-    time_indices = jnp.arange(1, emissions.shape[0], dtype=jnp.int32)
+    step_keys = jr.split(key, num_timesteps - 1)
+    time_indices = jnp.arange(1, num_timesteps, dtype=jnp.int32)
     scan_inputs = (
         (step_keys, emissions[1:], time_indices)
         if inputs_arr is None

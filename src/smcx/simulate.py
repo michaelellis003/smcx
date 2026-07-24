@@ -81,10 +81,12 @@ def simulate(
         ``(T, emission_dim)``.
 
     Raises:
-        ValueError: Inputs are malformed, the initial state tree is empty,
-            or a transition changes the state structure, leaf shape, or
-            dtype.
+        ValueError: ``num_timesteps`` is less than one, inputs are malformed,
+            the initial state tree is empty, or a transition changes the
+            state structure, leaf shape, or dtype.
     """
+    if num_timesteps < 1:
+        raise ValueError(f"num_timesteps must be >= 1; got {num_timesteps}")
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
     )
