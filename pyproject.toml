@@ -7,6 +7,7 @@ authors = [
     { name = "Michael Ellis", email = "michaelellis003@gmail.com" }
 ]
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 keywords = [
     "jax",
