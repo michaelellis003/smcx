@@ -9,7 +9,11 @@ import jax.random as jr
 import pytest
 
 from smcx.bootstrap import bootstrap_filter
-from smcx.containers import LiuWestPosterior, ParticleFilterPosterior
+from smcx.containers import (
+    LiuWestPosterior,
+    ParticleFilterPosterior,
+    SMC2Posterior,
+)
 from smcx.diagnostics import (
     cumulative_log_score,
     diagnose,
@@ -86,6 +90,19 @@ def _make_liu_west_posterior():
     return LiuWestPosterior(
         *posterior,
         filtered_params=posterior.filtered_particles / 10.0,
+    )
+
+
+def _make_smc2_posterior() -> SMC2Posterior:
+    """Return the same deterministic parameter cloud as an SMC² result."""
+    posterior = _make_liu_west_posterior()
+    return SMC2Posterior(
+        marginal_loglik=posterior.marginal_loglik,
+        filtered_params=posterior.filtered_params,
+        filtered_log_weights=posterior.filtered_log_weights,
+        ess=posterior.ess,
+        log_evidence_increments=posterior.log_evidence_increments,
+        acceptance_rates=jnp.zeros_like(posterior.ess),
     )
 
 
@@ -228,6 +245,20 @@ class TestParamWeightedMean:
         result = param_weighted_mean(post)
         expected = jnp.array([[0.0], [10.0], [-10.0]])
         assert jnp.allclose(result, expected, rtol=0.0, atol=1e-6)
+
+    def test_smc2_parameter_summaries(self):
+        from smcx.diagnostics import (
+            param_weighted_mean,
+            param_weighted_quantile,
+        )
+
+        posterior = _make_smc2_posterior()
+        mean = param_weighted_mean(posterior)
+        quantiles = param_weighted_quantile(posterior, jnp.array([0.5]))
+
+        expected = jnp.array([[0.0], [10.0], [-10.0]])
+        assert jnp.allclose(mean, expected, rtol=0.0, atol=1e-6)
+        assert jnp.allclose(quantiles[:, 0, :], expected, rtol=0.0, atol=1e-6)
 
 
 class TestParamWeightedQuantile:
