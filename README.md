@@ -166,6 +166,11 @@ observed differences are recorded with the frozen
 [extended](tests/_extended_kalman_reference.py) and
 [unscented](tests/_unscented_kalman_reference.py) fixtures.
 
+The auxiliary-guided runner recipe is distributionally cross-checked against
+particles 0.4's pinned
+[`AuxiliaryPF` composition](https://github.com/nchopin/particles/blob/c5fcb0b6d34b3c8efea6f6dc21d73e0e91287d9f/particles/state_space_models.py#L352-L428)
+and [SMC bookkeeping](https://github.com/nchopin/particles/blob/c5fcb0b6d34b3c8efea6f6dc21d73e0e91287d9f/particles/core.py#L299-L359).
+
 These projects are numerical comparison implementations, not code
 lineage; no implementation code was copied or translated.
 
