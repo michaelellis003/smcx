@@ -370,6 +370,7 @@ def test_unscented_nondefault_rule_matches_scalar_oracle():
         kappa=1.0,
     )
     expected_logpdf = -0.5 * (math.log(2.0 * math.pi) + 1.0)
+    # Four f32 eps covers the scalar transform and log-density operation depth.
     budget = 4 * np.finfo(np.float32).eps
 
     np.testing.assert_allclose(
@@ -404,6 +405,7 @@ def test_unscented_filter_regenerates_points_after_process_noise():
         jnp.zeros((2, 1), dtype=jnp.float32),
     )
     expected = -0.5 * (math.log(6.0 * math.pi) + 1.0 / 3.0)
+    # Four f32 eps covers both scalar transform and log-density evaluations.
     budget = 4 * np.finfo(np.float32).eps
 
     np.testing.assert_allclose(
@@ -449,6 +451,8 @@ def test_unscented_float32_update_is_psd_and_accurate():
         [9.999998754e-11, 5.046806022e-15],
         [5.046806022e-15, 9.990034666e-7],
     ])
+    # The innovation condition number is 9.94e6 and observed MPS error 5.01e-8.
+    # Four eps still rejects the subtractive update's -1.22e-5 eigenvalue.
     budget = 4 * np.finfo(np.float32).eps
 
     np.testing.assert_allclose(actual, expected, rtol=0.0, atol=budget)
