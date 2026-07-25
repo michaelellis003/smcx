@@ -56,10 +56,11 @@ class _ReplicatedLogMLFn(Protocol):
     def __call__(self, key: PRNGKeyT, /) -> Scalar: ...  # pragma: no cover
 
 
-# Callback-driven models own the meaning and dtype of observations. Scalar
-# events are canonicalized to length-one vectors before callbacks run.
-# Runtime boundary aliases admit malformed values so plain-Python validators
-# own the documented ValueError contract under the jaxtyping import hook.
+# Callback-driven models own the meaning and dtype of observations and
+# exogenous inputs. Scalar events are canonicalized to length-one vectors
+# before callbacks run. Runtime boundary aliases admit malformed values so
+# plain-Python validators own the documented ValueError contract under the
+# jaxtyping import hook.
 if TYPE_CHECKING:
     Emission: TypeAlias = Shaped[Array, " emission_dim"]
     EmissionValue: TypeAlias = Shaped[Array, ""] | Emission
@@ -74,8 +75,10 @@ if TYPE_CHECKING:
     GaussianInputSequence: TypeAlias = (
         Float[Array, " ntime"] | Float[Array, "ntime input_dim"]
     )
+    ModelInput: TypeAlias = Shaped[Array, " input_dim"]
+    InputValue: TypeAlias = Shaped[Array, ""] | ModelInput
     InputSequence: TypeAlias = (
-        Float[Array, " ntime"] | Float[Array, "ntime input_dim"]
+        Shaped[Array, " ntime"] | Shaped[Array, "ntime input_dim"]
     )
 else:
     Emission: TypeAlias = Shaped[Array, " emission_dim"]
@@ -84,8 +87,10 @@ else:
     GaussianEmission: TypeAlias = Shaped[Array, " observation_dim"]
     GaussianEmissionSequence: TypeAlias = Any
     GaussianInput: TypeAlias = Shaped[Array, " input_dim"]
-    GaussianInputSequence: TypeAlias = Shaped[Array, "*gaussian_input_shape"]
-    InputSequence: TypeAlias = Float[Array, "*input_shape"]
+    GaussianInputSequence: TypeAlias = Any
+    ModelInput: TypeAlias = Shaped[Array, " input_dim"]
+    InputValue: TypeAlias = Any
+    InputSequence: TypeAlias = Any
 
 
 @runtime_checkable
@@ -105,7 +110,7 @@ class InitialSamplerWithInput(Protocol):
         self,
         key: PRNGKeyT,
         num_particles: int,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> ParticleCloud: ...
 
@@ -127,7 +132,7 @@ class DenseInitialSamplerWithInput(Protocol):
         self,
         key: PRNGKeyT,
         num_particles: int,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> Float[Array, "num_particles state_dim"]: ...
 
@@ -163,7 +168,7 @@ class ParamCloudInitialStateSamplerWithInput(Protocol):
         key: PRNGKeyT,
         num_particles: int,
         params: Float[Array, "num_particles param_dim"],
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> Float[Array, "num_particles state_dim"]: ...  # pragma: no cover
 
@@ -248,7 +253,7 @@ class TransitionSamplerWithInput(Protocol):
         self,
         key: PRNGKeyT,
         state: StateTree,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> StateTree: ...
 
@@ -267,7 +272,7 @@ class SingleInitialSamplerWithInput(Protocol):
     def __call__(
         self,
         key: PRNGKeyT,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> StateTree: ...
 
@@ -276,9 +281,7 @@ class SingleInitialSamplerWithInput(Protocol):
 class EmissionSampler(Protocol):
     """Draw one emission conditional on a state."""
 
-    def __call__(
-        self, key: PRNGKeyT, state: StateTree, /
-    ) -> Float[Array, " emission_dim"]: ...
+    def __call__(self, key: PRNGKeyT, state: StateTree, /) -> EmissionValue: ...
 
 
 @runtime_checkable
@@ -289,9 +292,9 @@ class EmissionSamplerWithInput(Protocol):
         self,
         key: PRNGKeyT,
         state: StateTree,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
-    ) -> Float[Array, " emission_dim"]: ...
+    ) -> EmissionValue: ...
 
 
 @runtime_checkable
@@ -314,7 +317,7 @@ class LogObservationFnWithInput(Protocol):
         self,
         emission: Emission,
         state: StateTree,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> Scalar: ...
 
@@ -341,7 +344,7 @@ class ProposalSamplerWithInput(Protocol):
         key: PRNGKeyT,
         state: StateTree,
         emission: Emission,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> StateTree: ...
 
@@ -368,7 +371,7 @@ class LogProposalFnWithInput(Protocol):
         emission: Emission,
         new_state: StateTree,
         old_state: StateTree,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> Scalar: ...
 
@@ -393,7 +396,7 @@ class LogTransitionFnWithInput(Protocol):
         self,
         new_state: StateTree,
         old_state: StateTree,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> Scalar: ...
 
@@ -512,7 +515,7 @@ class ParamTransitionSamplerWithInput(Protocol):
         key: PRNGKeyT,
         state: Float[Array, " state_dim"],
         params: Float[Array, " param_dim"],
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> Float[Array, " state_dim"]: ...
 
@@ -539,7 +542,7 @@ class ParamLogObservationFnWithInput(Protocol):
         emission: Emission,
         state: Float[Array, " state_dim"],
         params: Float[Array, " param_dim"],
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         /,
     ) -> Scalar: ...
 
@@ -595,7 +598,7 @@ class ParticleFilterInitFnWithInput(Protocol):
         self,
         time_index: Int[Array, ""],
         emission_t: Emission,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         key_t: PRNGKeyT,
         /,
     ) -> "tuple[FilterCarry, ParticleFilterRecord]": ...
@@ -624,7 +627,7 @@ class ParticleFilterStepFnWithInput(Protocol):
         carry: FilterCarry,
         time_index: Int[Array, ""],
         emission_t: Emission,
-        input_t: Float[Array, " input_dim"],
+        input_t: ModelInput,
         key_t: PRNGKeyT,
         /,
     ) -> "tuple[FilterCarry, ParticleFilterRecord]": ...

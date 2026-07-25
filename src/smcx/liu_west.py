@@ -73,6 +73,7 @@ from smcx.types import (
     Emission,
     EmissionSequence,
     InputSequence,
+    ModelInput,
     ParamCloudInitialStateSampler,
     ParamCloudInitialStateSamplerWithInput,
     ParamInitialSampler,
@@ -100,7 +101,7 @@ class _LiuWestStepCarry(NamedTuple):
 
 class _LiuWestStepInput(NamedTuple):
     emission: Emission
-    input_t: Float[Array, " input_dim"] | None
+    input_t: ModelInput | None
     time_index: Int[Array, ""]
 
 
@@ -216,7 +217,7 @@ def _init_liu_west(
     log_observation_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
     first_emission: Emission,
     num_particles: int,
-    input_t: Float[Array, " input_dim"] | None = None,
+    input_t: ModelInput | None = None,
     param_initial_state_sampler: ParamCloudInitialStateSampler
     | ParamCloudInitialStateSamplerWithInput
     | None = None,
@@ -524,7 +525,8 @@ def liu_west_filter(
             The callback receives the first-stage weights and ESS at the
             zero-based emission indices 1 through T - 1.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
-            or ``(T,)``. Inputs follow ``params`` in every callback;
+            or ``(T,)`` and a nonempty event. Inputs follow ``params`` in
+            every callback;
             the parameter initializer remains input-independent.
         param_initial_state_sampler: Optional
             ``(key, num_particles, params[, input_0]) -> particles`` callback.

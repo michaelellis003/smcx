@@ -28,9 +28,9 @@ from smcx.types import (
     EmissionSequence,
     InitialSampler,
     InitialSamplerWithInput,
-    InputSequence,
     LogObservationFn,
     LogObservationFnWithInput,
+    ModelInput,
     ParticleCloud,
     ParticleHistory,
     PRNGKeyT,
@@ -294,24 +294,6 @@ def _validate_initial_state(state: object, *, name: str) -> _TreeSignature:
     return _array_tree_signature(state, name=name)
 
 
-def _validate_emission(emission: object, *, name: str) -> _TreeSignature:
-    """Require one nonempty floating emission vector."""
-    if not isinstance(emission, (jax.Array, Tracer)):
-        raise ValueError(
-            f"{name} must be a JAX array with shape (emission_dim,)"
-        )
-    if emission.ndim != 1 or emission.shape[0] == 0:
-        raise ValueError(
-            f"{name} must have shape (emission_dim,) with emission_dim >= 1; "
-            f"got {emission.shape}"
-        )
-    if not jnp.issubdtype(emission.dtype, jnp.floating):
-        raise ValueError(
-            f"{name} must have a floating dtype; got {emission.dtype}"
-        )
-    return _validate_initial_state(emission, name=name)
-
-
 def _gather_particles(
     particles: ParticleCloud,
     ancestors: Int[Array, " num_samples"],
@@ -342,8 +324,8 @@ def _prepend_state_history(
 
 
 def _canonicalize_inputs(
-    inputs: InputSequence, num_timesteps: int
-) -> Float[Array, "ntime input_dim"]:
+    inputs: object, num_timesteps: int
+) -> Shaped[Array, "ntime input_dim"]:
     """Validate and canonicalize a per-step input sequence.
 
     Args:
@@ -354,9 +336,14 @@ def _canonicalize_inputs(
         Input sequence with shape ``(T, input_dim)``.
 
     Raises:
-        ValueError: The rank is not one or two, or the leading dimension
-            does not equal ``num_timesteps``.
+        ValueError: The value is not a JAX array, the rank is not one or two,
+            the leading dimension does not equal ``num_timesteps``, or the
+            event dimension is empty.
     """
+    if not isinstance(inputs, (jax.Array, Tracer)):
+        raise ValueError(
+            "inputs must be a JAX array with shape (T,) or (T, input_dim)"
+        )
     if inputs.ndim == 1:
         inputs = inputs[:, None]
     if inputs.ndim != 2:
@@ -369,7 +356,29 @@ def _canonicalize_inputs(
             f"inputs must have leading dimension T={num_timesteps}; "
             f"got {inputs.shape[0]}"
         )
+    if inputs.shape[1] == 0:
+        raise ValueError("inputs must have input_dim >= 1")
     return inputs
+
+
+def _canonicalize_input(
+    input_t: object,
+    *,
+    name: str = "input_t",
+) -> Shaped[Array, " input_dim"]:
+    """Validate one exogenous input and canonicalize a scalar value."""
+    if not isinstance(input_t, (jax.Array, Tracer)):
+        raise ValueError(
+            f"{name} must be a JAX array with shape () or (input_dim,)"
+        )
+    if input_t.ndim == 0:
+        input_t = input_t[None]
+    if input_t.ndim != 1 or input_t.shape[0] == 0:
+        raise ValueError(
+            f"{name} must have shape () or (input_dim,) with "
+            f"input_dim >= 1; got {input_t.shape}"
+        )
+    return input_t
 
 
 def _compact_positive_weight_support(
@@ -538,7 +547,7 @@ def _init_standard(
     first_emission: Emission,
     num_particles: int,
     log_n: Array,
-    input_t: Float[Array, " input_dim"] | None = None,
+    input_t: ModelInput | None = None,
 ) -> tuple[
     ParticleCloud,
     Array,

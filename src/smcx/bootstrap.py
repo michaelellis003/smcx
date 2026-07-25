@@ -33,6 +33,7 @@ from smcx._numerics import (
 from smcx._utils import (
     _canonicalize_emission,
     _canonicalize_emissions,
+    _canonicalize_input,
     _canonicalize_inputs,
     _conditional_resample,
     _filter_scan,
@@ -65,8 +66,10 @@ from smcx.types import (
     InitialSampler,
     InitialSamplerWithInput,
     InputSequence,
+    InputValue,
     LogObservationFn,
     LogObservationFnWithInput,
+    ModelInput,
     ParticleCloud,
     PRNGKeyT,
     ResamplingCriterion,
@@ -172,7 +175,7 @@ def bootstrap_init(
     first_emission: EmissionValue,
     num_particles: int,
     *,
-    input_t: Float[Array, " input_dim"] | None = None,
+    input_t: InputValue | None = None,
 ) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
     """Initialize a resumable bootstrap filter at observation zero.
 
@@ -184,7 +187,8 @@ def bootstrap_init(
         first_emission: Scalar or vector observation ``y[0]``. Scalars
             reach callbacks as length-one vectors; dtype is preserved.
         num_particles: Number of particles.
-        input_t: Optional ``inputs[0]`` passed to both callbacks.
+        input_t: Optional scalar or vector ``inputs[0]`` passed to both
+            callbacks as a vector.
 
     Returns:
         Normalized checkpoint plus identity, non-resampled time-zero details.
@@ -200,6 +204,7 @@ def bootstrap_init(
         first_emission,
         name="first_emission",
     )
+    input_t = None if input_t is None else _canonicalize_input(input_t)
     log_n = jnp.asarray(math.log(num_particles))
     initialized = _init_standard(
         init_key,
@@ -236,7 +241,7 @@ def _bootstrap_particle_step(
     emission_t: Emission,
     resampling_fn: ResamplingFn,
     resampling_threshold: float | ResamplingCriterion,
-    input_t: Float[Array, " input_dim"] | None,
+    input_t: ModelInput | None,
     state_signature: _TreeSignature,
     time_index: Int[Array, ""] | None = None,
 ) -> _BootstrapParticleStepResult:
@@ -307,7 +312,7 @@ def _bootstrap_step(
     emission_t: Emission,
     resampling_fn: ResamplingFn,
     resampling_threshold: float,
-    input_t: Float[Array, " input_dim"] | None,
+    input_t: ModelInput | None,
     state_signature: _TreeSignature,
 ) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
     """Apply one pure bootstrap-filter update."""
@@ -351,7 +356,7 @@ def bootstrap_step(
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float = 0.5,
     *,
-    input_t: Float[Array, " input_dim"] | None = None,
+    input_t: InputValue | None = None,
 ) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
     """Advance a resumable bootstrap filter by one observation.
 
@@ -368,7 +373,8 @@ def bootstrap_step(
         resampling_fn: Particle resampling algorithm.
         resampling_threshold: Finite, nonnegative ESS fraction. Zero disables
             resampling; values above one force it at every update.
-        input_t: Optional ``inputs[t]`` reaching the transition and density.
+        input_t: Optional scalar or vector ``inputs[t]`` reaching the
+            transition and density as a vector.
 
     Returns:
         Updated normalized checkpoint and current-step diagnostics.
@@ -386,6 +392,7 @@ def bootstrap_step(
     """
     _validate_resampling_threshold(resampling_threshold)
     emission_t = _canonicalize_emission(emission_t, name="emission_t")
+    input_t = None if input_t is None else _canonicalize_input(input_t)
     state_signature = _validate_checkpoint(checkpoint)
 
     def body(carry, args):
@@ -646,8 +653,9 @@ def bootstrap_filter(
             resampling and values above one force it at every update.
             Time is the zero-based emission index from 1 through T - 1.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
-            or ``(T,)``. The latter becomes ``(T, 1)``. ``inputs[0]``
-            reaches the initial sampler and observation callback;
+            or ``(T,)`` and a nonempty event. The latter becomes
+            ``(T, 1)``. ``inputs[0]`` reaches the initial sampler and
+            observation callback;
             ``inputs[t]`` then reaches the transition into t and the
             observation at t.
         store_history: When False, the filter retains no

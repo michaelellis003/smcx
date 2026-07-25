@@ -20,13 +20,13 @@ from typing import cast
 
 import jax.random as jr
 from jax import lax
-from jaxtyping import Array, Float
+from jaxtyping import Array, Shaped
 
 from smcx._utils import (
+    _canonicalize_emission,
     _canonicalize_inputs,
     _prepend,
     _prepend_state_history,
-    _validate_emission,
     _validate_initial_state,
     _validate_state_tree,
 )
@@ -34,6 +34,7 @@ from smcx.types import (
     EmissionSampler,
     EmissionSamplerWithInput,
     InputSequence,
+    ModelInput,
     PRNGKeyT,
     SingleInitialSampler,
     SingleInitialSamplerWithInput,
@@ -54,7 +55,7 @@ def simulate(
     inputs: InputSequence | None = None,
 ) -> tuple[
     StateHistory,
-    Float[Array, "ntime emission_dim"],
+    Shaped[Array, "ntime emission_dim"],
 ]:
     r"""Simulate a single trajectory from a state-space model.
 
@@ -68,11 +69,12 @@ def simulate(
             state's PyTree structure, leaf shapes, and dtypes.
         emission_sampler: Function ``(key, state[, input_t]) -> emission`` that
             draws from the emission distribution $p(y_t \mid z_t)$. It
-            returns a nonempty floating vector
-            with shape and dtype fixed across time.
+            returns a scalar or nonempty vector with dtype fixed across
+            time. Scalars become length-one vectors.
         num_timesteps: Number of time steps $T$ to simulate.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
-            or ``(T,)``. Input zero reaches initialization and the first
+            or ``(T,)`` and a nonempty event. Input zero reaches
+            initialization and the first
             emission; each later input reaches its aligned transition and
             emission.
 
@@ -85,7 +87,7 @@ def simulate(
     Raises:
         ValueError: ``num_timesteps`` is less than one, inputs are malformed,
             the initial state tree is empty, a transition changes the state
-            structure, or an emission has an invalid shape or dtype.
+            structure, or an emission has an invalid shape or changes dtype.
     """
     if num_timesteps < 1:
         raise ValueError(f"num_timesteps must be >= 1; got {num_timesteps}")
@@ -105,9 +107,13 @@ def simulate(
         state_signature = _validate_initial_state(
             z_0, name="initial_sampler output"
         )
-        y_0 = emission_fn(k_y0, z_0)
-        emission_signature = _validate_emission(
-            y_0, name="emission_sampler output"
+        y_0 = _canonicalize_emission(
+            emission_fn(k_y0, z_0),
+            name="emission_sampler output",
+        )
+        emission_signature = _validate_initial_state(
+            y_0,
+            name="emission_sampler output",
         )
 
         def _step(
@@ -121,7 +127,10 @@ def simulate(
                 state_signature,
                 name="transition_sampler output",
             )
-            y_t = emission_fn(k_y, z_t)
+            y_t = _canonicalize_emission(
+                emission_fn(k_y, z_t),
+                name="emission_sampler output",
+            )
             _validate_state_tree(
                 y_t,
                 emission_signature,
@@ -138,14 +147,18 @@ def simulate(
         state_signature = _validate_initial_state(
             z_0, name="initial_sampler output"
         )
-        y_0 = emission_fn_u(k_y0, z_0, inputs_arr[0])
-        emission_signature = _validate_emission(
-            y_0, name="emission_sampler output"
+        y_0 = _canonicalize_emission(
+            emission_fn_u(k_y0, z_0, inputs_arr[0]),
+            name="emission_sampler output",
+        )
+        emission_signature = _validate_initial_state(
+            y_0,
+            name="emission_sampler output",
         )
 
         def _step_with_input(
             z_prev: StateTree,
-            args: tuple[PRNGKeyT, Float[Array, " input_dim"]],
+            args: tuple[PRNGKeyT, ModelInput],
         ) -> tuple[StateTree, tuple[StateTree, Array]]:
             step_key, input_t = args
             k_z, k_y = jr.split(step_key)
@@ -155,7 +168,10 @@ def simulate(
                 state_signature,
                 name="transition_sampler output",
             )
-            y_t = emission_fn_u(k_y, z_t, input_t)
+            y_t = _canonicalize_emission(
+                emission_fn_u(k_y, z_t, input_t),
+                name="emission_sampler output",
+            )
             _validate_state_tree(
                 y_t,
                 emission_signature,

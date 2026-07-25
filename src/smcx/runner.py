@@ -175,8 +175,8 @@ def run_particle_filter(
         emissions: Scalar ``(T,)`` or vector ``(T, emission_dim)``
             observations. Rank-one data become ``(T, 1)``; dtype is
             preserved.
-        inputs: Optional inputs with shape ``(T, input_dim)`` or ``(T,)``.
-            Rank-one inputs become ``(T, 1)``.
+        inputs: Optional inputs with shape ``(T, input_dim)`` or ``(T,)``
+            and a nonempty event. Rank-one inputs become ``(T, 1)``.
         store_history: If False, retain only the final particle, weight, and
             ancestor record while keeping full ESS and evidence traces.
 
