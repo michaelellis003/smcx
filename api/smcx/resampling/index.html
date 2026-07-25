@@ -1442,20 +1442,20 @@
 
         <p>Inverse-CDF resampling kernels.</p>
 <p>Every kernel takes <code>(key, weights, num_samples)</code> — probability-space
-weights, any positive scale — and returns <code>int32</code> ancestor indices in
-<code>[0, num_particles)</code>. Systematic, stratified, and multinomial outputs
-are nondecreasing; residual returns its deterministic block followed by
-iid remainder draws. Calls with concrete weights require finite, nonnegative
-values with positive total mass. Data-dependent validation is skipped for
-traced values, where Python exceptions cannot be staged. Query grids are
-clamped strictly below 1 so a grid point that rounds to 1.0 in float32 cannot
-select past the final positive-weight slot. This endpoint guard is inherited
-from smcx's former MLX implementation. Normalized CDFs are capped at one,
-repaired with a cumulative maximum, and given an exact unit endpoint before
-search. This can change fixed-key ancestors relative to releases that passed
-locally inverted float32 CDFs to <code>searchsorted</code>; already-ordered seeded
-fixtures retain their draws. Numerical correctness fixes are not a promise of
-cross-version random-stream identity.</p>
+weights with at least float32 precision, at any positive scale — and returns
+<code>int32</code> ancestor indices in <code>[0, num_particles)</code>. Systematic, stratified,
+and multinomial outputs are nondecreasing; residual returns its deterministic
+block followed by iid remainder draws. Calls with concrete weights require
+finite, nonnegative values with positive total mass. Data-dependent validation
+is skipped for traced values, where Python exceptions cannot be staged. Query
+grids are clamped strictly below 1 so a grid point that rounds to 1.0 in
+float32 cannot select past the final positive-weight slot. This endpoint guard
+is inherited from smcx's former MLX implementation. Normalized CDFs are capped
+at one, repaired with a cumulative maximum, and given an exact unit endpoint
+before search. This can change fixed-key ancestors relative to releases that
+passed locally inverted float32 CDFs to <code>searchsorted</code>; already-ordered
+seeded fixtures retain their draws. Numerical correctness fixes are not a
+promise of cross-version random-stream identity.</p>
 
 
 
@@ -1538,7 +1538,7 @@ Sorted queries keep the ancestor gather monotone.</p>
             <td>
               <div class="doc-md-description">
                 <p>Finite, nonnegative probability-space weights with positive
-total mass, on any positive scale.</p>
+total mass and at least float32 precision, on any positive scale.</p>
               </div>
             </td>
             <td>
@@ -1674,7 +1674,7 @@ schedule so the output size stays <code>num_samples</code> under jit.</p>
             <td>
               <div class="doc-md-description">
                 <p>Finite, nonnegative probability-space weights with positive
-total mass, on any positive scale.</p>
+total mass and at least float32 precision, on any positive scale.</p>
               </div>
             </td>
             <td>
@@ -1824,7 +1824,7 @@ https://doi.org/10.1109/ISPA.2005.195385</p>
             <td>
               <div class="doc-md-description">
                 <p>Finite, nonnegative probability-space weights with positive
-total mass, on any positive scale.</p>
+total mass and at least float32 precision, on any positive scale.</p>
               </div>
             </td>
             <td>
@@ -1957,7 +1957,7 @@ weight checks run while their values remain concrete.</p>
             <td>
               <div class="doc-md-description">
                 <p>Finite, nonnegative probability-space weights with positive
-total mass, on any positive scale.</p>
+total mass and at least float32 precision, on any positive scale.</p>
               </div>
             </td>
             <td>

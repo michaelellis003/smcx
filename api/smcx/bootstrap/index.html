@@ -1566,6 +1566,7 @@ and dtypes. smcx <code>vmap</code>-s it internally.</p>
                 <p>Function
 <code>(emission, state[, input_t]) -&gt; log_prob</code> that evaluates the
 observation log-density <span class="arithmatex">\(\log p(y_t \mid z_t)\)</span>.
+It must return a scalar with at least float32 precision.
 Will be <code>vmap</code>-ped over the particle dimension (second
 argument) internally.</p>
               </div>
@@ -1861,7 +1862,8 @@ callback output is malformed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observation log-density callback.</p>
+                <p>Observation log-density callback returning a
+scalar with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -2066,7 +2068,8 @@ callback output is malformed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observation log-density callback.</p>
+                <p>Observation log-density callback returning a
+scalar with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -2285,7 +2288,8 @@ public-step loop; other platforms use a compiled scan.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observation log-density callback.</p>
+                <p>Observation log-density callback returning a
+scalar with at least float32 precision.</p>
               </div>
             </td>
             <td>

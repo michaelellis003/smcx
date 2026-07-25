@@ -1485,7 +1485,7 @@ from the prior.</p>
             <td>
               <div class="doc-md-description">
                 <p>Per-particle <code>(state) -&gt; scalar</code> log-prior;
-vmapped internally.</p>
+vmapped internally. Must return at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -1502,7 +1502,8 @@ vmapped internally.</p>
             <td>
               <div class="doc-md-description">
                 <p>Per-particle <code>(state) -&gt; scalar</code>
-log-likelihood; vmapped internally.</p>
+log-likelihood; vmapped internally. Must return at least
+float32 precision.</p>
               </div>
             </td>
             <td>

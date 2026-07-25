@@ -1508,6 +1508,7 @@ and dtypes. smcx <code>vmap</code>-s it internally.</p>
                 <p>Function
 <code>(emission, state[, input_t]) -&gt; log_prob</code> that evaluates the
 observation log-density <span class="arithmatex">\(\log p(y_t \mid z_t)\)</span>.
+It must return a scalar with at least float32 precision.
 Will be <code>vmap</code>-ped over the particle dimension (second
 argument) internally.</p>
               </div>
@@ -1529,6 +1530,7 @@ argument) internally.</p>
 <code>(emission, state[, input_t]) -&gt; log_prob</code> that evaluates the
 look-ahead log-density
 <span class="arithmatex">\(\log g(y_{t+1} \mid x_t)\)</span>.
+It must return a scalar with at least float32 precision.
 Will be <code>vmap</code>-ped over the particle dimension (second
 argument) internally.  When this returns zero for all
 inputs the APF reduces to the bootstrap filter.</p>

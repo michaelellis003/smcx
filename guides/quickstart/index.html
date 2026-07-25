@@ -1465,7 +1465,10 @@ observation noise dominates the process noise and filtering has real
 work to do. A model in smcx is a handful of closures, written
 <em>per particle</em>: each takes one state array or PyTree and smcx <code>vmap</code>s it
 over the particle cloud internally. Samplers take an explicit PRNG key;
-the observation model returns a log-density.</p>
+the observation model returns a log-density with at least float32 precision.
+The weight, ESS, and resampling APIs likewise reject float16 and bfloat16
+arrays because those formats cannot reliably preserve particle-weight
+invariants.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>

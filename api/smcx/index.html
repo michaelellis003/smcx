@@ -3806,6 +3806,7 @@ and dtypes. smcx <code>vmap</code>-s it internally.</p>
                 <p>Function
 <code>(emission, state[, input_t]) -&gt; log_prob</code> that evaluates the
 observation log-density <span class="arithmatex">\(\log p(y_t \mid z_t)\)</span>.
+It must return a scalar with at least float32 precision.
 Will be <code>vmap</code>-ped over the particle dimension (second
 argument) internally.</p>
               </div>
@@ -3827,6 +3828,7 @@ argument) internally.</p>
 <code>(emission, state[, input_t]) -&gt; log_prob</code> that evaluates the
 look-ahead log-density
 <span class="arithmatex">\(\log g(y_{t+1} \mid x_t)\)</span>.
+It must return a scalar with at least float32 precision.
 Will be <code>vmap</code>-ped over the particle dimension (second
 argument) internally.  When this returns zero for all
 inputs the APF reduces to the bootstrap filter.</p>
@@ -4147,6 +4149,7 @@ and dtypes. smcx <code>vmap</code>-s it internally.</p>
                 <p>Function
 <code>(emission, state[, input_t]) -&gt; log_prob</code> that evaluates the
 observation log-density <span class="arithmatex">\(\log p(y_t \mid z_t)\)</span>.
+It must return a scalar with at least float32 precision.
 Will be <code>vmap</code>-ped over the particle dimension (second
 argument) internally.</p>
               </div>
@@ -4442,7 +4445,8 @@ callback output is malformed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observation log-density callback.</p>
+                <p>Observation log-density callback returning a
+scalar with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -4647,7 +4651,8 @@ callback output is malformed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observation log-density callback.</p>
+                <p>Observation log-density callback returning a
+scalar with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -4866,7 +4871,8 @@ public-step loop; other platforms use a compiled scan.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observation log-density callback.</p>
+                <p>Observation log-density callback returning a
+scalar with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -5518,7 +5524,8 @@ ESS &lt; <code>ess_threshold * N</code></li>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Log importance weights (any normalization).</p>
+                <p>Log importance weights (any normalization) with at
+least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -5571,8 +5578,8 @@ ESS &lt; <code>ess_threshold * N</code></li>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>log_weights</code> is not a nonempty rank-one floating JAX
-array.</p>
+                <p><code>log_weights</code> is not a nonempty rank-one JAX array
+with at least float32 precision.</p>
               </div>
             </td>
           </tr>
@@ -5975,7 +5982,7 @@ shapes, and dtypes. smcx <code>vmap</code>-s it internally.</p>
               <div class="doc-md-description">
                 <p>Per-particle
 <code>(y_t, z_t, z_prev[, input_t]) -&gt; scalar</code> log proposal
-density.</p>
+density with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -5993,7 +6000,7 @@ density.</p>
               <div class="doc-md-description">
                 <p>Per-particle
 <code>(z_t, z_prev[, input_t]) -&gt; scalar</code> log transition
-density <span class="arithmatex">\(\log f\)</span>.</p>
+density <span class="arithmatex">\(\log f\)</span> with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -6011,7 +6018,7 @@ density <span class="arithmatex">\(\log f\)</span>.</p>
               <div class="doc-md-description">
                 <p>Per-particle
 <code>(y_t, z_t[, input_t]) -&gt; scalar</code> log observation density
-<span class="arithmatex">\(\log g\)</span>.</p>
+<span class="arithmatex">\(\log g\)</span> with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -6603,7 +6610,8 @@ shape and dtype.</p>
               <div class="doc-md-description">
                 <p>Function
 <code>(emission, state, params[, input_t]) -&gt; log_prob</code> that
-evaluates the observation log-density.</p>
+evaluates the observation log-density and returns a scalar
+with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -6621,7 +6629,8 @@ evaluates the observation log-density.</p>
               <div class="doc-md-description">
                 <p>Function
 <code>(emission, state, params[, input_t]) -&gt; log_prob</code> that
-evaluates the look-ahead log-density.</p>
+evaluates the look-ahead log-density and returns a scalar
+with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -7017,7 +7026,8 @@ a predictive criterion such as <code>smcx.crps</code>, and use
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Log importance weights (any normalization).</p>
+                <p>Log importance weights (any normalization) with at
+least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -7070,8 +7080,8 @@ a predictive criterion such as <code>smcx.crps</code>, and use
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>log_weights</code> is not a nonempty rank-one floating JAX
-array.</p>
+                <p><code>log_weights</code> is not a nonempty rank-one JAX array
+with at least float32 precision.</p>
               </div>
             </td>
           </tr>
@@ -7353,7 +7363,8 @@ of variance in particle filters. https://arxiv.org/abs/1701.01001</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Unnormalized log importance weights.</p>
+                <p>Unnormalized log importance weights with at least
+float32 precision.</p>
               </div>
             </td>
             <td>
@@ -7430,8 +7441,8 @@ of variance in particle filters. https://arxiv.org/abs/1701.01001</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>log_weights</code> is not a nonempty rank-one floating JAX
-array.</p>
+                <p><code>log_weights</code> is not a nonempty rank-one JAX array
+with at least float32 precision.</p>
               </div>
             </td>
           </tr>
@@ -7504,7 +7515,7 @@ Sorted queries keep the ancestor gather monotone.</p>
             <td>
               <div class="doc-md-description">
                 <p>Finite, nonnegative probability-space weights with positive
-total mass, on any positive scale.</p>
+total mass and at least float32 precision, on any positive scale.</p>
               </div>
             </td>
             <td>
@@ -7616,7 +7627,8 @@ weight checks run while their values remain concrete.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Unnormalized log importance weights.</p>
+                <p>Unnormalized log importance weights with at least
+float32 precision.</p>
               </div>
             </td>
             <td>
@@ -7665,8 +7677,8 @@ weight checks run while their values remain concrete.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>log_weights</code> is not a nonempty rank-one floating JAX
-array.</p>
+                <p><code>log_weights</code> is not a nonempty rank-one JAX array
+with at least float32 precision.</p>
               </div>
             </td>
           </tr>
@@ -8543,7 +8555,7 @@ schedule so the output size stays <code>num_samples</code> under jit.</p>
             <td>
               <div class="doc-md-description">
                 <p>Finite, nonnegative probability-space weights with positive
-total mass, on any positive scale.</p>
+total mass and at least float32 precision, on any positive scale.</p>
               </div>
             </td>
             <td>
@@ -8795,9 +8807,10 @@ policy; and posterior construction.</p>
 </span></code></pre></div>
 <p>Input-aware callbacks insert <code>input_t</code> immediately before <code>key_t</code>.
 <code>record</code> must be <code>smcx.containers.ParticleFilterRecord</code>.
-Its log weights must already be normalized and its ancestor indices must
-be in range; these are data-dependent callback preconditions rather than
-conditions the compiled scan can raise on.</p>
+Its log weights must already be normalized, and both log-weight and
+evidence fields must have at least float32 precision. Ancestor indices
+must be in range; these are data-dependent callback preconditions rather
+than conditions the compiled scan can raise on.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -9063,7 +9076,7 @@ negative infinity.</p>
             <td>
               <div class="doc-md-description">
                 <p>Finite, nonnegative probability-space weights with positive
-total mass, on any positive scale.</p>
+total mass and at least float32 precision, on any positive scale.</p>
               </div>
             </td>
             <td>
@@ -9196,7 +9209,7 @@ weight checks run while their values remain concrete.</p>
             <td>
               <div class="doc-md-description">
                 <p>Finite, nonnegative probability-space weights with positive
-total mass, on any positive scale.</p>
+total mass and at least float32 precision, on any positive scale.</p>
               </div>
             </td>
             <td>
@@ -9471,7 +9484,7 @@ from the prior.</p>
             <td>
               <div class="doc-md-description">
                 <p>Per-particle <code>(state) -&gt; scalar</code> log-prior;
-vmapped internally.</p>
+vmapped internally. Must return at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -9488,7 +9501,8 @@ vmapped internally.</p>
             <td>
               <div class="doc-md-description">
                 <p>Per-particle <code>(state) -&gt; scalar</code>
-log-likelihood; vmapped internally.</p>
+log-likelihood; vmapped internally. Must return at least
+float32 precision.</p>
               </div>
             </td>
             <td>

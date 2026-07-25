@@ -1502,7 +1502,7 @@ shapes, and dtypes. smcx <code>vmap</code>-s it internally.</p>
               <div class="doc-md-description">
                 <p>Per-particle
 <code>(y_t, z_t, z_prev[, input_t]) -&gt; scalar</code> log proposal
-density.</p>
+density with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -1520,7 +1520,7 @@ density.</p>
               <div class="doc-md-description">
                 <p>Per-particle
 <code>(z_t, z_prev[, input_t]) -&gt; scalar</code> log transition
-density <span class="arithmatex">\(\log f\)</span>.</p>
+density <span class="arithmatex">\(\log f\)</span> with at least float32 precision.</p>
               </div>
             </td>
             <td>
@@ -1538,7 +1538,7 @@ density <span class="arithmatex">\(\log f\)</span>.</p>
               <div class="doc-md-description">
                 <p>Per-particle
 <code>(y_t, z_t[, input_t]) -&gt; scalar</code> log observation density
-<span class="arithmatex">\(\log g\)</span>.</p>
+<span class="arithmatex">\(\log g\)</span> with at least float32 precision.</p>
               </div>
             </td>
             <td>

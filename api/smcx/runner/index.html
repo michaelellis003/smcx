@@ -1419,9 +1419,10 @@ policy; and posterior construction.</p>
 </span></code></pre></div>
 <p>Input-aware callbacks insert <code>input_t</code> immediately before <code>key_t</code>.
 <code>record</code> must be <code>smcx.containers.ParticleFilterRecord</code>.
-Its log weights must already be normalized and its ancestor indices must
-be in range; these are data-dependent callback preconditions rather than
-conditions the compiled scan can raise on.</p>
+Its log weights must already be normalized, and both log-weight and
+evidence fields must have at least float32 precision. Ancestor indices
+must be in range; these are data-dependent callback preconditions rather
+than conditions the compiled scan can raise on.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
