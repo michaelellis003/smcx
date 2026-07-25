@@ -2037,7 +2037,9 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>State returned by initialization or a prior step.</p>
+                <p>State returned by initialization or a prior step. Its
+log weights must be normalized and its stored ESS must agree
+with them.</p>
               </div>
             </td>
             <td>
@@ -2193,13 +2195,21 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Updated importance weights cannot normalize.</p>
+                <p>Checkpoint evidence is nonfinite or updated
+importance weights cannot normalize.</p>
               </div>
             </td>
           </tr>
       </tbody>
     </table>
 
+
+<details class="note" open>
+  <summary>Note</summary>
+  <p>Concrete calls validate the checkpoint's weight normalization, ESS,
+and evidence state. Under a JAX transform, those data-dependent
+checks are skipped and malformed values propagate into the result.</p>
+</details>
 
     </div>
 
@@ -2257,7 +2267,9 @@ public-step loop; other platforms use a compiled scan.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>State returned by initialization or an earlier update.</p>
+                <p>State returned by initialization or an earlier update.
+Its log weights must be normalized and its stored ESS must agree
+with them.</p>
               </div>
             </td>
             <td>
@@ -2450,7 +2462,8 @@ is malformed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Cumulative importance weights cannot normalize.</p>
+                <p>Checkpoint evidence is nonfinite or cumulative
+importance weights cannot normalize.</p>
               </div>
             </td>
           </tr>

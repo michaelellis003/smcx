@@ -1666,7 +1666,10 @@ numbers describe this example, not a general performance guarantee.</p>
 <li>The <a href="../custom-models/">custom-model guide</a> covers structured latent states
   and time-varying inputs.</li>
 <li><code>bootstrap_init</code>, <code>bootstrap_step</code>, and <code>bootstrap_update</code> support
-  checkpointed or chunked filtering.</li>
+  checkpointed or chunked filtering. Resumed checkpoints retain normalized
+  log weights, their matching ESS, and finite evidence state. Concrete calls
+  validate those invariants; a transformed <code>bootstrap_step</code> skips the
+  data-dependent checks, while <code>bootstrap_update</code> is host-only.</li>
 <li>Every function used here — including <code>kalman_filter</code>, <code>rts_smoother</code>,
   <code>bootstrap_filter</code>, <code>guided_filter</code>, <code>simulate</code>, and <code>diagnose</code> — has a
   full contract in the <a href="../../api/smcx/">API reference</a>.</li>

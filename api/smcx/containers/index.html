@@ -1634,7 +1634,56 @@ registered as JAX PyTrees by default.</p>
 
 
 
-        <p>Resumable state and ESS; evidence is its sum plus its correction.</p>
+        <p>Resumable normalized bootstrap-filter state.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="smcx.containers.BootstrapCheckpoint.state">state</span></code></td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleState (smcx.containers.ParticleState)" href="#smcx.containers.ParticleState">ParticleState</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle state with normalized log weights and finite running
+log evidence.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="smcx.containers.BootstrapCheckpoint.ess">ess</span></code></td>
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Effective sample size implied by <code>state.log_weights</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="smcx.containers.BootstrapCheckpoint.log_evidence_compensation">log_evidence_compensation</span></code></td>
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Finite correction summed with the running
+log evidence.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
 
 

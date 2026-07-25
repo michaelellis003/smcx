@@ -2512,7 +2512,56 @@
 
 
 
-        <p>Resumable state and ESS; evidence is its sum plus its correction.</p>
+        <p>Resumable normalized bootstrap-filter state.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="smcx.BootstrapCheckpoint.state">state</span></code></td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParticleState (smcx.containers.ParticleState)" href="containers/#smcx.containers.ParticleState">ParticleState</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Particle state with normalized log weights and finite running
+log evidence.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="smcx.BootstrapCheckpoint.ess">ess</span></code></td>
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Effective sample size implied by <code>state.log_weights</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="smcx.BootstrapCheckpoint.log_evidence_compensation">log_evidence_compensation</span></code></td>
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Finite correction summed with the running
+log evidence.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
 
 
@@ -4621,7 +4670,9 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>State returned by initialization or a prior step.</p>
+                <p>State returned by initialization or a prior step. Its
+log weights must be normalized and its stored ESS must agree
+with them.</p>
               </div>
             </td>
             <td>
@@ -4777,13 +4828,21 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Updated importance weights cannot normalize.</p>
+                <p>Checkpoint evidence is nonfinite or updated
+importance weights cannot normalize.</p>
               </div>
             </td>
           </tr>
       </tbody>
     </table>
 
+
+<details class="note" open>
+  <summary>Note</summary>
+  <p>Concrete calls validate the checkpoint's weight normalization, ESS,
+and evidence state. Under a JAX transform, those data-dependent
+checks are skipped and malformed values propagate into the result.</p>
+</details>
 
     </div>
 
@@ -4841,7 +4900,9 @@ public-step loop; other platforms use a compiled scan.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>State returned by initialization or an earlier update.</p>
+                <p>State returned by initialization or an earlier update.
+Its log weights must be normalized and its stored ESS must agree
+with them.</p>
               </div>
             </td>
             <td>
@@ -5034,7 +5095,8 @@ is malformed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Cumulative importance weights cannot normalize.</p>
+                <p>Checkpoint evidence is nonfinite or cumulative
+importance weights cannot normalize.</p>
               </div>
             </td>
           </tr>
