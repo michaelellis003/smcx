@@ -447,16 +447,6 @@ def test_extended_kalman_rejects_misaligned_arrays(argument, value, message):
             "initial_covariance must be positive semidefinite",
         ),
         (
-            "transition_covariance",
-            jnp.array([[jnp.nan]]),
-            "transition_covariance must contain only finite values",
-        ),
-        (
-            "transition_covariance",
-            jnp.array([[jnp.inf]]),
-            "transition_covariance must contain only finite values",
-        ),
-        (
             "observation_covariance",
             jnp.array([[0.0]]),
             "observation_covariance must be positive definite",

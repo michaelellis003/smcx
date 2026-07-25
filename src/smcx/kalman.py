@@ -281,17 +281,18 @@ def _check_covariance(
         return
     if not np.all(np.isfinite(covariance)):
         raise ValueError(f"{name} must contain only finite values")
-    scale = max(1.0, float(np.max(np.abs(covariance))))
+    scale = np.maximum(1.0, np.max(np.abs(covariance), axis=(-2, -1)))
     tolerance = 32.0 * float(np.finfo(value.dtype).eps) * scale
     transpose = np.swapaxes(covariance, -1, -2)
-    if not np.allclose(covariance, transpose, rtol=0.0, atol=tolerance):
+    asymmetry = np.max(np.abs(covariance - transpose), axis=(-2, -1))
+    if np.any(asymmetry > tolerance):
         raise ValueError(f"{name} must be symmetric")
     symmetric = 0.5 * covariance + 0.5 * transpose
-    minimum_eigenvalue = float(np.min(np.linalg.eigvalsh(symmetric)))
+    minimum_eigenvalue = np.min(np.linalg.eigvalsh(symmetric), axis=-1)
     if positive_definite:
-        if minimum_eigenvalue <= 0.0:
+        if np.any(minimum_eigenvalue <= 0.0):
             raise ValueError(f"{name} must be positive definite")
-    elif minimum_eigenvalue < -tolerance:
+    elif np.any(minimum_eigenvalue < -tolerance):
         raise ValueError(f"{name} must be positive semidefinite")
 
 

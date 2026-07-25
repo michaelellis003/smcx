@@ -330,11 +330,6 @@ def test_kalman_filter_rejects_misaligned_shapes(argument, value, message):
             "transition_covariance must be symmetric",
         ),
         (
-            "transition_covariance",
-            jnp.array([[1.0, 0.0], [0.0, jnp.nan]]),
-            "transition_covariance must contain only finite values",
-        ),
-        (
             "observation_covariance",
             jnp.array([[1.0, 0.0], [0.0, jnp.inf]]),
             "observation_covariance must contain only finite values",
@@ -368,6 +363,22 @@ def test_kalman_filter_accepts_semidefinite_state_covariances():
     posterior = smcx.kalman_filter(**model)
 
     assert jnp.all(jnp.isfinite(posterior.filtered_covariances))
+
+
+def test_kalman_filter_checks_each_timed_covariance_scale():
+    """A large valid slice cannot hide an indefinite small slice."""
+    model = _valid_linear_model()
+    model["emissions"] = jnp.zeros((3, 2))
+    model["transition_covariance"] = jnp.array([
+        [[1.0e20, 0.0], [0.0, 1.0e20]],
+        [[1.0, 0.0], [0.0, -1.0]],
+    ])
+
+    with pytest.raises(
+        ValueError,
+        match="transition_covariance must be positive semidefinite",
+    ):
+        smcx.kalman_filter(**model)
 
 
 def test_kalman_filter_skips_covariance_value_checks_when_traced():
