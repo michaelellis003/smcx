@@ -948,8 +948,9 @@ def kalman_filter(
         observation covariances must be finite, symmetric, and positive
         definite. Value checks run eagerly and are skipped for traced
         arrays. Nonzero subnormal covariance entries are rejected;
-        positive-definite covariances must also meet the dtype's
-        factorability bound. Missing observations are not supported.
+        positive-definite covariances must also yield a finite,
+        positive-diagonal factor on the active backend. Missing observations
+        are not supported.
     """
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
         raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
@@ -1203,8 +1204,9 @@ def extended_kalman_filter(
         observation covariances must be finite, symmetric, and positive
         definite. Value checks run eagerly and are skipped for traced
         arrays. Nonzero subnormal covariance entries are rejected;
-        positive-definite covariances must also meet the dtype's
-        factorability bound. Missing observations are not supported.
+        positive-definite covariances must also yield a finite,
+        positive-diagonal factor on the active backend. Missing observations
+        are not supported.
 
     References:
         Schmidt, S. F. (1966). Application of State-Space Methods to
@@ -1428,7 +1430,8 @@ def unscented_kalman_filter(
         be finite, symmetric, and positive definite because the UKF takes
         state and innovation Cholesky factors. Value checks run eagerly and
         are skipped for traced arrays. Nonzero subnormal entries are rejected,
-        and every covariance must meet the dtype's factorability bound.
+        and every covariance must yield a finite, positive-diagonal factor on
+        the active backend.
         Missing observations are not supported. Smaller ``alpha`` values may
         improve local quadrature but are more cancellation-prone in float32.
 
@@ -1684,8 +1687,8 @@ def rts_smoother(
         predicted covariances must be finite, symmetric, and positive
         definite because the backward recursion factors them. Value checks
         run eagerly and are skipped for traced arrays. Nonzero subnormal
-        covariance entries are rejected; positive-time predictions must also
-        meet the dtype's factorability bound.
+        covariance entries are rejected; positive-time predictions must yield
+        a finite, positive-diagonal factor on the active backend.
     """
     num_timesteps, state_dim, dtype = _validate_filter_posterior(
         filtered_posterior
