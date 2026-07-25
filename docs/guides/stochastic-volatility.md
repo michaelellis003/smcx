@@ -69,12 +69,27 @@ parameter vector per particle. Here `params[0]` is that particle's
 value of $\mu$. The transition and the observation read it; the
 auxiliary function is the APF look-ahead, evaluating the observation
 at the one-step-ahead mean of the transition to pre-weight particles
-before they move.
+before they move. The initial state distribution also depends on
+$\mu$:
+
+$$
+x_0 \mid \mu \sim
+\mathcal{N}\!\left(\mu, \frac{\sigma^2}{1-\phi^2}\right).
+$$
+
+At initialization, `param_initial_state_sampler` receives the whole
+parameter cloud, so `params[:, :1]` keeps each state draw aligned with
+its own $\mu$ particle.
 
 ```python
-def initial_sampler(key, n):
-    sd = SIGMA / math.sqrt(1 - PHI**2)
-    return MU_TRUE + sd * jr.normal(key, (n, 1))
+def param_initial_sampler(key, n):
+    # Diffuse prior over the mean log-variance: Uniform(-3, 1).
+    return jr.uniform(key, (n, 1), minval=-3.0, maxval=1.0)
+
+
+def param_initial_state_sampler(key, n, params):
+    initial_sd = SIGMA / math.sqrt(1 - PHI**2)
+    return params[:, :1] + initial_sd * jr.normal(key, (n, 1))
 
 
 def transition_sampler(key, state, params):
@@ -92,32 +107,35 @@ def log_auxiliary_fn(y, state, params):
     mu = params[0]
     x_pred = mu + PHI * (state[0] - mu)
     return -0.5 * (LOG2PI + x_pred + y[0] * y[0] * jnp.exp(-x_pred))
-
-
-def param_initial_sampler(key, n):
-    # Diffuse prior over the mean log-variance: Uniform(-3, 1).
-    return jr.uniform(key, (n, 1), minval=-3.0, maxval=1.0)
 ```
 
 The prior on $\mu$ is deliberately vague — a uniform band four units
-wide — so the concentration we see afterward is the data speaking,
-not the prior.
+wide — and neither inference initializer reads `MU_TRUE`. The filter
+therefore starts from the declared joint prior rather than the hidden
+simulation value.
 
 ## Run the filter
 
 ```python
 post = smcx.liu_west_filter(
-    jr.key(1),
-    initial_sampler,
-    transition_sampler,
-    log_observation_fn,
-    log_auxiliary_fn,
-    param_initial_sampler,
-    emissions,
+    key=jr.key(1),
+    initial_sampler=None,
+    transition_sampler=transition_sampler,
+    log_observation_fn=log_observation_fn,
+    log_auxiliary_fn=log_auxiliary_fn,
+    param_initial_sampler=param_initial_sampler,
+    emissions=emissions,
     num_particles=20_000,
     shrinkage=0.97,
+    param_initial_state_sampler=param_initial_state_sampler,
 )
 ```
+
+For a model with $x_0 \perp \mu$, pass the existing
+`initial_sampler(key, n)` callback instead and omit
+`param_initial_state_sampler`. Exactly one initial-state callback is
+required; keeping the alternatives explicit preserves the legacy
+callback signature and fixed-key RNG schedule.
 
 The one knob beyond the model is `shrinkage`, the Liu-West discount
 $a \in (0, 1)$. Resampling the parameter alongside the state would

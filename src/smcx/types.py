@@ -123,8 +123,35 @@ class ParamInitialSampler(Protocol):
 
 
 @runtime_checkable
+class ParamCloudInitialStateSampler(Protocol):
+    """Draw initial states conditional on an aligned parameter cloud."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        num_particles: int,
+        params: Float[Array, "num_particles param_dim"],
+        /,
+    ) -> Float[Array, "num_particles state_dim"]: ...  # pragma: no cover
+
+
+@runtime_checkable
+class ParamCloudInitialStateSamplerWithInput(Protocol):
+    """Draw input-aware initial states from an aligned parameter cloud."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        num_particles: int,
+        params: Float[Array, "num_particles param_dim"],
+        input_t: Float[Array, " input_dim"],
+        /,
+    ) -> Float[Array, "num_particles state_dim"]: ...  # pragma: no cover
+
+
+@runtime_checkable
 class ParamInitialStateSampler(Protocol):
-    """Draw a parameter-conditioned initial state-particle cloud."""
+    """Draw an initial state cloud for one parameter particle."""
 
     def __call__(
         self,
