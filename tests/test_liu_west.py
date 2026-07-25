@@ -150,6 +150,8 @@ def _make_liu_west_fns():
 
 def _run_covariance_case(
     parameter_cloud: jax.Array,
+    *,
+    shrinkage: float = 0.95,
 ) -> lw.LiuWestPosterior:
     """Run one Liu-West propagation for a supplied parameter cloud."""
     dtype = parameter_cloud.dtype
@@ -181,7 +183,7 @@ def _run_covariance_case(
         param_initial_sampler=param_initial_sampler,
         emissions=jnp.zeros((2, 1), dtype=dtype),
         num_particles=num_particles,
-        shrinkage=0.95,
+        shrinkage=shrinkage,
         resampling_threshold=0.0,
     )
 
@@ -283,17 +285,24 @@ class TestLiuWestCovarianceKernel:
         assert actual.dtype == cloud.dtype
         assert jnp.all(jnp.isfinite(actual))
 
-    def test_ordinary_spread_preserves_kernel_variance(self):
+    @pytest.mark.parametrize("shrinkage", [0.80, 0.99])
+    def test_ordinary_spread_preserves_kernel_variance(
+        self,
+        shrinkage: float,
+    ):
         pattern = jnp.array(
             [[-1.0, -2.0], [-1.0, 2.0], [1.0, -2.0], [1.0, 2.0]],
             jnp.float32,
         )
         cloud = jnp.tile(pattern, (5_000, 1))
 
-        actual = _run_covariance_case(cloud).filtered_params[-1]
-        noise = np.asarray(actual - jnp.float32(0.95) * cloud)
+        actual = _run_covariance_case(
+            cloud,
+            shrinkage=shrinkage,
+        ).filtered_params[-1]
+        noise = np.asarray(actual - jnp.float32(shrinkage) * cloud)
         second_moment = np.mean(noise**2, axis=0)
-        expected = (1.0 - 0.95**2) * np.array([1.0, 4.0])
+        expected = (1.0 - shrinkage**2) * np.array([1.0, 4.0])
         # For Gaussian noise, SE(sample second moment) =
         # sqrt(2 / N) * variance. Five SE is the stochastic-test gate.
         estimator_se = np.sqrt(2.0 / cloud.shape[0]) * expected
