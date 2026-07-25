@@ -35,7 +35,7 @@ from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import numpy as np
-from jax import lax, vmap
+from jax import debug_infs, debug_nans, lax, vmap
 from jax.core import Tracer
 from jax.scipy.linalg import solve_triangular
 from jaxtyping import Array, Float, Shaped
@@ -121,10 +121,10 @@ class _NonlinearFilterSetup(NamedTuple):
 
 
 def _symmetrize(
-    covariance: Float[Array, "state_dim state_dim"],
-) -> Float[Array, "state_dim state_dim"]:
+    covariance: Float[Array, "*batch dimension dimension"],
+) -> Float[Array, "*batch dimension dimension"]:
     """Remove roundoff asymmetry from a covariance matrix."""
-    transpose = covariance.T
+    transpose = jnp.swapaxes(covariance, -1, -2)
     ordinary = 0.5 * (covariance + transpose)
     lower = jnp.minimum(covariance, transpose)
     fallback = lower + 0.5 * (jnp.maximum(covariance, transpose) - lower)
@@ -324,17 +324,22 @@ def _check_covariance(
     if not np.all(np.isfinite(normalized)):
         raise ValueError(f"{name} must be positive {domain}")
     minimum_eigenvalue = np.min(np.linalg.eigvalsh(normalized), axis=-1)
-    if positive_definite:
-        # The bound keeps the represented minimum scale normal after
-        # undoing the diagonal equilibration.
-        factorability_floor = normal_minimum / np.min(diagonal, axis=-1)
-        invalid = (minimum_eigenvalue <= 0.0) | (
-            minimum_eigenvalue < factorability_floor
-        )
-    else:
-        invalid = minimum_eigenvalue < -psd_tolerance
-    if np.any(invalid):
+    if np.any(minimum_eigenvalue < -psd_tolerance):
         raise ValueError(f"{name} must be positive {domain}")
+    if positive_definite:
+        symmetrized = _symmetrize(value)
+        if isinstance(symmetrized, Tracer):
+            return
+        with debug_nans(False), debug_infs(False):
+            factor = np.asarray(
+                jnp.linalg.cholesky(
+                    symmetrized,
+                    symmetrize_input=False,
+                )
+            )
+        factor_diagonal = np.diagonal(factor, axis1=-2, axis2=-1)
+        if not np.all(np.isfinite(factor)) or np.any(factor_diagonal <= 0.0):
+            raise ValueError(f"{name} must be positive {domain}")
 
 
 def _time_matrix(
