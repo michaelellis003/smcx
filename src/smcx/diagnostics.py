@@ -1028,11 +1028,16 @@ def crps(
     centered = jnp.sort(predictions - obs)
     n = predictions.shape[0]
     reciprocal_n = jnp.reciprocal(jnp.asarray(n, dtype=centered.dtype))
-    midpoint_mass = (jnp.arange(n, dtype=centered.dtype) + 0.5) * reciprocal_n
+    lower_midpoint_mass = (
+        jnp.arange(n, dtype=centered.dtype) + 0.5
+    ) * reciprocal_n
+    upper_midpoint_mass = (
+        jnp.arange(n, 0, -1, dtype=centered.dtype) - 0.5
+    ) * reciprocal_n
     quantile_weight = jnp.where(
         centered < 0.0,
-        midpoint_mass,
-        jnp.maximum(1.0 - midpoint_mass, 0.0),
+        lower_midpoint_mass,
+        upper_midpoint_mass,
     )
     return jnp.asarray(
         2.0 * reciprocal_n * jnp.sum(jnp.abs(centered) * quantile_weight)
