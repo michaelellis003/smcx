@@ -23,7 +23,7 @@ from typing import NamedTuple, cast
 import jax.numpy as jnp
 import jax.random as jr
 from jax import vmap
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Bool, Float, Int
 
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
@@ -36,6 +36,7 @@ from smcx._utils import (
     _prepend,
     _prepend_particle_history,
     _raise_if_degenerate,
+    _raise_invalid_ancestors,
     _TreeSignature,
     _validate_filter_inputs,
     _validate_log_density_batch,
@@ -70,6 +71,7 @@ class _GuidedCarry(NamedTuple):
     ess: Float[Array, ""]
     log_evidence_compensation: Float[Array, ""]
     ancestors: Int[Array, " num_particles"]
+    invalid_resampling: Bool[Array, ""]
 
 
 class _GuidedStepInput(NamedTuple):
@@ -101,12 +103,12 @@ def _guided_step(
     log_num_particles: Float[Array, ""],
 ) -> tuple[_GuidedCarry, _GuidedStepOutput]:
     """Resample, propose, and reweight one guided particle cloud."""
-    state, current_ess, correction, _ = carry
+    state, current_ess, correction, _, invalid_seen = carry
     y_t, input_t, time_index = inputs_t
     num_particles = state.log_weights.shape[0]
     identity = jnp.arange(num_particles, dtype=jnp.int32)
     resampling_key, proposal_key = jr.split(key_t)
-    do_resample, ancestors = _conditional_resample(
+    do_resample, ancestors, invalid_resampling = _conditional_resample(
         resampling_key,
         state.log_weights,
         current_ess,
@@ -193,7 +195,10 @@ def _guided_step(
         log_marginal_likelihood=log_evidence,
     )
     ess_t: Array = jnp.asarray(compute_ess(log_w_norm))
-    next_carry = _GuidedCarry(next_state, ess_t, correction, ancestors)
+    invalid_seen |= invalid_resampling
+    next_carry = _GuidedCarry(
+        next_state, ess_t, correction, ancestors, invalid_seen
+    )
     output = _GuidedStepOutput(
         propagated, log_w_norm, ancestors, ess_t, log_ev_inc
     )
@@ -333,6 +338,7 @@ def guided_filter(
         ess_0,
         jnp.zeros_like(log_ev_0),
         identity_ancestors,
+        jnp.asarray(False),
     )
     if store_history:
         final_carry, outputs = _filter_scan(scan_step, init_carry, scan_inputs)
@@ -368,6 +374,7 @@ def guided_filter(
         + final_carry.log_evidence_compensation
     )
 
+    _raise_invalid_ancestors(final_carry.invalid_resampling, num_particles)
     _raise_if_degenerate(final_log_evidence)
     return ParticleFilterPosterior(
         marginal_loglik=final_log_evidence,

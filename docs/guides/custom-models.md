@@ -245,8 +245,13 @@ and Liu–West filters instead supply the normalized first-stage weights and
 their ESS, because those are the quantities governing ancestor selection.
 The numeric default `0.5` retains the strict rule `ESS < 0.5 * N`.
 
-Until issue #38 closes, multi-observation MPS filters use a sequence of
-one-step scans.
+The separate `resampling_fn` callback must return a JAX array of exactly
+`num_samples` ancestor indices with dtype `int32`. Every index must be in
+`[0, num_particles)`. Shape and dtype errors are reported while the filter
+is traced. Index values are checked after the filter loop returns, including
+with `store_history=False`; under an outer `jax.jit`, Python exceptions cannot
+be raised and the value check is skipped. Until issue #38 closes,
+multi-observation MPS filters use a sequence of one-step scans.
 
 ## Compose a particle-filter kernel
 

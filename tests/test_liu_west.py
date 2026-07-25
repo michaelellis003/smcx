@@ -158,6 +158,7 @@ def test_uncompiled_step_matches_compiled_scan():
         jnp.asarray(0.0),
         jnp.asarray(0.0),
         jnp.arange(num_particles, dtype=jnp.int32),
+        jnp.asarray(False),
     )
     signature = lw._validate_dense_initial_cloud(carry.particles, 16, name="x")
 
@@ -391,6 +392,38 @@ class TestLiuWestJIT:
         assert result.filtered_particles.shape == (10, 50, 1)
         assert result.filtered_params.shape == (10, 50, 1)
         assert jnp.isfinite(result.marginal_loglik)
+
+
+def test_invalid_ancestor_precedes_induced_degeneracy():
+    def initial(key, count):
+        del key
+        return jnp.arange(count, dtype=jnp.float32)[:, None]
+
+    def transition(key, state, params):
+        del key, params
+        return state
+
+    def observation(emission, state, params):
+        del emission, params
+        return jnp.where(state[0] == 3, -jnp.inf, 0.0)
+
+    def invalid_resampler(key, weights, count):
+        del key, weights
+        return jnp.full(count, count, dtype=jnp.int32)
+
+    with pytest.raises(ValueError, match=r"entries.*\[0, 4\)"):
+        liu_west_filter(
+            jr.key(159),
+            initial,
+            transition,
+            observation,
+            lambda emission, state, params: jnp.asarray(0.0),
+            lambda key, count: jnp.zeros((count, 1)),
+            jnp.zeros((2, 1)),
+            4,
+            resampling_fn=invalid_resampler,
+            resampling_threshold=1.1,
+        )
 
 
 class TestLiuWestLogEvidenceIncrements:

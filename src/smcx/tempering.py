@@ -34,7 +34,12 @@ from jax import jit, lax, vmap
 from jaxtyping import Array, Float
 
 from smcx._numerics import _neumaier_add
-from smcx._utils import _raise_if_degenerate, _validate_log_density_batch
+from smcx._utils import (
+    _raise_if_degenerate,
+    _raise_invalid_ancestors,
+    _validate_ancestors,
+    _validate_log_density_batch,
+)
 from smcx.containers import TemperedPosterior
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import systematic
@@ -389,7 +394,12 @@ def temper(
 
         # --- resample (always) + pi_{phi'}-invariant moves ----------
         key, kr, km = jr.split(key, 3)
-        idx = resampling_fn(kr, jnp.exp(lw_norm), n)
+        idx, invalid_resampling = _validate_ancestors(
+            resampling_fn(kr, jnp.exp(lw_norm), n),
+            n,
+            n,
+        )
+        _raise_invalid_ancestors(invalid_resampling, n)
         particles = particles[idx]
         loglik = loglik[idx]
         logprior = logprior[idx]

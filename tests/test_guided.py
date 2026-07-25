@@ -90,7 +90,7 @@ def _misspecified_proposal():
 
 def _assert_compiled_close(actual, expected):
     actual_array, expected_array = np.asarray(actual), np.asarray(expected)
-    if np.issubdtype(actual_array.dtype, np.integer):
+    if actual_array.dtype.kind in "biu":
         np.testing.assert_array_equal(actual_array, expected_array)
         return
     # Fixed keys remove MC error; 64 ulps covers the eight-term reduction.
@@ -119,6 +119,7 @@ def test_uncompiled_guided_step_matches_public_two_step_run():
         full.ess[0],
         jnp.zeros_like(state.log_marginal_likelihood),
         full.ancestors[0],
+        jnp.asarray(False),
     )
     step_input = guided_module._GuidedStepInput(Y[1], None, jnp.int32(1))
     signature = _validate_particle_cloud(state.particles, 8, name="particles")

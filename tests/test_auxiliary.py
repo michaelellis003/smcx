@@ -205,6 +205,7 @@ def test_uncompiled_step_matches_public_and_compiled_scan(
         state,
         jnp.zeros_like(state.log_marginal_likelihood),
         expected.ancestors[0],
+        jnp.asarray(False),
     )
     step_input = _AuxiliaryStepInput(
         emissions[1], None, jnp.asarray(1, dtype=jnp.int32)
@@ -242,6 +243,7 @@ def test_uncompiled_step_matches_public_and_compiled_scan(
         expected_total,
         expected_correction,
         record[2],
+        jnp.asarray(False),
         *record,
         jnp.asarray(True),
     )
@@ -457,3 +459,34 @@ class TestAuxiliaryInputs:
             auxiliary.filtered_log_weights, bootstrap.filtered_log_weights
         )
         assert auxiliary.marginal_loglik == bootstrap.marginal_loglik
+
+
+def test_invalid_ancestor_precedes_induced_degeneracy():
+    def initial(key, count):
+        del key
+        return jnp.arange(count, dtype=jnp.float32)[:, None]
+
+    def transition(key, state):
+        del key
+        return state
+
+    def observation(emission, state):
+        del emission
+        return jnp.where(state[0] == 3, -jnp.inf, 0.0)
+
+    def invalid_resampler(key, weights, count):
+        del key, weights
+        return jnp.full(count, count, dtype=jnp.int32)
+
+    with pytest.raises(ValueError, match=r"entries.*\[0, 4\)"):
+        auxiliary_filter(
+            jr.key(159),
+            initial,
+            transition,
+            observation,
+            lambda emission, state: jnp.asarray(0.0),
+            jnp.zeros((2, 1)),
+            4,
+            resampling_fn=invalid_resampler,
+            resampling_threshold=1.1,
+        )
