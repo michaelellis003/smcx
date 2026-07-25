@@ -5151,7 +5151,7 @@ importance weights cannot normalize.</p>
                 <code>predictions</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_samples&#39;]</code>
+                  <code><span title="smcx.diagnostics._DiagnosticVector">_DiagnosticVector</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -5167,11 +5167,7 @@ importance weights cannot normalize.</p>
                 <code>observation</code>
             </td>
             <td>
-                  <code><a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
-
-  
-      module-attribute
-   (smcx.types.Scalar)" href="types/#smcx.types.Scalar">Scalar</a></code>
+                  <code><span title="smcx.diagnostics._DiagnosticScalar">_DiagnosticScalar</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -5206,6 +5202,30 @@ importance weights cannot normalize.</p>
             <td>
               <div class="doc-md-description">
                 <p>Scalar CRPS (lower is better, zero for perfect prediction).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Predictions are not a nonempty rank-one floating array,
+or the observation is not a floating scalar.</p>
               </div>
             </td>
           </tr>
@@ -7021,11 +7041,7 @@ a predictive criterion such as <code>smcx.crps</code>, and use
                 <code>log_ml_1</code>
             </td>
             <td>
-                  <code><a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
-
-  
-      module-attribute
-   (smcx.types.Scalar)" href="types/#smcx.types.Scalar">Scalar</a></code>
+                  <code><span title="smcx.diagnostics._DiagnosticScalar">_DiagnosticScalar</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -7041,11 +7057,7 @@ a predictive criterion such as <code>smcx.crps</code>, and use
                 <code>log_ml_2</code>
             </td>
             <td>
-                  <code><a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
-
-  
-      module-attribute
-   (smcx.types.Scalar)" href="types/#smcx.types.Scalar">Scalar</a></code>
+                  <code><span title="smcx.diagnostics._DiagnosticScalar">_DiagnosticScalar</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -7080,6 +7092,29 @@ a predictive criterion such as <code>smcx.crps</code>, and use
             <td>
               <div class="doc-md-description">
                 <p>Scalar log Bayes factor.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Either log marginal likelihood is not a floating scalar.</p>
               </div>
             </td>
           </tr>
@@ -7352,7 +7387,7 @@ exploratory diagnostics rather than calibrated variance estimates.</p>
                 <code>lag</code>
             </td>
             <td>
-                  <code><span title="int">int</span> | None</code>
+                  <code><span title="smcx.diagnostics._IntegerArgument">_IntegerArgument</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -7405,8 +7440,8 @@ exploratory diagnostics rather than calibrated variance estimates.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The lag is negative, or the posterior retains only its
-final particle cloud.</p>
+                <p>The lag is not a nonnegative integer, or the posterior
+retains only its final particle cloud.</p>
               </div>
             </td>
           </tr>
@@ -7908,12 +7943,13 @@ with at least float32 precision.</p>
                 <code>q</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_quantiles&#39;]</code>
+                  <code><span title="smcx.diagnostics._DiagnosticVector">_DiagnosticVector</span></code>
             </td>
             <td>
               <div class="doc-md-description">
                 <p>Quantile levels in [0, 1], e.g. <code>jnp.array([0.025, 0.975])</code>
-for a 95% credible interval.</p>
+for a 95% credible interval. Values are checked eagerly;
+callers passing traced levels must preserve this domain.</p>
               </div>
             </td>
             <td>
@@ -7940,6 +7976,30 @@ for a 95% credible interval.</p>
             <td>
               <div class="doc-md-description">
                 <p>Weighted quantiles, shape <code>(ntime, num_quantiles, param_dim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>q</code> is not a nonempty rank-one floating array, or an
+eager level lies outside [0, 1].</p>
               </div>
             </td>
           </tr>
@@ -8284,7 +8344,7 @@ the same state PyTree and returning a nonempty floating vector.</p>
                 <code>num_samples</code>
             </td>
             <td>
-                  <code><span title="int">int</span> | None</code>
+                  <code><span title="smcx.diagnostics._IntegerArgument">_IntegerArgument</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -8348,9 +8408,9 @@ Defaults to the number of particles.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>num_samples</code> is less than one, the posterior state is
-malformed, the transition changes its PyTree contract, or the
-emission is not a nonempty floating vector.</p>
+                <p><code>num_samples</code> is not a positive integer, the posterior
+state is malformed, the transition changes its PyTree contract,
+or the emission is not a nonempty floating vector.</p>
               </div>
             </td>
           </tr>
@@ -8555,7 +8615,7 @@ filter and returns the marginal log-likelihood.</p>
                 <code>num_replicates</code>
             </td>
             <td>
-                  <code><span title="int">int</span></code>
+                  <code><span title="smcx.diagnostics._IntegerArgument">_IntegerArgument</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -8586,6 +8646,30 @@ filter and returns the marginal log-likelihood.</p>
             <td>
               <div class="doc-md-description">
                 <p>Array of log-ML estimates, shape <code>(num_replicates,)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>num_replicates</code> is not a positive integer, or
+<code>filter_fn</code> does not return a floating scalar.</p>
               </div>
             </td>
           </tr>
@@ -9440,7 +9524,7 @@ implementation.</p>
                 <code>q</code>
             </td>
             <td>
-                  <code><span title="float">float</span></code>
+                  <code><span title="smcx.diagnostics._RealArgument">_RealArgument</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -9495,6 +9579,16 @@ implementation.</p>
             <td>
               <div class="doc-md-description">
                 <p>The posterior has structured rather than dense particles.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>q</code> is not finite and in (0, 0.5].</p>
               </div>
             </td>
           </tr>
@@ -10522,12 +10616,13 @@ sorts particles, computes cumulative weights, and interpolates.</p>
                 <code>q</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_quantiles&#39;]</code>
+                  <code><span title="smcx.diagnostics._DiagnosticVector">_DiagnosticVector</span></code>
             </td>
             <td>
               <div class="doc-md-description">
                 <p>Quantile levels in [0, 1], e.g. <code>jnp.array([0.025, 0.975])</code>
-for a 95% credible interval.</p>
+for a 95% credible interval. Values are checked eagerly;
+callers passing traced levels must preserve this domain.</p>
               </div>
             </td>
             <td>
@@ -10577,6 +10672,17 @@ for a 95% credible interval.</p>
             <td>
               <div class="doc-md-description">
                 <p>The posterior has structured rather than dense particles.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>q</code> is not a nonempty rank-one floating array, or an
+eager level lies outside [0, 1].</p>
               </div>
             </td>
           </tr>
