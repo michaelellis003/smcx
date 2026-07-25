@@ -59,7 +59,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, tree, vmap
 from jax.core import Tracer
-from jaxtyping import Array, Float, Int, Shaped
+from jaxtyping import Array, Float, Int
 
 from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
@@ -102,7 +102,7 @@ if TYPE_CHECKING:
     _DiagnosticScalar: TypeAlias = Scalar
     _IntegerArgument: TypeAlias = int
 else:
-    _DiagnosticVector: TypeAlias = Shaped[Array, "*diagnostic_shape"]
+    _DiagnosticVector: TypeAlias = Any
     _DiagnosticScalar: TypeAlias = object
     _IntegerArgument: TypeAlias = object
 
