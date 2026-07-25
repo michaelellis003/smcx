@@ -7,14 +7,17 @@ Every kernel takes ``(key, weights, num_samples)`` — probability-space
 weights, any positive scale — and returns ``int32`` ancestor indices in
 ``[0, num_particles)``. Systematic, stratified, and multinomial outputs
 are nondecreasing; residual returns its deterministic block followed by
-iid remainder draws. Query grids are clamped strictly below 1 so a grid
-point that rounds to 1.0 in float32 cannot select past the final
-positive-weight slot. This endpoint guard is inherited from smcx's
-former MLX implementation.
+iid remainder draws. Calls with concrete weights require finite, nonnegative
+values with positive total mass. Data-dependent validation is skipped for
+traced values, where Python exceptions cannot be staged. Query grids are
+clamped strictly below 1 so a grid point that rounds to 1.0 in float32 cannot
+select past the final positive-weight slot. This endpoint guard is inherited
+from smcx's former MLX implementation.
 """
 
 import jax
 import jax.numpy as jnp
+from jax.core import Tracer
 from jaxtyping import Array, Float, Int32
 
 from smcx.types import PRNGKeyT
@@ -24,7 +27,7 @@ _TINY = 1e-30
 
 
 def _validate_inputs(weights: Array, num_samples: int) -> None:
-    """Validate the static public resampling contract."""
+    """Validate the public resampling contract where values are concrete."""
     if weights.ndim != 1:
         raise ValueError(
             f"weights must have shape (N,); got shape {weights.shape}"
@@ -37,6 +40,19 @@ def _validate_inputs(weights: Array, num_samples: int) -> None:
         )
     if num_samples < 1:
         raise ValueError(f"num_samples must be >= 1; got {num_samples}")
+    if isinstance(weights, Tracer):
+        return
+    all_finite = jnp.all(jnp.isfinite(weights))
+    # Closed-over JAX arrays remain concrete at function entry but their
+    # first value operation is traced under jit/vmap.
+    if isinstance(all_finite, Tracer):
+        return
+    if not bool(all_finite):
+        raise ValueError("weights must contain only finite values")
+    if bool(jnp.any(weights < 0)):
+        raise ValueError("weights must be nonnegative")
+    if not bool(jnp.any(weights > 0)):
+        raise ValueError("weights must have positive total mass")
 
 
 def _below_one(dtype: jnp.dtype) -> Array:
@@ -87,14 +103,16 @@ def systematic(
 
     Args:
         key: PRNG key.
-        weights: Probability-space weights.
+        weights: Finite, nonnegative probability-space weights with positive
+            total mass, on any positive scale.
         num_samples: Number of ancestors to draw.
 
     Returns:
         Nondecreasing int32 ancestor indices.
 
     Raises:
-        ValueError: The weights or sample count are structurally invalid.
+        ValueError: The weights or sample count are invalid. Data-dependent
+            weight checks run while their values remain concrete.
     """
     _validate_inputs(weights, num_samples)
     u0 = jax.random.uniform(key)
@@ -112,14 +130,16 @@ def stratified(
 
     Args:
         key: PRNG key.
-        weights: Probability-space weights.
+        weights: Finite, nonnegative probability-space weights with positive
+            total mass, on any positive scale.
         num_samples: Number of ancestors to draw.
 
     Returns:
         Nondecreasing int32 ancestor indices.
 
     Raises:
-        ValueError: The weights or sample count are structurally invalid.
+        ValueError: The weights or sample count are invalid. Data-dependent
+            weight checks run while their values remain concrete.
     """
     _validate_inputs(weights, num_samples)
     v = jax.random.uniform(key, (num_samples,))
@@ -144,14 +164,16 @@ def multinomial(
 
     Args:
         key: PRNG key.
-        weights: Probability-space weights.
+        weights: Finite, nonnegative probability-space weights with positive
+            total mass, on any positive scale.
         num_samples: Number of ancestors to draw.
 
     Returns:
         Nondecreasing int32 ancestor indices.
 
     Raises:
-        ValueError: The weights or sample count are structurally invalid.
+        ValueError: The weights or sample count are invalid. Data-dependent
+            weight checks run while their values remain concrete.
     """
     _validate_inputs(weights, num_samples)
     e = -jnp.log1p(-jax.random.uniform(key, (num_samples + 1,)))
@@ -179,7 +201,8 @@ def residual(
 
     Args:
         key: PRNG key.
-        weights: Probability-space weights.
+        weights: Finite, nonnegative probability-space weights with positive
+            total mass, on any positive scale.
         num_samples: Number of ancestors to draw.
 
     Returns:
@@ -187,7 +210,8 @@ def residual(
         drawn multinomially from the residual weights).
 
     Raises:
-        ValueError: The weights or sample count are structurally invalid.
+        ValueError: The weights or sample count are invalid. Data-dependent
+            weight checks run while their values remain concrete.
 
     References:
         Douc, R., Cappe, O., and Moulines, E. (2005). Comparison of

@@ -45,6 +45,37 @@ class TestContract:
 
     @pytest.mark.parametrize("resampler", SCHEMES, ids=SCHEME_IDS)
     @pytest.mark.parametrize(
+        ("weights", "message"),
+        [
+            (
+                jnp.array([0.0, 0.0, 0.0]),
+                "weights must have positive total mass",
+            ),
+            (
+                jnp.array([-1.0, 2.0, 0.0]),
+                "weights must be nonnegative",
+            ),
+            (
+                jnp.array([jnp.nan, 1.0, 1.0]),
+                "weights must contain only finite values",
+            ),
+            (
+                jnp.array([jnp.inf, 1.0, 1.0]),
+                "weights must contain only finite values",
+            ),
+        ],
+    )
+    def test_rejects_non_normalizable_weights(
+        self,
+        resampler: ResamplingFn,
+        weights: jax.Array,
+        message: str,
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            resampler(jr.key(162), weights, 8)
+
+    @pytest.mark.parametrize("resampler", SCHEMES, ids=SCHEME_IDS)
+    @pytest.mark.parametrize(
         ("weights", "num_samples", "message"),
         [
             (jnp.ones((2, 2)), 2, r"weights must have shape \(N,\)"),
