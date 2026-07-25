@@ -359,6 +359,29 @@ class TestWeightedVariance:
         result = weighted_variance(_make_posterior())
         assert jnp.array_equal(result, jnp.full((3, 1), 341.0))
 
+    def test_safe_deviations_keep_square_first_product_order(self):
+        """Ordinary coordinates retain the established bitwise result."""
+        posterior = _make_weighted_moment_posterior(
+            [0.0, 0.5],
+            [0.1, 0.9],
+        )
+        weights = jnp.exp(posterior.filtered_log_weights[0])
+        weights /= jnp.sum(weights)
+        offsets = (
+            posterior.filtered_particles[0] - posterior.filtered_particles[0, 1]
+        )
+        deviations = offsets - jnp.sum(weights[:, None] * offsets, axis=0)
+        expected = jnp.sum(
+            weights[:, None] * deviations**2,
+            axis=0,
+        )[None, :]
+
+        for actual in (
+            weighted_variance(posterior),
+            jax.jit(weighted_variance)(posterior),
+        ):
+            assert jnp.array_equal(actual, expected)
+
     @pytest.mark.parametrize(
         ("values", "expected_mean", "expected_variance"),
         [
@@ -451,6 +474,7 @@ class TestWeightedVariance:
             jax.jit(weighted_variance)(posterior),
         ):
             assert jnp.all(jnp.isposinf(actual))
+
 
 class TestWeightedQuantile:
     """Tests for weighted_quantile."""
