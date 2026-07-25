@@ -3,6 +3,8 @@
 
 """Tests for smcx.diagnostics against frozen exact references."""
 
+from fractions import Fraction
+
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -670,7 +672,7 @@ class TestTailESS:
             ess=jnp.full((1,), float(n)),
             log_evidence_increments=jnp.zeros((1,)),
         )
-        te = float(tail_ess(posterior, q=0.05)[0])
+        te = float(tail_ess(posterior, q=Fraction(1, 20))[0])
         assert te == pytest.approx(0.05 * n, rel=0.15)
 
     def test_tail_ess_leq_standard_ess(self, lgssm_params, lgssm_data):
