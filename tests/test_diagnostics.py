@@ -405,6 +405,21 @@ class TestCRPS:
             rel=relative_tolerance,
         )
 
+    @pytest.mark.parametrize("observation", [-3e38, 3e38, 0.0, -0.0])
+    def test_crps_extreme_opposite_signs_remain_finite(self, observation):
+        from smcx.diagnostics import crps
+
+        predictions = jnp.asarray([-3e38, 3e38], dtype=jnp.float32)
+
+        result = crps(predictions, jnp.float32(observation))
+
+        assert jnp.isfinite(result)
+        relative_tolerance = 8.0 * float(jnp.finfo(jnp.float32).eps)
+        assert float(result) == pytest.approx(
+            float(jnp.float32(1.5e38)),
+            rel=relative_tolerance,
+        )
+
     def test_crps_zero_for_perfect_prediction(self):
         """CRPS = 0 when all predictions equal observation."""
         from smcx.diagnostics import crps
