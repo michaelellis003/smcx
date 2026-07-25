@@ -56,13 +56,12 @@ class TestSimulateOutputShapes:
     ("emission", "message"),
     [
         ([0.0], "must be a JAX array"),
-        (jnp.asarray(0.0), "shape \\(emission_dim,\\)"),
-        (jnp.empty((0,)), "shape \\(emission_dim,\\)"),
-        (jnp.asarray([0], dtype=jnp.int32), "floating dtype"),
+        (jnp.empty((0,)), "emission_dim >= 1"),
+        (jnp.empty((1, 1)), r"shape \(\) or \(emission_dim,\)"),
     ],
 )
 def test_simulate_rejects_invalid_initial_emission(emission, message):
-    """The first emission establishes a nonempty floating vector contract."""
+    """The first emission establishes a nonempty scalar/vector contract."""
     with pytest.raises(ValueError, match=message):
         simulate(
             jr.key(0),
@@ -71,6 +70,25 @@ def test_simulate_rejects_invalid_initial_emission(emission, message):
             lambda _key, _state: emission,
             num_timesteps=1,
         )
+
+
+def test_simulate_canonicalizes_scalar_discrete_emissions():
+    """Scalar discrete draws become a stable length-one event."""
+
+    def emit(_key, state):
+        return jnp.asarray(state[0], dtype=jnp.int32)
+
+    _, emissions = simulate(
+        jr.key(152),
+        lambda _key: jnp.array([1]),
+        lambda _key, state: state + 1,
+        emit,
+        num_timesteps=3,
+    )
+
+    assert emissions.shape == (3, 1)
+    assert emissions.dtype == jnp.int32
+    assert jnp.array_equal(emissions[:, 0], jnp.array([1, 2, 3]))
 
 
 @pytest.mark.parametrize(
@@ -196,4 +214,15 @@ class TestSimulateInputs:
                 emission_sampler,
                 num_timesteps=3,
                 inputs=jnp.ones(2),
+            )
+
+    def test_inputs_must_have_nonempty_event_dimension(self):
+        with pytest.raises(ValueError, match="input_dim >= 1"):
+            simulate(
+                jr.key(0),
+                lambda _key, _input: jnp.zeros(1),
+                lambda _key, state, _input: state,
+                lambda _key, state, _input: state,
+                num_timesteps=3,
+                inputs=jnp.empty((3, 0)),
             )

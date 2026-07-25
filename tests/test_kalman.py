@@ -94,6 +94,11 @@ def test_gaussian_filters_accept_scalar_observation_sequences():
             jnp.ones(2, dtype=jnp.int32),
             "inputs must have a floating dtype",
         ),
+        (
+            "inputs",
+            jnp.empty((2, 0)),
+            "input_dim >= 1",
+        ),
     ],
 )
 def test_gaussian_data_validation_raises_plain_value_errors(

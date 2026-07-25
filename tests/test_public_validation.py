@@ -172,6 +172,19 @@ def test_particle_filters_validate_structure(
         run_filter(emissions, num_particles)
 
 
+def test_particle_filter_rejects_zero_width_inputs():
+    with pytest.raises(ValueError, match="input_dim >= 1"):
+        smcx.bootstrap_filter(
+            jr.key(152),
+            _initial_sampler,
+            _transition_sampler,
+            _log_observation,
+            jnp.zeros((2, 1)),
+            4,
+            inputs=jnp.empty((2, 0)),
+        )
+
+
 @pytest.mark.parametrize("run_filter", _PARTICLE_FILTERS)
 @pytest.mark.parametrize("threshold", [-1.0, float("nan"), float("inf")])
 def test_particle_filters_reject_invalid_numeric_resampling_threshold(

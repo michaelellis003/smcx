@@ -258,7 +258,7 @@ def test_runner_executes_a_custom_kernel_with_time_aligned_inputs():
     assert "min_ess" in smcx.diagnose(posterior)
 
 
-def test_runner_canonicalizes_scalar_discrete_emissions():
+def test_runner_canonicalizes_scalar_discrete_model_data():
     num_particles = 4
     identity = jnp.arange(num_particles, dtype=jnp.int32)
 
@@ -272,10 +272,14 @@ def test_runner_canonicalizes_scalar_discrete_emissions():
             jnp.asarray(0.0),
         )
 
-    def initialize(_time_index, emission, _key):
+    def initialize(_time_index, emission, input_t, _key):
+        assert input_t.shape == (1,)
+        assert input_t.dtype == jnp.bool_
         return jnp.asarray(0), record(emission)
 
-    def step(carry, _time_index, emission, _key):
+    def step(carry, _time_index, emission, input_t, _key):
+        assert input_t.shape == (1,)
+        assert input_t.dtype == jnp.bool_
         return carry, record(emission)
 
     posterior = smcx.run_particle_filter(
@@ -283,6 +287,7 @@ def test_runner_canonicalizes_scalar_discrete_emissions():
         initialize,
         step,
         jnp.array([2, 3], dtype=jnp.int32),
+        inputs=jnp.array([False, True]),
     )
 
     assert posterior.log_evidence_increments.shape == (2,)
@@ -494,6 +499,7 @@ def test_runner_rejects_step_particle_shape_drift():
     [
         (jnp.zeros((3, 1, 1)), "inputs must have shape"),
         (jnp.zeros((2, 1)), "inputs must have leading dimension T=3"),
+        (jnp.empty((3, 0)), "input_dim >= 1"),
     ],
 )
 def test_runner_rejects_misaligned_inputs(inputs, message):
