@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.12 (2026-07-25)
+
+### Bug Fixes
+
+- **resampling**: Reject non-normalizable weights
+  ([#197](https://github.com/michaelellis003/smcx/pull/197),
+  [`1700cb7`](https://github.com/michaelellis003/smcx/commit/1700cb721e2b30d7647f0078028e6319ba96296a))
+
+
 ## v1.13.11 (2026-07-25)
 
 ### Bug Fixes
