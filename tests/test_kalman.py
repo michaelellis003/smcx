@@ -36,6 +36,87 @@ def _assert_roundoff_close(actual, expected):
     )
 
 
+def test_gaussian_filters_accept_scalar_observation_sequences():
+    """All Gaussian filters canonicalize one scalar observation per row."""
+    mean = jnp.zeros(1)
+    covariance = jnp.eye(1)
+    emissions = jnp.array([0.1, -0.2])
+
+    linear = smcx.kalman_filter(
+        mean,
+        covariance,
+        covariance,
+        covariance,
+        covariance,
+        covariance,
+        emissions,
+    )
+    extended = smcx.extended_kalman_filter(
+        mean,
+        covariance,
+        lambda state: state,
+        lambda _state: covariance,
+        covariance,
+        lambda state: state,
+        lambda _state: covariance,
+        covariance,
+        emissions,
+    )
+    unscented = smcx.unscented_kalman_filter(
+        mean,
+        covariance,
+        lambda state: state,
+        covariance,
+        lambda state: state,
+        covariance,
+        emissions,
+    )
+
+    for posterior in (linear, extended, unscented):
+        assert posterior.log_evidence_increments.shape == (2,)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        (
+            "emissions",
+            jnp.ones(2, dtype=jnp.int32),
+            "emissions must have a floating dtype",
+        ),
+        (
+            "emissions",
+            jnp.ones((2, 1, 1)),
+            r"shape \(T,\) or \(T, emission_dim\)",
+        ),
+        (
+            "inputs",
+            jnp.ones(2, dtype=jnp.int32),
+            "inputs must have a floating dtype",
+        ),
+    ],
+)
+def test_gaussian_data_validation_raises_plain_value_errors(
+    field,
+    value,
+    message,
+):
+    """Gaussian shape and dtype violations use the public error type."""
+    model = {
+        "initial_mean": jnp.zeros(1),
+        "initial_covariance": jnp.eye(1),
+        "transition_matrix": jnp.eye(1),
+        "transition_covariance": jnp.eye(1),
+        "observation_matrix": jnp.eye(1),
+        "observation_covariance": jnp.eye(1),
+        "emissions": jnp.zeros((2, 1)),
+    }
+    model[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        smcx.kalman_filter(**model)
+
+
 def test_kalman_filter_matches_frozen_dynamax_reference(
     lgssm_params, lgssm_data
 ):
