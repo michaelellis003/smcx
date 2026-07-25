@@ -2,6 +2,21 @@
 
 <!-- version list -->
 
+## v1.13.9 (2026-07-25)
+
+### Bug Fixes
+
+- **filters**: Compensate evidence accumulation
+  ([#194](https://github.com/michaelellis003/smcx/pull/194),
+  [`da5b82d`](https://github.com/michaelellis003/smcx/commit/da5b82d76b5911c51ee76d9a61b55c433eba7063))
+
+### Documentation
+
+- **diagnostics**: Define genealogy variance scope
+  ([#192](https://github.com/michaelellis003/smcx/pull/192),
+  [`7890794`](https://github.com/michaelellis003/smcx/commit/7890794d13dda5d7522993116349326cbae57c0c))
+
+
 ## v1.13.8 (2026-07-24)
 
 ### Bug Fixes
