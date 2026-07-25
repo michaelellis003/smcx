@@ -368,6 +368,47 @@ def _normalized_linear_weights(
     return weights / jnp.sum(weights, axis=1, keepdims=True)
 
 
+def _weighted_moment_coordinates(
+    log_weights: Float[Array, "ntime num_particles"],
+    field: Float[Array, "ntime num_particles dim"],
+) -> tuple[
+    Float[Array, "ntime num_particles"],
+    Float[Array, "ntime dim"],
+    Float[Array, "ntime num_particles dim"],
+    Int[Array, "ntime dim"],
+]:
+    """Return weights and overflow-safe maximum-weight coordinates."""
+    weights = _normalized_linear_weights(log_weights)
+    anchor_indices = jnp.argmax(log_weights, axis=1)
+    anchors = field[jnp.arange(field.shape[0]), anchor_indices]
+    material = weights[:, :, None] > 0.0
+    raw_offsets = jnp.where(
+        material,
+        field - anchors[:, None, :],
+        jnp.zeros_like(field),
+    )
+    # Halving finite endpoints makes every possible difference representable.
+    shifts = jnp.any(jnp.isinf(raw_offsets), axis=1).astype(jnp.int32)
+    # Explicit exact multipliers preserve reverse-mode particle gradients;
+    # ldexp has a zero tangent for these extreme exponents on CPU and MPS.
+    downscale = jnp.where(
+        shifts > 0,
+        jnp.asarray(0.5, dtype=field.dtype),
+        jnp.asarray(1.0, dtype=field.dtype),
+    )
+    scaled_field = (
+        jnp.where(material, field, jnp.zeros_like(field))
+        * downscale[:, None, :]
+    )
+    scaled_anchors = scaled_field[jnp.arange(field.shape[0]), anchor_indices]
+    offsets = jnp.where(
+        material,
+        scaled_field - scaled_anchors[:, None, :],
+        jnp.zeros_like(field),
+    )
+    return weights, scaled_anchors, offsets, shifts
+
+
 def _weighted_mean_field(
     log_weights: Float[Array, "ntime num_particles"],
     field: Float[Array, "ntime num_particles dim"],
@@ -381,16 +422,20 @@ def _weighted_mean_field(
     Returns:
         Weighted means, shape ``(ntime, D)``.
     """
-    weights = _normalized_linear_weights(log_weights)
-    anchor_indices = jnp.argmax(log_weights, axis=1)
-    anchors = field[jnp.arange(field.shape[0]), anchor_indices]
-    material = weights[:, :, None] > 0.0
-    offsets = jnp.where(
-        material,
-        field - anchors[:, None, :],
-        jnp.zeros_like(field),
+    weights, anchors, offsets, shifts = _weighted_moment_coordinates(
+        log_weights,
+        field,
     )
-    return anchors + jnp.sum(weights[:, :, None] * offsets, axis=1)
+    scaled_mean = anchors + jnp.sum(
+        weights[:, :, None] * offsets,
+        axis=1,
+    )
+    upscale = jnp.where(
+        shifts > 0,
+        jnp.asarray(2.0, dtype=field.dtype),
+        jnp.asarray(1.0, dtype=field.dtype),
+    )
+    return scaled_mean * upscale
 
 
 def _weighted_variance_field(
@@ -398,22 +443,27 @@ def _weighted_variance_field(
     field: Float[Array, "ntime num_particles dim"],
 ) -> Float[Array, "ntime dim"]:
     """Compute a weighted variance entirely in shifted coordinates."""
-    weights = _normalized_linear_weights(log_weights)
-    anchor_indices = jnp.argmax(log_weights, axis=1)
-    anchors = field[jnp.arange(field.shape[0]), anchor_indices]
-    material = weights[:, :, None] > 0.0
-    offsets = jnp.where(
-        material,
-        field - anchors[:, None, :],
-        jnp.zeros_like(field),
+    weights, _, offsets, shifts = _weighted_moment_coordinates(
+        log_weights,
+        field,
     )
+    material = weights[:, :, None] > 0.0
     offset_means = jnp.sum(weights[:, :, None] * offsets, axis=1)
     deviations = jnp.where(
         material,
         offsets - offset_means[:, None, :],
         jnp.zeros_like(offsets),
     )
-    return jnp.sum(weights[:, :, None] * deviations**2, axis=1)
+    scaled_variance = jnp.sum(
+        weights[:, :, None] * deviations**2,
+        axis=1,
+    )
+    upscale = jnp.where(
+        shifts > 0,
+        jnp.asarray(4.0, dtype=field.dtype),
+        jnp.asarray(1.0, dtype=field.dtype),
+    )
+    return scaled_variance * upscale
 
 
 def _weighted_quantile_field(
@@ -453,7 +503,9 @@ def weighted_mean(
     The reduction is shifted by a maximum-weight particle before summation,
     so common translations do not amplify floating-point
     weight-normalization error. Particles with represented-zero linear
-    weight are masked before centered arithmetic.
+    weight are masked before centered arithmetic. A coordinate whose finite
+    anchor difference would overflow is reduced after an exact one-bit
+    downshift.
 
     Args:
         posterior: Particle filter posterior output.
@@ -486,7 +538,8 @@ def weighted_variance(
     shifted by one particle, avoiding reconstruction of the rounded absolute
     mean inside the central-moment calculation. Particles with
     represented-zero linear weight are masked before subtraction and
-    squaring.
+    squaring. A coordinate whose finite anchor difference would overflow is
+    reduced after an exact one-bit downshift.
 
     Args:
         posterior: Particle filter posterior output.
