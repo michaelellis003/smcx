@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.14 (2026-07-25)
+
+### Bug Fixes
+
+- **numerics**: Require float32 weight precision
+  ([#199](https://github.com/michaelellis003/smcx/pull/199),
+  [`60f0ce0`](https://github.com/michaelellis003/smcx/commit/60f0ce0ef20fec18d5a62d9ef94da80a95baef8e))
+
+
 ## v1.13.13 (2026-07-25)
 
 ### Bug Fixes
