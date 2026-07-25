@@ -804,7 +804,11 @@ class TestDiagnose:
 
     def test_diagnose_uses_finite_pareto_k_when_one_step_is_undefined(self):
         posterior = _make_posterior()
-        log_weights = posterior.filtered_log_weights.at[1, -1].set(jnp.inf)
+        log_weights = posterior.filtered_log_weights
+        log_weights = log_weights.at[0].set(
+            jnp.linspace(-1.0, 1.0, log_weights.shape[1])
+        )
+        log_weights = log_weights.at[1, -1].set(jnp.inf)
         posterior = posterior._replace(filtered_log_weights=log_weights)
 
         k_hat = pareto_k_diagnostic(posterior)
@@ -814,7 +818,8 @@ class TestDiagnose:
             jnp.isfinite(k_hat),
             jnp.array([True, False, True]),
         )
-        assert summary["max_pareto_k"] == pytest.approx(float(k_hat[0]))
+        assert k_hat[2] > k_hat[0]
+        assert summary["max_pareto_k"] == pytest.approx(float(k_hat[2]))
         assert any(
             "Pareto-k was undefined at 1 step(s)" in warning
             for warning in summary["warnings"]
