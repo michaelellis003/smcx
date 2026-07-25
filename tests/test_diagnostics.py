@@ -89,23 +89,30 @@ def _make_posterior():
     )
 
 
-def _make_zero_weight_outlier_posterior(
+def _make_weighted_moment_posterior(
     values: list[float],
+    weights: list[float],
 ) -> ParticleFilterPosterior:
-    """Return one weighted pair preceded by a represented-zero outlier."""
+    """Return a one-step scalar posterior with explicit linear weights."""
+    num_particles = len(values)
+    linear_weights = jnp.asarray(weights, dtype=jnp.float32)
     return _make_posterior()._replace(
         filtered_particles=jnp.asarray(
             values,
             dtype=jnp.float32,
         )[None, :, None],
-        filtered_log_weights=jnp.array(
-            [[-jnp.inf, jnp.log(0.5), jnp.log(0.5)]],
-            dtype=jnp.float32,
-        ),
-        ancestors=jnp.array([[0, 1, 2]], dtype=jnp.int32),
-        ess=jnp.array([2.0]),
+        filtered_log_weights=jnp.log(linear_weights)[None, :],
+        ancestors=jnp.arange(num_particles, dtype=jnp.int32)[None, :],
+        ess=jnp.reciprocal(jnp.sum(linear_weights**2))[None],
         log_evidence_increments=jnp.array([0.0]),
     )
+
+
+def _make_zero_weight_outlier_posterior(
+    values: list[float],
+) -> ParticleFilterPosterior:
+    """Return one weighted pair preceded by a represented-zero outlier."""
+    return _make_weighted_moment_posterior(values, [0.0, 0.5, 0.5])
 
 
 def _neumaier_prefix_oracle(values: np.ndarray) -> np.ndarray:
@@ -280,6 +287,54 @@ class TestWeightedMean:
         actual = np.asarray(weighted_mean(posterior))
 
         _assert_translation_stable_means(actual, expected)
+
+    def test_positive_mass_extremes_preserve_finite_mean(self):
+        """A finite convex mean survives an overflowing anchor difference."""
+        posterior = _make_weighted_moment_posterior(
+            [3e38, -3e38],
+            [0.75, 0.25],
+        )
+        expected = jnp.asarray([[1.5e38]], dtype=jnp.float32)
+        # Eight eps covers normalization and the shifted reduction.
+        tolerance = float(8 * np.finfo(np.float32).eps)
+
+        for actual in (
+            weighted_mean(posterior),
+            jax.jit(weighted_mean)(posterior),
+        ):
+            assert jnp.all(jnp.isfinite(actual))
+            np.testing.assert_allclose(
+                actual,
+                expected,
+                rtol=tolerance,
+                atol=0.0,
+            )
+
+    def test_positive_mass_extreme_particle_gradient_matches_weights(self):
+        """The overflow guard preserves weighted-mean particle autodiff."""
+        posterior = _make_weighted_moment_posterior(
+            [3e38, -3e38],
+            [0.75, 0.25],
+        )
+
+        def summary(particles: jax.Array) -> jax.Array:
+            return jnp.sum(
+                weighted_mean(posterior._replace(filtered_particles=particles))
+            )
+
+        expected = jnp.asarray([[[0.75], [0.25]]], dtype=jnp.float32)
+        particles = posterior.filtered_particles
+        for actual in (
+            jax.grad(summary)(particles),
+            jax.jit(jax.grad(summary))(particles),
+        ):
+            # Two eps covers reverse-mode reassociation through the anchor.
+            np.testing.assert_allclose(
+                actual,
+                expected,
+                rtol=float(2 * np.finfo(np.float32).eps),
+                atol=0.0,
+            )
 
 
 class TestWeightedVariance:
@@ -521,6 +576,33 @@ class TestParamWeightedMean:
             actual,
             jnp.asarray([[-3e38]], dtype=jnp.float32),
         )
+
+    def test_positive_mass_extremes_preserve_finite_parameter_mean(self):
+        from smcx.diagnostics import param_weighted_mean
+
+        posterior = _make_weighted_moment_posterior(
+            [3e38, -3e38],
+            [0.75, 0.25],
+        )
+        liu_west = LiuWestPosterior(
+            *posterior,
+            filtered_params=posterior.filtered_particles,
+        )
+        expected = jnp.asarray([[1.5e38]], dtype=jnp.float32)
+        # Eight eps covers normalization and the shifted reduction.
+        tolerance = float(8 * np.finfo(np.float32).eps)
+
+        for actual in (
+            param_weighted_mean(liu_west),
+            jax.jit(param_weighted_mean)(liu_west),
+        ):
+            assert jnp.all(jnp.isfinite(actual))
+            np.testing.assert_allclose(
+                actual,
+                expected,
+                rtol=tolerance,
+                atol=0.0,
+            )
 
     def test_smc2_parameter_summaries(self):
         from smcx.diagnostics import (
