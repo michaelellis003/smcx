@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.13.21 (2026-07-25)
+
+### Bug Fixes
+
+- **filters**: Validate ESS thresholds ([#207](https://github.com/michaelellis003/smcx/pull/207),
+  [`9e2717e`](https://github.com/michaelellis003/smcx/commit/9e2717e64736bd87bd1982bb2c61705da3a6f43a))
+
+
 ## v1.13.20 (2026-07-25)
 
 ### Bug Fixes
