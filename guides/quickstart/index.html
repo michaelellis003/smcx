@@ -1550,6 +1550,12 @@ observation density.</p>
 </span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;marginal loglik:&quot;</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">posterior</span><span class="o">.</span><span class="n">marginal_loglik</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span> <span class="mi">1</span><span class="p">))</span>
 </span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;filter RMSE:&quot;</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">rmse</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="s2">&quot;observation sd:&quot;</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">r_sd</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
 </span></code></pre></div>
+<p>Particle filters accumulate <code>marginal_loglik</code> with float32/float64
+compensation while retaining the original per-step
+<code>log_evidence_increments</code>. On long float32 series, a plain
+<code>jnp.sum(posterior.log_evidence_increments)</code> can lose information that the
+compensated scalar preserves. This numerical correction can change
+fixed-key totals produced by older smcx releases.</p>
 <p>For the fixed seed above, the filtered RMSE is about 0.369, compared with
 an observation-noise scale of 0.7.</p>
 <h2 id="diagnose">Diagnose</h2>

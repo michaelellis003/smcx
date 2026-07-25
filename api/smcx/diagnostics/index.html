@@ -2453,16 +2453,21 @@ at time t is</p>
 \widehat{V}_t = \sum_{e} \Big( \sum_{n : B_t^n = e}
     W_t^n \Big)^2,
 \]</div>
-<p>the sum over Eve classes of squared normalized-weight mass. For
-large N this estimates the variance of <code>marginal_loglik</code> up to
-time t, and it costs one filter run where <code>smcx.replicated_log_ml</code>
-costs R. The estimate degenerates as
-the genealogy coalesces; once a single Eve class remains the
-function returns <code>inf</code> for that step (the run carries no
-variance information there).</p>
-<p>Passing <code>lag</code> uses the ancestor at time <code>t - lag</code> instead of
-time 0 (Olsson and Douc, 2019), trading a lag-controlled bias
-for estimates that stay usable on long series.</p>
+<p>the sum over Eve classes of squared normalized-weight mass. Under
+multinomial resampling, for large N this estimates the variance of
+<code>marginal_loglik</code> up to time t, and it costs one filter run where
+<code>smcx.replicated_log_ml</code> costs R. <code>ParticleFilterResult</code> does not record
+its resampling scheme, so callers must establish that precondition.
+Results from systematic, stratified, residual, or custom resampling are
+uncalibrated genealogy heuristics.</p>
+<p>The estimate degenerates as the genealogy coalesces; once a single Eve
+class remains the function returns <code>inf</code> for that step (the run carries
+no variance information there).</p>
+<p>Passing <code>lag</code> uses the ancestor at time <code>t - lag</code> instead of time 0.
+This ancestry-window heuristic is motivated by fixed-lag variance
+estimation, but smcx has no independent calibration result for applying
+it to this log-normalizer class-mass formula. Treat lagged values as
+exploratory diagnostics rather than calibrated variance estimates.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2502,8 +2507,7 @@ for estimates that stay usable on long series.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional fixed lag for the Olsson-Douc variant. <code>None</code>
-uses time-0 Eves (the exact Lee-Whiteley estimator).</p>
+                <p>Optional ancestry-window lag. <code>None</code> uses time-0 Eves.</p>
               </div>
             </td>
             <td>
@@ -2560,6 +2564,17 @@ final particle cloud.</p>
       </tbody>
     </table>
 
+
+<details class="references" open>
+  <summary>References</summary>
+  <p>Chan, H. P., and Lai, T. L. (2013). A general theory of particle
+filters in hidden Markov models and some applications.
+https://arxiv.org/abs/1312.5114
+Lee, A., and Whiteley, N. (2018). Variance estimation in the particle
+filter. https://doi.org/10.1093/biomet/asy028
+Olsson, J., and Douc, R. (2019). Numerically stable online estimation
+of variance in particle filters. https://arxiv.org/abs/1701.01001</p>
+</details>
 
     </div>
 

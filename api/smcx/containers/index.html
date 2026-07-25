@@ -2030,7 +2030,8 @@ shape <code>(ntime, state_dim, state_dim)</code>.</p>
         <p>Full output of a Liu-West particle filter run.</p>
 <p>Extends <code>smcx.containers.ParticleFilterPosterior</code> with parameter samples.
 The Liu-West filter (Liu &amp; West, 2001) jointly estimates latent
-states and static parameters using kernel density smoothing.</p>
+states and static parameters using kernel density smoothing.
+<code>marginal_loglik</code> uses Neumaier-compensated accumulation.</p>
 
 
 <p><span class="doc-section-title">Attributes:</span></p>
@@ -2114,7 +2115,7 @@ shape <code>(ntime,)</code>.</p>
             <td>
               <div class="doc-md-description">
                 <p>Per-step log marginal likelihood
-increments, shape <code>(ntime,)</code>.  These sum to
+increments, shape <code>(ntime,)</code>. Their compensated sum is
 <code>marginal_loglik</code>.</p>
               </div>
             </td>
@@ -2183,7 +2184,9 @@ shape <code>(ntime, num_particles, param_dim)</code>.</p>
         <p>Full output of a particle filter run.</p>
 <p>Follows the Dynamax <code>PosteriorGSSMFiltered</code> convention of storing
 the marginal log-likelihood as a scalar summary alongside the
-time-indexed arrays.</p>
+time-indexed arrays. <code>marginal_loglik</code> uses Neumaier-compensated
+accumulation; an ordinary floating-point reduction of the retained
+increments can therefore differ on long series.</p>
 <p>With <code>store_history=False</code>, particle, weight, and ancestor histories
 contain only the final row; ESS and evidence increments still cover all
 T observations.</p>
@@ -2275,7 +2278,7 @@ shape <code>(ntime,)</code>.</p>
             <td>
               <div class="doc-md-description">
                 <p>Per-step log marginal likelihood
-increments, shape <code>(ntime,)</code>.  These sum to
+increments, shape <code>(ntime,)</code>. Their compensated sum is
 <code>marginal_loglik</code>.</p>
               </div>
             </td>

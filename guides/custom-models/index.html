@@ -1862,6 +1862,11 @@ particle, weight, and ancestor histories contain only the final record; ESS
 and evidence increments remain available for every time step. Trajectory
 reconstruction, genealogy-based variance, the combined diagnostic summary,
 and ArviZ export require the default full history.</p>
+<p><code>log_ml_variance</code> is calibrated only when the filter used multinomial
+resampling. Posterior containers do not retain resampler provenance, so values
+from the default systematic resampler or another scheme are heuristic. Its
+optional lag is also an exploratory ancestry-window diagnostic for log
+evidence, not an independently calibrated fixed-lag estimator.</p>
 <h2 id="combine-auxiliary-selection-with-a-guided-proposal">Combine auxiliary selection with a guided proposal</h2>
 <p>The same runner can combine an auxiliary look-ahead <code>log_m</code> with a proposal
 <code>q</code> that sees the current emission. Keep normalized carried log weights <code>W</code>
