@@ -46,6 +46,7 @@ from smcx._utils import (
     _filter_scan,
     _prepend,
     _raise_if_degenerate,
+    _raise_invalid_ancestors,
     _TreeSignature,
     _validate_filter_inputs,
     _validate_log_density_batch,
@@ -78,6 +79,7 @@ class _LiuWestStepCarry(NamedTuple):
     log_marginal_likelihood: Float[Array, ""]
     log_evidence_compensation: Float[Array, ""]
     ancestors: Int[Array, " num_particles"]
+    invalid_resampling: Bool[Array, ""]
 
 
 class _LiuWestStepInput(NamedTuple):
@@ -225,7 +227,7 @@ def _liu_west_step(
     kernel_variance: Float[Array, ""],
     state_signature: _TreeSignature,
 ) -> tuple[_LiuWestStepCarry, _LiuWestStepOutput]:
-    particles, params, log_weights, log_ml, correction, _ = carry
+    particles, params, log_weights, log_ml, correction, _, invalid_seen = carry
     emission_t, input_t, time_index = inputs_t
     num_particles = log_weights.shape[0]
     identity = jnp.arange(num_particles, dtype=jnp.int32)
@@ -257,7 +259,7 @@ def _liu_west_step(
     _validate_log_density_batch(log_aux, num_particles, name="log_auxiliary_fn")
     log_first_norm, log_first_sum = log_normalize(log_weights + log_aux)
     first_ess = jnp.asarray(compute_ess(log_first_norm))
-    do_resample, ancestors = _conditional_resample(
+    do_resample, ancestors, invalid_resampling = _conditional_resample(
         resample_key,
         log_first_norm,
         first_ess,
@@ -313,6 +315,7 @@ def _liu_west_step(
         log_ml,
         correction,
         ancestors,
+        invalid_seen | invalid_resampling,
     )
     ess = jnp.asarray(compute_ess(log_w_norm))
     output = _LiuWestStepOutput(
@@ -490,6 +493,7 @@ def liu_west_filter(
         log_ev_0,
         jnp.zeros_like(log_ev_0),
         identity_ancestors,
+        jnp.asarray(False),
     )
     step_keys = jr.split(key, num_timesteps - 1)
     time_indices = jnp.arange(1, num_timesteps, dtype=jnp.int32)
@@ -535,6 +539,7 @@ def liu_west_filter(
         final_log_ml,
         jnp.nan,
     )
+    _raise_invalid_ancestors(final_carry.invalid_resampling, num_particles)
     _raise_if_degenerate(checked_log_ml)
 
     return LiuWestPosterior(

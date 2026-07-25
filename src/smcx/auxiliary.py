@@ -47,6 +47,7 @@ from smcx._utils import (
     _prepend,
     _prepend_particle_history,
     _raise_if_degenerate,
+    _raise_invalid_ancestors,
     _TreeSignature,
     _validate_filter_inputs,
     _validate_log_density_batch,
@@ -77,6 +78,7 @@ class _AuxiliaryStepCarry(NamedTuple):
     state: ParticleState
     log_evidence_compensation: Float[Array, ""]
     ancestors: Int[Array, " num_particles"]
+    invalid_resampling: Bool[Array, ""]
 
 
 class _AuxiliaryStepInput(NamedTuple):
@@ -141,7 +143,7 @@ def _auxiliary_step(
     log_first_norm, log_first_sum = log_normalize(log_first_stage)
     first_ess = jnp.asarray(compute_ess(log_first_norm))
 
-    do_resample, ancestors = _conditional_resample(
+    do_resample, ancestors, invalid_resampling = _conditional_resample(
         resample_key,
         log_first_norm,
         first_ess,
@@ -204,7 +206,10 @@ def _auxiliary_step(
         log_marginal_likelihood=log_evidence,
     )
     ess_t = jnp.asarray(compute_ess(log_w_norm))
-    new_carry = _AuxiliaryStepCarry(new_state, correction, ancestors)
+    invalid_seen = carry.invalid_resampling | invalid_resampling
+    new_carry = _AuxiliaryStepCarry(
+        new_state, correction, ancestors, invalid_seen
+    )
     output = _AuxiliaryStepOutput(
         propagated,
         log_w_norm,
@@ -369,6 +374,7 @@ def auxiliary_filter(
         init_state,
         jnp.zeros_like(log_ev_0),
         identity_ancestors,
+        jnp.asarray(False),
     )
     if store_history:
         final_carry, outputs = _filter_scan(_step, init_carry, scan_inputs)
@@ -409,6 +415,7 @@ def auxiliary_filter(
         final_log_evidence,
         jnp.nan,
     )
+    _raise_invalid_ancestors(final_carry.invalid_resampling, num_particles)
     _raise_if_degenerate(checked_log_ml)
 
     return ParticleFilterPosterior(

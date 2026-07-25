@@ -500,7 +500,11 @@ class ParamLogObservationFnWithInput(Protocol):
 
 @runtime_checkable
 class ResamplingFn(Protocol):
-    """Draw ancestor indices from normalized particle weights."""
+    """Draw ancestor indices from normalized particle weights.
+
+    The result must be a JAX array with shape ``(num_samples,)``, dtype
+    ``int32``, and entries in ``[0, len(weights))``.
+    """
 
     def __call__(
         self,

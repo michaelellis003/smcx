@@ -34,6 +34,8 @@ from jaxtyping import Array, Float
 
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
+    _raise_invalid_ancestors,
+    _validate_ancestors,
     _validate_initial_state,
     _validate_log_density_batch,
     _validate_particle_cloud,
@@ -373,7 +375,15 @@ def smc2(
         cov = _weighted_cov_f64(th, jnp.exp(log_omega))
         scale_tril = _chol_with_jitter(scale2 * cov)
         # Resample theta with its attached inner state (monotone gather).
-        idx = resampling_fn(k_res, jnp.exp(log_omega), num_theta)
+        idx, invalid_resampling = _validate_ancestors(
+            resampling_fn(k_res, jnp.exp(log_omega), num_theta),
+            num_theta,
+            num_theta,
+        )
+        _raise_invalid_ancestors(
+            invalid_resampling,
+            num_theta,
+        )
         th = th[idx]
         inner = inner[idx]
         inner_log_w = inner_log_w[idx]

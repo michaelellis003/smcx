@@ -24,7 +24,7 @@ from typing import NamedTuple, cast
 import jax.numpy as jnp
 import jax.random as jr
 from jax import core, device_put, lax, tree, vmap
-from jaxtyping import Array, Float, Int, Shaped
+from jaxtyping import Array, Bool, Float, Int, Shaped
 
 from smcx._numerics import (
     _neumaier_add,
@@ -40,7 +40,9 @@ from smcx._utils import (
     _prepend,
     _prepend_particle_history,
     _raise_if_degenerate,
+    _raise_invalid_ancestors,
     _TreeSignature,
+    _validate_ancestors,
     _validate_filter_inputs,
     _validate_log_density_batch,
     _validate_particle_cloud,
@@ -210,6 +212,7 @@ class _BootstrapParticleStepResult(NamedTuple):
     particles: ParticleCloud
     log_weights: Float[Array, " num_particles"]
     info: BootstrapStepInfo
+    invalid_resampling: Bool[Array, ""]
 
 
 def _bootstrap_particle_step(
@@ -229,7 +232,7 @@ def _bootstrap_particle_step(
     num_particles = state.log_weights.shape[0]
     identity = jnp.arange(num_particles, dtype=jnp.int32)
     resample_key, transition_key = jr.split(step_key)
-    do_resample, ancestors = _conditional_resample(
+    do_resample, ancestors, invalid_resampling = _conditional_resample(
         resample_key,
         state.log_weights,
         current_ess,
@@ -279,7 +282,9 @@ def _bootstrap_particle_step(
     )
     ess_t = jnp.asarray(compute_ess(log_w_norm))
     info = BootstrapStepInfo(ancestors, ess_t, do_resample, log_ev_inc)
-    return _BootstrapParticleStepResult(propagated, log_w_norm, info)
+    return _BootstrapParticleStepResult(
+        propagated, log_w_norm, info, invalid_resampling
+    )
 
 
 def _bootstrap_step(
@@ -383,6 +388,11 @@ def bootstrap_step(
         body, checkpoint, (step_key[None], emission_t[None])
     )
     info = tree.map(lambda leaf: leaf[0], batched_info)
+    num_particles = info.ancestors.shape[0]
+    _, invalid = _validate_ancestors(
+        info.ancestors, num_particles, num_particles
+    )
+    _raise_invalid_ancestors(invalid, num_particles)
     total = new_checkpoint.state.log_marginal_likelihood
     _raise_if_degenerate(total + new_checkpoint.log_evidence_compensation)
     return new_checkpoint, info
@@ -457,11 +467,13 @@ def bootstrap_update(
         raise TypeError("bootstrap_update cannot run under a JAX transform")
     platform = device.platform
     state_signature = _validate_checkpoint(checkpoint)
+    num_particles = log_weights_0.shape[0]
     scan_inputs = (step_keys, emissions_chunk)
     if inputs_arr is not None:
         scan_inputs = (*scan_inputs, inputs_arr)
     zero = jnp.zeros_like(jnp.asarray(checkpoint.state.log_marginal_likelihood))
-    retained = jnp.arange(log_weights_0.shape[0], dtype=jnp.int32)
+    retained = jnp.arange(num_particles, dtype=jnp.int32)
+    invalid = jnp.asarray(False)
 
     def _record(next_checkpoint, info):
         traces = info.ess, info.log_evidence_increment
@@ -475,7 +487,9 @@ def bootstrap_update(
         return traces
 
     def _advance(current, args):
-        current_checkpoint, chunk_sum, chunk_correction, _retained = current
+        current_checkpoint, chunk_sum, chunk_correction, _, invalid_seen = (
+            current
+        )
         if inputs_arr is None:
             step_key, emission_t = args
             input_t = None
@@ -495,8 +509,17 @@ def bootstrap_update(
         chunk_sum, chunk_correction = _neumaier_add(
             chunk_sum, chunk_correction, info.log_evidence_increment
         )
+        _, invalid_resampling = _validate_ancestors(
+            info.ancestors, num_particles, num_particles
+        )
         return (
-            (next_checkpoint, chunk_sum, chunk_correction, info.ancestors),
+            (
+                next_checkpoint,
+                chunk_sum,
+                chunk_correction,
+                info.ancestors,
+                invalid_seen | invalid_resampling,
+            ),
             _record(next_checkpoint, info),
         )
 
@@ -525,15 +548,15 @@ def bootstrap_update(
             )
             retained = info.ancestors
             records.append(_record(current, info))
-        carry = current, chunk_sum, chunk_correction, retained
+        carry = current, chunk_sum, chunk_correction, retained, invalid
         outputs = tree.map(lambda *values: jnp.stack(values), *records)
     else:
         carry, outputs = lax.scan(
             _advance,
-            (checkpoint, zero, zero, retained),
+            (checkpoint, zero, zero, retained, invalid),
             scan_inputs,
         )
-    final_checkpoint, chunk_sum, chunk_correction, retained = carry
+    final_checkpoint, chunk_sum, chunk_correction, retained, invalid = carry
     if store_history:
         particles, log_weights, ancestors, ess, increments = outputs
     else:
@@ -542,6 +565,7 @@ def bootstrap_update(
         log_weights = final_checkpoint.state.log_weights[None]
         ancestors = retained[None]
 
+    _raise_invalid_ancestors(invalid, num_particles)
     _raise_if_degenerate(
         final_checkpoint.state.log_marginal_likelihood
         + final_checkpoint.log_evidence_compensation
@@ -662,10 +686,10 @@ def bootstrap_filter(
 
     # --- Scan body for t = 1, ..., T-1 -------------------------------------
     def _step(
-        carry: tuple[ParticleState, Array, Array, Array],
+        carry: tuple[ParticleState, Array, Array, Array, Array],
         args: tuple[Array, ...],
     ):
-        state, current_ess, correction, _prev_ancestors = carry
+        state, current_ess, correction, _prev_ancestors, invalid_seen = carry
         if inputs_arr is None:
             step_key, y_t, time_index = args
             input_t = None
@@ -695,8 +719,15 @@ def bootstrap_filter(
             log_weights=result.log_weights,
             log_marginal_likelihood=log_evidence,
         )
+        next_carry = (
+            new_state,
+            info.ess,
+            correction,
+            info.ancestors,
+            invalid_seen | result.invalid_resampling,
+        )
         if store_history:
-            return (new_state, info.ess, correction, info.ancestors), (
+            return next_carry, (
                 result.particles,
                 result.log_weights,
                 info.ancestors,
@@ -705,7 +736,7 @@ def bootstrap_filter(
             )
         # Final-only mode: ancestors ride the carry (O(N)), the scan
         # stacks just the scalar traces.
-        return (new_state, info.ess, correction, info.ancestors), (
+        return next_carry, (
             info.ess,
             info.log_evidence_increment,
         )
@@ -723,10 +754,11 @@ def bootstrap_filter(
         ess_0,
         jnp.zeros_like(log_ev_0),
         identity_ancestors,
+        jnp.asarray(False),
     )
     if store_history:
         (
-            (final_state, _, final_correction, _),
+            (final_state, _, final_correction, _, invalid),
             (
                 particles_rest,
                 log_w_rest,
@@ -740,7 +772,7 @@ def bootstrap_filter(
         all_ancestors = _prepend(identity_ancestors, ancestors_rest)
     else:
         (
-            (final_state, _, final_correction, final_ancestors),
+            (final_state, _, final_correction, final_ancestors, invalid),
             (ess_rest, log_ev_inc_rest),
         ) = _filter_scan(_step, init_carry, scan_inputs)
         all_particles = _particle_time_axis(final_state.particles)
@@ -751,6 +783,7 @@ def bootstrap_filter(
     all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
     final_log_evidence = final_state.log_marginal_likelihood + final_correction
 
+    _raise_invalid_ancestors(invalid, num_particles)
     _raise_if_degenerate(final_log_evidence)
 
     return ParticleFilterPosterior(

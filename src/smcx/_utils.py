@@ -19,7 +19,7 @@ import jax.numpy as jnp
 from jax import lax, tree, vmap
 from jax.core import Tracer
 from jax.tree_util import PyTreeDef, keystr
-from jaxtyping import Array, Float, Int, PyTree, Shaped
+from jaxtyping import Array, Bool, Float, Int, Int32, PyTree, Shaped
 
 from smcx._numerics import _validate_minimum_float_precision
 from smcx.containers import ParticleState
@@ -442,7 +442,7 @@ def _conditional_resample(
     num_particles: int,
     identity: Int[Array, " num_particles"],
     time_index: Int[Array, ""] | None = None,
-) -> tuple[Array, Int[Array, " num_particles"]]:
+) -> tuple[Array, Int[Array, " num_particles"], Bool[Array, ""]]:
     """Conditionally resample particles using a float or callback rule.
 
     A float resamples when the precomputed effective sample size falls
@@ -459,9 +459,10 @@ def _conditional_resample(
         time_index: Zero-based emission index for a callable criterion.
 
     Returns:
-        Tuple of ``(do_resample, ancestors)`` where *do_resample*
-        is a boolean scalar and *ancestors* are the resampled (or
-        identity) indices.
+        Tuple of ``(do_resample, ancestors, invalid_ancestors)`` where
+        *do_resample* is a boolean scalar, *ancestors* are the resampled
+        (or identity) indices, and *invalid_ancestors* is a scalar range
+        failure flag for the eager shell.
     """
     if callable(resampling_threshold):
         if time_index is None:
@@ -485,12 +486,51 @@ def _conditional_resample(
             "resampling criterion must return a scalar Boolean; "
             f"got shape {do_resample.shape} and dtype {do_resample.dtype}"
         )
-    ancestors = lax.cond(
+
+    def resample() -> tuple[Int32[Array, " num_particles"], Array]:
+        output = resampling_fn(key, normalize(log_weights), num_particles)
+        return _validate_ancestors(output, num_particles, num_particles)
+
+    ancestors, invalid_ancestors = lax.cond(
         do_resample,
-        lambda: resampling_fn(key, normalize(log_weights), num_particles),
-        lambda: identity,
+        resample,
+        lambda: (identity, jnp.asarray(False)),
     )
-    return do_resample, ancestors
+    return do_resample, ancestors, invalid_ancestors
+
+
+def _validate_ancestors(
+    output: object, num_samples: int, num_particles: int
+) -> tuple[Int32[Array, " num_samples"], Bool[Array, ""]]:
+    """Validate a caller-owned resampler and return its range-failure flag."""
+    if not isinstance(output, (jax.Array, Tracer)):
+        raise ValueError(
+            "resampling_fn output must be a JAX array with dtype int32 "
+            f"and shape ({num_samples},)"
+        )
+    if output.shape != (num_samples,):
+        raise ValueError(
+            f"resampling_fn output must have shape ({num_samples},); "
+            f"got {output.shape}"
+        )
+    if output.dtype != jnp.dtype(jnp.int32):
+        raise ValueError(
+            f"resampling_fn output must have dtype int32; got {output.dtype}"
+        )
+    invalid = jnp.any((output < 0) | (output >= num_particles))
+    return output, invalid
+
+
+def _raise_invalid_ancestors(
+    invalid: Bool[Array, ""], num_particles: int
+) -> None:
+    """Raise at an eager boundary when compiled ancestor validation failed."""
+    if isinstance(invalid, Tracer):
+        return
+    if bool(invalid):
+        raise ValueError(
+            f"resampling_fn output entries must be in [0, {num_particles})"
+        )
 
 
 def _raise_if_degenerate(log_value) -> None:
