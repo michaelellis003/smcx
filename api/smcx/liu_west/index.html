@@ -1395,7 +1395,13 @@ parameter mean, <span class="arithmatex">\(V\)</span> is the weighted parameter 
   <p>Liu, J. and West, M. (2001). Combined Parameter and State Estimation
 in Simulation-Based Filtering. <em>Sequential Monte Carlo Methods in
 Practice</em>, 197--223.
-https://doi.org/10.1007/978-1-4757-3437-9_10</p>
+https://doi.org/10.1007/978-1-4757-3437-9_10
+Pébay, P., Terriberry, T. B., Kolla, H., and Bennett, J. (2016).
+Numerically stable, scalable formulas for parallel and online
+computation of higher-order multivariate central moments with
+arbitrary weights. https://doi.org/10.1007/s00180-015-0637-z
+Higham, N. J. (2008). Functions of Matrices: Theory and Computation,
+Chapter 6. https://doi.org/10.1137/1.9780898717778.ch6</p>
 </details>
 
 
@@ -1552,7 +1558,8 @@ with at least float32 precision.</p>
                 <p>Function
 <code>(key, num_particles) -&gt; params</code> that draws from the
 prior parameter distribution. Returns a nonempty floating array
-of shape <code>(num_particles, param_dim)</code>.</p>
+of shape <code>(num_particles, param_dim)</code>. Float16 and bfloat16
+kernel arithmetic is promoted to float32, then cast back.</p>
               </div>
             </td>
             <td>

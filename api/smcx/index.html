@@ -6723,7 +6723,8 @@ with at least float32 precision.</p>
                 <p>Function
 <code>(key, num_particles) -&gt; params</code> that draws from the
 prior parameter distribution. Returns a nonempty floating array
-of shape <code>(num_particles, param_dim)</code>.</p>
+of shape <code>(num_particles, param_dim)</code>. Float16 and bfloat16
+kernel arithmetic is promoted to float32, then cast back.</p>
               </div>
             </td>
             <td>

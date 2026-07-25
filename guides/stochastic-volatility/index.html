@@ -1543,6 +1543,17 @@ variance-matched: it fights degeneracy without inflating the
 marginal parameter posterior. Values near <span class="arithmatex">\(0.97\)</span>–<span class="arithmatex">\(0.99\)</span> are typical;
 smaller <span class="arithmatex">\(a\)</span> shrinks harder and adds more kernel noise, while larger <span class="arithmatex">\(a\)</span>
 shrinks less and adds less noise.</p>
+<p>The covariance calculation stays in centered coordinates and uses a
+positive-semidefinite spectral square root without a fixed diagonal boost.
+Consequently, a parameter direction with no represented spread receives no
+artificial drift. Float16 and bfloat16 kernel factorization, normal draws, and
+proposal arithmetic run in float32 before proposals are cast back, so callback
+parameters and the posterior retain the input dtype on every backend.</p>
+<p>This correction changes fixed-key parameter draws more broadly than the
+singular cases: explicitly typed normal draws change float32 streams when JAX
+x64 is enabled, and the symmetric eigen-factor changes ordinary nonsingular
+multidimensional draws. The represented covariance and public API are
+unchanged.</p>
 <h2 id="read-the-parameter-posterior">Read the parameter posterior</h2>
 <p><code>param_weighted_mean</code> and <code>param_weighted_quantile</code> summarize the
 parameter cloud at every step, so we can watch the posterior form.</p>
