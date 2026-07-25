@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.20 (2026-07-25)
+
+### Bug Fixes
+
+- **resampling**: Validate custom ancestor outputs
+  ([#205](https://github.com/michaelellis003/smcx/pull/205),
+  [`76b6101`](https://github.com/michaelellis003/smcx/commit/76b610113cd357bac81d24a28a1d284455c36aac))
+
+
 ## v1.13.19 (2026-07-25)
 
 ### Bug Fixes
