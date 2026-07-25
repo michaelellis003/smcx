@@ -4,6 +4,7 @@
 """Small numerical primitives shared across inference algorithms."""
 
 import jax.numpy as jnp
+from jax import lax
 from jaxtyping import Array, Float
 
 
@@ -25,3 +26,23 @@ def _neumaier_add(
         (value - updated) + total,
     )
     return updated, correction
+
+
+def _neumaier_prefix_sum(
+    values: Float[Array, " nvalues"],
+) -> Float[Array, " nvalues"]:
+    """Return every prefix from sequential Neumaier summation."""
+
+    def add(
+        carry: tuple[Float[Array, ""], Float[Array, ""]],
+        value: Float[Array, ""],
+    ) -> tuple[
+        tuple[Float[Array, ""], Float[Array, ""]],
+        Float[Array, ""],
+    ]:
+        total, correction = _neumaier_add(*carry, value)
+        return (total, correction), total + correction
+
+    zero = jnp.zeros((), dtype=values.dtype)
+    _, prefixes = lax.scan(add, (zero, zero), values)
+    return prefixes

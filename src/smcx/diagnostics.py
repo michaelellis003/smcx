@@ -60,6 +60,7 @@ from jax import lax, tree, vmap
 from jax.core import Tracer
 from jaxtyping import Array, Float, Int
 
+from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
     _gather_particles,
     _validate_emission,
@@ -975,6 +976,13 @@ def cumulative_log_score(
     factor accrues. At the final time their difference is exactly the
     log Bayes factor, with the same prior sensitivity.
 
+    Every prefix uses sequential Neumaier compensation in the input
+    dtype, matching compensated posterior evidence accumulation. This
+    corrects the ordinary cumulative sum used in earlier releases:
+    fixed-input prefixes can change, especially for long or
+    cancellation-heavy traces, while shape, dtype, and JIT behavior
+    are unchanged.
+
     Args:
         posterior: Particle filter posterior output.
 
@@ -985,8 +993,11 @@ def cumulative_log_score(
         Gneiting, T., and Raftery, A. E. (2007). Strictly proper scoring
         rules, prediction, and estimation.
         https://doi.org/10.1198/016214506000001437
+        Neumaier, A. (1974). Rundungsfehleranalyse einiger Verfahren zur
+        Summation endlicher Summen.
+        https://doi.org/10.1002/zamm.19740540106
     """
-    return jnp.cumsum(posterior.log_evidence_increments)
+    return _neumaier_prefix_sum(posterior.log_evidence_increments)
 
 
 # --- Diagnostic summary ----------------------------------------------------
