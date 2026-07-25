@@ -150,6 +150,9 @@ for w in report["warnings"]:
 
 For this run, no warnings are returned. The diagnostics describe the particle
 weights; they do not measure the Monte Carlo variance of the evidence estimate.
+If a per-step Pareto-k estimate is undefined, `diagnose` warns and computes
+`max_pareto_k` from the remaining finite estimates, or returns NaN when none
+are finite.
 
 For model comparison, `smcx.cumulative_log_score(posterior)` reconstructs
 every predictive-score prefix with the same float32 Neumaier compensation

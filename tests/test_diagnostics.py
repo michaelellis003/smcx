@@ -556,7 +556,12 @@ class TestParetoKDiagnostic:
         )
 
         assert jnp.all(jnp.isnan(pareto_k_diagnostic(posterior)))
-        assert jnp.isnan(diagnose(posterior)["max_pareto_k"])
+        summary = diagnose(posterior)
+        assert jnp.isnan(summary["max_pareto_k"])
+        assert any(
+            "Pareto-k was undefined at 2 step(s)" in warning
+            for warning in summary["warnings"]
+        )
 
     def test_pareto_k_ordering_by_tail_heaviness(self):
         """Cauchy log-weights produce a higher k than t_3 or Gaussian.
@@ -796,6 +801,29 @@ class TestDiagnose:
         forced = diagnose(pf_post, pareto_k_threshold=-1.0)
 
         assert len(forced["warnings"]) > len(quiet["warnings"])
+
+    def test_diagnose_uses_finite_pareto_k_when_one_step_is_undefined(self):
+        posterior = _make_posterior()
+        log_weights = posterior.filtered_log_weights
+        log_weights = log_weights.at[0].set(
+            jnp.linspace(-1.0, 1.0, log_weights.shape[1])
+        )
+        log_weights = log_weights.at[1, -1].set(jnp.inf)
+        posterior = posterior._replace(filtered_log_weights=log_weights)
+
+        k_hat = pareto_k_diagnostic(posterior)
+        summary = diagnose(posterior, pareto_k_threshold=float("inf"))
+
+        assert jnp.array_equal(
+            jnp.isfinite(k_hat),
+            jnp.array([True, False, True]),
+        )
+        assert k_hat[2] > k_hat[0]
+        assert summary["max_pareto_k"] == pytest.approx(float(k_hat[2]))
+        assert any(
+            "Pareto-k was undefined at 1 step(s)" in warning
+            for warning in summary["warnings"]
+        )
 
     def test_diagnose_collapsed_ess_warns(self):
         """When ESS = 1, diagnose should warn."""
