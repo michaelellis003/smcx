@@ -809,3 +809,19 @@ class TestBatchedIndependence:
         idx = _batched_inner_resample(jr.key(0), w, 4)
         assert np.all(np.array(idx[0]) == 0)
         assert np.all(np.array(idx[1]) == 3)
+
+
+def test_rejects_out_of_range_custom_outer_resampler():
+    def invalid_resampler(key, weights, count):
+        del key, weights
+        return jnp.full(count, count, dtype=jnp.int32)
+
+    with pytest.raises(ValueError, match=r"entries must be in \[0, 4\)"):
+        _run(
+            159,
+            n_theta=4,
+            n_x=2,
+            ess_threshold=1.1,
+            num_pmmh_steps=0,
+            resampling_fn=invalid_resampler,
+        )

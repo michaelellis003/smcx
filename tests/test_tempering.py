@@ -531,3 +531,12 @@ class TestMechanics:
         assert np.allclose(
             np.array(post.log_weights), -math.log(1000), atol=1e-5
         )
+
+
+def test_rejects_out_of_range_custom_resampler():
+    def invalid_resampler(key, weights, count):
+        del key, weights
+        return jnp.full(count, -1, dtype=jnp.int32)
+
+    with pytest.raises(ValueError, match=r"entries must be in \[0, 4\)"):
+        _run(159, n=4, resampling_fn=invalid_resampler)

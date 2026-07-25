@@ -388,3 +388,41 @@ class TestBootstrapInputs:
             strict=True,
         ):
             assert jnp.array_equal(legacy_field, input_field)
+
+
+@pytest.mark.parametrize(
+    ("output", "message", "store_history"),
+    [
+        ([0] * 4, "must be a JAX array", True),
+        (jnp.zeros((4, 1), dtype=jnp.int32), "must have shape", True),
+        (jnp.zeros(5, dtype=jnp.int32), "must have shape", True),
+        (jnp.zeros(4, dtype=jnp.float32), "must have dtype int32", True),
+        (jnp.full(4, -1, dtype=jnp.int32), r"entries.*\[0, 4\)", True),
+        (jnp.full(4, 4, dtype=jnp.int32), r"entries.*\[0, 4\)", False),
+    ],
+)
+def test_custom_resampler_output_contract(
+    lgssm_params,
+    lgssm_data,
+    output,
+    message,
+    store_history,
+):
+    initial, transition, observation = _make_smcx_fns(lgssm_params)
+
+    def invalid_resampler(key, weights, count):
+        del key, weights, count
+        return output
+
+    with pytest.raises(ValueError, match=message):
+        bootstrap_filter(
+            jr.key(159),
+            initial,
+            transition,
+            observation,
+            lgssm_data[1][:2],
+            4,
+            resampling_fn=invalid_resampler,
+            resampling_threshold=1.1,
+            store_history=store_history,
+        )
