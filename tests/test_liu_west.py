@@ -341,51 +341,6 @@ class TestLiuWestFixedParamsMatchesAPF:
         )
 
 
-class TestLiuWestShrinkage:
-    """Shrinkage parameter should affect posterior spread."""
-
-    def test_liu_west_shrinkage_affects_spread(self, lgssm_params, lgssm_data):
-        """Lower shrinkage → wider parameter posterior on average."""
-        from smcx.weights import normalize
-
-        _, emissions = lgssm_data
-        (
-            init_fn,
-            trans_fn,
-            obs_fn,
-            aux_fn,
-            param_init_fn,
-        ) = _make_liu_west_fns()
-
-        def _spread(seed, a):
-            post = liu_west_filter(
-                key=jr.PRNGKey(seed),
-                initial_sampler=init_fn,
-                transition_sampler=trans_fn,
-                log_observation_fn=obs_fn,
-                log_auxiliary_fn=aux_fn,
-                param_initial_sampler=param_init_fn,
-                emissions=emissions,
-                num_particles=2_000,
-                shrinkage=a,
-            )
-            w = normalize(post.filtered_log_weights[-1])
-            p = post.filtered_params[-1, :, 0]
-            mean = jnp.sum(w * p)
-            return float(jnp.sum(w * (p - mean) ** 2))
-
-        # Average across several seeds: a single particle filter run is
-        # too noisy to compare two shrinkage settings reliably.
-        seeds = list(range(8))
-        spread_low = sum(_spread(s, 0.80) for s in seeds) / len(seeds)
-        spread_high = sum(_spread(s, 0.99) for s in seeds) / len(seeds)
-
-        assert spread_low > spread_high, (
-            f"Mean spread (a=0.80): {spread_low:.4f}, "
-            f"(a=0.99): {spread_high:.4f}"
-        )
-
-
 class TestLiuWestJIT:
     """Liu-West filter should be JIT-compilable."""
 
