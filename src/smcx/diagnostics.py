@@ -53,7 +53,7 @@ scalars and strings, so it is intentionally host-only.
 import math
 import operator
 from numbers import Real
-from typing import TYPE_CHECKING, Any, SupportsIndex, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, SupportsFloat, TypeAlias, cast
 
 import jax
 import jax.numpy as jnp
@@ -95,13 +95,11 @@ _PRIOR_K = 0.5
 _EXC_FLOOR = 1e-100
 """Exceedance floor below which the tail is treated as degenerate."""
 
-# Static checkers see the narrow public contracts. At runtime, the import-hook
-# type checker must admit malformed values so these public validators can raise
-# the documented errors instead of wrapper-specific type-check failures.
+# Static contracts stay narrow; runtime validators admit malformed values.
 if TYPE_CHECKING:
     _DiagnosticVector: TypeAlias = Float[Array, " num_values"]
     _DiagnosticScalar: TypeAlias = Scalar
-    _RealArgument: TypeAlias = float
+    _RealArgument: TypeAlias = SupportsFloat
     _IntegerArgument: TypeAlias = int
 else:
     _DiagnosticVector: TypeAlias = Any
@@ -116,7 +114,6 @@ def _require_float_vector(
     name: str,
     dimension: str,
 ) -> Array:
-    """Require one nonempty rank-one floating JAX array."""
     if not isinstance(value, (jax.Array, Tracer)):
         raise ValueError(f"{name} must be a JAX array")
     if value.ndim != 1 or value.shape[0] == 0:
@@ -132,7 +129,6 @@ def _require_float_vector(
 
 
 def _require_float_scalar(value: object, *, name: str) -> Array:
-    """Require one Python-float or JAX floating scalar."""
     if isinstance(value, float):
         scalar = jnp.asarray(value)
     elif isinstance(value, (jax.Array, Tracer)):
@@ -154,11 +150,10 @@ def _require_integer(
     minimum: int,
     domain: str,
 ) -> int:
-    """Require a static integer in the requested domain."""
     if isinstance(value, bool):
         raise ValueError(f"{name} must be {domain}; got {value!r}")
     try:
-        integer = operator.index(cast(SupportsIndex, value))
+        integer = operator.index(cast(Any, value))
     except TypeError as error:
         raise ValueError(f"{name} must be {domain}; got {value!r}") from error
     if integer < minimum:
@@ -167,7 +162,6 @@ def _require_integer(
 
 
 def _validate_quantile_levels(q: object) -> Array:
-    """Validate structural and eager value contracts for quantile levels."""
     levels = _require_float_vector(
         q,
         name="q",
@@ -1057,7 +1051,10 @@ def tail_ess(
         TypeError: The posterior has structured rather than dense particles.
         ValueError: ``q`` is not finite and in (0, 0.5].
     """
-    if not isinstance(q, Real) or not math.isfinite(q) or not 0.0 < q <= 0.5:
+    if not isinstance(q, Real):
+        raise ValueError(f"q must be finite and in (0, 0.5]; got {q!r}")
+    q = float(q)
+    if not math.isfinite(q) or not 0.0 < q <= 0.5:
         raise ValueError(f"q must be finite and in (0, 0.5]; got {q!r}")
     qs = jnp.array([q, 1.0 - q])
     particles = _require_dense_particle_history(
