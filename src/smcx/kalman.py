@@ -41,10 +41,13 @@ from jax.scipy.linalg import solve_triangular
 from jaxtyping import Array, Float, Shaped
 
 from smcx._numerics import _neumaier_add
-from smcx._utils import _canonicalize_inputs
+from smcx._utils import _canonicalize_emissions, _canonicalize_inputs
 from smcx.containers import GaussianFilterPosterior, GaussianSmootherPosterior
 from smcx.types import (
-    InputSequence,
+    GaussianEmission,
+    GaussianEmissionSequence,
+    GaussianInput,
+    GaussianInputSequence,
     ObservationJacobianFn,
     ObservationJacobianFnWithInput,
     ObservationMeanFn,
@@ -78,7 +81,7 @@ class _FilterStepOutput(NamedTuple):
 class _NonlinearFilterStepInput(NamedTuple):
     """Arrays consumed by one nonlinear Gaussian filter step."""
 
-    emission: Float[Array, " observation_dim"]
+    emission: GaussianEmission
     transition_covariance: Float[Array, "state_dim state_dim"]
     observation_covariance: Float[Array, "observation_dim observation_dim"]
 
@@ -86,10 +89,10 @@ class _NonlinearFilterStepInput(NamedTuple):
 class _NonlinearFilterStepInputWithInput(NamedTuple):
     """Arrays and input consumed by one input-aware nonlinear step."""
 
-    emission: Float[Array, " observation_dim"]
+    emission: GaussianEmission
     transition_covariance: Float[Array, "state_dim state_dim"]
     observation_covariance: Float[Array, "observation_dim observation_dim"]
-    input_t: Float[Array, " input_dim"]
+    input_t: GaussianInput
 
 
 class _SmootherState(NamedTuple):
@@ -622,7 +625,7 @@ def _unscented_condition(
     observation_covariance: Float[Array, "observation_dim observation_dim"],
     observation: Float[Array, " observation_dim"],
     rule: _ScaledUnscentedRule,
-    input_t: Float[Array, " input_dim"] | None = None,
+    input_t: GaussianInput | None = None,
 ) -> tuple[
     Float[Array, " state_dim"],
     Float[Array, "state_dim state_dim"],
@@ -706,7 +709,7 @@ def _unscented_filter_step(
     transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
     observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
     rule: _ScaledUnscentedRule,
-    input_t: Float[Array, " input_dim"] | None = None,
+    input_t: GaussianInput | None = None,
 ) -> tuple[_FilterState, _FilterStepOutput]:
     """Apply one pure unscented Kalman predict-and-condition step."""
     state_points = _sigma_points(state.mean, state.covariance, rule)
@@ -776,7 +779,7 @@ def _extended_filter_step(
     observation_jacobian_fn: (
         ObservationJacobianFn | ObservationJacobianFnWithInput
     ),
-    input_t: Float[Array, " input_dim"] | None = None,
+    input_t: GaussianInput | None = None,
 ) -> tuple[_FilterState, _FilterStepOutput]:
     """Apply one pure extended Kalman predict-and-condition step."""
     state_dim = state.mean.shape[0]
@@ -889,7 +892,7 @@ def kalman_filter(
     transition_covariance: Shaped[Array, "*transition_covariance_shape"],
     observation_matrix: Shaped[Array, "*observation_matrix_shape"],
     observation_covariance: Shaped[Array, "*observation_covariance_shape"],
-    emissions: Shaped[Array, "*emissions_shape"],
+    emissions: GaussianEmissionSequence,
     *,
     transition_bias: Shaped[Array, "*transition_bias_shape"] | None = None,
     observation_bias: Shaped[Array, "*observation_bias_shape"] | None = None,
@@ -897,7 +900,7 @@ def kalman_filter(
     | None = None,
     observation_input_matrix: Shaped[Array, "*observation_input_matrix_shape"]
     | None = None,
-    inputs: InputSequence | None = None,
+    inputs: GaussianInputSequence | None = None,
 ) -> GaussianFilterPosterior:
     r"""Run an exact Kalman filter.
 
@@ -920,7 +923,9 @@ def kalman_filter(
             or time-varying array with leading length ``ntime``.
         observation_covariance: Static or time-varying observation-noise
             covariance.
-        emissions: Observations with shape ``(ntime, observation_dim)``.
+        emissions: Observations with shape ``(ntime,)`` or
+            ``(ntime, observation_dim)``. Scalar observations become
+            ``(ntime, 1)``.
         transition_bias: Optional static or length ``ntime - 1`` affine
             transition term.
         observation_bias: Optional static or length ``ntime`` affine
@@ -952,6 +957,7 @@ def kalman_filter(
         positive-diagonal factor on the active backend. Missing observations
         are not supported.
     """
+    emissions = _canonicalize_emissions(emissions)
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
         raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
     if emissions.ndim != 2 or emissions.shape[0] == 0:
@@ -1149,9 +1155,9 @@ def extended_kalman_filter(
         ObservationJacobianFn | ObservationJacobianFnWithInput
     ),
     observation_covariance: Shaped[Array, "*observation_covariance_shape"],
-    emissions: Shaped[Array, "*emissions_shape"],
+    emissions: GaussianEmissionSequence,
     *,
-    inputs: InputSequence | None = None,
+    inputs: GaussianInputSequence | None = None,
 ) -> GaussianFilterPosterior:
     r"""Run a first-order extended Kalman filter.
 
@@ -1184,7 +1190,9 @@ def extended_kalman_filter(
             ``observation_mean_fn`` with the same input signature.
         observation_covariance: Static observation covariance or a timed
             array with leading length ``ntime``.
-        emissions: Observations with shape ``(ntime, observation_dim)``.
+        emissions: Observations with shape ``(ntime,)`` or
+            ``(ntime, observation_dim)``. Scalar observations become
+            ``(ntime, 1)``.
         inputs: Optional exogenous inputs with shape ``(ntime, input_dim)``
             or ``(ntime,)``. Input ``t`` reaches observation ``t`` and the
             transition into ``t``; input zero does not alter the prior.
@@ -1216,6 +1224,7 @@ def extended_kalman_filter(
         Smoothing, second edition, chapter 7.
         https://doi.org/10.1017/9781108917407
     """
+    emissions = _canonicalize_emissions(emissions)
     setup = _prepare_nonlinear_filter(
         initial_mean,
         initial_covariance,
@@ -1374,12 +1383,12 @@ def unscented_kalman_filter(
     transition_covariance: Shaped[Array, "*transition_covariance_shape"],
     observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
     observation_covariance: Shaped[Array, "*observation_covariance_shape"],
-    emissions: Shaped[Array, "*emissions_shape"],
+    emissions: GaussianEmissionSequence,
     *,
     alpha: float = 1.0,
     beta: float = 2.0,
     kappa: float = 0.0,
-    inputs: InputSequence | None = None,
+    inputs: GaussianInputSequence | None = None,
 ) -> GaussianFilterPosterior:
     r"""Run a scaled unscented Kalman filter.
 
@@ -1408,7 +1417,9 @@ def unscented_kalman_filter(
             are supplied, ``(state, input_t) -> observation_mean``.
         observation_covariance: Static observation covariance or a timed
             array with leading length ``ntime``.
-        emissions: Observations with shape ``(ntime, observation_dim)``.
+        emissions: Observations with shape ``(ntime,)`` or
+            ``(ntime, observation_dim)``. Scalar observations become
+            ``(ntime, 1)``.
         alpha: Positive sigma-point spread parameter.
         beta: Covariance correction parameter.
         kappa: Secondary sigma-point scaling parameter.
@@ -1442,6 +1453,7 @@ def unscented_kalman_filter(
         Smoothing, second edition, chapter 8.
         https://doi.org/10.1017/9781108917407
     """
+    emissions = _canonicalize_emissions(emissions)
     setup = _prepare_nonlinear_filter(
         initial_mean,
         initial_covariance,
