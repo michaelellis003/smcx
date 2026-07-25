@@ -9,9 +9,10 @@ The variance estimator follows Chan & Lai (2013) / Lee & Whiteley
 (2018) as implemented by Chopin's `particles` (``Var_logLt``): with
 Eve variables tracing each particle to its time-0 ancestor, the
 estimate at time t is the sum over Eve classes of the squared
-normalized-weight mass. The reference formula is small enough to
-restate in NumPy inside these tests, which is how the semantics are
-pinned without adding `particles` (and numba) as a dependency.
+normalized-weight mass. Calibration uses multinomial resampling, the
+scheme required by the reference implementation. The reference formula
+is small enough to restate in NumPy inside these tests, which is how the
+semantics are pinned without adding `particles` (and numba) as a dependency.
 """
 
 import jax
@@ -23,6 +24,7 @@ import pytest
 import smcx
 from smcx import log_ml_variance, reconstruct_trajectories
 from smcx.containers import ParticleFilterPosterior
+from smcx.resampling import multinomial
 
 
 def _posterior(particles, log_weights, ancestors):
@@ -180,7 +182,7 @@ class TestLogMlVariance:
             log_ml_variance(post, lag=-1)
 
     def test_calibrates_against_replicates(self, lgssm_params, lgssm_data):
-        """The single-run estimate agrees with replicated variance.
+        """The multinomial single-run estimate agrees with replicated variance.
 
         Averaged over independent runs, the final-time single-run
         estimate must land within a factor of the empirical variance
@@ -193,7 +195,13 @@ class TestLogMlVariance:
 
         def run(k):
             return smcx.bootstrap_filter(
-                k, init, trans, log_obs, emissions, num_particles=300
+                k,
+                init,
+                trans,
+                log_obs,
+                emissions,
+                num_particles=300,
+                resampling_fn=multinomial,
             )
 
         keys = jr.split(jr.PRNGKey(11), 40)

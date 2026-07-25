@@ -355,6 +355,12 @@ and evidence increments remain available for every time step. Trajectory
 reconstruction, genealogy-based variance, the combined diagnostic summary,
 and ArviZ export require the default full history.
 
+`log_ml_variance` is calibrated only when the filter used multinomial
+resampling. Posterior containers do not retain resampler provenance, so values
+from the default systematic resampler or another scheme are heuristic. Its
+optional lag is also an exploratory ancestry-window diagnostic for log
+evidence, not an independently calibrated fixed-lag estimator.
+
 ## Combine auxiliary selection with a guided proposal
 
 The same runner can combine an auxiliary look-ahead `log_m` with a proposal
