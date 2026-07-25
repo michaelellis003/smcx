@@ -295,17 +295,6 @@ def test_custom_runner_supports_jit_vmap_and_evidence_gradients():
         )
 
     eager = run(jr.key(12))
-    if jax.default_backend() == "mps":
-        with pytest.raises(TypeError, match="JAX transform on MPS"):
-            jax.jit(run)(jr.key(12))
-        with pytest.raises(TypeError, match="JAX transform on MPS"):
-            jax.vmap(run)(jr.split(jr.key(13), 2))
-        with pytest.raises(TypeError, match="JAX transform on MPS"):
-            jax.grad(lambda scale: run(jr.key(14), scale).marginal_loglik)(
-                jnp.asarray(1.0)
-            )
-        return
-
     compiled = jax.jit(run)(jr.key(12))
     for eager_leaf, compiled_leaf in zip(
         jax.tree.leaves(eager),

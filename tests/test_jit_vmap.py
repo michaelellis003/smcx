@@ -100,7 +100,8 @@ class TestBootstrapJIT:
             mean = (H @ state[:, None]).squeeze(-1)
             return _mvn_logpdf(emission, mean, R)
 
-        emissions = jnp.ones((10, 1))
+        num_timesteps = 10
+        emissions = jnp.ones((num_timesteps, 1))
 
         @jax.jit
         def run(key):
@@ -114,7 +115,7 @@ class TestBootstrapJIT:
             )
 
         result = run(jr.PRNGKey(0))
-        assert result.filtered_particles.shape == (10, 50, 1)
+        assert result.filtered_particles.shape == (num_timesteps, 50, 1)
         assert jnp.isfinite(result.marginal_loglik)
 
 

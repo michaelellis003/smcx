@@ -245,6 +245,9 @@ and Liu–West filters instead supply the normalized first-stage weights and
 their ESS, because those are the quantities governing ancestor selection.
 The numeric default `0.5` retains the strict rule `ESS < 0.5 * N`.
 
+Until issue #38 closes, multi-observation MPS filters use a sequence of
+one-step scans.
+
 ## Compose a particle-filter kernel
 
 Use `smcx.run_particle_filter` when a built-in filter does not provide the
@@ -288,12 +291,13 @@ callback preconditions.
 CPU and other backends execute the later steps in one `jax.lax.scan` and
 support wrapping the runner in JAX transformations. Until
 [smcx #38](https://github.com/michaelellis003/smcx/issues/38) closes, MPS
-instead executes one eager callback step per observation to contain an
-upstream Metal history-corruption defect. An outer `jax.jit`, `jax.vmap`, or
-gradient transform is unsupported for a multi-observation MPS run because it
-would restage those steps in one multi-step executable. The containment adds
-per-observation dispatch overhead on MPS; other backends retain the compiled
-scan.
+instead uses a sequence of one-step scans to contain an upstream Metal
+history-corruption defect. Traced calls stage both paths and select the
+execution-platform branch during outer `jax.jit` lowering, so CPU-placed
+compiled inputs retain the full scan even when MPS is the default backend.
+The contained branch remains compatible with `jax.vmap` and gradients on the
+selected backend. Eager MPS calls add per-observation dispatch overhead;
+other backends retain the compiled scan.
 
 This always-resampling bootstrap kernel composes only public smcx operations
 with the `initial`, `transition`, and `log_observation` callbacks defined

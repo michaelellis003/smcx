@@ -22,13 +22,14 @@ from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax, vmap
+from jax import vmap
 from jaxtyping import Array, Float, Int
 
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
+    _filter_scan,
     _gather_particles,
     _init_standard,
     _particle_time_axis,
@@ -247,7 +248,7 @@ def guided_filter(
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)``. Input zero reaches initialization; each later
             input reaches every guided callback at that time step.
-        store_history: When False, the scan stacks no
+        store_history: When False, the filter retains no
             per-step particle/weight/ancestor histories — the returned
             arrays cover only the final step (time axis length 1)
             while ``ess``/``log_evidence_increments`` stay full.
@@ -334,7 +335,7 @@ def guided_filter(
         identity_ancestors,
     )
     if store_history:
-        final_carry, outputs = lax.scan(scan_step, init_carry, scan_inputs)
+        final_carry, outputs = _filter_scan(scan_step, init_carry, scan_inputs)
         all_particles = _prepend_particle_history(
             particles_0, outputs.particles
         )
@@ -351,7 +352,7 @@ def guided_filter(
             next_carry, output = scan_step(carry, inputs_and_key)
             return next_carry, (output.ess, output.log_evidence_increment)
 
-        final_carry, (ess_rest, log_ev_inc_rest) = lax.scan(
+        final_carry, (ess_rest, log_ev_inc_rest) = _filter_scan(
             final_only_step,
             init_carry,
             scan_inputs,
