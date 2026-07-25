@@ -118,7 +118,10 @@ def _small_model():
 class TestStructure:
     """Shapes, invariants, determinism, degeneracy."""
 
-    def test_rejuvenation_handles_identical_float32_parameters(self):
+    @pytest.mark.parametrize("num_param_particles", [1, 2])
+    def test_rejuvenation_handles_identical_float32_parameters(
+        self, num_param_particles
+    ):
         def param_init(_key, count):
             return jnp.zeros((count, 1), dtype=jnp.float32)
 
@@ -142,7 +145,7 @@ class TestStructure:
             inner_transition,
             inner_log_observation,
             jnp.zeros((2, 1), dtype=jnp.float32),
-            2,
+            num_param_particles,
             1,
             ess_threshold=1.1,
             num_pmmh_steps=1,

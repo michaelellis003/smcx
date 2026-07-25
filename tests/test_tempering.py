@@ -298,9 +298,11 @@ class TestMechanics:
         "spread",
         [0.0, np.finfo(np.float32).eps / 4],
     )
+    @pytest.mark.parametrize("num_particles", [1, 2])
     def test_adaptive_mutation_handles_zero_and_near_zero_spread(
         self,
         spread,
+        num_particles,
     ):
         def init(_key, count):
             values = spread * jnp.arange(count, dtype=jnp.float32)
@@ -314,7 +316,7 @@ class TestMechanics:
             init,
             log_density,
             log_density,
-            2,
+            num_particles,
             num_mcmc_steps=1,
         )
 
