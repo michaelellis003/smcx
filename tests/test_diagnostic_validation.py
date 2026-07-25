@@ -322,6 +322,38 @@ def test_diagnose_rejects_misaligned_ess_trace():
         smcx.diagnose(posterior)
 
 
+@pytest.mark.parametrize(
+    ("diagnostic", "name"),
+    [
+        (smcx.log_ml_increments, "log_ml_increments"),
+        (smcx.cumulative_log_score, "cumulative_log_score"),
+    ],
+)
+@pytest.mark.parametrize(
+    "trace",
+    [
+        jnp.zeros((3, 1)),
+        jnp.empty((0,)),
+        jnp.zeros(3, dtype=jnp.int32),
+    ],
+)
+def test_evidence_trace_diagnostics_reject_malformed_history(
+    diagnostic,
+    name,
+    trace,
+):
+    """Evidence diagnostics consume one nonempty floating time trace."""
+    posterior = _posterior()._replace(log_evidence_increments=trace)
+    with pytest.raises(
+        ValueError,
+        match=(
+            rf"{name} requires posterior\.log_evidence_increments to be "
+            r"a nonempty floating.*shape \(T,\)"
+        ),
+    ):
+        diagnostic(posterior)
+
+
 def test_valid_final_only_histories_retain_supported_summaries():
     """Final-only state and predictive summaries intentionally remain valid."""
     posterior = _posterior()

@@ -508,7 +508,16 @@ def log_ml_increments(
     Returns:
         Per-step evidence increments, shape ``(ntime,)``.  These sum
         to ``posterior.marginal_loglik``.
+
+    Raises:
+        ValueError: ``posterior.log_evidence_increments`` is not a nonempty
+            floating array with shape ``(T,)``.
     """
+    _validate_float_trace(
+        posterior.log_evidence_increments,
+        "posterior.log_evidence_increments",
+        "log_ml_increments",
+    )
     return posterior.log_evidence_increments
 
 
@@ -1296,6 +1305,10 @@ def cumulative_log_score(
     Returns:
         Cumulative log-scores, shape ``(ntime,)``.
 
+    Raises:
+        ValueError: ``posterior.log_evidence_increments`` is not a nonempty
+            floating array with shape ``(T,)``.
+
     References:
         Gneiting, T., and Raftery, A. E. (2007). Strictly proper scoring
         rules, prediction, and estimation.
@@ -1304,6 +1317,11 @@ def cumulative_log_score(
         Summation endlicher Summen.
         https://doi.org/10.1002/zamm.19740540106
     """
+    _validate_float_trace(
+        posterior.log_evidence_increments,
+        "posterior.log_evidence_increments",
+        "cumulative_log_score",
+    )
     return _neumaier_prefix_sum(posterior.log_evidence_increments)
 
 
