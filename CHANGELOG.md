@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.1 (2026-07-25)
+
+### Bug Fixes
+
+- **diagnostics**: Validate public arguments
+  ([#211](https://github.com/michaelellis003/smcx/pull/211),
+  [`95af51e`](https://github.com/michaelellis003/smcx/commit/95af51e771c64b6f88aaef7f0f5dcec094a17ad7))
+
+
 ## v1.14.0 (2026-07-25)
 
 ### Features
