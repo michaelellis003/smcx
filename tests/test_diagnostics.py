@@ -384,10 +384,16 @@ class TestCRPS:
 
         assert jnp.array_equal(shifted_score, centered_score)
 
-    def test_crps_large_finite_score_does_not_overflow(self):
+    @pytest.mark.parametrize(
+        ("num_samples", "value"),
+        [(10_000, 1e35), (1, 2e38)],
+    )
+    def test_crps_large_finite_score_does_not_overflow(
+        self, num_samples, value
+    ):
         from smcx.diagnostics import crps
 
-        predictions = jnp.full((10_000,), 1e35, dtype=jnp.float32)
+        predictions = jnp.full((num_samples,), value, dtype=jnp.float32)
 
         result = crps(predictions, jnp.float32(0.0))
 
