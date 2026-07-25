@@ -353,10 +353,12 @@ def liu_west_filter(
             shape and dtype.
         log_observation_fn: Function
             ``(emission, state, params[, input_t]) -> log_prob`` that
-            evaluates the observation log-density.
+            evaluates the observation log-density and returns a scalar
+            with at least float32 precision.
         log_auxiliary_fn: Function
             ``(emission, state, params[, input_t]) -> log_prob`` that
-            evaluates the look-ahead log-density.
+            evaluates the look-ahead log-density and returns a scalar
+            with at least float32 precision.
         param_initial_sampler: Function
             ``(key, num_particles) -> params`` that draws from the
             prior parameter distribution. Returns a nonempty floating array

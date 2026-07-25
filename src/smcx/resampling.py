@@ -4,20 +4,20 @@
 """Inverse-CDF resampling kernels.
 
 Every kernel takes ``(key, weights, num_samples)`` — probability-space
-weights, any positive scale — and returns ``int32`` ancestor indices in
-``[0, num_particles)``. Systematic, stratified, and multinomial outputs
-are nondecreasing; residual returns its deterministic block followed by
-iid remainder draws. Calls with concrete weights require finite, nonnegative
-values with positive total mass. Data-dependent validation is skipped for
-traced values, where Python exceptions cannot be staged. Query grids are
-clamped strictly below 1 so a grid point that rounds to 1.0 in float32 cannot
-select past the final positive-weight slot. This endpoint guard is inherited
-from smcx's former MLX implementation. Normalized CDFs are capped at one,
-repaired with a cumulative maximum, and given an exact unit endpoint before
-search. This can change fixed-key ancestors relative to releases that passed
-locally inverted float32 CDFs to ``searchsorted``; already-ordered seeded
-fixtures retain their draws. Numerical correctness fixes are not a promise of
-cross-version random-stream identity.
+weights with at least float32 precision, at any positive scale — and returns
+``int32`` ancestor indices in ``[0, num_particles)``. Systematic, stratified,
+and multinomial outputs are nondecreasing; residual returns its deterministic
+block followed by iid remainder draws. Calls with concrete weights require
+finite, nonnegative values with positive total mass. Data-dependent validation
+is skipped for traced values, where Python exceptions cannot be staged. Query
+grids are clamped strictly below 1 so a grid point that rounds to 1.0 in
+float32 cannot select past the final positive-weight slot. This endpoint guard
+is inherited from smcx's former MLX implementation. Normalized CDFs are capped
+at one, repaired with a cumulative maximum, and given an exact unit endpoint
+before search. This can change fixed-key ancestors relative to releases that
+passed locally inverted float32 CDFs to ``searchsorted``; already-ordered
+seeded fixtures retain their draws. Numerical correctness fixes are not a
+promise of cross-version random-stream identity.
 """
 
 import jax
@@ -25,6 +25,7 @@ import jax.numpy as jnp
 from jax.core import Tracer
 from jaxtyping import Array, Float, Int32
 
+from smcx._numerics import _validate_minimum_float_precision
 from smcx.types import PRNGKeyT
 
 # Avoids a zero denominator in the exponential-spacing construction.
@@ -43,6 +44,7 @@ def _validate_inputs(weights: Array, num_samples: int) -> None:
         raise ValueError(
             f"weights must have a floating dtype; got {weights.dtype}"
         )
+    _validate_minimum_float_precision(weights, name="weights")
     if num_samples < 1:
         raise ValueError(f"num_samples must be >= 1; got {num_samples}")
     if isinstance(weights, Tracer):
@@ -141,7 +143,7 @@ def systematic(
     Args:
         key: PRNG key.
         weights: Finite, nonnegative probability-space weights with positive
-            total mass, on any positive scale.
+            total mass and at least float32 precision, on any positive scale.
         num_samples: Number of ancestors to draw.
 
     Returns:
@@ -168,7 +170,7 @@ def stratified(
     Args:
         key: PRNG key.
         weights: Finite, nonnegative probability-space weights with positive
-            total mass, on any positive scale.
+            total mass and at least float32 precision, on any positive scale.
         num_samples: Number of ancestors to draw.
 
     Returns:
@@ -202,7 +204,7 @@ def multinomial(
     Args:
         key: PRNG key.
         weights: Finite, nonnegative probability-space weights with positive
-            total mass, on any positive scale.
+            total mass and at least float32 precision, on any positive scale.
         num_samples: Number of ancestors to draw.
 
     Returns:
@@ -239,7 +241,7 @@ def residual(
     Args:
         key: PRNG key.
         weights: Finite, nonnegative probability-space weights with positive
-            total mass, on any positive scale.
+            total mass and at least float32 precision, on any positive scale.
         num_samples: Number of ancestors to draw.
 
     Returns:

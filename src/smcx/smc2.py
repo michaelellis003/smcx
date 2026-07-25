@@ -123,7 +123,7 @@ def smc2(
             param_dim)`` floating prior draw over the static parameters.
         log_prior_fn: ``(theta) -> scalar`` parameter log-prior;
             vmapped internally (used in the PMMH accept ratio). Must
-            return a floating scalar.
+            return a scalar with at least float32 precision.
         initial_sampler: inner ``(key, num_x, theta) -> (num_x,
             state_dim)`` drawing a dense JAX array given a parameter.
         transition_sampler: inner ``(key, state, theta) -> state``,
@@ -131,7 +131,7 @@ def smc2(
             state shape and dtype.
         log_observation_fn: inner ``(emission, state, theta) ->
             scalar``, per-particle; vmapped internally. Must return a
-            floating scalar.
+            scalar with at least float32 precision.
         emissions: Observations ``(T, D)`` (or ``(T,)``,
             canonicalized).
         num_theta: Number of outer parameter particles.

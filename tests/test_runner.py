@@ -402,6 +402,14 @@ def test_runner_rejects_malformed_emissions(emissions, message):
             "log_weights must be floating",
         ),
         (
+            _valid_record(
+                log_weights=jnp.zeros(3, dtype=jnp.bfloat16),
+                log_evidence_increment=jnp.asarray(0.0, dtype=jnp.bfloat16),
+            ),
+            ValueError,
+            "log_weights must have at least float32 precision",
+        ),
+        (
             _valid_record(ancestors=jnp.arange(2, dtype=jnp.int32)),
             ValueError,
             "ancestors must have length num_particles=3",
@@ -422,6 +430,13 @@ def test_runner_rejects_malformed_emissions(emissions, message):
             ),
             ValueError,
             "log_evidence_increment must be floating",
+        ),
+        (
+            _valid_record(
+                log_evidence_increment=jnp.asarray(0.0, dtype=jnp.bfloat16)
+            ),
+            ValueError,
+            "log_evidence_increment must have at least float32 precision",
         ),
         (
             tuple(_valid_record()),

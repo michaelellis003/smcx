@@ -159,9 +159,10 @@ def temper(
         initial_sampler: ``(key, num_particles) -> (N, d)`` drawing
             from the prior.
         log_prior_fn: Per-particle ``(state) -> scalar`` log-prior;
-            vmapped internally.
+            vmapped internally. Must return at least float32 precision.
         log_likelihood_fn: Per-particle ``(state) -> scalar``
-            log-likelihood; vmapped internally.
+            log-likelihood; vmapped internally. Must return at least
+            float32 precision.
         num_particles: Number of particles N.
         num_mcmc_steps: RWM sweeps per temperature stage. Five may under-mix
             in moderate or high dimensions.

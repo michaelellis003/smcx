@@ -20,6 +20,7 @@ from jax.core import Tracer
 from jax.tree_util import PyTreeDef, keystr
 from jaxtyping import Array, Float, Int, PyTree, Shaped
 
+from smcx._numerics import _validate_minimum_float_precision
 from smcx.containers import ParticleState
 from smcx.types import (
     InitialSampler,
@@ -69,7 +70,7 @@ def _validate_log_density_batch(
     *,
     name: str,
 ) -> None:
-    """Require one floating log-density value per particle."""
+    """Require one >=f32 log-density value per particle."""
     if values.shape != (num_particles,):
         raise ValueError(
             f"{name} output must have shape ({num_particles},); "
@@ -79,6 +80,7 @@ def _validate_log_density_batch(
         raise ValueError(
             f"{name} output must have a floating dtype; got {values.dtype}"
         )
+    _validate_minimum_float_precision(values, name=f"{name} output")
 
 
 def _prepend(first: Array, rest: Array) -> Array:

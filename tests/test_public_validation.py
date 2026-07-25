@@ -165,6 +165,23 @@ def test_bootstrap_validates_log_observation(value, message):
         )
 
 
+@pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
+def test_bootstrap_rejects_low_precision_log_observation(dtype):
+    def low_precision_log_observation(emission, state):
+        del emission, state
+        return jnp.asarray(0.0, dtype=dtype)
+
+    with pytest.raises(ValueError, match="at least float32 precision"):
+        smcx.bootstrap_filter(
+            jr.key(0),
+            _initial_sampler,
+            _transition_sampler,
+            low_precision_log_observation,
+            jnp.zeros((2, 1)),
+            512,
+        )
+
+
 def _valid_then(value):
     values = iter((jnp.asarray(0.0), value))
 
@@ -282,6 +299,31 @@ def test_filters_validate_later_log_density_batches(
     boundary, callback_name, value, message
 ):
     with pytest.raises(ValueError, match=f"{callback_name} {message}"):
+        _run_invalid_later_density(boundary, value)
+
+
+@pytest.mark.parametrize(
+    ("boundary", "callback_name"),
+    [
+        ("bootstrap_observation", "log_observation_fn"),
+        ("auxiliary_observation", "log_observation_fn"),
+        ("auxiliary_auxiliary", "log_auxiliary_fn"),
+        ("guided_observation", "log_observation_fn"),
+        ("guided_transition", "log_transition_fn"),
+        ("guided_proposal", "log_proposal_fn"),
+        ("liu_west_observation", "log_observation_fn"),
+        ("liu_west_auxiliary", "log_auxiliary_fn"),
+    ],
+)
+def test_filters_reject_later_low_precision_log_densities(
+    boundary, callback_name
+):
+    value = jnp.asarray(0.0, dtype=jnp.bfloat16)
+
+    with pytest.raises(
+        ValueError,
+        match=f"{callback_name} output must have at least float32 precision",
+    ):
         _run_invalid_later_density(boundary, value)
 
 
@@ -404,6 +446,37 @@ def test_temper_validates_public_structure(
         _run_temper(initial_sampler, **kwargs)
 
 
+@pytest.mark.parametrize(
+    ("callback_name", "log_prior_fn", "log_likelihood_fn"),
+    [
+        (
+            "log_prior_fn",
+            lambda _value: jnp.asarray(0.0, dtype=jnp.bfloat16),
+            _log_quadratic,
+        ),
+        (
+            "log_likelihood_fn",
+            _log_quadratic,
+            lambda _value: jnp.asarray(0.0, dtype=jnp.bfloat16),
+        ),
+    ],
+)
+def test_temper_rejects_low_precision_log_density(
+    callback_name, log_prior_fn, log_likelihood_fn
+):
+    with pytest.raises(
+        ValueError,
+        match=f"{callback_name} output must have at least float32 precision",
+    ):
+        smcx.temper(
+            jr.key(0),
+            _initial_sampler,
+            log_prior_fn,
+            log_likelihood_fn,
+            4,
+        )
+
+
 def _smc2_initial(key, count, params):
     del key, params
     return jnp.zeros((count, 1))
@@ -503,3 +576,25 @@ def test_smc2_accepts_scalar_emission_series():
     )
 
     assert posterior.filtered_params.shape == (2, 2, 1)
+
+
+def test_smc2_rejects_low_precision_log_observation():
+    def low_precision_log_observation(emission, state, params):
+        del emission, state, params
+        return jnp.asarray(0.0, dtype=jnp.bfloat16)
+
+    with pytest.raises(
+        ValueError,
+        match="log_observation_fn output must have at least float32 precision",
+    ):
+        smcx.smc2(
+            jr.key(0),
+            _param_initial_sampler,
+            _log_quadratic,
+            _smc2_initial,
+            _smc2_transition,
+            low_precision_log_observation,
+            jnp.zeros((1, 1)),
+            2,
+            2,
+        )

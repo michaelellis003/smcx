@@ -229,13 +229,13 @@ def guided_filter(
             shapes, and dtypes. smcx ``vmap``-s it internally.
         log_proposal_fn: Per-particle
             ``(y_t, z_t, z_prev[, input_t]) -> scalar`` log proposal
-            density.
+            density with at least float32 precision.
         log_transition_fn: Per-particle
             ``(z_t, z_prev[, input_t]) -> scalar`` log transition
-            density $\log f$.
+            density $\log f$ with at least float32 precision.
         log_observation_fn: Per-particle
             ``(y_t, z_t[, input_t]) -> scalar`` log observation density
-            $\log g$.
+            $\log g$ with at least float32 precision.
         emissions: Observations with leading time dimension.
         num_particles: Number of particles $N$.
         resampling_fn: Resampler with signature
