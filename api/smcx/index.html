@@ -5172,6 +5172,12 @@ S_t = \sum_{s=1}^{t} \log p(y_s \mid y_{1:s-1})
 Comparing <span class="arithmatex">\(S_t\)</span> across models shows when their log Bayes
 factor accrues. At the final time their difference is exactly the
 log Bayes factor, with the same prior sensitivity.</p>
+<p>Every prefix uses sequential Neumaier compensation in the input
+dtype, matching compensated posterior evidence accumulation. This
+corrects the ordinary cumulative sum used in earlier releases:
+fixed-input prefixes can change, especially for long or
+cancellation-heavy traces, while shape, dtype, and JIT behavior
+are unchanged.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5232,7 +5238,10 @@ log Bayes factor, with the same prior sensitivity.</p>
   <summary>References</summary>
   <p>Gneiting, T., and Raftery, A. E. (2007). Strictly proper scoring
 rules, prediction, and estimation.
-https://doi.org/10.1198/016214506000001437</p>
+https://doi.org/10.1198/016214506000001437
+Neumaier, A. (1974). Rundungsfehleranalyse einiger Verfahren zur
+Summation endlicher Summen.
+https://doi.org/10.1002/zamm.19740540106</p>
 </details>
 
     </div>
