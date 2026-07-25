@@ -372,10 +372,11 @@ class TestCRPS:
         from smcx.diagnostics import crps
 
         offset = jnp.float32(1e7)
-        shifted = (
-            jr.normal(jr.key(7), (1000,), dtype=jnp.float32) * jnp.float32(3.0)
-            + offset
+        pattern = jnp.asarray(
+            [-8.0, -3.0, -1.0, 0.0, 2.0, 5.0, 9.0],
+            dtype=jnp.float32,
         )
+        shifted = jnp.tile(pattern + offset, 128)
         centered = shifted - offset
 
         shifted_score = crps(shifted, offset)
@@ -436,15 +437,25 @@ class TestCRPS:
         result = jax.jit(jax.vmap(crps))(predictions, observations)
         assert jnp.array_equal(result, jnp.array([0.25, 1.0]))
 
-    def test_crps_accepts_large_float32_sample(self):
-        """Ensemble size scaling never constructs an overflowing integer."""
+    @pytest.mark.parametrize("outlier", [-1.0, 1.0])
+    def test_crps_large_sample_preserves_reflected_outlier(self, outlier):
+        """Large empirical forecasts retain reflected tail contributions."""
         from smcx.diagnostics import crps
 
-        result = crps(
-            jnp.zeros((100_000,), dtype=jnp.float32),
-            jnp.float32(0.0),
+        num_samples = 6_556_022
+        predictions = (
+            jnp.zeros((num_samples,), dtype=jnp.float32).at[-1].set(outlier)
         )
-        assert jnp.array_equal(result, jnp.float32(0.0))
+        result = float(crps(predictions, jnp.asarray(0.0, dtype=jnp.float32)))
+        expected = 1.0 / (num_samples * num_samples)
+        # fl(1/N) contributes at most eps/2 relative error; squaring it
+        # and the two final products remain below five float32 eps.
+        relative_tolerance = 5.0 * float(jnp.finfo(jnp.float32).eps)
+        assert result == pytest.approx(
+            expected,
+            rel=relative_tolerance,
+            abs=0.0,
+        )
 
 
 class TestPosteriorPredictiveSample:
