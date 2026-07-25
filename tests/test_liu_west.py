@@ -148,6 +148,232 @@ def _make_liu_west_fns():
     )
 
 
+def _run_covariance_case(
+    parameter_cloud: jax.Array,
+    *,
+    shrinkage: float = 0.95,
+) -> lw.LiuWestPosterior:
+    """Run one Liu-West propagation for a supplied parameter cloud."""
+    dtype = parameter_cloud.dtype
+    num_particles = parameter_cloud.shape[0]
+
+    def initial_sampler(key, n):
+        del key
+        return jnp.zeros((n, 1), dtype=dtype)
+
+    def param_initial_sampler(key, n):
+        del key
+        assert n == num_particles
+        return parameter_cloud
+
+    def transition_sampler(key, state, params):
+        del key, params
+        return state
+
+    def log_density(emission, state, params):
+        del emission, state, params
+        return jnp.asarray(0.0, dtype=jnp.float32)
+
+    return liu_west_filter(
+        key=jr.key(129),
+        initial_sampler=initial_sampler,
+        transition_sampler=transition_sampler,
+        log_observation_fn=log_density,
+        log_auxiliary_fn=log_density,
+        param_initial_sampler=param_initial_sampler,
+        emissions=jnp.zeros((2, 1), dtype=dtype),
+        num_particles=num_particles,
+        shrinkage=shrinkage,
+        resampling_threshold=0.0,
+    )
+
+
+class TestLiuWestCovarianceKernel:
+    """Parameter perturbations preserve represented covariance support."""
+
+    def test_factor_is_the_symmetric_psd_spectral_root(self):
+        params = jnp.array(
+            [[2.0, 1.0], [-2.0, -1.0], [1.0, 2.0], [-1.0, -2.0]],
+            dtype=jnp.float32,
+        )
+        weights = jnp.full(4, 0.25, dtype=jnp.float32)
+
+        _, factor = lw._parameter_kernel(
+            params,
+            weights,
+            jnp.asarray(0.9, dtype=jnp.float32),
+            jnp.asarray(0.25, dtype=jnp.float32),
+        )
+
+        centered = np.asarray(params) - np.mean(np.asarray(params), axis=0)
+        weighted = centered * np.asarray(weights)[:, None]
+        covariance = 0.25 * centered.T @ weighted
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        expected = (
+            eigenvectors * np.sqrt(np.maximum(eigenvalues, 0.0))[None, :]
+        ) @ eigenvectors.T
+        # The symmetric PSD root is invariant to eigenvector sign choices.
+        tolerance = float(8 * np.finfo(np.float32).eps)
+        np.testing.assert_allclose(
+            factor,
+            expected,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+
+    def test_zero_weight_leading_outlier_does_not_set_moment_anchor(self):
+        params = jnp.array([[1e10], [0.0], [1.0]], dtype=jnp.float32)
+        weights = jnp.array([0.0, 0.5, 0.5], dtype=jnp.float32)
+        shrinkage = jnp.asarray(0.95, dtype=jnp.float32)
+        kernel_variance = 1.0 - shrinkage**2
+
+        shrunk, factor = lw._parameter_kernel(
+            params,
+            weights,
+            shrinkage,
+            kernel_variance,
+        )
+
+        # Five eps cover the centered f32 reductions and eigendecomposition.
+        tolerance = float(5 * np.finfo(np.float32).eps)
+        np.testing.assert_allclose(
+            shrunk[1:],
+            np.array([[0.025], [0.975]], dtype=np.float32),
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        np.testing.assert_allclose(
+            factor @ factor.T,
+            np.array([[0.25 * (1.0 - 0.95**2)]], dtype=np.float32),
+            rtol=tolerance,
+            atol=tolerance,
+        )
+
+    def test_zero_weight_extreme_is_masked_before_moment_arithmetic(self):
+        extreme = jnp.asarray(3e38, dtype=jnp.float32)
+        params = jnp.array(
+            [[extreme], [-extreme], [-extreme]],
+            dtype=jnp.float32,
+        )
+        weights = jnp.array([0.0, 0.5, 0.5], dtype=jnp.float32)
+        shrinkage = jnp.asarray(0.95, dtype=jnp.float32)
+
+        shrunk, factor = lw._parameter_kernel(
+            params,
+            weights,
+            shrinkage,
+            1.0 - shrinkage**2,
+        )
+
+        assert jnp.all(jnp.isfinite(shrunk))
+        np.testing.assert_array_equal(shrunk, -extreme)
+        np.testing.assert_array_equal(factor, jnp.zeros((1, 1)))
+
+    def test_float32_zero_spread_does_not_drift(self):
+        cloud = jnp.zeros((17, 2), dtype=jnp.float32)
+
+        actual = _run_covariance_case(cloud).filtered_params[-1]
+
+        assert actual.dtype == cloud.dtype
+        np.testing.assert_array_equal(actual, cloud)
+
+    @pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
+    def test_low_precision_kernel_uses_float32_controls(self, dtype):
+        pattern = jnp.array(
+            [[-2.0, -1.0], [0.0, 1.0], [2.0, 3.0], [4.0, -1.0]],
+            dtype=dtype,
+        )
+        cloud = jnp.tile(pattern, (4, 1))
+
+        actual = _run_covariance_case(
+            cloud,
+            shrinkage=0.9997,
+        ).filtered_params[-1]
+        reference = (
+            _run_covariance_case(
+                cloud.astype(jnp.float32),
+                shrinkage=0.9997,
+            )
+            .filtered_params[-1]
+            .astype(dtype)
+        )
+
+        assert actual.dtype == cloud.dtype
+        assert jnp.all(jnp.isfinite(actual))
+        # One low-dtype ulp covers casting the shrunk center before addition.
+        tolerance = float(jnp.finfo(dtype).eps * jnp.max(jnp.abs(reference)))
+        np.testing.assert_allclose(
+            actual.astype(jnp.float32),
+            reference.astype(jnp.float32),
+            rtol=0.0,
+            atol=tolerance,
+        )
+
+    def test_translated_constant_does_not_create_spread(self):
+        cloud = jnp.full((1_000, 2), 1e10, dtype=jnp.float32)
+
+        actual = _run_covariance_case(cloud).filtered_params[-1]
+
+        assert actual.dtype == cloud.dtype
+        np.testing.assert_array_equal(actual, cloud)
+
+    def test_rank_deficient_cloud_stays_in_its_support(self):
+        first = jnp.array([9_990.0, 10_000.0, 10_010.0], jnp.float32)
+        cloud = jnp.stack((first, 0.5 * first), axis=1)
+
+        actual = _run_covariance_case(cloud).filtered_params[-1]
+
+        assert jnp.all(jnp.isfinite(actual))
+        # Sixteen eps cover eigensolver and matrix-product rounding.
+        tolerance = float(16 * np.finfo(np.float32).eps * np.max(np.abs(cloud)))
+        np.testing.assert_allclose(
+            actual[:, 1],
+            0.5 * actual[:, 0],
+            rtol=0.0,
+            atol=tolerance,
+        )
+
+    def test_near_singular_cloud_remains_finite(self):
+        first = jnp.array(
+            [9_990.0, 10_000.0, 10_010.0, 10_020.0],
+            jnp.float32,
+        )
+        second = 0.5 * first
+        second = second.at[-1].add(jnp.float32(0.01))
+        cloud = jnp.stack((first, second), axis=1)
+
+        actual = _run_covariance_case(cloud).filtered_params[-1]
+
+        assert actual.dtype == cloud.dtype
+        assert jnp.all(jnp.isfinite(actual))
+
+    @pytest.mark.parametrize("shrinkage", [0.80, 0.99])
+    def test_ordinary_spread_preserves_kernel_variance(
+        self,
+        shrinkage: float,
+    ):
+        pattern = jnp.array(
+            [[-1.0, -2.0], [-1.0, 2.0], [1.0, -2.0], [1.0, 2.0]],
+            jnp.float32,
+        )
+        cloud = jnp.tile(pattern, (5_000, 1))
+
+        actual = _run_covariance_case(
+            cloud,
+            shrinkage=shrinkage,
+        ).filtered_params[-1]
+        noise = np.asarray(actual - jnp.float32(shrinkage) * cloud)
+        second_moment = np.mean(noise**2, axis=0)
+        expected = (1.0 - shrinkage**2) * np.array([1.0, 4.0])
+        # For Gaussian noise, SE(sample second moment) =
+        # sqrt(2 / N) * variance. Five SE is the stochastic-test gate.
+        estimator_se = np.sqrt(2.0 / cloud.shape[0]) * expected
+        np.testing.assert_array_less(
+            np.abs(second_moment - expected),
+            5 * estimator_se,
+        )
+
+
 def test_uncompiled_step_matches_compiled_scan():
     _, transition, observation, auxiliary, _ = _make_conjugate_fns()
     num_particles, shrinkage = 16, jnp.asarray(0.95)

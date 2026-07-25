@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
-# Apache-2.0. Modified: local ESS/resampling and validation, shrinkage
-# guidance, typed callbacks, exogenous inputs, and optional history storage.
+# Apache-2.0. Modified: local ESS/resampling and validation, PSD covariance
+# perturbations, shrinkage guidance, typed callbacks, exogenous inputs, and
+# optional history storage.
 
 r"""Liu-West particle filter for joint state-parameter estimation.
 
@@ -29,6 +30,12 @@ References:
     in Simulation-Based Filtering. *Sequential Monte Carlo Methods in
     Practice*, 197--223.
     https://doi.org/10.1007/978-1-4757-3437-9_10
+    Pébay, P., Terriberry, T. B., Kolla, H., and Bennett, J. (2016).
+    Numerically stable, scalable formulas for parallel and online
+    computation of higher-order multivariate central moments with
+    arbitrary weights. https://doi.org/10.1007/s00180-015-0637-z
+    Higham, N. J. (2008). Functions of Matrices: Theory and Computation,
+    Chapter 6. https://doi.org/10.1137/1.9780898717778.ch6
 """
 
 import math
@@ -97,6 +104,72 @@ class _LiuWestStepOutput(NamedTuple):
     ess: Float[Array, ""]
     log_evidence_increment: Float[Array, ""]
     normalizers_finite: Bool[Array, ""]
+
+
+def _parameter_kernel(
+    params: Float[Array, "num_particles param_dim"],
+    weights: Float[Array, " num_particles"],
+    shrinkage: Float[Array, ""],
+    kernel_variance: Float[Array, ""],
+) -> tuple[
+    Float[Array, "num_particles param_dim"],
+    Float[Array, "param_dim param_dim"],
+]:
+    """Return shrunk parameters and a PSD kernel covariance factor.
+
+    Moments are evaluated relative to a maximum-weight parameter,
+    avoiding amplification of weight-sum error by a large common offset.
+    Represented-zero parameters are masked before centered arithmetic.
+    Spectral modes no larger than ``D * eps * ||covariance||_2`` are
+    indistinguishable from eigensolver roundoff and are left unperturbed.
+    """
+    dtype = params.dtype
+    working_dtype = jnp.promote_types(dtype, jnp.float32)
+    working_params = params.astype(working_dtype)
+    weights = weights.astype(working_dtype)
+    weights = weights / jnp.sum(weights)
+    shrinkage = jnp.asarray(shrinkage, dtype=working_dtype)
+    kernel_variance = jnp.asarray(kernel_variance, dtype=working_dtype)
+
+    anchor = working_params[jnp.argmax(weights)]
+    material = weights[:, None] > 0.0
+    offsets = jnp.where(
+        material,
+        working_params - anchor,
+        jnp.zeros_like(working_params),
+    )
+    offset_mean = jnp.sum(weights[:, None] * offsets, axis=0)
+    deviations = jnp.where(
+        material,
+        offsets - offset_mean[None, :],
+        jnp.zeros_like(offsets),
+    )
+    covariance = jnp.einsum(
+        "n,nd,ne->de",
+        weights,
+        deviations,
+        deviations,
+    )
+
+    eigenvalues, eigenvectors = jnp.linalg.eigh(kernel_variance * covariance)
+    spectral_scale = jnp.max(jnp.abs(eigenvalues))
+    tolerance = (
+        jnp.asarray(params.shape[1], dtype=working_dtype)
+        * jnp.asarray(jnp.finfo(working_dtype).eps, dtype=working_dtype)
+        * spectral_scale
+    )
+    eigenvalues = jnp.where(eigenvalues > tolerance, eigenvalues, 0.0)
+    covariance_factor = (
+        eigenvectors * jnp.sqrt(eigenvalues)[None, :]
+    ) @ eigenvectors.T
+
+    one = jnp.asarray(1.0, dtype=working_dtype)
+    shrunk = (
+        anchor[None, :]
+        + shrinkage * offsets
+        + (one - shrinkage) * offset_mean[None, :]
+    )
+    return shrunk.astype(dtype), covariance_factor
 
 
 def _validate_dense_initial_cloud(
@@ -252,10 +325,12 @@ def _liu_west_step(
         return cast(Array, result)
 
     weights = normalize(log_weights)
-    param_mean = jnp.sum(weights[:, None] * params, axis=0)
-    param_dev = params - param_mean[None, :]
-    param_cov = jnp.einsum("n,nd,ne->de", weights, param_dev, param_dev)
-    shrunk = shrinkage * params + (1.0 - shrinkage) * param_mean[None, :]
+    shrunk, covariance_factor = _parameter_kernel(
+        params,
+        weights,
+        shrinkage,
+        kernel_variance,
+    )
     log_aux = _evaluate(log_auxiliary_fn, particles, shrunk)
     _validate_log_density_batch(log_aux, num_particles, name="log_auxiliary_fn")
     log_first_norm, log_first_sum = log_normalize(log_weights + log_aux)
@@ -271,10 +346,15 @@ def _liu_west_step(
         time_index,
     )
     param_dim = params.shape[1]
-    jitter = 1e-8 * jnp.eye(param_dim)
-    chol = jnp.linalg.cholesky(kernel_variance * param_cov + jitter)
-    eps = jr.normal(parameter_key, (num_particles, param_dim))
-    new_params = shrunk[ancestors] + eps @ chol.T
+    eps = jr.normal(
+        parameter_key,
+        (num_particles, param_dim),
+        dtype=covariance_factor.dtype,
+    )
+    new_params = (
+        shrunk[ancestors].astype(covariance_factor.dtype)
+        + eps @ covariance_factor.T
+    ).astype(params.dtype)
     particle_keys = jr.split(transition_key, num_particles)
     if input_t is None:
         transition_fn = cast(ParamTransitionSampler, transition_sampler)
@@ -374,7 +454,8 @@ def liu_west_filter(
         param_initial_sampler: Function
             ``(key, num_particles) -> params`` that draws from the
             prior parameter distribution. Returns a nonempty floating array
-            of shape ``(num_particles, param_dim)``.
+            of shape ``(num_particles, param_dim)``. Float16 and bfloat16
+            kernel arithmetic is promoted to float32, then cast back.
         emissions: Observed emissions, shape ``(T, D)``.
         num_particles: Number of particles $N$.
         shrinkage: Shrinkage parameter $a \in (0, 1)$. Larger values apply
@@ -427,9 +508,6 @@ def liu_west_filter(
     )
     key, init_key = jr.split(key)
     log_n = jnp.asarray(math.log(num_particles))
-    a = jnp.asarray(shrinkage)
-    h_sq = 1.0 - a**2
-
     (
         particles_0,
         params_0,
@@ -458,6 +536,9 @@ def liu_west_filter(
             inputs_arr[0],
         )
     )
+    kernel_dtype = jnp.promote_types(params_0.dtype, jnp.float32)
+    a = jnp.asarray(shrinkage, dtype=kernel_dtype)
+    h_sq = jnp.asarray(1.0, dtype=kernel_dtype) - a**2
 
     # --- Scan body for t = 1, ..., T-1 -------------------------------------
     def _step(carry: _LiuWestStepCarry, args: tuple[Array, ...]):
