@@ -1752,8 +1752,9 @@ full.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>All weights collapsed (eager execution
-only; under <code>jax.jit</code> the <code>-inf</code> marginal propagates).</p>
+                <p>A particle-weight stage cannot be normalized
+(eager execution only; under <code>jax.jit</code> its nonfinite signal
+propagates).</p>
               </div>
             </td>
           </tr>

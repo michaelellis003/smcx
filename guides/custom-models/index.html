@@ -1897,16 +1897,22 @@ and use this core inside the step callback:</p>
 </span><span id="__span-10-20"><a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="n">log_scores</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">do_resample</span><span class="p">,</span> <span class="n">log_step</span> <span class="o">-</span> <span class="n">log_m</span><span class="p">[</span><span class="n">ancestors</span><span class="p">],</span> <span class="n">W</span> <span class="o">+</span> <span class="n">log_step</span><span class="p">)</span>
 </span><span id="__span-10-21"><a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a><span class="n">log_weights</span><span class="p">,</span> <span class="n">second_total</span> <span class="o">=</span> <span class="n">smcx</span><span class="o">.</span><span class="n">log_normalize</span><span class="p">(</span><span class="n">log_scores</span><span class="p">)</span>
 </span><span id="__span-10-22"><a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a><span class="n">increment</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
-</span><span id="__span-10-23"><a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a>    <span class="n">do_resample</span><span class="p">,</span>
-</span><span id="__span-10-24"><a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a>    <span class="n">first_total</span> <span class="o">+</span> <span class="n">second_total</span> <span class="o">-</span> <span class="n">jnp</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">num_particles</span><span class="p">),</span>
-</span><span id="__span-10-25"><a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a>    <span class="n">second_total</span><span class="p">,</span>
-</span><span id="__span-10-26"><a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a><span class="p">)</span>
+</span><span id="__span-10-23"><a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a>    <span class="n">jnp</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">first_total</span><span class="p">),</span>
+</span><span id="__span-10-24"><a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a>    <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+</span><span id="__span-10-25"><a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a>        <span class="n">do_resample</span><span class="p">,</span>
+</span><span id="__span-10-26"><a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a>        <span class="n">first_total</span> <span class="o">+</span> <span class="n">second_total</span> <span class="o">-</span> <span class="n">jnp</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">num_particles</span><span class="p">),</span>
+</span><span id="__span-10-27"><a id="__codelineno-10-27" name="__codelineno-10-27" href="#__codelineno-10-27"></a>        <span class="n">second_total</span><span class="p">,</span>
+</span><span id="__span-10-28"><a id="__codelineno-10-28" name="__codelineno-10-28" href="#__codelineno-10-28"></a>    <span class="p">),</span>
+</span><span id="__span-10-29"><a id="__codelineno-10-29" name="__codelineno-10-29" href="#__codelineno-10-29"></a>    <span class="n">first_total</span><span class="p">,</span>
+</span><span id="__span-10-30"><a id="__codelineno-10-30" name="__codelineno-10-30" href="#__codelineno-10-30"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>Return <code>particles</code>, <code>log_weights</code>, <code>ancestors</code>, and <code>increment</code> in a
 <code>ParticleFilterRecord</code>. The look-ahead correction appears only after
 first-stage resampling; without resampling, the ordinary guided score is
-<code>W + log(g) + log(f) - log(q)</code>. In an input-aware step, pass the aligned
-<code>input_t</code> to the look-ahead, proposal, and all three density callbacks.</p>
+<code>W + log(g) + log(f) - log(q)</code>. The outer <code>where</code> carries a nonfinite
+first-stage normalizer into the runner's eager evidence check even when
+resampling is skipped. In an input-aware step, pass the aligned <code>input_t</code> to
+the look-ahead, proposal, and all three density callbacks.</p>
 <h2 id="write-input-aware-callbacks-explicitly">Write input-aware callbacks explicitly</h2>
 <p>Time-varying inputs use distinct callback signatures. At time zero,
 <code>input_0</code> reaches the initial sampler and observation callback. At later

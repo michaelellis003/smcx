@@ -2608,7 +2608,7 @@
 
 
 
-        <p>A checked particle-weight or evidence state is <code>-inf</code> or NaN.</p>
+        <p>A checked particle-weight normalizer or evidence state is nonfinite.</p>
 <p>Public algorithms raise at their eager shell boundaries, which may be
 initialization, an intermediate stage, or the end of a scan. Inside a
 user <code>jax.jit</code>, traced values propagate instead because transformed
@@ -4028,8 +4028,9 @@ while <code>ess</code>/<code>log_evidence_increments</code> stay full.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>All weights collapsed (eager execution
-only; under <code>jax.jit</code> the <code>-inf</code> marginal propagates).</p>
+                <p>A particle-weight stage cannot be normalized
+(eager execution only; under <code>jax.jit</code> its nonfinite signal
+propagates).</p>
               </div>
             </td>
           </tr>
@@ -4349,8 +4350,9 @@ dropping memory from O(T*N) to O(N).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>All weights collapsed (eager execution
-only; under <code>jax.jit</code> the <code>-inf</code> marginal propagates).</p>
+                <p>A particle-weight stage cannot be normalized
+(eager execution only; under <code>jax.jit</code> its nonfinite signal
+propagates).</p>
               </div>
             </td>
           </tr>
@@ -4553,7 +4555,7 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Every initial importance weight collapses.</p>
+                <p>Initial importance weights cannot normalize.</p>
               </div>
             </td>
           </tr>
@@ -4775,7 +4777,7 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Every updated importance weight collapses.</p>
+                <p>Updated importance weights cannot normalize.</p>
               </div>
             </td>
           </tr>
@@ -5032,7 +5034,7 @@ is malformed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Cumulative importance weights collapse.</p>
+                <p>Cumulative importance weights cannot normalize.</p>
               </div>
             </td>
           </tr>
@@ -6192,8 +6194,9 @@ while <code>ess</code>/<code>log_evidence_increments</code> stay full.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>All weights collapsed (eager execution
-only; under <code>jax.jit</code> the <code>-inf</code> marginal propagates).</p>
+                <p>A particle-weight stage cannot be normalized
+(eager execution only; under <code>jax.jit</code> its nonfinite signal
+propagates).</p>
               </div>
             </td>
           </tr>
@@ -6849,8 +6852,9 @@ full.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>All weights collapsed (eager execution
-only; under <code>jax.jit</code> the <code>-inf</code> marginal propagates).</p>
+                <p>A particle-weight stage cannot be normalized
+(eager execution only; under <code>jax.jit</code> its nonfinite signal
+propagates).</p>
               </div>
             </td>
           </tr>
@@ -9008,8 +9012,7 @@ invalid, or a later record changes its particle or dtype contract.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Eager evidence accumulation ends at NaN or
-negative infinity.</p>
+                <p>Eager evidence accumulation is nonfinite.</p>
               </div>
             </td>
           </tr>
@@ -9703,8 +9706,8 @@ is incomplete, or a mutation state or diagnostic is malformed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The likelihood is <code>-inf</code> on the
-whole cloud (no tempering step is possible).</p>
+                <p>A tempering reweight stage cannot be
+normalized.</p>
               </div>
             </td>
           </tr>

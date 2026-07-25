@@ -1766,8 +1766,9 @@ dropping memory from O(T*N) to O(N).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>All weights collapsed (eager execution
-only; under <code>jax.jit</code> the <code>-inf</code> marginal propagates).</p>
+                <p>A particle-weight stage cannot be normalized
+(eager execution only; under <code>jax.jit</code> its nonfinite signal
+propagates).</p>
               </div>
             </td>
           </tr>
@@ -1970,7 +1971,7 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Every initial importance weight collapses.</p>
+                <p>Initial importance weights cannot normalize.</p>
               </div>
             </td>
           </tr>
@@ -2192,7 +2193,7 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Every updated importance weight collapses.</p>
+                <p>Updated importance weights cannot normalize.</p>
               </div>
             </td>
           </tr>
@@ -2449,7 +2450,7 @@ is malformed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Cumulative importance weights collapse.</p>
+                <p>Cumulative importance weights cannot normalize.</p>
               </div>
             </td>
           </tr>
