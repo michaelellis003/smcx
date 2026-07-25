@@ -288,9 +288,11 @@ def _check_covariance(
     psd_tolerance = 8.0 * dimension * epsilon
     transpose = np.swapaxes(covariance, -1, -2)
     scale = np.maximum(np.abs(covariance), np.abs(transpose))
-    if np.any(np.abs(covariance - transpose) > 32.0 * epsilon * scale):
+    scaled = covariance / np.where(np.equal(scale, 0.0), 1.0, scale)
+    if np.any(np.abs(scaled - np.swapaxes(scaled, -1, -2)) > 32.0 * epsilon):
         raise ValueError(f"{name} must be symmetric")
-    symmetric = 0.5 * covariance + 0.5 * transpose
+    lower = np.minimum(covariance, transpose)
+    symmetric = lower + 0.5 * (np.maximum(covariance, transpose) - lower)
     diagonal = np.diagonal(symmetric, axis1=-2, axis2=-1)
     domain = "definite" if positive_definite else "semidefinite"
     invalid_diagonal = diagonal <= 0.0 if positive_definite else diagonal < 0.0
