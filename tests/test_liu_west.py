@@ -278,17 +278,36 @@ class TestLiuWestCovarianceKernel:
         np.testing.assert_array_equal(actual, cloud)
 
     @pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
-    def test_low_precision_cloud_preserves_dtype(self, dtype):
+    def test_low_precision_kernel_uses_float32_controls(self, dtype):
         pattern = jnp.array(
             [[-2.0, -1.0], [0.0, 1.0], [2.0, 3.0], [4.0, -1.0]],
             dtype=dtype,
         )
         cloud = jnp.tile(pattern, (4, 1))
 
-        actual = _run_covariance_case(cloud).filtered_params[-1]
+        actual = _run_covariance_case(
+            cloud,
+            shrinkage=0.9997,
+        ).filtered_params[-1]
+        reference = (
+            _run_covariance_case(
+                cloud.astype(jnp.float32),
+                shrinkage=0.9997,
+            )
+            .filtered_params[-1]
+            .astype(dtype)
+        )
 
         assert actual.dtype == cloud.dtype
         assert jnp.all(jnp.isfinite(actual))
+        # One low-dtype ulp covers casting the shrunk center before addition.
+        tolerance = float(jnp.finfo(dtype).eps * jnp.max(jnp.abs(reference)))
+        np.testing.assert_allclose(
+            actual.astype(jnp.float32),
+            reference.astype(jnp.float32),
+            rtol=0.0,
+            atol=tolerance,
+        )
 
     def test_translated_constant_does_not_create_spread(self):
         cloud = jnp.full((1_000, 2), 1e10, dtype=jnp.float32)
