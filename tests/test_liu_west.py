@@ -795,6 +795,36 @@ class TestLiuWestInitialJointLaw:
         del emission, state
         return 0.0 * params[0]
 
+    def test_legacy_initializers_keep_fixed_key_mapping(self):
+        """Independent initializers retain the legacy fixed-key schedule."""
+        num_particles = 4
+
+        def sample(key, n):
+            return jr.uniform(key, (n, 1), dtype=jnp.float32)
+
+        key = jr.key(11)
+        posterior = liu_west_filter(
+            key=key,
+            initial_sampler=sample,
+            transition_sampler=self._transition,
+            log_observation_fn=self._flat_log_density,
+            log_auxiliary_fn=self._flat_log_density,
+            param_initial_sampler=sample,
+            emissions=jnp.zeros((1, 1)),
+            num_particles=num_particles,
+        )
+        _, init_key = jr.split(key)
+        state_key, param_key = jr.split(init_key)
+
+        assert jnp.array_equal(
+            posterior.filtered_particles[0],
+            sample(state_key, num_particles),
+        )
+        assert jnp.array_equal(
+            posterior.filtered_params[0],
+            sample(param_key, num_particles),
+        )
+
     def test_parameter_cloud_conditions_initial_states_under_jit(self):
         """Parameters are sampled first and remain aligned with states."""
         num_particles = 8
@@ -920,4 +950,26 @@ class TestLiuWestInitialJointLaw:
                 param_initial_state_sampler=(
                     lambda key, n, params: jnp.zeros(n)
                 ),
+            )
+
+    def test_validates_parameters_before_conditioned_state_callback(self):
+        """Invalid parameters fail before the state callback is invoked."""
+
+        def param_initial_state_sampler(key, n, params):
+            pytest.fail("conditioned state callback must not run")
+
+        with pytest.raises(
+            ValueError,
+            match="param_initial_sampler output must have shape",
+        ):
+            liu_west_filter(
+                key=jr.key(4),
+                initial_sampler=None,
+                transition_sampler=self._transition,
+                log_observation_fn=self._flat_log_density,
+                log_auxiliary_fn=self._flat_log_density,
+                param_initial_sampler=lambda key, n: jnp.zeros(n),
+                emissions=jnp.zeros((1, 1)),
+                num_particles=4,
+                param_initial_state_sampler=param_initial_state_sampler,
             )
