@@ -12,7 +12,7 @@ eliminate duplication.  They are not part of the public API.
 """
 
 import math
-from typing import NamedTuple, TypeAlias, cast
+from typing import Any, NamedTuple, TypeAlias, cast
 
 import jax
 import jax.numpy as jnp
@@ -45,6 +45,40 @@ _ParticleHistoryTail: TypeAlias = PyTree[
 ]
 _StateHistoryTail: TypeAlias = PyTree[Shaped[Array, "remaining_time ..."]]
 _SampledCloud: TypeAlias = PyTree[Shaped[Array, "num_samples ..."]]
+
+
+def _filter_scan(step: Any, carry: Any, xs: Any) -> tuple[Any, Any]:
+    """Run a filter scan without the jax-mps history defect."""
+    num_steps = tree.leaves(xs)[0].shape[0]
+    if num_steps == 0:
+        return lax.scan(step, carry, xs)
+
+    def full_scan(current: Any, inputs: Any) -> tuple[Any, Any]:
+        return lax.scan(step, current, inputs)
+
+    def mps_scan(current: Any, inputs: Any) -> tuple[Any, Any]:
+        # Remove this containment under smcx#38 after a fixed release.
+        outputs: list[Any] = []
+        for index in range(num_steps):
+            step_input = tree.map(lambda value, i=index: value[i], inputs)
+            step_xs = tree.map(lambda value: value[None], step_input)
+            current, batched_output = lax.scan(step, current, step_xs)
+            output = tree.map(lambda value: value[0], batched_output)
+            outputs.append(output)
+        return current, tree.map(lambda *values: jnp.stack(values), *outputs)
+
+    leaves = tree.leaves((carry, xs))
+    traced = any(isinstance(leaf, Tracer) for leaf in leaves)
+    if traced:
+        return lax.platform_dependent(
+            carry,
+            xs,
+            mps=mps_scan,
+            default=full_scan,
+        )
+    if next(iter(leaves[0].devices())).platform == "mps":
+        return mps_scan(carry, xs)
+    return full_scan(carry, xs)
 
 
 def _validate_filter_inputs(

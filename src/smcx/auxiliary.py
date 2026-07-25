@@ -25,7 +25,7 @@ At each time step the APF:
 When ``log_auxiliary_fn`` returns zero for all inputs, the APF
 reduces to the bootstrap filter.
 
-The implementation expresses the full time-loop as one `jax.lax.scan`.
+MPS uses a sequence of one-step scans; other platforms use one full scan.
 """
 
 import math
@@ -33,13 +33,14 @@ from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax, tree, vmap
+from jax import tree, vmap
 from jaxtyping import Array, Bool, Float, Int
 
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
+    _filter_scan,
     _gather_particles,
     _init_standard,
     _particle_time_axis,
@@ -269,7 +270,7 @@ def auxiliary_filter(
             or ``(T,)``. Input zero reaches initialization; each later
             input reaches the transition, observation, and auxiliary
             callbacks aligned at the same time step.
-        store_history: When False, the scan stacks no
+        store_history: When False, the filter retains no
             per-step particle/weight/ancestor histories — the returned
             arrays cover only the final step (time axis length 1)
             while ``ess``/``log_evidence_increments`` stay full.
@@ -370,7 +371,7 @@ def auxiliary_filter(
         identity_ancestors,
     )
     if store_history:
-        final_carry, outputs = lax.scan(_step, init_carry, scan_inputs)
+        final_carry, outputs = _filter_scan(_step, init_carry, scan_inputs)
         all_particles = _prepend_particle_history(
             particles_0, outputs.particles
         )
@@ -387,7 +388,7 @@ def auxiliary_filter(
                 log_ev_inc_rest,
                 normalizers_finite,
             ),
-        ) = lax.scan(_step, init_carry, scan_inputs)
+        ) = _filter_scan(_step, init_carry, scan_inputs)
         all_particles = _particle_time_axis(final_carry.state.particles)
         all_log_w = final_carry.state.log_weights[None]
         all_ancestors = final_carry.ancestors[None]

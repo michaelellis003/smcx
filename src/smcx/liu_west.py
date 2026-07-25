@@ -22,7 +22,7 @@ where $a$ is the shrinkage parameter, $\bar{\phi}$ is the weighted
 parameter mean, $V$ is the weighted parameter covariance, and
 $h^2 = 1 - a^2$.
 
-The implementation expresses the full time-loop as one `jax.lax.scan`.
+MPS uses a sequence of one-step scans; other platforms use one full scan.
 
 References:
     Liu, J. and West, M. (2001). Combined Parameter and State Estimation
@@ -36,13 +36,14 @@ from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax, vmap
+from jax import vmap
 from jaxtyping import Array, Bool, Float, Int
 
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
+    _filter_scan,
     _prepend,
     _raise_if_degenerate,
     _TreeSignature,
@@ -499,7 +500,7 @@ def liu_west_filter(
     )
 
     if store_history:
-        final_carry, outputs = lax.scan(_step, init_carry, scan_inputs)
+        final_carry, outputs = _filter_scan(_step, init_carry, scan_inputs)
         all_particles = _prepend(particles_0, outputs.particles)
         all_params = _prepend(params_0, outputs.params)
         all_log_w = _prepend(log_w_0, outputs.log_weights)
@@ -515,7 +516,7 @@ def liu_west_filter(
                 log_ev_inc_rest,
                 normalizers_finite,
             ),
-        ) = lax.scan(_step, init_carry, scan_inputs)
+        ) = _filter_scan(_step, init_carry, scan_inputs)
         all_particles = final_carry.particles[None]
         all_params = final_carry.params[None]
         all_log_w = final_carry.log_weights[None]

@@ -15,7 +15,7 @@ Monte Carlo algorithm.  At each time step it:
 2. **Propagates** particles through the transition prior.
 3. **Weights** particles by the observation likelihood.
 
-The implementation expresses the full time-loop as one `jax.lax.scan`.
+MPS uses a sequence of one-step scans; other platforms use one full scan.
 """
 
 import math
@@ -33,6 +33,7 @@ from smcx._numerics import (
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
+    _filter_scan,
     _gather_particles,
     _init_standard,
     _particle_time_axis,
@@ -600,7 +601,7 @@ def bootstrap_filter(
             reaches the initial sampler and observation callback;
             ``inputs[t]`` then reaches the transition into t and the
             observation at t.
-        store_history: When False, the scan stacks no
+        store_history: When False, the filter retains no
             per-step particle/weight/ancestor histories — the returned
             arrays cover only the final step (time axis length 1)
             while ``ess``/``log_evidence_increments`` stay full —
@@ -733,7 +734,7 @@ def bootstrap_filter(
                 ess_rest,
                 log_ev_inc_rest,
             ),
-        ) = lax.scan(_step, init_carry, scan_inputs)
+        ) = _filter_scan(_step, init_carry, scan_inputs)
         all_particles = _prepend_particle_history(particles_0, particles_rest)
         all_log_w = _prepend(log_w_0, log_w_rest)
         all_ancestors = _prepend(identity_ancestors, ancestors_rest)
@@ -741,7 +742,7 @@ def bootstrap_filter(
         (
             (final_state, _, final_correction, final_ancestors),
             (ess_rest, log_ev_inc_rest),
-        ) = lax.scan(_step, init_carry, scan_inputs)
+        ) = _filter_scan(_step, init_carry, scan_inputs)
         all_particles = _particle_time_axis(final_state.particles)
         all_log_w = final_state.log_weights[None]
         all_ancestors = final_ancestors[None]

@@ -7,12 +7,13 @@ from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import core, default_backend, lax, tree
+from jax import tree
 from jaxtyping import Array
 
 from smcx._numerics import _neumaier_add, _validate_minimum_float_precision
 from smcx._utils import (
     _canonicalize_inputs,
+    _filter_scan,
     _particle_time_axis,
     _prepend,
     _prepend_particle_history,
@@ -176,9 +177,6 @@ def run_particle_filter(
             Rank-one inputs become ``(T, 1)``.
         store_history: If False, retain only the final particle, weight, and
             ancestor record while keeping full ESS and evidence traces.
-            On MPS, multi-observation execution uses one eager callback step
-            per observation and cannot be wrapped in a JAX transform until
-            smcx #38 closes.
 
     Returns:
         Standard particle-filter posterior. The algorithm-specific carry is
@@ -186,8 +184,6 @@ def run_particle_filter(
 
     Raises:
         TypeError: A callback does not return ``ParticleFilterRecord``.
-            On MPS, also raised when a multi-step run is traced by a JAX
-            transform.
         ValueError: Emissions, inputs, or a callback record are structurally
             invalid, or a later record changes its particle or dtype contract.
         DegenerateWeightsError: Eager evidence accumulation is nonfinite.
@@ -218,22 +214,6 @@ def run_particle_filter(
         record_0,
         name="initial record",
     )
-    log_weights_0 = jnp.asarray(record_0.log_weights)
-    record_is_traced = isinstance(log_weights_0, core.Tracer)
-    platform = (
-        default_backend()
-        if record_is_traced
-        else next(iter(log_weights_0.devices())).platform
-    )
-    use_mps_loop = platform == "mps" and num_timesteps > 1
-    transformed = any(
-        isinstance(leaf, core.Tracer)
-        for leaf in tree.leaves((key, emissions, inputs_arr, carry_0, record_0))
-    )
-    if use_mps_loop and transformed:  # pragma: no cover - MPS-only
-        raise TypeError(
-            "run_particle_filter cannot run under a JAX transform on MPS"
-        )
     increment_0 = record_0.log_evidence_increment
     correction_0 = jnp.zeros_like(increment_0)
     ess_0 = jnp.asarray(compute_ess(record_0.log_weights))
@@ -291,25 +271,14 @@ def run_particle_filter(
         increment_0,
         correction_0,
     )
-    if use_mps_loop:  # pragma: no cover - exercised by Metal gate
-        # Remove this containment under smcx#38 after a fixed jax-mps release.
-        runner_carry = initial_runner_carry
-        records = []
-        for index in range(num_timesteps - 1):
-            args = tuple(value[index] for value in scan_inputs)
-            runner_carry, output = advance(runner_carry, args)
-            records.append(output)
-        (final_carry, final_record, total, correction) = runner_carry
-        outputs = tree.map(lambda *values: jnp.stack(values), *records)
-    else:
-        (
-            (final_carry, final_record, total, correction),
-            outputs,
-        ) = lax.scan(
-            advance,
-            initial_runner_carry,
-            scan_inputs,
-        )
+    (
+        (final_carry, final_record, total, correction),
+        outputs,
+    ) = _filter_scan(
+        advance,
+        initial_runner_carry,
+        scan_inputs,
+    )
     del final_carry
     if store_history:
         particles, log_weights, ancestors, ess_rest, increments_rest = outputs
