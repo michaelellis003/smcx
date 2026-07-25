@@ -3,6 +3,7 @@
 
 """Adaptive covariance factorization regressions."""
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -80,6 +81,10 @@ def test_factor_leaves_well_conditioned_covariance_unregularized(magnitude):
     )
 
 
+@pytest.mark.skipif(
+    jax.default_backend() != "cpu",
+    reason="covariance scaling order is a CPU/x64 arithmetic contract",
+)
 def test_scale_is_applied_after_covariance_accumulation():
     particles = jnp.asarray(
         [[-628.6092345815442], [328.39444847219517], [-801.0697777975164]],
