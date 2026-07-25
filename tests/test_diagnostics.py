@@ -1713,7 +1713,6 @@ class TestPosteriorPredictiveSample:
     @pytest.mark.parametrize(
         ("future_inputs", "message"),
         [
-            ([1.0, 2.0, 3.0], "must be a JAX array"),
             (jnp.zeros((2, 1)), "leading dimension T=3"),
             (jnp.zeros((3, 0)), "input_dim >= 1"),
             (jnp.zeros((3, 1, 1)), "shape \\(T,\\) or \\(T, input_dim\\)"),

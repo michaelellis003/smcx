@@ -71,6 +71,7 @@ from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
     _array_tree_signature,
     _canonicalize_emission,
+    _canonicalize_inputs,
     _coalesce_positive_weight_support,
     _gather_particles,
     _validate_particle_cloud,
@@ -84,11 +85,15 @@ from smcx.containers import (
 )
 from smcx.types import (
     EmissionSampler,
+    EmissionSamplerWithInput,
+    InputSequence,
+    ModelInput,
     ParticleCloud,
     ParticleHistory,
     PRNGKeyT,
     Scalar,
     TransitionSampler,
+    TransitionSamplerWithInput,
     _ReplicatedLogMLFn,
 )
 from smcx.weights import normalize
@@ -1025,9 +1030,11 @@ def param_weighted_quantile(
 def posterior_predictive_sample(
     key: PRNGKeyT,
     posterior: ParticleFilterResult,
-    transition_sampler: TransitionSampler,
-    emission_sampler: EmissionSampler,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    emission_sampler: EmissionSampler | EmissionSamplerWithInput,
     num_samples: _IntegerArgument | None = None,
+    *,
+    future_inputs: InputSequence | None = None,
 ) -> Shaped[Array, "ntime num_samples emission_dim"]:
     r"""Draw one-step-ahead posterior predictive samples.
 
@@ -1038,20 +1045,26 @@ def posterior_predictive_sample(
     3. Draw an emission from ``emission_sampler``.
 
     This gives iid samples from the posterior predictive
-    $p(y_{t+1} \mid y_{1:t})$, which can be compared with the actual
-    observation $y_{t+1}$ for posterior predictive
-    checking (Gelman et al., 2013, ch. 6).
+    $p(y_{t+1} \mid y_{1:t}, u_{t+1})$, which can be compared with the actual
+    observation $y_{t+1}$ for posterior predictive checking (Gelman et al.,
+    2013, ch. 6). When ``future_inputs`` is supplied, row ``t`` reaches both
+    the transition from retained filtering row ``t`` and its emission.
 
     Args:
         key: JAX PRNG key.
         posterior: Particle filter posterior output.
-        transition_sampler: Function ``(key, state) -> state``. ``state``
-            may be a latent-state PyTree.
-        emission_sampler: Function ``(key, state) -> emission`` accepting
-            the same state PyTree and returning a scalar or nonempty vector.
-            Scalars become length-one vectors; dtype is preserved.
+        transition_sampler: Function ``(key, state[, input_t]) -> state``.
+            ``state`` may be a latent-state PyTree.
+        emission_sampler: Function ``(key, state[, input_t]) -> emission``
+            accepting the same state PyTree and returning a scalar or
+            nonempty vector. Scalars become length-one vectors; dtype is
+            preserved.
         num_samples: Number of predictive draws per time step.
             Defaults to the number of particles.
+        future_inputs: Optional rank-one or rank-two input array with one
+            row per retained posterior row. Row ``t`` is $u_{t+1}$, not the
+            input used to filter row ``t``. Its presence selects the
+            input-aware callback protocols.
 
     Returns:
         Predictive samples, shape
@@ -1059,8 +1072,9 @@ def posterior_predictive_sample(
 
     Raises:
         ValueError: ``num_samples`` is not a positive integer, the posterior
-            state is malformed, the transition changes its PyTree contract,
-            or the emission is not a scalar or nonempty vector.
+            state is malformed, future inputs are misaligned, the transition
+            changes its PyTree contract, or the emission is not a scalar or
+            nonempty vector.
     """
     if num_samples is not None:
         num_samples = _require_integer(
@@ -1076,11 +1090,17 @@ def posterior_predictive_sample(
     )
     ntime, n_particles = axes
     num_samples = n_particles if num_samples is None else num_samples
+    future_inputs_arr = (
+        None
+        if future_inputs is None
+        else _canonicalize_inputs(future_inputs, ntime)
+    )
 
     def _sample_one_step(
         log_weights_t: Float[Array, " num_particles"],
         particles_t: ParticleCloud,
         step_key: PRNGKeyT,
+        input_t: ModelInput | None = None,
     ) -> Shaped[Array, "num_samples emission_dim"]:
         """Draw predictive samples at one time step."""
         k1, k2, k3 = jr.split(step_key, 3)
@@ -1096,7 +1116,15 @@ def posterior_predictive_sample(
         )
 
         def _transition(key_i, state_i):
-            next_state = transition_sampler(key_i, state_i)
+            if input_t is None:
+                transition_fn = cast(TransitionSampler, transition_sampler)
+                next_state = transition_fn(key_i, state_i)
+            else:
+                transition_fn_u = cast(
+                    TransitionSamplerWithInput,
+                    transition_sampler,
+                )
+                next_state = transition_fn_u(key_i, state_i, input_t)
             _validate_state_tree(
                 next_state,
                 state_signature,
@@ -1110,14 +1138,30 @@ def posterior_predictive_sample(
         emit_keys = jr.split(k3, num_samples)
 
         def _emit(key_i, state_i):
+            if input_t is None:
+                emission_fn = cast(EmissionSampler, emission_sampler)
+                emission = emission_fn(key_i, state_i)
+            else:
+                emission_fn_u = cast(
+                    EmissionSamplerWithInput,
+                    emission_sampler,
+                )
+                emission = emission_fn_u(key_i, state_i, input_t)
             return _canonicalize_emission(
-                emission_sampler(key_i, state_i),
+                emission,
                 name="emission_sampler output",
             )
 
         return vmap(_emit)(emit_keys, propagated)
 
     step_keys = jr.split(key, ntime)
+    if future_inputs_arr is not None:
+        return vmap(_sample_one_step)(
+            posterior.filtered_log_weights,
+            posterior.filtered_particles,
+            step_keys,
+            future_inputs_arr,
+        )
     return vmap(_sample_one_step)(
         posterior.filtered_log_weights,
         posterior.filtered_particles,
