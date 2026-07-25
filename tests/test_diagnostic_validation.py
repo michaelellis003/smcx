@@ -179,7 +179,18 @@ def test_log_bayes_factor_requires_two_floating_scalars(log_ml_1, log_ml_2):
 
 @pytest.mark.parametrize(
     "q",
-    [0.0, -0.1, 0.5001, 1.0, float("nan"), float("inf")],
+    [
+        0.0,
+        -0.1,
+        0.5001,
+        1.0,
+        float("nan"),
+        float("inf"),
+        None,
+        "0.1",
+        [0.1],
+        jnp.asarray([0.1]),
+    ],
 )
 def test_tail_ess_rejects_invalid_tail_fraction(q):
     """Tail fractions are finite and cannot overlap."""
