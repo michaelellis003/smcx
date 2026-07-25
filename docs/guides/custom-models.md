@@ -130,6 +130,11 @@ Log-weight normalization and ESS are invariant to a finite constant offset
 whenever the relative differences remain representable in the input dtype.
 The absolute log normalizer remains in that dtype, so a correction smaller
 than one unit in its last place cannot be represented in the returned scalar.
+Earlier releases could restore the offset before deriving normalized results
+and erase those differences. Correcting that wrong-result path can change
+fixed-key weights, ESS values, and SMC² or tempering paths. Following
+[NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html), smcx
+treats this as a bug fix; public signatures, shapes, and dtypes are unchanged.
 
 ## Bind a plain JAX model
 

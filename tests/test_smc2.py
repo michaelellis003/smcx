@@ -16,6 +16,8 @@ import numpy as np
 import pytest
 
 import smcx
+from smcx.smc2 import _normalize_outer
+from smcx.weights import _LogExpansion
 from tests._kalman import kalman_1d
 
 A_TRUE, Q, R, P0 = 0.9, 0.5, 0.3, 1.0
@@ -124,10 +126,138 @@ class TestStructure:
         assert post.log_evidence_increments.shape == (T,)
         assert post.acceptance_rates.shape == (T,)
 
+    def test_row_normalization_survives_large_finite_offset(self):
+        """Large-offset outer log weights preserve represented differences."""
+
+        def param_init(_key, _num_theta):
+            return jnp.asarray([[-1.0], [0.0], [1.0]], dtype=jnp.float32)
+
+        def log_prior(_theta):
+            return jnp.asarray(0.0, dtype=jnp.float32)
+
+        def inner_init(_key, num_x, _theta):
+            return jnp.arange(num_x, dtype=jnp.float32)[:, None]
+
+        def inner_trans(_key, state, _theta):
+            return state
+
+        def inner_logobs(_emission, state, theta):
+            return jnp.float32(2**24) + 2.0 * theta[0] * state[0]
+
+        posterior = smcx.smc2(
+            jr.key(28),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            jnp.zeros((1, 1), dtype=jnp.float32),
+            3,
+            2,
+            ess_threshold=0.0,
+        )
+        log_increment = jax.nn.logsumexp(
+            jnp.asarray(
+                [[0.0, -2.0], [0.0, 0.0], [0.0, 2.0]],
+                dtype=jnp.float32,
+            ),
+            axis=1,
+        ) - jnp.log(jnp.float32(2.0))
+        expected_initial = jax.nn.log_softmax(log_increment)
+        tolerance = float(5 * np.finfo(np.float32).eps)
+
+        np.testing.assert_allclose(
+            np.asarray(posterior.filtered_log_weights[0]),
+            expected_initial,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+
+    def test_pmmh_rejuvenation_survives_large_finite_offset(self):
+        """A shared offset does not alter fixed-key PMMH decisions."""
+
+        def param_init(_key, num_theta):
+            values = jnp.linspace(-2.0, 2.0, num_theta, dtype=jnp.float32)
+            return values[:, None]
+
+        def log_prior(theta):
+            return -0.5 * theta[0] ** 2
+
+        def inner_init(_key, num_x, _theta):
+            return jnp.zeros((num_x, 1), dtype=jnp.float32)
+
+        def inner_trans(_key, state, _theta):
+            return state
+
+        def run(offset):
+            def inner_logobs(_emission, _state, _theta):
+                return jnp.asarray(offset, dtype=jnp.float32)
+
+            return smcx.smc2(
+                jr.key(128),
+                param_init,
+                log_prior,
+                inner_init,
+                inner_trans,
+                inner_logobs,
+                jnp.zeros((2, 1), dtype=jnp.float32),
+                4,
+                2,
+                ess_threshold=1.1,
+                num_pmmh_steps=1,
+            )
+
+        reference = run(0.0)
+        shifted = run(2**24)
+
+        np.testing.assert_array_equal(
+            np.asarray(shifted.filtered_params),
+            np.asarray(reference.filtered_params),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(shifted.acceptance_rates),
+            np.asarray(reference.acceptance_rates),
+        )
+        assert shifted.marginal_loglik == (
+            jnp.float32(2**25) + reference.marginal_loglik
+        )
+
+    def test_large_likelihood_can_revive_tiny_outer_weight(self):
+        """Cancelling outer and likelihood shifts retain their correction."""
+        large = jnp.float32(2**24)
+        actual, _ = _normalize_outer(
+            jnp.asarray([-large, 0.0, -jnp.inf], dtype=jnp.float32),
+            _LogExpansion(
+                shift=jnp.asarray([large, 0.0, 0.0], dtype=jnp.float32),
+                correction=jnp.asarray([-0.5, 0.0, 0.0], dtype=jnp.float32),
+            ),
+        )
+
+        np.testing.assert_allclose(
+            np.asarray(actual),
+            np.asarray(
+                jax.nn.log_softmax(
+                    jnp.asarray([-0.5, 0.0, -jnp.inf], dtype=jnp.float32)
+                )
+            ),
+            rtol=float(5 * np.finfo(np.float32).eps),
+            atol=float(5 * np.finfo(np.float32).eps),
+        )
+
     def test_evidence_increments_sum_to_marginal(self):
         post = _run(1)
-        assert float(jnp.sum(post.log_evidence_increments)) == pytest.approx(
-            float(post.marginal_loglik), rel=1e-8
+        increments = np.asarray(post.log_evidence_increments)
+        increments_f64 = increments.astype(np.float64)
+        eps = np.finfo(increments.dtype).eps
+        gamma_n = increments.size * eps / (1.0 - increments.size * eps)
+        # A sequential sum has error <= gamma_n * sum(abs(x)); include one
+        # final rounding for the stored marginal value.
+        tolerance = (gamma_n + eps) * np.abs(increments_f64).sum()
+        np.testing.assert_allclose(
+            increments_f64.sum(),
+            np.asarray(post.marginal_loglik, dtype=np.float64),
+            rtol=0.0,
+            atol=tolerance,
         )
 
     def test_outer_ess_in_range(self):
@@ -434,25 +564,25 @@ class TestFixedKeyRegression:
         np.testing.assert_array_equal(
             np.asarray(posterior.filtered_log_weights),
             np.array([
-                [-1.1037195976548424, -0.9457871459341566, -1.2729977505620504],
-                [-1.1812879768008746, -0.9261661263302763, -1.2138632483444947],
-                [-1.4378978303439447, -0.7854789880395324, -1.1819752775167212],
+                [-1.1037195976548424, -0.9457871459341566, -1.2729977505620502],
+                [-1.1812879768008746, -0.9261661263302765, -1.2138632483444942],
+                [-1.4378978303439451, -0.7854789880395328, -1.181975277516721],
             ]),
         )
         np.testing.assert_array_equal(
             np.asarray(posterior.ess),
             np.array([
                 2.948017030946551,
-                2.94737112339564,
+                2.9473711233956394,
                 2.7912284636963074,
             ]),
         )
         np.testing.assert_array_equal(
             np.asarray(posterior.log_evidence_increments),
             np.array([
-                -0.9132325220568566,
+                -0.9132325220568567,
                 -1.8150181135800527,
-                -0.6934973549223041,
+                -0.693497354922304,
             ]),
         )
         np.testing.assert_array_equal(
@@ -524,7 +654,7 @@ class TestFixedKeyRegression:
             np.array([
                 -0.8723455471462007,
                 -1.4975149224137319,
-                -0.6632440790978372,
+                -0.6632440790978373,
             ]),
         )
         np.testing.assert_array_equal(
