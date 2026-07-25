@@ -49,6 +49,7 @@ def _parameter_posterior() -> LiuWestPosterior:
 @pytest.mark.parametrize(
     ("q", "message"),
     [
+        ([0.5], "must be a JAX array"),
         (jnp.asarray(0.5), "shape \\(num_quantiles,\\)"),
         (jnp.empty((0,)), "num_quantiles >= 1"),
         (jnp.asarray([[0.5]]), "shape \\(num_quantiles,\\)"),
@@ -103,6 +104,7 @@ def test_quantile_validation_retains_valid_jit(summary, posterior):
 @pytest.mark.parametrize(
     ("predictions", "message"),
     [
+        ([1.0], "must be a JAX array"),
         (jnp.asarray(1.0), "shape \\(num_samples,\\)"),
         (jnp.empty((0,)), "num_samples >= 1"),
         (jnp.asarray([[1.0]]), "shape \\(num_samples,\\)"),
