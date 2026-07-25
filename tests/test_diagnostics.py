@@ -1655,6 +1655,125 @@ class TestPosteriorPredictiveSample:
         )
         assert result.shape[1] == pf_post.filtered_log_weights.shape[1]
 
+    def test_future_inputs_align_with_structured_states_under_jit(self):
+        """One future input reaches both callbacks for the same row."""
+        posterior = _make_posterior()
+        values = jnp.array([10.0, 20.0, 30.0])[:, None, None]
+        particles = jnp.broadcast_to(
+            values,
+            posterior.filtered_particles.shape,
+        )
+        posterior = posterior._replace(
+            filtered_particles={
+                "position": particles,
+                "offset": jnp.zeros_like(particles),
+            }
+        )
+
+        def draw(future_inputs):
+            return posterior_predictive_sample(
+                jr.key(174),
+                posterior,
+                lambda _key, state, input_t: {
+                    "position": state["position"] + 10.0 * input_t,
+                    "offset": state["offset"],
+                },
+                lambda _key, state, input_t: (
+                    state["position"] + state["offset"] + 100.0 * input_t
+                ),
+                num_samples=4,
+                future_inputs=future_inputs,
+            )
+
+        result = jax.jit(draw)(jnp.array([1.0, 2.0, 3.0]))
+        expected = jnp.array([120.0, 240.0, 360.0])[:, None, None]
+        assert jnp.array_equal(result, jnp.broadcast_to(expected, result.shape))
+
+    @pytest.mark.parametrize(
+        "future_inputs",
+        [
+            jnp.array([1, 2, 3], dtype=jnp.int32),
+            jnp.array([True, False, True], dtype=jnp.bool_),
+        ],
+    )
+    def test_future_inputs_preserve_model_owned_dtype(self, future_inputs):
+        """Integer and Boolean inputs reach callbacks without conversion."""
+        result = posterior_predictive_sample(
+            jr.key(175),
+            _make_posterior(),
+            lambda _key, state, _input_t: state,
+            lambda _key, _state, input_t: input_t[0],
+            num_samples=2,
+            future_inputs=future_inputs,
+        )
+
+        assert result.dtype == future_inputs.dtype
+        assert jnp.array_equal(result[:, 0, 0], future_inputs)
+
+    @pytest.mark.parametrize(
+        ("future_inputs", "message"),
+        [
+            ([1.0, 2.0, 3.0], "must be a JAX array"),
+            (jnp.zeros((2, 1)), "leading dimension T=3"),
+            (jnp.zeros((3, 0)), "input_dim >= 1"),
+            (jnp.zeros((3, 1, 1)), "shape \\(T,\\) or \\(T, input_dim\\)"),
+        ],
+    )
+    def test_rejects_malformed_future_inputs(self, future_inputs, message):
+        """Future inputs validate before model callbacks execute."""
+        with pytest.raises(ValueError, match=message):
+            posterior_predictive_sample(
+                jr.key(176),
+                _make_posterior(),
+                lambda *_args: pytest.fail("transition called"),
+                lambda *_args: pytest.fail("emission called"),
+                future_inputs=future_inputs,
+            )
+
+    def test_input_path_preserves_the_legacy_key_stream(self):
+        """Ignored inputs leave seeded state-only draws unchanged."""
+        posterior = _make_posterior()
+
+        def transition(key, state):
+            return state + jr.normal(key, state.shape, dtype=state.dtype)
+
+        def emission(key, state):
+            return state + jr.normal(key, state.shape, dtype=state.dtype)
+
+        legacy = posterior_predictive_sample(
+            jr.key(177),
+            posterior,
+            transition,
+            emission,
+            num_samples=5,
+        )
+        input_aware = posterior_predictive_sample(
+            jr.key(177),
+            posterior,
+            lambda key, state, _input_t: transition(key, state),
+            lambda key, state, _input_t: emission(key, state),
+            num_samples=5,
+            future_inputs=jnp.zeros((3, 1)),
+        )
+
+        assert jnp.array_equal(input_aware, legacy)
+
+    def test_final_only_posterior_accepts_one_future_input(self):
+        """Input rows align to retained history, not the evidence trace."""
+        posterior = _posterior_for_increment_contract(
+            jnp.array([1.0, 2.0, 3.0])
+        )
+        result = posterior_predictive_sample(
+            jr.key(178),
+            posterior,
+            lambda _key, state, input_t: state + input_t,
+            lambda _key, state, _input_t: state[0],
+            num_samples=2,
+            future_inputs=jnp.array([4.0]),
+        )
+
+        assert jnp.array_equal(result, jnp.full((1, 2, 1), 4.0))
+
 
 class TestParetoKDiagnostic:
     """Tests for pareto_k_diagnostic."""
