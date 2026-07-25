@@ -189,6 +189,54 @@ def _run_covariance_case(
 class TestLiuWestCovarianceKernel:
     """Parameter perturbations preserve represented covariance support."""
 
+    def test_zero_weight_leading_outlier_does_not_set_moment_anchor(self):
+        params = jnp.array([[1e10], [0.0], [1.0]], dtype=jnp.float32)
+        weights = jnp.array([0.0, 0.5, 0.5], dtype=jnp.float32)
+        shrinkage = jnp.asarray(0.95, dtype=jnp.float32)
+        kernel_variance = 1.0 - shrinkage**2
+
+        shrunk, factor = lw._parameter_kernel(
+            params,
+            weights,
+            shrinkage,
+            kernel_variance,
+        )
+
+        # Five eps cover the centered f32 reductions and eigendecomposition.
+        tolerance = float(5 * np.finfo(np.float32).eps)
+        np.testing.assert_allclose(
+            shrunk[1:],
+            np.array([[0.025], [0.975]], dtype=np.float32),
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        np.testing.assert_allclose(
+            factor @ factor.T,
+            np.array([[0.25 * (1.0 - 0.95**2)]], dtype=np.float32),
+            rtol=tolerance,
+            atol=tolerance,
+        )
+
+    def test_zero_weight_extreme_is_masked_before_moment_arithmetic(self):
+        extreme = jnp.asarray(3e38, dtype=jnp.float32)
+        params = jnp.array(
+            [[extreme], [-extreme], [-extreme]],
+            dtype=jnp.float32,
+        )
+        weights = jnp.array([0.0, 0.5, 0.5], dtype=jnp.float32)
+        shrinkage = jnp.asarray(0.95, dtype=jnp.float32)
+
+        shrunk, factor = lw._parameter_kernel(
+            params,
+            weights,
+            shrinkage,
+            1.0 - shrinkage**2,
+        )
+
+        assert jnp.all(jnp.isfinite(shrunk))
+        np.testing.assert_array_equal(shrunk, -extreme)
+        np.testing.assert_array_equal(factor, jnp.zeros((1, 1)))
+
     def test_float32_zero_spread_does_not_drift(self):
         cloud = jnp.zeros((17, 2), dtype=jnp.float32)
 

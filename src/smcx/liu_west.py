@@ -117,8 +117,9 @@ def _parameter_kernel(
 ]:
     """Return shrunk parameters and a PSD kernel covariance factor.
 
-    Moments are evaluated relative to the first represented parameter,
+    Moments are evaluated relative to a maximum-weight parameter,
     avoiding amplification of weight-sum error by a large common offset.
+    Represented-zero parameters are masked before centered arithmetic.
     Spectral modes no larger than ``D * eps * ||covariance||_2`` are
     indistinguishable from eigensolver roundoff and are left unperturbed.
     """
@@ -128,10 +129,19 @@ def _parameter_kernel(
     shrinkage = jnp.asarray(shrinkage, dtype=dtype)
     kernel_variance = jnp.asarray(kernel_variance, dtype=dtype)
 
-    anchor = params[0]
-    offsets = params - anchor
+    anchor = params[jnp.argmax(weights)]
+    material = weights[:, None] > 0.0
+    offsets = jnp.where(
+        material,
+        params - anchor,
+        jnp.zeros_like(params),
+    )
     offset_mean = jnp.sum(weights[:, None] * offsets, axis=0)
-    deviations = offsets - offset_mean[None, :]
+    deviations = jnp.where(
+        material,
+        offsets - offset_mean[None, :],
+        jnp.zeros_like(offsets),
+    )
     covariance = jnp.einsum(
         "n,nd,ne->de",
         weights,
