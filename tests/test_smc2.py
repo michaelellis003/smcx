@@ -628,6 +628,45 @@ class TestRejuvenation:
 class TestBatchedIndependence:
     """The theta axis never couples the inner filters."""
 
+    def test_adversarial_float32_row_matches_monotone_cdf_oracle(
+        self,
+    ) -> None:
+        from smcx.resampling import _below_one
+        from smcx.smc2 import _batched_inner_resample
+
+        num_particles = 100_000
+        weights = jnp.exp(
+            -jnp.linspace(
+                0.0,
+                20.0,
+                num_particles,
+                dtype=jnp.float32,
+            )
+        )[None, :]
+        with jax.enable_x64(False):
+            key = jr.key(123)
+            unrepaired = jnp.cumsum(weights, axis=1)
+            unrepaired = unrepaired / unrepaired[:, -1:]
+            oracle_cdf = np.maximum.accumulate(
+                np.minimum(np.asarray(unrepaired[0]), np.float32(1.0))
+            )
+            oracle_cdf[-1] = np.float32(1.0)
+            u0 = jr.uniform(key, (1, 1))
+            queries = (jnp.arange(num_particles) + u0) / num_particles
+            queries = np.asarray(
+                jnp.minimum(queries, _below_one(weights.dtype))[0]
+            )
+            expected = np.searchsorted(oracle_cdf, queries, side="right")
+            expected = np.clip(
+                expected,
+                0,
+                num_particles - 1,
+            ).astype(np.int32)
+
+            actual = _batched_inner_resample(key, weights, num_particles)
+
+        np.testing.assert_array_equal(actual[0], expected)
+
     def test_batched_resample_routes_each_row_independently(self):
         from smcx.smc2 import _batched_inner_resample
 

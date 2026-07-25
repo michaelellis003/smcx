@@ -43,6 +43,130 @@ def _replicated_counts(
 class TestContract:
     """Structural contract shared by all resampling schemes."""
 
+    def test_float32_cdf_is_monotone_with_exact_endpoint(self) -> None:
+        from smcx.resampling import _normalized_cdf
+
+        weights = jnp.exp(-jnp.linspace(0.0, 20.0, 512, dtype=jnp.float32))
+        cdf = np.asarray(jax.jit(_normalized_cdf)(weights))
+
+        assert np.all(np.diff(cdf) >= 0)
+        assert cdf[-1] == np.float32(1.0)
+
+    @pytest.mark.parametrize(
+        ("resampler", "expected"),
+        [
+            (
+                systematic,
+                [1, 1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 4],
+            ),
+            (
+                stratified,
+                [1, 1, 1, 1, 1, 2, 3, 3, 3, 3, 4, 4],
+            ),
+            (
+                multinomial,
+                [1, 1, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4],
+            ),
+            (
+                residual,
+                [1, 1, 1, 1, 2, 3, 3, 3, 4, 4, 0, 2],
+            ),
+        ],
+        ids=SCHEME_IDS,
+    )
+    def test_monotone_repair_preserves_ordinary_seeded_draws(
+        self,
+        resampler: ResamplingFn,
+        expected: list[int],
+    ) -> None:
+        """Keep the pre-repair stream where the original CDF was ordered."""
+        weights = jnp.array(
+            [0.05, 0.35, 0.10, 0.30, 0.20],
+            dtype=jnp.float32,
+        )
+
+        with jax.enable_x64(False):
+            ancestors = resampler(jr.key(155), weights, 12)
+
+        np.testing.assert_array_equal(ancestors, expected)
+
+    @pytest.mark.parametrize(
+        ("resampler", "seed"),
+        [
+            (systematic, 5),
+            (stratified, 123),
+            (multinomial, 123),
+        ],
+        ids=SCHEME_IDS[:3],
+    )
+    def test_adversarial_float32_draw_matches_monotone_cdf_oracle(
+        self,
+        resampler: ResamplingFn,
+        seed: int,
+    ) -> None:
+        from smcx.resampling import _below_one, _scale_by_max
+
+        num_particles = 65_536
+        weights = jnp.exp(
+            -jnp.linspace(
+                0.0,
+                20.0,
+                num_particles,
+                dtype=jnp.float32,
+            )
+        )
+        with jax.enable_x64(False):
+            key = jr.key(seed)
+            unrepaired = jnp.cumsum(_scale_by_max(weights))
+            unrepaired = unrepaired / unrepaired[-1]
+            oracle_cdf = np.maximum.accumulate(
+                np.minimum(np.asarray(unrepaired), np.float32(1.0))
+            )
+            oracle_cdf[-1] = np.float32(1.0)
+
+            if resampler is systematic:
+                queries = jax.random.uniform(key) + jnp.arange(num_particles)
+                queries = queries / num_particles
+            elif resampler is stratified:
+                queries = jnp.arange(num_particles) + jax.random.uniform(
+                    key, (num_particles,)
+                )
+                queries = queries / num_particles
+            else:
+                spacings = -jnp.log1p(
+                    -jax.random.uniform(key, (num_particles + 1,))
+                )
+                partial_sums = jax.lax.associative_scan(
+                    jnp.maximum,
+                    jnp.cumsum(spacings),
+                )
+                queries = partial_sums[:-1] / jnp.maximum(
+                    partial_sums[-1],
+                    1e-30,
+                )
+            queries = jnp.minimum(queries, _below_one(weights.dtype))
+            expected = np.searchsorted(
+                oracle_cdf,
+                np.asarray(queries),
+                side="right",
+            )
+            expected = np.clip(
+                expected,
+                0,
+                num_particles - 1,
+            ).astype(np.int32)
+
+            draw = jax.jit(
+                lambda draw_key, draw_weights: resampler(
+                    draw_key,
+                    draw_weights,
+                    num_particles,
+                )
+            )
+            actual = draw(key, weights)
+
+        np.testing.assert_array_equal(actual, expected)
+
     @pytest.mark.parametrize("resampler", SCHEMES, ids=SCHEME_IDS)
     @pytest.mark.parametrize(
         ("weights", "message"),
@@ -182,6 +306,24 @@ class TestContract:
         )
 
         np.testing.assert_array_equal(ancestor, np.array([0]))
+
+    def test_rounded_endpoint_never_selects_trailing_zero_mass(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def endpoint_uniform(key):
+            del key
+            return jnp.array(1.0, dtype=jnp.float32)
+
+        monkeypatch.setattr(jax.random, "uniform", endpoint_uniform)
+        positive = jnp.exp(-jnp.linspace(0.0, 20.0, 512, dtype=jnp.float32))
+        weights = jnp.concatenate([
+            positive,
+            jnp.zeros((2,), dtype=jnp.float32),
+        ])
+
+        ancestor = systematic(jr.key(155), weights, 1)
+
+        assert float(weights[ancestor[0]]) > 0
 
     @pytest.mark.skipif(
         not jax.config.read("jax_enable_x64"),
