@@ -3,9 +3,58 @@
 
 """Tests for smcx.weights — validated against hand-computed values."""
 
+import jax
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
+import smcx
 from smcx.weights import log_normalize, normalize
+
+_WEIGHT_UTILITIES = (
+    pytest.param(smcx.log_normalize, id="log-normalize"),
+    pytest.param(smcx.normalize, id="normalize"),
+    pytest.param(smcx.log_ess, id="log-ess"),
+    pytest.param(smcx.ess, id="ess"),
+)
+
+
+@pytest.mark.parametrize("weight_utility", _WEIGHT_UTILITIES)
+@pytest.mark.parametrize(
+    ("log_weights", "message"),
+    [
+        ([0.0], "log_weights must be a JAX array"),
+        (np.asarray([0.0]), "log_weights must be a JAX array"),
+        (jnp.asarray(0.0), "log_weights must be rank 1"),
+        (jnp.ones((2, 1)), "log_weights must be rank 1"),
+        (jnp.empty((0,)), "log_weights must contain at least one value"),
+        (
+            jnp.asarray([0], dtype=jnp.int32),
+            "log_weights must have a floating dtype",
+        ),
+    ],
+)
+def test_weight_utilities_reject_invalid_inputs(
+    weight_utility, log_weights, message
+):
+    """Every public weight utility owns the same structural contract."""
+    with pytest.raises(ValueError, match=message):
+        weight_utility(log_weights)
+
+
+@pytest.mark.parametrize("weight_utility", _WEIGHT_UTILITIES)
+def test_weight_utilities_remain_jit_compatible(weight_utility):
+    """Structural validation admits tracers for valid JAX inputs."""
+    log_weights = jnp.asarray([-2.0, -1.0, 0.0])
+
+    eager = weight_utility(log_weights)
+    compiled = jax.jit(weight_utility)(log_weights)
+
+    eager_leaves = jax.tree.leaves(eager)
+    compiled_leaves = jax.tree.leaves(compiled)
+    assert len(compiled_leaves) == len(eager_leaves)
+    for actual, expected in zip(compiled_leaves, eager_leaves, strict=True):
+        assert jnp.allclose(actual, expected)
 
 
 class TestLogNormalize:
