@@ -124,17 +124,19 @@ def _parameter_kernel(
     indistinguishable from eigensolver roundoff and are left unperturbed.
     """
     dtype = params.dtype
-    weights = weights.astype(dtype)
+    working_dtype = jnp.promote_types(dtype, jnp.float32)
+    working_params = params.astype(working_dtype)
+    weights = weights.astype(working_dtype)
     weights = weights / jnp.sum(weights)
-    shrinkage = jnp.asarray(shrinkage, dtype=dtype)
-    kernel_variance = jnp.asarray(kernel_variance, dtype=dtype)
+    shrinkage = jnp.asarray(shrinkage, dtype=working_dtype)
+    kernel_variance = jnp.asarray(kernel_variance, dtype=working_dtype)
 
-    anchor = params[jnp.argmax(weights)]
+    anchor = working_params[jnp.argmax(weights)]
     material = weights[:, None] > 0.0
     offsets = jnp.where(
         material,
-        params - anchor,
-        jnp.zeros_like(params),
+        working_params - anchor,
+        jnp.zeros_like(working_params),
     )
     offset_mean = jnp.sum(weights[:, None] * offsets, axis=0)
     deviations = jnp.where(
@@ -152,20 +154,22 @@ def _parameter_kernel(
     eigenvalues, eigenvectors = jnp.linalg.eigh(kernel_variance * covariance)
     spectral_scale = jnp.max(jnp.abs(eigenvalues))
     tolerance = (
-        jnp.asarray(params.shape[1], dtype=dtype)
-        * jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype)
+        jnp.asarray(params.shape[1], dtype=working_dtype)
+        * jnp.asarray(jnp.finfo(working_dtype).eps, dtype=working_dtype)
         * spectral_scale
     )
     eigenvalues = jnp.where(eigenvalues > tolerance, eigenvalues, 0.0)
-    covariance_factor = eigenvectors * jnp.sqrt(eigenvalues)[None, :]
+    covariance_factor = (
+        eigenvectors * jnp.sqrt(eigenvalues)[None, :]
+    ) @ eigenvectors.T
 
-    one = jnp.asarray(1.0, dtype=dtype)
+    one = jnp.asarray(1.0, dtype=working_dtype)
     shrunk = (
         anchor[None, :]
         + shrinkage * offsets
         + (one - shrinkage) * offset_mean[None, :]
     )
-    return shrunk, covariance_factor
+    return shrunk.astype(dtype), covariance_factor
 
 
 def _validate_dense_initial_cloud(
@@ -345,9 +349,12 @@ def _liu_west_step(
     eps = jr.normal(
         parameter_key,
         (num_particles, param_dim),
-        dtype=params.dtype,
+        dtype=covariance_factor.dtype,
     )
-    new_params = shrunk[ancestors] + eps @ covariance_factor.T
+    new_params = (
+        shrunk[ancestors].astype(covariance_factor.dtype)
+        + eps @ covariance_factor.T
+    ).astype(params.dtype)
     particle_keys = jr.split(transition_key, num_particles)
     if input_t is None:
         transition_fn = cast(ParamTransitionSampler, transition_sampler)
