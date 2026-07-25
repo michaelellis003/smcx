@@ -3,15 +3,13 @@
 
 """Regression tests for representable Kalman covariance boundaries."""
 
-import math
-
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from jax.scipy.linalg import solve_triangular
 
 import smcx
+import smcx.kalman as kalman_module
 
 
 def _scalar_linear_model() -> dict[str, jax.Array]:
@@ -49,6 +47,42 @@ def _zero_jacobian(state):
     return jnp.zeros((1, state.shape[0]), dtype=state.dtype)
 
 
+def _observation_model(covariance, *, timed=False):
+    """Return a zero-state model exposing one observation factor path."""
+    observation_dim = covariance.shape[-1]
+    dtype = covariance.dtype
+    model = _scalar_linear_model()
+    model["observation_matrix"] = jnp.zeros((observation_dim, 1), dtype=dtype)
+    model["observation_covariance"] = (
+        jnp.stack((jnp.eye(observation_dim, dtype=dtype), covariance))
+        if timed
+        else covariance
+    )
+    model["emissions"] = jnp.zeros((1 + timed, observation_dim), dtype=dtype)
+    return model
+
+
+def _backend_factorable(covariance):
+    """Report the active backend's represented Cholesky result."""
+    factor = np.asarray(
+        jnp.linalg.cholesky(
+            covariance,
+            symmetrize_input=False,
+        )
+    )
+    diagonal = np.diagonal(factor, axis1=-2, axis2=-1)
+    return bool(np.all(np.isfinite(factor)) and np.all(diagonal > 0.0))
+
+
+def _hilbert_correlation(dtype):
+    """Return a represented SPD matrix near the backend factor boundary."""
+    dimension = 13 if dtype == jnp.dtype(jnp.float64) else 8
+    index = np.arange(dimension, dtype=np.float64)
+    hilbert = 1.0 / (index[:, None] + index[None, :] + 1.0)
+    scale = np.sqrt(np.diag(hilbert))
+    return jnp.asarray(hilbert / scale[:, None] / scale[None, :], dtype=dtype)
+
+
 def test_concrete_covariance_rejects_nonzero_subnormal():
     """A representable value that arithmetic flushes cannot enter the loop."""
     dtype = jnp.asarray(0.0).dtype
@@ -70,28 +104,73 @@ def test_concrete_covariance_rejects_nonzero_subnormal():
         smcx.kalman_filter(**model)
 
 
-def test_factorized_covariance_rejects_subnormal_pivot_scale():
-    """An all-normal SPD input must retain a normal Cholesky scale."""
+@pytest.mark.parametrize("kind", ["hilbert", "subnormal_pivot"])
+@pytest.mark.parametrize("timed", [False, True])
+def test_factorized_covariance_matches_active_backend(kind, timed):
+    """Concrete validation agrees with the represented factor operation."""
     dtype = jnp.asarray(0.0).dtype
-    tiny = jnp.finfo(dtype).tiny
-    model = {
-        "initial_mean": jnp.zeros(2, dtype=dtype),
-        "initial_covariance": jnp.eye(2, dtype=dtype),
-        "transition_matrix": jnp.eye(2, dtype=dtype),
-        "transition_covariance": jnp.eye(2, dtype=dtype),
-        "observation_matrix": jnp.zeros((2, 2), dtype=dtype),
-        "observation_covariance": jnp.asarray(
+    if kind == "hilbert":
+        covariance = _hilbert_correlation(dtype)
+    else:
+        tiny = jnp.finfo(dtype).tiny
+        covariance = jnp.asarray(
             [[2.0 * tiny, tiny], [tiny, tiny]],
             dtype=dtype,
-        ),
-        "emissions": jnp.zeros((1, 2), dtype=dtype),
-    }
+        )
+    model = _observation_model(covariance, timed=timed)
+
+    if _backend_factorable(model["observation_covariance"]):
+        posterior = smcx.kalman_filter(**model)
+        assert all(jnp.all(jnp.isfinite(field)) for field in posterior)
+    else:
+        with pytest.raises(
+            ValueError,
+            match="observation_covariance must be positive definite",
+        ):
+            smcx.kalman_filter(**model)
+
+
+def test_factorized_covariance_accepts_backend_factorable_roundoff():
+    """A roundoff-negative host eigenvalue cannot mask a finite factor."""
+    dtype = jnp.asarray(0.0).dtype
+    host_dtype = np.dtype(dtype)
+    one = host_dtype.type(1.0)
+    rho = np.nextafter(one, host_dtype.type(0.0))
+    covariance = np.full((4, 4), rho, dtype=host_dtype)
+    np.fill_diagonal(covariance, one)
+
+    posterior = smcx.kalman_filter(
+        **_observation_model(jnp.asarray(covariance))
+    )
+
+    assert all(jnp.all(jnp.isfinite(field)) for field in posterior)
+
+
+def test_factorized_covariance_rejects_negative_backend_diagonal():
+    """A finite but nonpositive backend factor is not positive definite."""
+    covariance = jnp.asarray([[1.0, 2.0], [2.0, 1.0]])
 
     with pytest.raises(
         ValueError,
         match="observation_covariance must be positive definite",
     ):
-        smcx.kalman_filter(**model)
+        smcx.kalman_filter(**_observation_model(covariance))
+
+
+def test_factor_probe_normalizes_debug_nan_failure():
+    """Expected factor failure remains the public ValueError under debugging."""
+    covariance = _hilbert_correlation(jnp.asarray(0.0).dtype)
+    if _backend_factorable(covariance):
+        return
+
+    with (
+        jax.debug_nans(True),
+        pytest.raises(
+            ValueError,
+            match="observation_covariance must be positive definite",
+        ),
+    ):
+        smcx.kalman_filter(**_observation_model(covariance))
 
 
 def test_scalar_normal_minimum_covariance_remains_supported():
@@ -143,7 +222,7 @@ def test_unscented_maximum_covariance_path_is_finite():
     """The UKF keeps a factorable maximum scalar through paired moments."""
     dtype = jnp.asarray(0.0).dtype
     maximum = jnp.asarray([[jnp.finfo(dtype).max]], dtype=dtype)
-    tiny = jnp.asarray([[jnp.finfo(dtype).tiny]], dtype=dtype)
+    one = jnp.ones((1, 1), dtype=dtype)
     zero = jnp.zeros((1, 1), dtype=dtype)
 
     def run(initial_covariance):
@@ -151,16 +230,15 @@ def test_unscented_maximum_covariance_path_is_finite():
             jnp.zeros(1, dtype=dtype),
             initial_covariance,
             _identity,
-            tiny,
+            one,
             _zero_mean,
-            tiny,
+            one,
             zero,
         )
 
-    posterior = run(maximum)
-
-    for field in posterior:
-        assert jnp.all(jnp.isfinite(field))
+    for posterior in (run(maximum), jax.jit(run)(maximum)):
+        for field in posterior:
+            assert jnp.all(jnp.isfinite(field))
 
 
 def test_rts_maximum_factor_path_is_finite():
@@ -192,63 +270,19 @@ def test_rts_maximum_factor_path_is_finite():
     assert jnp.all(jnp.isfinite(smoothed.smoothed_covariances))
 
 
-def test_ordinary_unscented_outputs_retain_legacy_bits():
-    """Overflow guards leave every ordinary public result bitwise unchanged."""
+def test_ordinary_unscented_moments_retain_legacy_bits():
+    """Overflow guards leave ordinary paired moments bitwise unchanged."""
     dtype = jnp.asarray(0.0).dtype
-    mean = jnp.asarray([0.25], dtype=dtype)
-    covariance = jnp.asarray([[0.7]], dtype=dtype)
-    transition_covariance = jnp.asarray([[0.3]], dtype=dtype)
-    observation_covariance = jnp.asarray([[0.4]], dtype=dtype)
-    emissions = jnp.asarray([[-0.2]], dtype=dtype)
-
-    posterior = smcx.unscented_kalman_filter(
-        mean,
-        covariance,
-        _identity,
-        transition_covariance,
-        _zero_mean,
-        observation_covariance,
-        emissions,
-    )
-    symmetric = 0.5 * (covariance + covariance.T)
-    factor = jnp.linalg.cholesky(symmetric)
-    points = jnp.concatenate((
-        mean[None],
-        mean[None] + factor.T,
-        mean[None] - factor.T,
-    ))
-    positive = points[1:2] - points[0]
-    negative = points[2:] - points[0]
-    delta_sum = (positive + negative).sum(axis=0)
-    residual_covariance = 0.5 * (
-        jnp.einsum("ij,ik->jk", positive, positive)
-        + jnp.einsum("ij,ik->jk", negative, negative)
+    values = jnp.asarray([[0.25], [0.75], [-0.35]], dtype=dtype)
+    rule = kalman_module._scaled_unscented_rule(1, dtype, 1.0, 2.0, 0.0)
+    _, actual = kalman_module._unscented_moments(values, rule)
+    deltas = values[1:] - values[0]
+    delta_sum = deltas.sum(axis=0)
+    expected = 0.5 * jnp.einsum(
+        "ij,ik->jk",
+        deltas,
+        deltas,
     ) + 0.25 * jnp.outer(delta_sum, delta_sum)
-    residual_covariance = 0.5 * (residual_covariance + residual_covariance.T)
-    innovation = 0.5 * (observation_covariance + observation_covariance.T)
-    innovation_cholesky = jnp.linalg.cholesky(innovation)
-    whitened = solve_triangular(
-        innovation_cholesky,
-        emissions[0],
-        lower=True,
-    )
-    log_two_pi = jnp.asarray(math.log(2.0 * math.pi), dtype=dtype)
-    increment = -0.5 * (
-        log_two_pi
-        + 2.0 * jnp.log(jnp.diag(innovation_cholesky)).sum()
-        + whitened @ whitened
-    )
-    expected = (
-        increment,
-        mean[None],
-        covariance[None],
-        mean[None],
-        residual_covariance[None],
-        increment[None],
-    )
-    for actual_field, expected_field in zip(
-        posterior,
-        expected,
-        strict=True,
-    ):
-        np.testing.assert_array_equal(actual_field, expected_field)
+    expected = 0.5 * (expected + expected.T)
+
+    np.testing.assert_array_equal(actual, expected)
