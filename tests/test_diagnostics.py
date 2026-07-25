@@ -386,7 +386,7 @@ class TestCRPS:
 
     @pytest.mark.parametrize(
         ("num_samples", "value"),
-        [(10_000, 1e35), (1, 2e38)],
+        [(10_000, 1e35), (1, 2e38), (100, 1e-37)],
     )
     def test_crps_large_finite_score_does_not_overflow(
         self, num_samples, value
@@ -403,6 +403,7 @@ class TestCRPS:
         assert float(result) == pytest.approx(
             float(predictions[0]),
             rel=relative_tolerance,
+            abs=0.0,
         )
 
     @pytest.mark.parametrize("observation", [-3e38, 3e38, 0.0, -0.0])
