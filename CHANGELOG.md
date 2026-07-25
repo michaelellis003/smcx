@@ -2,6 +2,21 @@
 
 <!-- version list -->
 
+## v1.13.19 (2026-07-25)
+
+### Bug Fixes
+
+- **mps**: Select filter containment at lowering
+  ([#204](https://github.com/michaelellis003/smcx/pull/204),
+  [`8e1e7e1`](https://github.com/michaelellis003/smcx/commit/8e1e7e152641b01988ea0f44d1ee19fa3a61e0a0))
+
+### Testing
+
+- **mps**: Keep hosted Metal smoke best-effort
+  ([#206](https://github.com/michaelellis003/smcx/pull/206),
+  [`a09c86d`](https://github.com/michaelellis003/smcx/commit/a09c86d1434713207bba869f8c39464032110ecb))
+
+
 ## v1.13.18 (2026-07-25)
 
 ### Bug Fixes
