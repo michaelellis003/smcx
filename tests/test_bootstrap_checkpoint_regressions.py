@@ -53,10 +53,10 @@ def test_bootstrap_filter_preserves_frozen_fixed_key_output():
         ]),
         filtered_log_weights=jnp.array([
             [-0.4250064795171949, -1.0606391294376925],
-            [-0.35289219279946654, -1.2128552713619594],
+            [-0.35289219279946654, -1.2128552713619596],
         ]),
         ancestors=jnp.array([[0, 1], [0, 1]], dtype=jnp.int32),
-        ess=jnp.array([1.8271925747186781, 1.7178103810647196]),
+        ess=jnp.array([1.8271925747186781, 1.7178103810647194]),
         log_evidence_increments=jnp.array([
             -0.2728719921782969,
             -0.08159922684107379,

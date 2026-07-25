@@ -265,6 +265,31 @@ class TestSchedule:
         assert post.temperatures.shape == (1,)
         assert float(post.temperatures[0]) == pytest.approx(1.0)
 
+    def test_large_constant_likelihood_offset_does_not_add_stages(self):
+        """A representable constant must not change the ESS schedule."""
+
+        def init(_key, n):
+            return jnp.linspace(-1.0, 1.0, n, dtype=jnp.float32)[:, None]
+
+        def log_prior(x):
+            return -0.5 * jnp.sum(x**2)
+
+        def log_likelihood(_x):
+            return jnp.asarray(2**24, dtype=jnp.float32)
+
+        post = smcx.temper(
+            jr.key(30),
+            init,
+            log_prior,
+            log_likelihood,
+            3,
+            num_mcmc_steps=1,
+            target_ess=0.9,
+        )
+
+        np.testing.assert_array_equal(np.asarray(post.temperatures), [1.0])
+        np.testing.assert_allclose(np.asarray(post.ess), [3.0], rtol=2e-6)
+
 
 class TestMechanics:
     """Acceptance, determinism, degeneracy, container."""

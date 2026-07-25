@@ -79,6 +79,76 @@ def test_weight_utilities_remain_jit_compatible(weight_utility):
 class TestLogNormalize:
     """Tests for log_normalize."""
 
+    @pytest.mark.parametrize("compiled", [False, True], ids=["eager", "jit"])
+    def test_log_normalizer_gradient_is_softmax(self, compiled):
+        """The restored offset does not alter log-sum-exp gradients."""
+        log_weights = jnp.asarray(
+            [0.0, -2.0, -4.0], dtype=jnp.float32
+        ) + jnp.float32(2**24)
+
+        def normalizer(values):
+            return log_normalize(values)[1]
+
+        gradient = jax.grad(normalizer)
+        if compiled:
+            gradient = jax.jit(gradient)
+
+        actual = gradient(log_weights)
+        expected = jax.nn.softmax(log_weights)
+        # Five f32 eps cover eager and compiled reduction rounding.
+        tolerance = float(5 * np.finfo(np.float32).eps)
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+
+    @pytest.mark.parametrize(
+        "log_weights",
+        [
+            pytest.param(
+                jnp.full((2,), 1e10, dtype=jnp.float32),
+                id="uniform-at-1e10",
+            ),
+            pytest.param(
+                jnp.asarray([0.0, -2.0, -4.0], dtype=jnp.float32)
+                + jnp.float32(2**24),
+                id="representable-relative-weights",
+            ),
+        ],
+    )
+    def test_large_finite_offset_preserves_weight_invariants(self, log_weights):
+        """Normalization and ESS depend only on represented differences."""
+        represented = np.asarray(log_weights, dtype=np.float64)
+        shifted = represented - represented.max()
+        expected_weights = np.exp(shifted)
+        expected_weights /= expected_weights.sum()
+        expected_ess = 1.0 / np.sum(expected_weights**2)
+
+        log_norm, _ = log_normalize(log_weights)
+
+        np.testing.assert_allclose(
+            np.exp(np.asarray(log_norm)),
+            expected_weights,
+            rtol=2e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(normalize(log_weights)),
+            expected_weights,
+            rtol=2e-6,
+        )
+        np.testing.assert_allclose(
+            np.exp(np.asarray(smcx.log_ess(log_weights))),
+            expected_ess,
+            rtol=2e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(smcx.ess(log_weights)),
+            expected_ess,
+            rtol=2e-6,
+        )
+
     def test_uniform_weights(self):
         """Uniform log-weights [0, 0, 0] -> log(1/3) each."""
         lw = jnp.array([0.0, 0.0, 0.0])

@@ -2,9 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
-# Apache-2.0. Modified: local ESS and log-ESS helpers.
+# Apache-2.0. Modified: local normalization, ESS, and log-ESS helpers.
 
-"""Log-space weight normalization utilities."""
+"""Log-space weight normalization utilities.
+
+Normalization uses the max-shifted formulation analysed by Blanchard,
+Higham, and Higham (2021), https://doi.org/10.1093/imanum/draa038.
+"""
 
 from typing import TYPE_CHECKING, Any, TypeAlias
 
@@ -43,6 +47,32 @@ def _validate_log_weights(log_weights: _LogWeightVector) -> None:
     _validate_minimum_float_precision(log_weights, name="log_weights")
 
 
+def _log_normalize_axis(
+    log_weights: Array,
+    *,
+    axis: int,
+) -> tuple[Array, Array]:
+    """Normalize one axis before restoring its absolute offset."""
+    maximum = jnp.max(log_weights, axis=axis, keepdims=True)
+    # Preserve the established nonfinite behavior: all -inf rows have an
+    # absolute normalizer of -inf, while their normalized values are NaN.
+    shift = jax.lax.stop_gradient(
+        jnp.where(jnp.isfinite(maximum), maximum, jnp.zeros_like(maximum))
+    )
+    shifted = log_weights - shift
+    shifted_log_normalizer = jax.nn.logsumexp(
+        shifted,
+        axis=axis,
+        keepdims=True,
+    )
+    log_normalized = shifted - shifted_log_normalizer
+    log_normalizer = jnp.squeeze(
+        shift + shifted_log_normalizer,
+        axis=axis,
+    )
+    return log_normalized, log_normalizer
+
+
 def log_normalize(
     log_weights: _LogWeightVector,
 ) -> tuple[Float[Array, " num_particles"], Scalar]:
@@ -62,8 +92,7 @@ def log_normalize(
             with at least float32 precision.
     """
     _validate_log_weights(log_weights)
-    log_normalizer = jnp.logaddexp.reduce(log_weights)  # type: ignore[union-attr]
-    log_normalized = log_weights - log_normalizer
+    log_normalized, log_normalizer = _log_normalize_axis(log_weights, axis=0)
     return log_normalized, log_normalizer
 
 
@@ -106,9 +135,8 @@ def log_ess(
             with at least float32 precision.
     """
     _validate_log_weights(log_weights)
-    two_lse = 2.0 * jnp.logaddexp.reduce(log_weights)  # type: ignore[union-attr]
-    lse_two = jnp.logaddexp.reduce(2.0 * log_weights)  # type: ignore[union-attr]
-    return two_lse - lse_two
+    log_normalized, _ = _log_normalize_axis(log_weights, axis=0)
+    return -jax.nn.logsumexp(2.0 * log_normalized)
 
 
 def ess(
