@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.23 (2026-07-25)
+
+### Bug Fixes
+
+- **liu-west**: Stabilize covariance perturbations
+  ([#209](https://github.com/michaelellis003/smcx/pull/209),
+  [`1f6b0b1`](https://github.com/michaelellis003/smcx/commit/1f6b0b146be6505fe907c96e7de6446b13bc52cc))
+
+
 ## v1.13.22 (2026-07-25)
 
 ### Bug Fixes
