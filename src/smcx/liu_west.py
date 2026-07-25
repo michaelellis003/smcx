@@ -536,8 +536,9 @@ def liu_west_filter(
             inputs_arr[0],
         )
     )
-    a = jnp.asarray(shrinkage, dtype=params_0.dtype)
-    h_sq = jnp.asarray(1.0, dtype=params_0.dtype) - a**2
+    kernel_dtype = jnp.promote_types(params_0.dtype, jnp.float32)
+    a = jnp.asarray(shrinkage, dtype=kernel_dtype)
+    h_sq = jnp.asarray(1.0, dtype=kernel_dtype) - a**2
 
     # --- Scan body for t = 1, ..., T-1 -------------------------------------
     def _step(carry: _LiuWestStepCarry, args: tuple[Array, ...]):
