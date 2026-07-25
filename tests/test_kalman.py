@@ -324,7 +324,7 @@ def test_kalman_filter_rejects_misaligned_shapes(argument, value, message):
         (
             "initial_covariance",
             jnp.nextafter(jnp.zeros((2, 2)), 1.0).at[1, 1].set(0.0),
-            "initial_covariance must be positive semidefinite",
+            "initial_covariance must not contain nonzero subnormal values",
         ),
         (
             "transition_covariance",
