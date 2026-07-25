@@ -1044,13 +1044,35 @@ def crps(
         lower_midpoint_mass,
         upper_midpoint_mass,
     )
-    scale = 2.0 * reciprocal_n * quantile_weight
-    scaled_deviation = jnp.where(
-        opposite_sign,
-        scale * jnp.abs(ordered) + scale * jnp.abs(obs),
-        scale * jnp.abs(centered),
+    same_sign_magnitude = jnp.abs(centered)
+    opposite_sign_scale = jnp.maximum(jnp.abs(ordered), jnp.abs(obs))
+    deviation_scale = jnp.max(
+        jnp.where(opposite_sign, opposite_sign_scale, same_sign_magnitude)
     )
-    return jnp.asarray(jnp.sum(scaled_deviation))
+    safe_scale = jnp.where(
+        deviation_scale > 0.0,
+        deviation_scale,
+        jnp.asarray(1.0, dtype=centered.dtype),
+    )
+    scale_mantissa, scale_exponent = jnp.frexp(safe_scale)
+    normalized_same_sign = (
+        jnp.ldexp(same_sign_magnitude, -scale_exponent) / scale_mantissa
+    )
+    normalized_ordered = (
+        jnp.ldexp(jnp.abs(ordered), -scale_exponent) / scale_mantissa
+    )
+    normalized_observation = (
+        jnp.ldexp(jnp.abs(obs), -scale_exponent) / scale_mantissa
+    )
+    normalized_deviation = jnp.where(
+        opposite_sign,
+        normalized_ordered + normalized_observation,
+        normalized_same_sign,
+    )
+    normalized_score = jnp.sum(
+        normalized_deviation * (2.0 * reciprocal_n * quantile_weight)
+    )
+    return jnp.asarray(safe_scale * normalized_score)
 
 
 # --- Pareto-k diagnostic ---------------------------------------------------
