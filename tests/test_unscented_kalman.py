@@ -4,6 +4,7 @@
 """Tests for scaled unscented Kalman filtering."""
 
 import math
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -356,57 +357,35 @@ def test_unscented_filter_rejects_invalid_rule(parameters, message):
 
 
 @pytest.mark.parametrize(
-    ("argument", "value", "message"),
+    ("argument", "scalar", "constraint"),
     [
-        (
-            "initial_covariance",
-            jnp.array([[0.0]], dtype=jnp.float32),
-            "initial_covariance must be positive definite",
-        ),
-        (
-            "transition_covariance",
-            jnp.array([[0.0]], dtype=jnp.float32),
-            "transition_covariance must be positive definite",
-        ),
-        (
-            "observation_covariance",
-            jnp.array([[0.0]], dtype=jnp.float32),
-            "observation_covariance must be positive definite",
-        ),
-        (
-            "initial_covariance",
-            jnp.array([[jnp.nan]], dtype=jnp.float32),
-            "initial_covariance must contain only finite values",
-        ),
+        ("initial_covariance", 0.0, "be positive definite"),
+        ("transition_covariance", 0.0, "be positive definite"),
+        ("observation_covariance", 0.0, "be positive definite"),
+        ("initial_covariance", jnp.nan, "contain only finite values"),
     ],
 )
 def test_unscented_filter_rejects_invalid_covariance(
     argument,
-    value,
-    message,
+    scalar,
+    constraint,
 ):
     """Every covariance factored by the UKF must be positive definite."""
+    zero = jnp.zeros(1, dtype=jnp.float32)
     covariance = jnp.eye(1, dtype=jnp.float32)
-    initial_covariance = (
-        value if argument == "initial_covariance" else covariance
-    )
-    transition_covariance = (
-        value if argument == "transition_covariance" else covariance
-    )
-    observation_covariance = (
-        value if argument == "observation_covariance" else covariance
-    )
+    model: dict[str, Any] = {
+        "initial_mean": zero,
+        "initial_covariance": covariance,
+        "transition_mean_fn": _identity,
+        "transition_covariance": covariance,
+        "observation_mean_fn": _identity,
+        "observation_covariance": covariance,
+        "emissions": zero[None],
+    }
+    model[argument] = jnp.array([[scalar]], dtype=jnp.float32)
 
-    with pytest.raises(ValueError, match=message):
-        smcx.unscented_kalman_filter(
-            jnp.zeros(1, dtype=jnp.float32),
-            initial_covariance,
-            _identity,
-            transition_covariance,
-            _identity,
-            observation_covariance,
-            jnp.zeros((2, 1), dtype=jnp.float32),
-        )
+    with pytest.raises(ValueError, match=f"{argument} must {constraint}"):
+        smcx.unscented_kalman_filter(**model)
 
 
 def test_unscented_nondefault_rule_matches_scalar_oracle():

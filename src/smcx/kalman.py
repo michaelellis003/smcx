@@ -281,19 +281,39 @@ def _check_covariance(
         return
     if not np.all(np.isfinite(covariance)):
         raise ValueError(f"{name} must contain only finite values")
-    scale = np.maximum(1.0, np.max(np.abs(covariance), axis=(-2, -1)))
-    tolerance = 32.0 * float(np.finfo(value.dtype).eps) * scale
+    dimension = covariance.shape[-1]
+    # A normalized Rayleigh quotient sums at most dimension rounded terms;
+    # 8 covers input rounding and the explicit symmetrization below.
+    epsilon = float(np.finfo(value.dtype).eps)
+    psd_tolerance = 8.0 * dimension * epsilon
     transpose = np.swapaxes(covariance, -1, -2)
-    asymmetry = np.max(np.abs(covariance - transpose), axis=(-2, -1))
-    if np.any(asymmetry > tolerance):
+    scale = np.maximum(np.abs(covariance), np.abs(transpose))
+    if np.any(np.abs(covariance - transpose) > 32.0 * epsilon * scale):
         raise ValueError(f"{name} must be symmetric")
     symmetric = 0.5 * covariance + 0.5 * transpose
-    minimum_eigenvalue = np.min(np.linalg.eigvalsh(symmetric), axis=-1)
-    if positive_definite:
-        if np.any(minimum_eigenvalue <= 0.0):
-            raise ValueError(f"{name} must be positive definite")
-    elif np.any(minimum_eigenvalue < -tolerance):
-        raise ValueError(f"{name} must be positive semidefinite")
+    diagonal = np.diagonal(symmetric, axis1=-2, axis2=-1)
+    domain = "definite" if positive_definite else "semidefinite"
+    invalid_diagonal = diagonal <= 0.0 if positive_definite else diagonal < 0.0
+    zero_diagonal = np.equal(diagonal, 0.0)
+    nonzero = np.not_equal(symmetric, 0.0)
+    incompatible_zero = zero_diagonal[..., :, None] & nonzero
+    if np.any(invalid_diagonal) or np.any(incompatible_zero):
+        raise ValueError(f"{name} must be positive {domain}")
+    diagonal_scale = np.sqrt(np.where(zero_diagonal, 1.0, diagonal))
+    with np.errstate(over="ignore", invalid="ignore"):
+        normalized = (
+            symmetric / diagonal_scale[..., :, None]
+        ) / diagonal_scale[..., None, :]
+    if not np.all(np.isfinite(normalized)):
+        raise ValueError(f"{name} must be positive {domain}")
+    minimum_eigenvalue = np.min(np.linalg.eigvalsh(normalized), axis=-1)
+    invalid = (
+        minimum_eigenvalue <= 0.0
+        if positive_definite
+        else minimum_eigenvalue < -psd_tolerance
+    )
+    if np.any(invalid):
+        raise ValueError(f"{name} must be positive {domain}")
 
 
 def _time_matrix(

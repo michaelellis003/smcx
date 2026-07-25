@@ -278,7 +278,8 @@ def test_scan_steps_uncompiled_match_public_two_step_run():
     )
 
 
-def _valid_linear_model():
+def _valid_linear_model() -> dict[str, jax.Array]:
+    """Return a valid two-dimensional linear model."""
     return {
         "initial_mean": jnp.zeros(2),
         "initial_covariance": jnp.eye(2),
@@ -321,12 +322,12 @@ def test_kalman_filter_rejects_misaligned_shapes(argument, value, message):
     [
         (
             "initial_covariance",
-            jnp.diag(jnp.array([1.0, -0.1])),
+            jnp.diag(jnp.array([1.0e20, -1.0])),
             "initial_covariance must be positive semidefinite",
         ),
         (
             "transition_covariance",
-            jnp.array([[1.0, 0.5], [0.0, 1.0]]),
+            jnp.array([[1.0e20, 0.0], [1.0, 1.0]]),
             "transition_covariance must be symmetric",
         ),
         (
@@ -539,7 +540,8 @@ def test_rts_smoother_rejects_misaligned_transition_history():
         smcx.rts_smoother(filtered, jnp.ones((3, 1, 1)))
 
 
-def _valid_filter_posterior():
+def _valid_filter_posterior() -> smcx.GaussianFilterPosterior:
+    """Return a valid two-time filter posterior."""
     means = jnp.zeros((2, 2))
     covariances = jnp.broadcast_to(jnp.eye(2), (2, 2, 2))
     return smcx.GaussianFilterPosterior(
