@@ -1040,7 +1040,7 @@ def crps(
         upper_midpoint_mass,
     )
     return jnp.asarray(
-        jnp.sum(2.0 * reciprocal_n * jnp.abs(centered) * quantile_weight)
+        jnp.sum(jnp.abs(centered) * (2.0 * reciprocal_n * quantile_weight))
     )
 
 
