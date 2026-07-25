@@ -172,7 +172,7 @@ def _run_covariance_case(
 
     def log_density(emission, state, params):
         del emission, state, params
-        return jnp.asarray(0.0, dtype=dtype)
+        return jnp.asarray(0.0, dtype=jnp.float32)
 
     return liu_west_filter(
         key=jr.key(129),
@@ -190,6 +190,36 @@ def _run_covariance_case(
 
 class TestLiuWestCovarianceKernel:
     """Parameter perturbations preserve represented covariance support."""
+
+    def test_factor_is_the_symmetric_psd_spectral_root(self):
+        params = jnp.array(
+            [[2.0, 1.0], [-2.0, -1.0], [1.0, 2.0], [-1.0, -2.0]],
+            dtype=jnp.float32,
+        )
+        weights = jnp.full(4, 0.25, dtype=jnp.float32)
+
+        _, factor = lw._parameter_kernel(
+            params,
+            weights,
+            jnp.asarray(0.9, dtype=jnp.float32),
+            jnp.asarray(0.25, dtype=jnp.float32),
+        )
+
+        centered = np.asarray(params) - np.mean(np.asarray(params), axis=0)
+        weighted = centered * np.asarray(weights)[:, None]
+        covariance = 0.25 * centered.T @ weighted
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        expected = (
+            eigenvectors * np.sqrt(np.maximum(eigenvalues, 0.0))[None, :]
+        ) @ eigenvectors.T
+        # The symmetric PSD root is invariant to eigenvector sign choices.
+        tolerance = float(8 * np.finfo(np.float32).eps)
+        np.testing.assert_allclose(
+            factor,
+            expected,
+            rtol=tolerance,
+            atol=tolerance,
+        )
 
     def test_zero_weight_leading_outlier_does_not_set_moment_anchor(self):
         params = jnp.array([[1e10], [0.0], [1.0]], dtype=jnp.float32)
@@ -246,6 +276,19 @@ class TestLiuWestCovarianceKernel:
 
         assert actual.dtype == cloud.dtype
         np.testing.assert_array_equal(actual, cloud)
+
+    @pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
+    def test_low_precision_cloud_preserves_dtype(self, dtype):
+        pattern = jnp.array(
+            [[-2.0, -1.0], [0.0, 1.0], [2.0, 3.0], [4.0, -1.0]],
+            dtype=dtype,
+        )
+        cloud = jnp.tile(pattern, (4, 1))
+
+        actual = _run_covariance_case(cloud).filtered_params[-1]
+
+        assert actual.dtype == cloud.dtype
+        assert jnp.all(jnp.isfinite(actual))
 
     def test_translated_constant_does_not_create_spread(self):
         cloud = jnp.full((1_000, 2), 1e10, dtype=jnp.float32)
