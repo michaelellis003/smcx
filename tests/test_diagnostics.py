@@ -384,6 +384,21 @@ class TestCRPS:
 
         assert jnp.array_equal(shifted_score, centered_score)
 
+    def test_crps_large_finite_score_does_not_overflow(self):
+        from smcx.diagnostics import crps
+
+        predictions = jnp.full((10_000,), 1e35, dtype=jnp.float32)
+
+        result = crps(predictions, jnp.float32(0.0))
+
+        assert jnp.isfinite(result)
+        # Thirty-two eps cover reciprocal, products, and the pairwise reduction.
+        relative_tolerance = 32.0 * float(jnp.finfo(jnp.float32).eps)
+        assert float(result) == pytest.approx(
+            float(predictions[0]),
+            rel=relative_tolerance,
+        )
+
     def test_crps_zero_for_perfect_prediction(self):
         """CRPS = 0 when all predictions equal observation."""
         from smcx.diagnostics import crps
