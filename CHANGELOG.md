@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.15 (2026-07-25)
+
+### Bug Fixes
+
+- **weights**: Reject non-normalizable stages
+  ([#200](https://github.com/michaelellis003/smcx/pull/200),
+  [`eaf391f`](https://github.com/michaelellis003/smcx/commit/eaf391f86580d497ff25d93daa1bc08d178aa980))
+
+
 ## v1.13.14 (2026-07-25)
 
 ### Bug Fixes
