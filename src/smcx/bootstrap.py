@@ -110,28 +110,38 @@ def _validate_checkpoint(checkpoint: BootstrapCheckpoint) -> _TreeSignature:
     ):
         return signature
 
+    _, log_total = log_normalize(log_weights)
+    expected_ess = compute_ess(log_weights)
+    evidence_total = (
+        scalar_values["log_marginal_likelihood"]
+        + scalar_values["log_evidence_compensation"]
+    )
+    # Arrays closed over by a transformed function are concrete at entry,
+    # but their first value operation is traced.
+    if any(
+        isinstance(value, core.Tracer)
+        for value in (log_total, expected_ess, evidence_total)
+    ):
+        return signature
+
     ess_value = float(scalar_values["ess"])
     if not math.isfinite(ess_value) or ess_value < 0:
         raise ValueError("checkpoint ess must be finite and nonnegative")
     tolerance = _checkpoint_tolerance(log_weights.dtype, num_particles)
-    _, log_total = log_normalize(log_weights)
     log_total_value = float(log_total)
     if not math.isfinite(log_total_value) or abs(log_total_value) > tolerance:
         raise ValueError(
             "checkpoint log_weights must be normalized (logsumexp = 0)"
         )
-    expected_ess = float(compute_ess(log_weights))
+    expected_ess_value = float(expected_ess)
     if not math.isclose(
         ess_value,
-        expected_ess,
+        expected_ess_value,
         rel_tol=tolerance,
         abs_tol=tolerance,
     ):
         raise ValueError("checkpoint ess must match checkpoint log_weights")
-    _raise_if_degenerate(
-        scalar_values["log_marginal_likelihood"]
-        + scalar_values["log_evidence_compensation"]
-    )
+    _raise_if_degenerate(evidence_total)
     return signature
 
 

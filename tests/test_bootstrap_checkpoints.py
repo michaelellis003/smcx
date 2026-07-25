@@ -231,6 +231,23 @@ def test_step_skips_semantic_checkpoint_checks_when_traced():
     jax.tree.map(assert_close, actual, expected)
 
 
+def test_step_accepts_valid_checkpoint_closed_over_by_jit():
+    """Derived checkpoint values may become tracers under a closure."""
+    checkpoint = _checkpoint()
+
+    @jax.jit
+    def compiled(key, emission):
+        return _advance(key, checkpoint, emission)
+
+    actual = compiled(jr.key(74), EMISSIONS[1])
+    expected = _advance(jr.key(74), checkpoint, EMISSIONS[1])
+    tolerance = float(5 * np.finfo(np.float32).eps)
+    assert_close = partial(
+        np.testing.assert_allclose, rtol=tolerance, atol=tolerance
+    )
+    jax.tree.map(assert_close, actual, expected)
+
+
 @pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
 def test_init_step_and_update_reject_nonfinite_weights(value):
     """Each resumable shell rejects a non-normalizable update."""
@@ -397,7 +414,7 @@ def test_update_aligns_inputs_for_structured_state():
 def test_checkpoint_preserves_compensated_evidence_across_chunks():
     """Large and small increments retain their correction when chunked."""
     large = -1e16 if jax.config.read("jax_enable_x64") else -1e8
-    emissions = jnp.array([[0.0], [-1.0], [-2.0], [-3.0]])
+    emissions = jnp.array([[large], [-1.0], [-2.0], [-3.0]])
 
     def transition(key, state):
         return state
@@ -409,11 +426,6 @@ def test_checkpoint_preserves_compensated_evidence_across_chunks():
     initial, initial_info = smcx.bootstrap_init(
         jr.key(32), _initial, log_observation, emissions[0], 4
     )
-    evidence = jnp.asarray(initial.state.log_marginal_likelihood)
-    large_evidence = jnp.asarray(large, dtype=evidence.dtype)
-    state = initial.state._replace(log_marginal_likelihood=large_evidence)
-    initial = initial._replace(state=state)
-    initial_info = initial_info._replace(log_evidence_increment=large_evidence)
 
     def update(keys, checkpoint, values):
         return smcx.bootstrap_update(
