@@ -133,7 +133,15 @@ shrinks less and adds less noise.
 The covariance calculation stays in centered coordinates and uses a
 positive-semidefinite spectral square root without a fixed diagonal boost.
 Consequently, a parameter direction with no represented spread receives no
-artificial drift, and the propagated parameter cloud retains its input dtype.
+artificial drift. Float16 and bfloat16 kernel factorization, normal draws, and
+proposal arithmetic run in float32 before proposals are cast back, so callback
+parameters and the posterior retain the input dtype on every backend.
+
+This correction changes fixed-key parameter draws more broadly than the
+singular cases: explicitly typed normal draws change float32 streams when JAX
+x64 is enabled, and the symmetric eigen-factor changes ordinary nonsingular
+multidimensional draws. The represented covariance and public API are
+unchanged.
 
 ## Read the parameter posterior
 

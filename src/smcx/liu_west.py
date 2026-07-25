@@ -454,7 +454,8 @@ def liu_west_filter(
         param_initial_sampler: Function
             ``(key, num_particles) -> params`` that draws from the
             prior parameter distribution. Returns a nonempty floating array
-            of shape ``(num_particles, param_dim)``.
+            of shape ``(num_particles, param_dim)``. Float16 and bfloat16
+            kernel arithmetic is promoted to float32, then cast back.
         emissions: Observed emissions, shape ``(T, D)``.
         num_particles: Number of particles $N$.
         shrinkage: Shrinkage parameter $a \in (0, 1)$. Larger values apply
