@@ -520,6 +520,12 @@ The built-in tempering and SMC² proposals retain trace-relative jitter for
 ill-conditioned clouds. If no positive factor survives in the parameter
 dtype, they use a machine-epsilon variance floor with squared parameter units,
 so an identical parameter population remains a valid input.
+Proposal noise is now drawn explicitly in the particle dtype. On x64-enabled
+runs this corrects the former promotion of float32 clouds and therefore
+changes fixed-key proposals and acceptance paths, including for
+well-conditioned covariances. Following
+[NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html), smcx
+treats that wrong-dtype result as a direct bug fix.
 
 ## Optional Equinox representation
 
