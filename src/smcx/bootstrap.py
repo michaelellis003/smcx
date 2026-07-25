@@ -26,7 +26,10 @@ import jax.random as jr
 from jax import core, device_put, lax, tree, vmap
 from jaxtyping import Array, Float, Int, Shaped
 
-from smcx._numerics import _neumaier_add
+from smcx._numerics import (
+    _neumaier_add,
+    _validate_minimum_float_precision,
+)
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
@@ -86,6 +89,10 @@ def _validate_checkpoint(checkpoint: BootstrapCheckpoint) -> _TreeSignature:
         raise ValueError("checkpoint must contain at least one particle")
     if not jnp.issubdtype(log_weights.dtype, jnp.floating):
         raise ValueError("checkpoint log_weights must be floating")
+    _validate_minimum_float_precision(
+        log_weights,
+        name="checkpoint log_weights",
+    )
     signature = _validate_particle_cloud(
         state.particles, num_particles, name="checkpoint particles"
     )
@@ -100,6 +107,10 @@ def _validate_checkpoint(checkpoint: BootstrapCheckpoint) -> _TreeSignature:
             raise ValueError(f"checkpoint {name} must be scalar")
         if not jnp.issubdtype(value.dtype, jnp.floating):
             raise ValueError(f"checkpoint {name} must be floating")
+        _validate_minimum_float_precision(
+            value,
+            name=f"checkpoint {name}",
+        )
         scalar_values[name] = value
 
     # Value checks belong to concrete public shells. A transformed
@@ -344,7 +355,8 @@ def bootstrap_step(
 
     Raises:
         ValueError: The checkpoint or propagated state is malformed.
-        DegenerateWeightsError: Updated importance weights cannot normalize.
+        DegenerateWeightsError: Checkpoint evidence is nonfinite or updated
+            importance weights cannot normalize.
 
     Note:
         Concrete calls validate the checkpoint's weight normalization, ESS,
@@ -414,7 +426,8 @@ def bootstrap_update(
         TypeError: The host shell is called with traced checkpoint arrays.
         ValueError: The checkpoint, chunk, keys, inputs, or transition output
             is malformed.
-        DegenerateWeightsError: Cumulative importance weights cannot normalize.
+        DegenerateWeightsError: Checkpoint evidence is nonfinite or cumulative
+            importance weights cannot normalize.
     """
     num_steps = emissions_chunk.shape[0]
     if num_steps == 0:

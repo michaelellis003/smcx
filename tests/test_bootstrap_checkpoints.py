@@ -38,6 +38,14 @@ def _checkpoint():
     )[0]
 
 
+def _replace_checkpoint_field(checkpoint, field, value):
+    if field in checkpoint.state._fields:
+        return checkpoint._replace(
+            state=checkpoint.state._replace(**{field: value})
+        )
+    return checkpoint._replace(**{field: value})
+
+
 def _advance(key, checkpoint, emission=EMISSIONS[1], **kwargs):
     observation = kwargs.pop("observation", _log_observation)
     return smcx.bootstrap_step(
@@ -187,6 +195,38 @@ def test_checkpoint_semantics_accept_valid_round_trip():
     )
 
 
+@pytest.mark.parametrize("transformed", [False, True], ids=["eager", "jit"])
+@pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "log_weights",
+        "log_marginal_likelihood",
+        "ess",
+        "log_evidence_compensation",
+    ],
+)
+def test_checkpoint_rejects_low_precision_numerical_fields(
+    field, dtype, transformed
+):
+    """Checkpoint precision is a structural invariant, including under JIT."""
+    checkpoint = _checkpoint()
+    source = (
+        getattr(checkpoint.state, field)
+        if field in checkpoint.state._fields
+        else getattr(checkpoint, field)
+    )
+    checkpoint = _replace_checkpoint_field(
+        checkpoint, field, source.astype(dtype)
+    )
+    message = rf"checkpoint {field} must have at least float32 precision"
+    with pytest.raises(ValueError, match=message):
+        if transformed:
+            jax.jit(lambda current: _advance(jr.key(69), current))(checkpoint)
+        else:
+            _advance(jr.key(69), checkpoint)
+
+
 @pytest.mark.parametrize("shell", ["step", "update"])
 def test_checkpoint_rejects_shifted_log_weights(shell):
     """A distribution-preserving shift cannot alter resumed evidence."""
@@ -221,14 +261,41 @@ def test_step_skips_semantic_checkpoint_checks_when_traced():
         return _advance(key, checkpoint, emission)
 
     checkpoint = _checkpoint()
-    actual = compiled(jr.key(73), checkpoint, EMISSIONS[1])
+    actual_checkpoint, actual_info = compiled(
+        jr.key(73), checkpoint, EMISSIONS[1]
+    )
     expected = _advance(jr.key(73), checkpoint, EMISSIONS[1])
     # Fixed keys remove MC error; five f32 eps covers compiler rounding.
     tolerance = float(5 * np.finfo(np.float32).eps)
     assert_close = partial(
         np.testing.assert_allclose, rtol=tolerance, atol=tolerance
     )
-    jax.tree.map(assert_close, actual, expected)
+    jax.tree.map(assert_close, (actual_checkpoint, actual_info), expected)
+
+    shifted = _replace_checkpoint_field(
+        checkpoint,
+        "log_weights",
+        checkpoint.state.log_weights + 5.0,
+    )
+    shifted_checkpoint, shifted_info = compiled(
+        jr.key(73), shifted, EMISSIONS[1]
+    )
+    assert float(
+        shifted_info.log_evidence_increment - actual_info.log_evidence_increment
+    ) == pytest.approx(5.0)
+    assert float(
+        shifted_checkpoint.state.log_marginal_likelihood
+        - actual_checkpoint.state.log_marginal_likelihood
+    ) == pytest.approx(5.0)
+
+    stale = _replace_checkpoint_field(
+        checkpoint,
+        "ess",
+        jnp.asarray(1.0, dtype=checkpoint.ess.dtype),
+    )
+    _, stale_info = compiled(jr.key(73), stale, EMISSIONS[1])
+    assert not bool(actual_info.resampled)
+    assert bool(stale_info.resampled)
 
 
 def test_step_accepts_valid_checkpoint_closed_over_by_jit():
