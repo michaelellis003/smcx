@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.22 (2026-07-25)
+
+### Bug Fixes
+
+- **mutation**: Handle zero-spread covariance
+  ([#208](https://github.com/michaelellis003/smcx/pull/208),
+  [`15aadad`](https://github.com/michaelellis003/smcx/commit/15aadad1f6f2ace9f357f8e9693459e7c10f349e))
+
+
 ## v1.13.21 (2026-07-25)
 
 ### Bug Fixes

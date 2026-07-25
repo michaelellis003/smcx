@@ -2723,7 +2723,7 @@ wheels = [
 
 [[package]]
 name = "smcx"
-version = "1.13.21"
+version = "1.13.22"
 source = { editable = "." }
 dependencies = [
     { name = "jax" },
