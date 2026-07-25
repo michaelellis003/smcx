@@ -107,6 +107,10 @@ The linear filter permits finite symmetric positive-semidefinite initial and
 transition covariances, while its observation covariance must be positive
 definite. The smoother also requires each positive-time predicted covariance
 to be positive definite because the backward recursion factors it.
+Concrete covariance entries must be zero or normal finite values. For any
+factored covariance `A`, with `D = diag(sqrt(diag(A)))`, smcx also requires
+`lambda_min(D^-1 A D^-1) >= finfo(dtype).tiny / min(diag(A))`. The inclusive
+boundary retains a scalar `tiny` while rejecting subnormal factor scales.
 
 ## Run a particle filter
 
