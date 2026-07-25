@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.16 (2026-07-25)
+
+### Bug Fixes
+
+- **weights**: Preserve large-offset invariance
+  ([#201](https://github.com/michaelellis003/smcx/pull/201),
+  [`a04197c`](https://github.com/michaelellis003/smcx/commit/a04197c949373447107e6ca9e28e9091b100ca74))
+
+
 ## v1.13.15 (2026-07-25)
 
 ### Bug Fixes
