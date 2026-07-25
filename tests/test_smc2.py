@@ -443,7 +443,7 @@ class TestFixedKeyRegression:
             np.asarray(posterior.ess),
             np.array([
                 2.948017030946551,
-                2.9473711233956394,
+                2.94737112339564,
                 2.7912284636963074,
             ]),
         )
