@@ -141,6 +141,14 @@ def test_callable_default_preserves_fixed_key_output(kind):
 
 
 @pytest.mark.parametrize(
+    "kind", ["bootstrap", "auxiliary", "guided", "liu_west"]
+)
+def test_threshold_above_one_forces_resampling(kind):
+    posterior = _run_filter(kind, 1.1, concentrated=True)
+    np.testing.assert_array_equal(posterior.ancestors[1], REVERSE)
+
+
+@pytest.mark.parametrize(
     "criterion",
     [
         lambda log_weights, current_ess, time_index: jnp.array([True]),

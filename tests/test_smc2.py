@@ -345,6 +345,14 @@ class TestCallbackValidation:
         ):
             self._run(param_init=integer_params)
 
+    @pytest.mark.parametrize("threshold", [-1.0, float("nan"), float("inf")])
+    def test_rejects_invalid_ess_threshold(self, threshold):
+        with pytest.raises(
+            ValueError,
+            match="ess_threshold must be finite and nonnegative",
+        ):
+            self._run(ess_threshold=threshold)
+
     @pytest.mark.parametrize(
         ("inner_init", "message"),
         [

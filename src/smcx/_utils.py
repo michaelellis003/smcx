@@ -83,6 +83,26 @@ def _filter_scan(step: Any, carry: Any, xs: Any) -> tuple[Any, Any]:
     return full_scan(carry, xs)
 
 
+def _validate_numeric_ess_threshold(
+    threshold: float,
+    *,
+    name: str,
+) -> None:
+    """Require a finite, nonnegative host-side ESS fraction."""
+    if not math.isfinite(threshold) or threshold < 0.0:
+        raise ValueError(
+            f"{name} must be finite and nonnegative; got {threshold}"
+        )
+
+
+def _validate_resampling_threshold(
+    threshold: float | ResamplingCriterion,
+) -> None:
+    """Validate a numeric filter threshold without invoking a criterion."""
+    if not callable(threshold):
+        _validate_numeric_ess_threshold(threshold, name="resampling_threshold")
+
+
 def _validate_filter_inputs(
     emissions: Float[Array, "ntime emission_dim"],
     num_particles: int,

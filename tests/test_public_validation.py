@@ -26,7 +26,7 @@ def _log_observation(emission, state):
     return jnp.asarray(0.0)
 
 
-def _run_bootstrap(emissions, num_particles):
+def _run_bootstrap(emissions, num_particles, **kwargs):
     return smcx.bootstrap_filter(
         jr.key(0),
         _initial_sampler,
@@ -34,10 +34,11 @@ def _run_bootstrap(emissions, num_particles):
         _log_observation,
         emissions,
         num_particles,
+        **kwargs,
     )
 
 
-def _run_auxiliary(emissions, num_particles):
+def _run_auxiliary(emissions, num_particles, **kwargs):
     return smcx.auxiliary_filter(
         jr.key(0),
         _initial_sampler,
@@ -46,6 +47,7 @@ def _run_auxiliary(emissions, num_particles):
         _log_observation,
         emissions,
         num_particles,
+        **kwargs,
     )
 
 
@@ -64,7 +66,7 @@ def _log_transition(state, previous_state):
     return jnp.asarray(0.0)
 
 
-def _run_guided(emissions, num_particles):
+def _run_guided(emissions, num_particles, **kwargs):
     return smcx.guided_filter(
         jr.key(0),
         _initial_sampler,
@@ -74,6 +76,7 @@ def _run_guided(emissions, num_particles):
         _log_observation,
         emissions,
         num_particles,
+        **kwargs,
     )
 
 
@@ -96,7 +99,7 @@ def _param_log_observation(emission, state, params):
     return jnp.asarray(0.0)
 
 
-def _run_liu_west(emissions, num_particles, *, shrinkage=0.95):
+def _run_liu_west(emissions, num_particles, *, shrinkage=0.95, **kwargs):
     return smcx.liu_west_filter(
         jr.key(0),
         _initial_sampler,
@@ -107,6 +110,7 @@ def _run_liu_west(emissions, num_particles, *, shrinkage=0.95):
         emissions,
         num_particles,
         shrinkage=shrinkage,
+        **kwargs,
     )
 
 
@@ -140,6 +144,22 @@ def test_particle_filters_validate_structure(
     )
     with pytest.raises(ValueError, match=message):
         run_filter(emissions, num_particles)
+
+
+@pytest.mark.parametrize("run_filter", _PARTICLE_FILTERS)
+@pytest.mark.parametrize("threshold", [-1.0, float("nan"), float("inf")])
+def test_particle_filters_reject_invalid_numeric_resampling_threshold(
+    run_filter, threshold
+):
+    with pytest.raises(
+        ValueError,
+        match="resampling_threshold must be finite and nonnegative",
+    ):
+        run_filter(
+            jnp.zeros((2, 1)),
+            4,
+            resampling_threshold=threshold,
+        )
 
 
 @pytest.mark.parametrize(

@@ -243,7 +243,10 @@ for time indices 1 through T - 1 and can be traced as part of the filter.
 Bootstrap and guided filters supply their carried weights and ESS. Auxiliary
 and Liu–West filters instead supply the normalized first-stage weights and
 their ESS, because those are the quantities governing ancestor selection.
-The numeric default `0.5` retains the strict rule `ESS < 0.5 * N`.
+Numeric thresholds must be finite and nonnegative. Zero disables resampling;
+because the comparison is strict and ESS cannot exceed N, values above one
+force resampling at every eligible step. The default `0.5` retains the rule
+`ESS < 0.5 * N`.
 
 The separate `resampling_fn` callback must return a JAX array of exactly
 `num_samples` ancestor indices with dtype `int32`. Every index must be in

@@ -365,6 +365,31 @@ def test_resumable_shells_reject_nonfinite_checkpoint_evidence(
             _update(jr.key(2)[None], checkpoint, EMISSIONS[1:2])
 
 
+@pytest.mark.parametrize("boundary", ["step", "update"])
+@pytest.mark.parametrize("threshold", [-1.0, float("nan"), float("inf")])
+def test_checkpoint_advances_reject_invalid_resampling_threshold(
+    boundary, threshold
+):
+    checkpoint = _checkpoint()
+    with pytest.raises(
+        ValueError,
+        match="resampling_threshold must be finite and nonnegative",
+    ):
+        if boundary == "step":
+            _advance(
+                jr.key(2),
+                checkpoint,
+                resampling_threshold=threshold,
+            )
+        else:
+            _update(
+                jr.split(jr.key(2), 1),
+                checkpoint,
+                EMISSIONS[1:2],
+                resampling_threshold=threshold,
+            )
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [

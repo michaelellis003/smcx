@@ -38,6 +38,7 @@ from smcx._utils import (
     _validate_ancestors,
     _validate_initial_state,
     _validate_log_density_batch,
+    _validate_numeric_ess_threshold,
     _validate_particle_cloud,
     _validate_state_tree,
 )
@@ -192,8 +193,9 @@ def smc2(
         num_theta: Number of outer parameter particles.
         num_x: Fixed number of inner particles.
         ess_threshold: Rejuvenate the parameter cloud when the outer
-            ESS drops below ``ess_threshold * num_theta``. Set 0 to
-            disable rejuvenation (a pure forward pass).
+            ESS drops below ``ess_threshold * num_theta``. It must be finite
+            and nonnegative. Set zero to disable rejuvenation (a pure forward
+            pass); values above one force it at every observation.
         num_pmmh_steps: PMMH moves applied per rejuvenation.
         resampling_fn: Resampler for the outer parameter cloud at
             rejuvenation (the inner filters use a fixed vmapped
@@ -205,11 +207,12 @@ def smc2(
         An `smcx.containers.SMC2Posterior`.
 
     Raises:
-        ValueError: Counts, emissions, or a callback output is structurally
-            invalid.
+        ValueError: Counts, emissions, the ESS threshold, or a callback output
+            is structurally invalid.
         DegenerateWeightsError: An outer particle-weight stage cannot be
             normalized.
     """
+    _validate_numeric_ess_threshold(ess_threshold, name="ess_threshold")
     if emissions.ndim not in (1, 2):
         raise ValueError(
             "emissions must have shape (T,) or (T, emission_dim); "
