@@ -465,9 +465,15 @@ def _weighted_variance_field(
         offsets - offset_means[:, None, :],
         jnp.zeros_like(offsets),
     )
-    # Apply each weight before the second deviation can overflow.
-    weighted_deviations = weights[:, :, None] * deviations
-    scaled_variance = jnp.sum(weighted_deviations * deviations, axis=1)
+    squared_deviations = deviations**2
+    safe_contributions = weights[:, :, None] * squared_deviations
+    overflow_contributions = (weights[:, :, None] * deviations) * deviations
+    contributions = jnp.where(
+        jnp.isinf(squared_deviations),
+        overflow_contributions,
+        safe_contributions,
+    )
+    scaled_variance = jnp.sum(contributions, axis=1)
     upscale = jnp.where(
         shifts > 0,
         jnp.asarray(4.0, dtype=field.dtype),
