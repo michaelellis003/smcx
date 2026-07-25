@@ -1645,6 +1645,8 @@ report the range of posterior and evidence estimates.</p>
               <div class="doc-md-description">
                 <p>ESS fraction, or a JAX-traceable criterion
 <code>(normalized_log_weights, absolute_ess, time_index) -&gt; bool</code>.
+Numeric values must be finite and nonnegative; zero disables
+resampling and values above one force it at every update.
 The callback receives the first-stage weights and ESS at the
 zero-based emission indices 1 through T - 1.</p>
               </div>
@@ -1764,8 +1766,8 @@ propagates).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Inputs, particle count, shrinkage, callback output, or a
-criterion result is structurally invalid.</p>
+                <p>Inputs, particle count, shrinkage, the numeric threshold,
+callback output, or a criterion result is structurally invalid.</p>
               </div>
             </td>
           </tr>

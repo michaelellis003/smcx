@@ -1604,8 +1604,9 @@ canonicalized).</p>
             <td>
               <div class="doc-md-description">
                 <p>Rejuvenate the parameter cloud when the outer
-ESS drops below <code>ess_threshold * num_theta</code>. Set 0 to
-disable rejuvenation (a pure forward pass).</p>
+ESS drops below <code>ess_threshold * num_theta</code>. It must be finite
+and nonnegative. Set zero to disable rejuvenation (a pure forward
+pass); values above one force it at every observation.</p>
               </div>
             </td>
             <td>
@@ -1705,8 +1706,8 @@ final parameter cloud is returned (time axis length 1).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Counts, emissions, or a callback output is structurally
-invalid.</p>
+                <p>Counts, emissions, the ESS threshold, or a callback output
+is structurally invalid.</p>
               </div>
             </td>
           </tr>

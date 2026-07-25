@@ -1637,6 +1637,8 @@ Defaults to <code>smcx.resampling.systematic</code>.</p>
                 <p>ESS fraction (e.g. 0.5 means resample when
 <code>ESS &lt; 0.5 * N</code>), or a JAX-traceable criterion
 <code>(normalized_log_weights, absolute_ess, time_index) -&gt; bool</code>.
+Numeric values must be finite and nonnegative; zero disables
+resampling and values above one force it at every update.
 Time is the zero-based emission index from 1 through T - 1.</p>
               </div>
             </td>
@@ -1778,10 +1780,10 @@ propagates).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Inputs are malformed, a criterion result is not a scalar
-Boolean, the initial state tree is empty or has a wrong leading
-axis, a transition changes its state contract, or an observation
-callback output is malformed.</p>
+                <p>Inputs or the numeric threshold are malformed, a
+criterion result is not a scalar Boolean, the initial state tree
+is empty or has a wrong leading axis, a transition changes its
+state contract, or an observation callback output is malformed.</p>
               </div>
             </td>
           </tr>
@@ -2120,7 +2122,8 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>ESS resampling threshold as a particle fraction.</p>
+                <p>Finite, nonnegative ESS fraction. Zero disables
+resampling; values above one force it at every update.</p>
               </div>
             </td>
             <td>
@@ -2185,7 +2188,8 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The checkpoint or propagated state is malformed.</p>
+                <p>The threshold, checkpoint, or propagated state is
+malformed.</p>
               </div>
             </td>
           </tr>
@@ -2350,7 +2354,8 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>ESS resampling threshold as a particle fraction.</p>
+                <p>Finite, nonnegative ESS fraction. Zero disables
+resampling; values above one force it at every update.</p>
               </div>
             </td>
             <td>
@@ -2451,8 +2456,8 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The checkpoint, chunk, keys, inputs, or transition output
-is malformed.</p>
+                <p>The threshold, checkpoint, chunk, keys, inputs, or
+transition output is malformed.</p>
               </div>
             </td>
           </tr>

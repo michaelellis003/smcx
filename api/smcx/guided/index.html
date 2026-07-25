@@ -1605,6 +1605,8 @@ density <span class="arithmatex">\(\log f\)</span> with at least float32 precisi
               <div class="doc-md-description">
                 <p>ESS fraction, or a JAX-traceable criterion
 <code>(normalized_log_weights, absolute_ess, time_index) -&gt; bool</code>.
+Numeric values must be finite and nonnegative; zero disables
+resampling and values above one force it at every update.
 The callback receives carried weights and ESS at the zero-based
 emission indices 1 through T - 1.</p>
               </div>
@@ -1724,10 +1726,10 @@ propagates).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Inputs are malformed, a criterion result is not a scalar
-Boolean, the initial state tree is empty or has a wrong leading
-axis, a proposal changes its state contract, or a log-density
-callback output is malformed.</p>
+                <p>Inputs or the numeric threshold are malformed, a
+criterion result is not a scalar Boolean, the initial state tree
+is empty or has a wrong leading axis, a proposal changes its
+state contract, or a log-density callback output is malformed.</p>
               </div>
             </td>
           </tr>
