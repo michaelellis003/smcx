@@ -157,8 +157,8 @@ def test_replicated_log_ml_requires_scalar_float_callback_output(result):
     ("log_ml_1", "log_ml_2"),
     [
         (jnp.asarray([1.0]), jnp.asarray(0.0)),
-        (jnp.asarray(1.0), jnp.asarray([0.0])),
-        (jnp.asarray(1, dtype=jnp.int32), jnp.asarray(0.0)),
+        (1.0, jnp.asarray([0.0])),
+        ("1.0", jnp.asarray(0.0)),
         (jnp.asarray(1.0), jnp.asarray(0, dtype=jnp.int32)),
     ],
 )
