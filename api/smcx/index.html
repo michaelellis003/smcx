@@ -6592,7 +6592,7 @@ supported.</p>
 
 
 <h3 id="smcx.liu_west_filter" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">liu_west_filter</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">initial_sampler</span><span class="p">,</span> <span class="n">transition_sampler</span><span class="p">,</span> <span class="n">log_observation_fn</span><span class="p">,</span> <span class="n">log_auxiliary_fn</span><span class="p">,</span> <span class="n">param_initial_sampler</span><span class="p">,</span> <span class="n">emissions</span><span class="p">,</span> <span class="n">num_particles</span><span class="p">,</span> <span class="n">shrinkage</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span> <span class="n">resampling_fn</span><span class="o">=</span><span class="n">systematic</span><span class="p">,</span> <span class="n">resampling_threshold</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">inputs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">store_history</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">liu_west_filter</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">initial_sampler</span><span class="p">,</span> <span class="n">transition_sampler</span><span class="p">,</span> <span class="n">log_observation_fn</span><span class="p">,</span> <span class="n">log_auxiliary_fn</span><span class="p">,</span> <span class="n">param_initial_sampler</span><span class="p">,</span> <span class="n">emissions</span><span class="p">,</span> <span class="n">num_particles</span><span class="p">,</span> <span class="n">shrinkage</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span> <span class="n">resampling_fn</span><span class="o">=</span><span class="n">systematic</span><span class="p">,</span> <span class="n">resampling_threshold</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">inputs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">param_initial_state_sampler</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">store_history</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
 </h3>
 
@@ -6641,13 +6641,14 @@ parameter propagation.</p>
                 <code>initial_sampler</code>
             </td>
             <td>
-                  <code><a class="autorefs autorefs-internal" title="DenseInitialSampler (smcx.types.DenseInitialSampler)" href="types/#smcx.types.DenseInitialSampler">DenseInitialSampler</a> | <a class="autorefs autorefs-internal" title="DenseInitialSamplerWithInput (smcx.types.DenseInitialSamplerWithInput)" href="types/#smcx.types.DenseInitialSamplerWithInput">DenseInitialSamplerWithInput</a></code>
+                  <code><a class="autorefs autorefs-internal" title="DenseInitialSampler (smcx.types.DenseInitialSampler)" href="types/#smcx.types.DenseInitialSampler">DenseInitialSampler</a> | <a class="autorefs autorefs-internal" title="DenseInitialSamplerWithInput (smcx.types.DenseInitialSamplerWithInput)" href="types/#smcx.types.DenseInitialSamplerWithInput">DenseInitialSamplerWithInput</a> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
                 <p>Function <code>(key, num_particles[, input_0]) -&gt;
-particles</code> that draws a nonempty floating array of shape
-<code>(num_particles, state_dim)</code>.</p>
+particles</code> that draws a parameter-independent state prior as a
+nonempty floating array of shape <code>(num_particles, state_dim)</code>.
+Set to <code>None</code> when using <code>param_initial_state_sampler</code>.</p>
               </div>
             </td>
             <td>
@@ -6847,6 +6848,26 @@ the parameter initializer remains input-independent.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
+                <code>param_initial_state_sampler</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParamCloudInitialStateSampler (smcx.types.ParamCloudInitialStateSampler)" href="types/#smcx.types.ParamCloudInitialStateSampler">ParamCloudInitialStateSampler</a> | <a class="autorefs autorefs-internal" title="ParamCloudInitialStateSamplerWithInput (smcx.types.ParamCloudInitialStateSamplerWithInput)" href="types/#smcx.types.ParamCloudInitialStateSamplerWithInput">ParamCloudInitialStateSamplerWithInput</a> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional
+<code>(key, num_particles, params[, input_0]) -&gt; particles</code> callback.
+The filter samples and validates the parameter cloud first, then
+passes the whole aligned cloud to this callback. Supply exactly
+one of this callback and <code>initial_sampler</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
                 <code>store_history</code>
             </td>
             <td>
@@ -6938,8 +6959,9 @@ propagates).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Inputs, particle count, shrinkage, the numeric threshold,
-callback output, or a criterion result is structurally invalid.</p>
+                <p>Initializer selection, inputs, particle count, shrinkage,
+the numeric threshold, callback output, or a criterion result is
+structurally invalid.</p>
               </div>
             </td>
           </tr>
