@@ -1767,8 +1767,13 @@ Bootstrap and guided filters supply their carried weights and ESS. Auxiliary
 and Liu–West filters instead supply the normalized first-stage weights and
 their ESS, because those are the quantities governing ancestor selection.
 The numeric default <code>0.5</code> retains the strict rule <code>ESS &lt; 0.5 * N</code>.</p>
-<p>Until issue #38 closes, multi-observation MPS filters use a sequence of
-one-step scans.</p>
+<p>The separate <code>resampling_fn</code> callback must return a JAX array of exactly
+<code>num_samples</code> ancestor indices with dtype <code>int32</code>. Every index must be in
+<code>[0, num_particles)</code>. Shape and dtype errors are reported while the filter
+is traced. Index values are checked after the filter loop returns, including
+with <code>store_history=False</code>; under an outer <code>jax.jit</code>, Python exceptions cannot
+be raised and the value check is skipped. Until issue #38 closes,
+multi-observation MPS filters use a sequence of one-step scans.</p>
 <h2 id="compose-a-particle-filter-kernel">Compose a particle-filter kernel</h2>
 <p>Use <code>smcx.run_particle_filter</code> when a built-in filter does not provide the
 algorithmic pieces you want to combine. The runner accepts these callback
