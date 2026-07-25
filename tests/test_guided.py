@@ -114,7 +114,12 @@ def test_uncompiled_guided_step_matches_public_two_step_run():
         full.filtered_log_weights[0],
         full.log_evidence_increments[0],
     )
-    carry = guided_module._GuidedCarry(state, full.ess[0], full.ancestors[0])
+    carry = guided_module._GuidedCarry(
+        state,
+        full.ess[0],
+        jnp.zeros_like(state.log_marginal_likelihood),
+        full.ancestors[0],
+    )
     step_input = guided_module._GuidedStepInput(Y[1], None, jnp.int32(1))
     signature = _validate_particle_cloud(state.particles, 8, name="particles")
     step = partial(

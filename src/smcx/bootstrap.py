@@ -585,10 +585,10 @@ def bootstrap_filter(
 
     # --- Scan body for t = 1, ..., T-1 -------------------------------------
     def _step(
-        carry: tuple[ParticleState, Array, Array],
+        carry: tuple[ParticleState, Array, Array, Array],
         args: tuple[Array, ...],
     ):
-        state, current_ess, _prev_ancestors = carry
+        state, current_ess, correction, _prev_ancestors = carry
         if inputs_arr is None:
             step_key, y_t, time_index = args
             input_t = None
@@ -608,15 +608,18 @@ def bootstrap_filter(
             time_index,
         )
         info = result.info
+        log_evidence, correction = _neumaier_add(
+            jnp.asarray(state.log_marginal_likelihood),
+            correction,
+            info.log_evidence_increment,
+        )
         new_state = ParticleState(
             particles=result.particles,
             log_weights=result.log_weights,
-            log_marginal_likelihood=(
-                state.log_marginal_likelihood + info.log_evidence_increment
-            ),
+            log_marginal_likelihood=log_evidence,
         )
         if store_history:
-            return (new_state, info.ess, info.ancestors), (
+            return (new_state, info.ess, correction, info.ancestors), (
                 result.particles,
                 result.log_weights,
                 info.ancestors,
@@ -625,7 +628,7 @@ def bootstrap_filter(
             )
         # Final-only mode: ancestors ride the carry (O(N)), the scan
         # stacks just the scalar traces.
-        return (new_state, info.ess, info.ancestors), (
+        return (new_state, info.ess, correction, info.ancestors), (
             info.ess,
             info.log_evidence_increment,
         )
@@ -638,10 +641,15 @@ def bootstrap_filter(
         if inputs_arr is None
         else (step_keys, emissions[1:], inputs_arr[1:], time_indices)
     )
-    init_carry = (init_state, ess_0, identity_ancestors)
+    init_carry = (
+        init_state,
+        ess_0,
+        jnp.zeros_like(log_ev_0),
+        identity_ancestors,
+    )
     if store_history:
         (
-            (final_state, _, _),
+            (final_state, _, final_correction, _),
             (
                 particles_rest,
                 log_w_rest,
@@ -655,7 +663,7 @@ def bootstrap_filter(
         all_ancestors = _prepend(identity_ancestors, ancestors_rest)
     else:
         (
-            (final_state, _, final_ancestors),
+            (final_state, _, final_correction, final_ancestors),
             (ess_rest, log_ev_inc_rest),
         ) = lax.scan(_step, init_carry, scan_inputs)
         all_particles = _particle_time_axis(final_state.particles)
@@ -664,11 +672,12 @@ def bootstrap_filter(
     ess_0_arr: Array = jnp.asarray(ess_0)
     all_ess = _prepend(ess_0_arr, ess_rest)
     all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
+    final_log_evidence = final_state.log_marginal_likelihood + final_correction
 
-    _raise_if_degenerate(final_state.log_marginal_likelihood)
+    _raise_if_degenerate(final_log_evidence)
 
     return ParticleFilterPosterior(
-        marginal_loglik=final_state.log_marginal_likelihood,
+        marginal_loglik=final_log_evidence,
         filtered_particles=all_particles,
         filtered_log_weights=all_log_w,
         ancestors=all_ancestors,

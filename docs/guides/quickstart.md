@@ -121,6 +121,13 @@ print("marginal loglik:", round(posterior.marginal_loglik.item(), 1))
 print("filter RMSE:", round(rmse, 3), "observation sd:", round(r_sd, 3))
 ```
 
+Particle filters accumulate `marginal_loglik` with float32/float64
+compensation while retaining the original per-step
+`log_evidence_increments`. On long float32 series, a plain
+`jnp.sum(posterior.log_evidence_increments)` can lose information that the
+compensated scalar preserves. This numerical correction can change
+fixed-key totals produced by older smcx releases.
+
 For the fixed seed above, the filtered RMSE is about 0.369, compared with
 an observation-noise scale of 0.7.
 

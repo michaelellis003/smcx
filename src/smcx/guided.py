@@ -25,6 +25,7 @@ import jax.random as jr
 from jax import lax, vmap
 from jaxtyping import Array, Float, Int
 
+from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
@@ -66,6 +67,7 @@ from smcx.weights import log_normalize
 class _GuidedCarry(NamedTuple):
     state: ParticleState
     ess: Float[Array, ""]
+    log_evidence_compensation: Float[Array, ""]
     ancestors: Int[Array, " num_particles"]
 
 
@@ -98,7 +100,7 @@ def _guided_step(
     log_num_particles: Float[Array, ""],
 ) -> tuple[_GuidedCarry, _GuidedStepOutput]:
     """Resample, propose, and reweight one guided particle cloud."""
-    state, current_ess, _ = carry
+    state, current_ess, correction, _ = carry
     y_t, input_t, time_index = inputs_t
     num_particles = state.log_weights.shape[0]
     identity = jnp.arange(num_particles, dtype=jnp.int32)
@@ -179,13 +181,18 @@ def _guided_step(
     )
     log_w_norm, log_sum = log_normalize(log_w_unnorm)
     log_ev_inc = jnp.where(do_resample, log_sum - log_num_particles, log_sum)
+    log_evidence, correction = _neumaier_add(
+        jnp.asarray(state.log_marginal_likelihood),
+        correction,
+        log_ev_inc,
+    )
     next_state = ParticleState(
         particles=propagated,
         log_weights=log_w_norm,
-        log_marginal_likelihood=(state.log_marginal_likelihood + log_ev_inc),
+        log_marginal_likelihood=log_evidence,
     )
     ess_t: Array = jnp.asarray(compute_ess(log_w_norm))
-    next_carry = _GuidedCarry(next_state, ess_t, ancestors)
+    next_carry = _GuidedCarry(next_state, ess_t, correction, ancestors)
     output = _GuidedStepOutput(
         propagated, log_w_norm, ancestors, ess_t, log_ev_inc
     )
@@ -319,7 +326,12 @@ def guided_filter(
         inputs_t, key_t = inputs_and_key
         return step(carry, inputs_t, key_t)
 
-    init_carry = _GuidedCarry(init_state, ess_0, identity_ancestors)
+    init_carry = _GuidedCarry(
+        init_state,
+        ess_0,
+        jnp.zeros_like(log_ev_0),
+        identity_ancestors,
+    )
     if store_history:
         final_carry, outputs = lax.scan(scan_step, init_carry, scan_inputs)
         all_particles = _prepend_particle_history(
@@ -349,10 +361,14 @@ def guided_filter(
     final_state = final_carry.state
     all_ess = _prepend(jnp.asarray(ess_0), ess_rest)
     all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
+    final_log_evidence = (
+        final_state.log_marginal_likelihood
+        + final_carry.log_evidence_compensation
+    )
 
-    _raise_if_degenerate(final_state.log_marginal_likelihood)
+    _raise_if_degenerate(final_log_evidence)
     return ParticleFilterPosterior(
-        marginal_loglik=final_state.log_marginal_likelihood,
+        marginal_loglik=final_log_evidence,
         filtered_particles=all_particles,
         filtered_log_weights=all_log_w,
         ancestors=all_ancestors,

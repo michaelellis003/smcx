@@ -39,6 +39,7 @@ import jax.random as jr
 from jax import lax, vmap
 from jaxtyping import Array, Float, Int
 
+from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
@@ -74,6 +75,7 @@ class _LiuWestStepCarry(NamedTuple):
     params: Float[Array, "num_particles param_dim"]
     log_weights: Float[Array, " num_particles"]
     log_marginal_likelihood: Float[Array, ""]
+    log_evidence_compensation: Float[Array, ""]
     ancestors: Int[Array, " num_particles"]
 
 
@@ -221,7 +223,7 @@ def _liu_west_step(
     kernel_variance: Float[Array, ""],
     state_signature: _TreeSignature,
 ) -> tuple[_LiuWestStepCarry, _LiuWestStepOutput]:
-    particles, params, log_weights, log_ml, _ = carry
+    particles, params, log_weights, log_ml, correction, _ = carry
     emission_t, input_t, time_index = inputs_t
     num_particles = log_weights.shape[0]
     identity = jnp.arange(num_particles, dtype=jnp.int32)
@@ -301,11 +303,13 @@ def _liu_west_step(
         log_first_sum + log_sum - log_num_particles,
         log_sum,
     )
+    log_ml, correction = _neumaier_add(log_ml, correction, log_ev_inc)
     new_carry = _LiuWestStepCarry(
         propagated,
         new_params,
         log_w_norm,
-        log_ml + log_ev_inc,
+        log_ml,
+        correction,
         ancestors,
     )
     ess = jnp.asarray(compute_ess(log_w_norm))
@@ -469,6 +473,7 @@ def liu_west_filter(
         params_0,
         log_w_0,
         log_ev_0,
+        jnp.zeros_like(log_ev_0),
         identity_ancestors,
     )
     step_keys = jr.split(key, num_timesteps - 1)
@@ -496,7 +501,10 @@ def liu_west_filter(
         all_log_w = final_carry.log_weights[None]
         all_ancestors = final_carry.ancestors[None]
 
-    final_log_ml = final_carry.log_marginal_likelihood
+    final_log_ml = (
+        final_carry.log_marginal_likelihood
+        + final_carry.log_evidence_compensation
+    )
 
     _raise_if_degenerate(final_log_ml)
 

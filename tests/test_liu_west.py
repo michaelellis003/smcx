@@ -155,6 +155,7 @@ def test_uncompiled_step_matches_compiled_scan():
         jnp.linspace(-1.0, 1.0, num_particles)[:, None],
         jnp.full(num_particles, -math.log(num_particles)),
         jnp.asarray(0.0),
+        jnp.asarray(0.0),
         jnp.arange(num_particles, dtype=jnp.int32),
     )
     signature = lw._validate_dense_initial_cloud(carry.particles, 16, name="x")
