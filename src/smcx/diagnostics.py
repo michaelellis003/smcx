@@ -52,6 +52,7 @@ scalars and strings, so it is intentionally host-only.
 
 import math
 import operator
+from numbers import Real
 from typing import TYPE_CHECKING, Any, SupportsIndex, TypeAlias, cast
 
 import jax
@@ -100,10 +101,12 @@ _EXC_FLOOR = 1e-100
 if TYPE_CHECKING:
     _DiagnosticVector: TypeAlias = Float[Array, " num_values"]
     _DiagnosticScalar: TypeAlias = Scalar
+    _RealArgument: TypeAlias = float
     _IntegerArgument: TypeAlias = int
 else:
     _DiagnosticVector: TypeAlias = Any
     _DiagnosticScalar: TypeAlias = object
+    _RealArgument: TypeAlias = object
     _IntegerArgument: TypeAlias = object
 
 
@@ -1022,7 +1025,7 @@ def pareto_k_diagnostic(
 
 def tail_ess(
     posterior: ParticleFilterResult,
-    q: float = 0.05,
+    q: _RealArgument = 0.05,
 ) -> Float[Array, " ntime"]:
     r"""Effective particles supporting the distribution tails.
 
@@ -1054,7 +1057,7 @@ def tail_ess(
         TypeError: The posterior has structured rather than dense particles.
         ValueError: ``q`` is not finite and in (0, 0.5].
     """
-    if not math.isfinite(q) or not 0.0 < q <= 0.5:
+    if not isinstance(q, Real) or not math.isfinite(q) or not 0.0 < q <= 0.5:
         raise ValueError(f"q must be finite and in (0, 0.5]; got {q!r}")
     qs = jnp.array([q, 1.0 - q])
     particles = _require_dense_particle_history(

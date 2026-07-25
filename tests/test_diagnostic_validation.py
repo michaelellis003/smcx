@@ -13,7 +13,6 @@ from smcx.containers import LiuWestPosterior, ParticleFilterPosterior
 
 
 def _posterior() -> ParticleFilterPosterior:
-    """Return a small dense posterior with full genealogy history."""
     num_particles = 4
     return ParticleFilterPosterior(
         marginal_loglik=jnp.asarray(-1.0),
@@ -31,7 +30,6 @@ def _posterior() -> ParticleFilterPosterior:
 
 
 def _parameter_posterior() -> LiuWestPosterior:
-    """Return a parameter posterior for the shared quantile contract."""
     posterior = _posterior()
     return LiuWestPosterior(
         *posterior,
@@ -57,7 +55,6 @@ def _parameter_posterior() -> LiuWestPosterior:
     ],
 )
 def test_quantile_summaries_reject_malformed_q(summary, posterior, q, message):
-    """Quantile levels have one fixed public array contract."""
     with pytest.raises(ValueError, match=message):
         summary(posterior, q)
 
@@ -80,7 +77,6 @@ def test_quantile_summaries_reject_malformed_q(summary, posterior, q, message):
 def test_quantile_summaries_reject_eager_values_outside_unit_interval(
     summary, posterior, q
 ):
-    """Eager quantile values must lie in the documented closed interval."""
     with pytest.raises(ValueError, match="q values must be in \\[0, 1\\]"):
         summary(posterior, q)
 
@@ -93,7 +89,6 @@ def test_quantile_summaries_reject_eager_values_outside_unit_interval(
     ],
 )
 def test_quantile_validation_retains_valid_jit(summary, posterior):
-    """Structural validation remains available while q is traced."""
     compiled = jax.jit(lambda q: summary(posterior, q))
     result = compiled(jnp.asarray([0.25, 0.75]))
     assert result.shape == (3, 2, 1)
@@ -112,7 +107,6 @@ def test_quantile_validation_retains_valid_jit(summary, posterior):
     ],
 )
 def test_crps_rejects_malformed_predictions(predictions, message):
-    """CRPS requires a nonempty rank-one floating sample."""
     with pytest.raises(ValueError, match=message):
         smcx.crps(predictions, jnp.asarray(0.0))
 
@@ -125,7 +119,6 @@ def test_crps_rejects_malformed_predictions(predictions, message):
     ],
 )
 def test_crps_rejects_nonfloating_scalar_observation(observation):
-    """The CRPS observation is one floating scalar."""
     with pytest.raises(
         ValueError,
         match="observation must be a floating scalar",
@@ -135,7 +128,6 @@ def test_crps_rejects_nonfloating_scalar_observation(observation):
 
 @pytest.mark.parametrize("num_replicates", [0, -1, 1.5, True])
 def test_replicated_log_ml_requires_positive_integer_count(num_replicates):
-    """Replicate counts fail before key splitting or callback execution."""
     with pytest.raises(
         ValueError, match="num_replicates must be a positive integer"
     ):
@@ -154,7 +146,6 @@ def test_replicated_log_ml_requires_positive_integer_count(num_replicates):
     ],
 )
 def test_replicated_log_ml_requires_scalar_float_callback_output(result):
-    """Every replicated filter returns one floating log-evidence value."""
     with pytest.raises(
         ValueError,
         match="filter_fn output must be a floating scalar",
@@ -172,7 +163,6 @@ def test_replicated_log_ml_requires_scalar_float_callback_output(result):
     ],
 )
 def test_log_bayes_factor_requires_two_floating_scalars(log_ml_1, log_ml_2):
-    """Bayes-factor broadcasting is outside the public contract."""
     with pytest.raises(ValueError, match="must be a floating scalar"):
         smcx.log_bayes_factor(log_ml_1, log_ml_2)
 
@@ -193,7 +183,6 @@ def test_log_bayes_factor_requires_two_floating_scalars(log_ml_1, log_ml_2):
     ],
 )
 def test_tail_ess_rejects_invalid_tail_fraction(q):
-    """Tail fractions are finite and cannot overlap."""
     with pytest.raises(
         ValueError,
         match=r"q must be finite and in \(0, 0.5\]",
@@ -203,14 +192,12 @@ def test_tail_ess_rejects_invalid_tail_fraction(q):
 
 @pytest.mark.parametrize("lag", [-1, 1.5, True])
 def test_log_ml_variance_requires_nonnegative_integer_lag(lag):
-    """The fixed genealogy lag is an optional nonnegative integer."""
     with pytest.raises(ValueError, match="lag must be nonnegative integer"):
         smcx.log_ml_variance(_posterior(), lag=lag)
 
 
 @pytest.mark.parametrize("num_samples", [0, -1, 1.5, True])
 def test_posterior_predictive_requires_positive_integer_count(num_samples):
-    """Predictive sample counts fail before any callback executes."""
     with pytest.raises(ValueError, match="num_samples must be >= 1"):
         smcx.posterior_predictive_sample(
             jr.key(0),
