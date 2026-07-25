@@ -58,12 +58,12 @@ def _validate_log_weights(log_weights: _LogWeightVector) -> None:
     _validate_minimum_float_precision(log_weights, name="log_weights")
 
 
-def _log_normalize_axis_parts(
+def _shifted_log_normalize_axis(
     log_weights: Array,
     *,
     axis: int,
-) -> tuple[Array, _LogExpansion]:
-    """Normalize one axis while retaining its shifted decomposition."""
+) -> tuple[Array, Array, Array]:
+    """Normalize one axis and retain keep-dimension shift components."""
     maximum = jnp.max(log_weights, axis=axis, keepdims=True)
     # Preserve the established nonfinite behavior: all -inf rows have an
     # absolute normalizer of -inf, while their normalized values are NaN.
@@ -77,9 +77,22 @@ def _log_normalize_axis_parts(
         keepdims=True,
     )
     log_normalized = shifted - shifted_log_normalizer
+    return log_normalized, shift, shifted_log_normalizer
+
+
+def _log_normalize_axis_parts(
+    log_weights: Array,
+    *,
+    axis: int,
+) -> tuple[Array, _LogExpansion]:
+    """Normalize one axis while retaining its shifted decomposition."""
+    log_normalized, shift, correction = _shifted_log_normalize_axis(
+        log_weights,
+        axis=axis,
+    )
     return log_normalized, _LogExpansion(
         shift=jnp.squeeze(shift, axis=axis),
-        correction=jnp.squeeze(shifted_log_normalizer, axis=axis),
+        correction=jnp.squeeze(correction, axis=axis),
     )
 
 
@@ -89,11 +102,12 @@ def _log_normalize_axis(
     axis: int,
 ) -> tuple[Array, Array]:
     """Normalize one axis before restoring its absolute offset."""
-    log_normalized, expansion = _log_normalize_axis_parts(
+    log_normalized, shift, correction = _shifted_log_normalize_axis(
         log_weights,
         axis=axis,
     )
-    return log_normalized, expansion.resolve()
+    log_normalizer = jnp.squeeze(shift + correction, axis=axis)
+    return log_normalized, log_normalizer
 
 
 def log_normalize(
