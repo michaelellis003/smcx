@@ -5514,7 +5514,7 @@ ESS &lt; <code>ess_threshold * N</code></li>
                 <code>log_weights</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_particles&#39;]</code>
+                  <code><span title="smcx.weights._LogWeightVector">_LogWeightVector</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -5549,6 +5549,30 @@ ESS &lt; <code>ess_threshold * N</code></li>
             <td>
               <div class="doc-md-description">
                 <p>The ESS as a scalar array in <code>(0, num_particles]</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>log_weights</code> is not a nonempty rank-one floating JAX
+array.</p>
               </div>
             </td>
           </tr>
@@ -6989,7 +7013,7 @@ a predictive criterion such as <code>smcx.crps</code>, and use
                 <code>log_weights</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_particles&#39;]</code>
+                  <code><span title="smcx.weights._LogWeightVector">_LogWeightVector</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -7024,6 +7048,30 @@ a predictive criterion such as <code>smcx.crps</code>, and use
             <td>
               <div class="doc-md-description">
                 <p><code>log(ESS)</code> as a scalar array.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>log_weights</code> is not a nonempty rank-one floating JAX
+array.</p>
               </div>
             </td>
           </tr>
@@ -7301,7 +7349,7 @@ of variance in particle filters. https://arxiv.org/abs/1701.01001</p>
                 <code>log_weights</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_particles&#39;]</code>
+                  <code><span title="smcx.weights._LogWeightVector">_LogWeightVector</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -7360,6 +7408,30 @@ of variance in particle filters. https://arxiv.org/abs/1701.01001</p>
             <td>
               <div class="doc-md-description">
                 <p><em>log_normalizer</em> is <code>logsumexp(log_weights)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>log_weights</code> is not a nonempty rank-one floating JAX
+array.</p>
               </div>
             </td>
           </tr>
@@ -7538,7 +7610,7 @@ Sorted queries keep the ancestor gather monotone.</p>
                 <code>log_weights</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; num_particles&#39;]</code>
+                  <code><span title="smcx.weights._LogWeightVector">_LogWeightVector</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -7569,6 +7641,30 @@ Sorted queries keep the ancestor gather monotone.</p>
             <td>
               <div class="doc-md-description">
                 <p>Normalized weights that sum to one.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>log_weights</code> is not a nonempty rank-one floating JAX
+array.</p>
               </div>
             </td>
           </tr>
