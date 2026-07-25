@@ -78,3 +78,29 @@ def test_factor_leaves_well_conditioned_covariance_unregularized(magnitude):
         rtol=float(5 * np.finfo(np.float32).eps),
         atol=0.0,
     )
+
+
+def test_scale_is_applied_after_covariance_accumulation():
+    particles = jnp.asarray(
+        [[-628.6092345815442], [328.39444847219517], [-801.0697777975164]],
+        dtype=jnp.float64,
+    )
+    weights = jnp.asarray(
+        [0.16770429251437832, 0.4913811098889822, 0.3409145975966395],
+        dtype=jnp.float64,
+    )
+    scale = 413.89206727629573
+
+    factor = _weighted_covariance_factor(
+        particles,
+        weights,
+        scale=scale,
+    )
+
+    x = np.asarray(particles)
+    w = np.asarray(weights)
+    w = w / w.sum()
+    centered = x - w @ x
+    covariance = (centered * w[:, None]).T @ centered
+    expected = np.linalg.cholesky(scale * covariance)
+    np.testing.assert_array_equal(np.asarray(factor), expected)
