@@ -122,26 +122,49 @@ _PARTICLE_FILTERS = (
 )
 
 
+def test_callback_receives_rank_one_integer_emissions_as_vectors():
+    def log_observation(emission, state):
+        assert emission.shape == (1,)
+        assert emission.dtype == jnp.int32
+        return 0.0 * state[0]
+
+    posterior = smcx.bootstrap_filter(
+        jr.key(152),
+        _initial_sampler,
+        _transition_sampler,
+        log_observation,
+        jnp.array([0, 1], dtype=jnp.int32),
+        4,
+    )
+
+    assert posterior.log_evidence_increments.shape == (2,)
+
+
+@pytest.mark.parametrize("run_filter", _PARTICLE_FILTERS)
+def test_particle_filters_accept_scalar_discrete_emissions(run_filter):
+    emissions = jnp.array([0, 1], dtype=jnp.int32)
+
+    posterior = run_filter(emissions, 4)
+
+    assert posterior.log_evidence_increments.shape == (2,)
+
+
 @pytest.mark.parametrize("run_filter", _PARTICLE_FILTERS)
 @pytest.mark.parametrize(
-    ("emissions", "num_particles", "message", "disable_typechecker"),
+    ("emissions", "num_particles", "message"),
     [
-        (jnp.zeros((0, 1)), 4, "must contain at least one row", False),
-        (jnp.zeros((2, 1)), 0, "num_particles must be >= 1", False),
-        (jnp.zeros(2), 4, r"shape \(T, emission_dim\)", True),
+        (jnp.zeros((0, 1)), 4, "must contain at least one row"),
+        (jnp.zeros((2, 1)), 0, "num_particles must be >= 1"),
+        (jnp.zeros((2, 0)), 4, "emission_dim >= 1"),
+        (jnp.zeros((2, 1, 1)), 4, r"shape \(T,\) or \(T, emission_dim\)"),
     ],
 )
 def test_particle_filters_validate_structure(
-    monkeypatch,
     run_filter,
     emissions,
     num_particles,
     message,
-    disable_typechecker,
 ):
-    monkeypatch.setattr(
-        jaxtyping_config, "jaxtyping_disable", disable_typechecker
-    )
     with pytest.raises(ValueError, match=message):
         run_filter(emissions, num_particles)
 
