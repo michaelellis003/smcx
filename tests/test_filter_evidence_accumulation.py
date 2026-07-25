@@ -4,6 +4,9 @@
 """Long-horizon evidence regressions for one-shot particle filters."""
 
 import math
+import os
+import subprocess
+import sys
 
 import jax
 import jax.numpy as jnp
@@ -13,6 +16,48 @@ import pytest
 
 import smcx
 from smcx.containers import ParticleFilterResult
+
+_CPU_PLACED_JIT_SCRIPT = """
+import jax
+import jax.numpy as jnp
+import jax.random as jr
+
+import smcx
+
+assert jax.default_backend() == "mps"
+cpu = jax.devices("cpu")[0]
+
+
+def run(key, emissions):
+    def initial_sampler(_key, count):
+        return jnp.zeros((count, 1), dtype=emissions.dtype)
+
+    def transition_sampler(_key, state):
+        return state + 1
+
+    def log_observation(_emission, state):
+        return jnp.zeros((), dtype=state.dtype)
+
+    return smcx.bootstrap_filter(
+        key,
+        initial_sampler,
+        transition_sampler,
+        log_observation,
+        emissions,
+        2,
+        resampling_threshold=0.0,
+    )
+
+
+key = jax.device_put(jr.key(38), cpu)
+emissions = jax.device_put(jnp.zeros((3, 1)), cpu)
+posterior = jax.jit(run)(key, emissions)
+jax.block_until_ready(posterior)
+platforms = {
+    device.platform for device in posterior.filtered_particles.devices()
+}
+assert platforms == {"cpu"}
+"""
 
 
 def _run_filter(
@@ -97,11 +142,15 @@ def test_one_shot_filter_compensates_long_horizon_evidence(filter_name):
     with jax.enable_x64(False):
         posterior = _run_filter(filter_name, emissions)
 
+    expected_increments = np.asarray(emissions[:, 0])
+    np.testing.assert_array_equal(
+        posterior.log_evidence_increments, expected_increments
+    )
     # math.fsum is an independent higher-precision oracle. Cast once to the
     # public f32 result dtype. One ULP at the final total admits the rounding
     # of the retained correction back into one public f32 scalar.
     reference = np.asarray(
-        math.fsum(map(float, np.asarray(posterior.log_evidence_increments))),
+        math.fsum(map(float, expected_increments)),
         dtype=np.float32,
     )
     final_ulp = float(abs(np.spacing(reference)))
@@ -111,3 +160,21 @@ def test_one_shot_filter_compensates_long_horizon_evidence(filter_name):
         rtol=0.0,
         atol=final_ulp,
     )
+
+
+@pytest.mark.skipif(
+    jax.default_backend() != "mps",
+    reason="requires both the physical MPS and CPU backends",
+)
+def test_jitted_cpu_filter_uses_argument_platform():
+    env = os.environ.copy()
+    env["JAX_PLATFORMS"] = "mps,cpu"
+    env["JAX_ENABLE_X64"] = "false"
+    result = subprocess.run(
+        [sys.executable, "-c", _CPU_PLACED_JIT_SCRIPT],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr

@@ -300,7 +300,8 @@ def test_traced_invalid_first_stage_propagates(lgssm_params, lgssm_data):
             resampling_threshold=0.0,
         ).marginal_loglik
 
-    assert not jnp.isfinite(jax.jit(run)(jnp.asarray(jnp.inf)))
+    compiled = jax.jit(run)
+    assert not jnp.isfinite(compiled(jnp.asarray(jnp.inf)))
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +391,23 @@ class TestAuxiliaryLogEvidenceIncrements:
 class TestAuxiliaryInputs:
     """Input-aware APF preserves its bootstrap reduction."""
 
-    def test_flat_auxiliary_matches_input_aware_bootstrap(self):
+    def test_flat_auxiliary_matches_input_aware_bootstrap(
+        self, lgssm_params, lgssm_data
+    ):
+        if jax.default_backend() == "mps":
+            initial, transition, observation, auxiliary = _make_smcx_fns(
+                lgssm_params
+            )
+            warmup = auxiliary_filter(
+                jr.key(0),
+                initial,
+                transition,
+                observation,
+                auxiliary,
+                lgssm_data[1],
+                2_048,
+            )
+            jax.block_until_ready(warmup)
         inputs = jnp.array([1.0, 2.0, 3.0])
         emissions = jnp.array([[2.0], [5.0], [9.0]])
 
@@ -432,9 +449,10 @@ class TestAuxiliaryInputs:
             inputs=inputs,
         )
 
-        assert jnp.array_equal(
-            auxiliary.filtered_particles, bootstrap.filtered_particles
-        )
+        expected = jnp.array([1.0, 3.0, 6.0])[:, None, None]
+        expected = jnp.broadcast_to(expected, (3, 4, 1))
+        assert jnp.array_equal(auxiliary.filtered_particles, expected)
+        assert jnp.array_equal(bootstrap.filtered_particles, expected)
         assert jnp.array_equal(
             auxiliary.filtered_log_weights, bootstrap.filtered_log_weights
         )
