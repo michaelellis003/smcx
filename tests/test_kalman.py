@@ -317,12 +317,13 @@ def test_kalman_filter_rejects_misaligned_shapes(argument, value, message):
         smcx.kalman_filter(**model)
 
 
+@pytest.mark.filterwarnings("error::RuntimeWarning")
 @pytest.mark.parametrize(
     ("argument", "value", "message"),
     [
         (
             "initial_covariance",
-            jnp.diag(jnp.array([1.0e20, -1.0])),
+            jnp.nextafter(jnp.zeros((2, 2)), 1.0).at[1, 1].set(0.0),
             "initial_covariance must be positive semidefinite",
         ),
         (
@@ -336,17 +337,16 @@ def test_kalman_filter_rejects_misaligned_shapes(argument, value, message):
             "observation_covariance must contain only finite values",
         ),
         (
-            "observation_covariance",
-            jnp.diag(jnp.array([1.0, 0.0])),
-            "observation_covariance must be positive definite",
+            "transition_covariance",
+            jnp.array([
+                [1.0, jnp.finfo(jnp.asarray(0.0).dtype).max],
+                [-jnp.finfo(jnp.asarray(0.0).dtype).max, 1.0],
+            ]),
+            "transition_covariance must be symmetric",
         ),
     ],
 )
-def test_kalman_filter_rejects_invalid_covariance(
-    argument,
-    value,
-    message,
-):
+def test_kalman_filter_rejects_invalid_covariance(argument, value, message):
     """Concrete covariance values obey the public Gaussian domain."""
     model = _valid_linear_model()
     model[argument] = value
@@ -372,7 +372,7 @@ def test_kalman_filter_checks_each_timed_covariance_scale():
     model["emissions"] = jnp.zeros((3, 2))
     model["transition_covariance"] = jnp.array([
         [[1.0e20, 0.0], [0.0, 1.0e20]],
-        [[1.0, 0.0], [0.0, -1.0]],
+        [[1.0, 2.0], [2.0, 1.0]],
     ])
 
     with pytest.raises(
