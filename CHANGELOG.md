@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.18 (2026-07-25)
+
+### Bug Fixes
+
+- **bootstrap**: Enforce checkpoint invariants
+  ([#203](https://github.com/michaelellis003/smcx/pull/203),
+  [`3d5cbd5`](https://github.com/michaelellis003/smcx/commit/3d5cbd51816e5724c6a0639fd115192fb9b21fcf))
+
+
 ## v1.13.17 (2026-07-25)
 
 ### Bug Fixes
