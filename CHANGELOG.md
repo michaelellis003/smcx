@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.0 (2026-07-25)
+
+### Features
+
+- **liu-west**: Support conditioned initialization
+  ([#210](https://github.com/michaelellis003/smcx/pull/210),
+  [`cad5152`](https://github.com/michaelellis003/smcx/commit/cad515279bdb55ebda2f97aeaec82934f6d76508))
+
+
 ## v1.13.23 (2026-07-25)
 
 ### Bug Fixes
