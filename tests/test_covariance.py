@@ -46,7 +46,7 @@ def test_near_zero_rank_deficient_factor_remains_positive():
     np.testing.assert_allclose(
         factor_variance[1, 1],
         expected_null_variance,
-        rtol=5 * np.finfo(np.float32).eps,
+        rtol=float(5 * np.finfo(np.float32).eps),
         atol=0.0,
     )
 
@@ -75,6 +75,6 @@ def test_factor_leaves_well_conditioned_covariance_unregularized(magnitude):
     np.testing.assert_allclose(
         np.asarray(factor) @ np.asarray(factor).T,
         expected,
-        rtol=5 * np.finfo(np.float32).eps,
+        rtol=float(5 * np.finfo(np.float32).eps),
         atol=0.0,
     )
