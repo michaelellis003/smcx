@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.10 (2026-07-25)
+
+### Bug Fixes
+
+- **diagnostics**: Compensate cumulative predictive log scores
+  ([#195](https://github.com/michaelellis003/smcx/pull/195),
+  [`4d7c232`](https://github.com/michaelellis003/smcx/commit/4d7c232c9ad7e3ee10401008167073568f4e0474))
+
+
 ## v1.13.9 (2026-07-25)
 
 ### Bug Fixes
