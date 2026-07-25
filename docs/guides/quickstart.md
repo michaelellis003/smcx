@@ -179,6 +179,12 @@ conservative largest-error-over-$N^2$ bound can enter the subnormal range.
 This includes mixed narrower observation dtypes, needs no backend `uint64`,
 and prevents represented translations from exposing flush-to-zero behavior.
 
+Weighted mean and variance summaries likewise reduce in coordinates centered
+on a particle with material weight. This preserves represented translations
+without letting a zero-weight outlier set the numerical origin. Affected
+fixed-input summaries can change as a clear numerical correction under NEP 23;
+their shapes, dtypes, and JIT contracts are unchanged.
+
 ## Cut the variance with a guided proposal
 
 The bootstrap proposal ignores the current observation. The guided

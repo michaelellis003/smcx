@@ -382,7 +382,8 @@ def _weighted_mean_field(
         Weighted means, shape ``(ntime, D)``.
     """
     weights = _normalized_linear_weights(log_weights)
-    anchors = field[:, 0, :]
+    anchor_indices = jnp.argmax(log_weights, axis=1)
+    anchors = field[jnp.arange(field.shape[0]), anchor_indices]
     offsets = field - anchors[:, None, :]
     return anchors + jnp.sum(weights[:, :, None] * offsets, axis=1)
 
@@ -393,7 +394,9 @@ def _weighted_variance_field(
 ) -> Float[Array, "ntime dim"]:
     """Compute a weighted variance entirely in shifted coordinates."""
     weights = _normalized_linear_weights(log_weights)
-    offsets = field - field[:, :1, :]
+    anchor_indices = jnp.argmax(log_weights, axis=1)
+    anchors = field[jnp.arange(field.shape[0]), anchor_indices]
+    offsets = field - anchors[:, None, :]
     offset_means = jnp.sum(weights[:, :, None] * offsets, axis=1)
     deviations = offsets - offset_means[:, None, :]
     return jnp.sum(weights[:, :, None] * deviations**2, axis=1)

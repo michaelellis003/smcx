@@ -271,6 +271,24 @@ class TestWeightedVariance:
         result = weighted_variance(_make_posterior())
         assert jnp.array_equal(result, jnp.full((3, 1), 341.0))
 
+    def test_zero_weight_outlier_cannot_anchor_weighted_moments(self):
+        """A material-weight particle defines the centered coordinates."""
+        posterior = _make_posterior()._replace(
+            filtered_particles=jnp.array(
+                [[[1e10], [0.0], [1.0]]], dtype=jnp.float32
+            ),
+            filtered_log_weights=jnp.array(
+                [[-jnp.inf, jnp.log(0.5), jnp.log(0.5)]],
+                dtype=jnp.float32,
+            ),
+            ancestors=jnp.array([[0, 1, 2]], dtype=jnp.int32),
+            ess=jnp.array([2.0]),
+            log_evidence_increments=jnp.array([0.0]),
+        )
+
+        np.testing.assert_array_equal(weighted_mean(posterior), [[0.5]])
+        np.testing.assert_array_equal(weighted_variance(posterior), [[0.25]])
+
     def test_large_translation_preserves_represented_central_moment(self):
         posterior = _make_large_offset_posterior()
         _, expected = _numpy_weighted_moments(posterior)
