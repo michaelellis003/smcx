@@ -932,11 +932,24 @@ class TestLiuWestInitialJointLaw:
                 param_initial_state_sampler=param_initial_state_sampler,
             )
 
-    def test_validates_parameter_conditioned_initial_state_output(self):
+    @pytest.mark.parametrize(
+        "malformed",
+        [
+            pytest.param(lambda n: jnp.zeros(n), id="rank"),
+            pytest.param(
+                lambda n: {"state": jnp.zeros((n, 1))},
+                id="tree",
+            ),
+        ],
+    )
+    def test_validates_parameter_conditioned_initial_state_output(
+        self,
+        malformed,
+    ):
         """The conditioned callback obeys the dense state-cloud contract."""
         with pytest.raises(
             ValueError,
-            match="param_initial_state_sampler output must have shape",
+            match=r"param_initial_state_sampler output must .*shape",
         ):
             liu_west_filter(
                 key=jr.key(2),
@@ -948,7 +961,7 @@ class TestLiuWestInitialJointLaw:
                 emissions=jnp.zeros((1, 1)),
                 num_particles=4,
                 param_initial_state_sampler=(
-                    lambda key, n, params: jnp.zeros(n)
+                    lambda key, n, params: malformed(n)
                 ),
             )
 
