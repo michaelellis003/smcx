@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.11 (2026-07-25)
+
+### Bug Fixes
+
+- **weights**: Validate public log-weight inputs
+  ([#196](https://github.com/michaelellis003/smcx/pull/196),
+  [`4f117f9`](https://github.com/michaelellis003/smcx/commit/4f117f9513a3e8418cb33baa566ede108611532e))
+
+
 ## v1.13.10 (2026-07-25)
 
 ### Bug Fixes
