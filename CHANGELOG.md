@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.17 (2026-07-25)
+
+### Bug Fixes
+
+- **smc2**: Preserve shifted likelihood components
+  ([#202](https://github.com/michaelellis003/smcx/pull/202),
+  [`6235bd6`](https://github.com/michaelellis003/smcx/commit/6235bd6b635fd89584c0317d346fcd35fed79001))
+
+
 ## v1.13.16 (2026-07-25)
 
 ### Bug Fixes
