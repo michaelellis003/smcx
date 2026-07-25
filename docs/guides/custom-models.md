@@ -293,10 +293,11 @@ support wrapping the runner in JAX transformations. Until
 [smcx #38](https://github.com/michaelellis003/smcx/issues/38) closes, MPS
 instead uses a sequence of one-step scans to contain an upstream Metal
 history-corruption defect. Traced calls stage both paths and select the
-execution-platform branch during lowering, so JAX transformations remain
-supported and CPU-placed data retain the full scan even when MPS is the
-default backend. Eager MPS calls add per-observation dispatch overhead; other
-backends retain the compiled scan.
+execution-platform branch during outer `jax.jit` lowering, so CPU-placed
+compiled inputs retain the full scan even when MPS is the default backend.
+The contained branch remains compatible with `jax.vmap` and gradients on the
+selected backend. Eager MPS calls add per-observation dispatch overhead;
+other backends retain the compiled scan.
 
 This always-resampling bootstrap kernel composes only public smcx operations
 with the `initial`, `transition`, and `log_observation` callbacks defined
