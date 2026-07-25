@@ -31,6 +31,8 @@ from smcx._numerics import (
     _validate_minimum_float_precision,
 )
 from smcx._utils import (
+    _canonicalize_emission,
+    _canonicalize_emissions,
     _canonicalize_inputs,
     _conditional_resample,
     _filter_scan,
@@ -57,6 +59,9 @@ from smcx.containers import (
 )
 from smcx.resampling import systematic
 from smcx.types import (
+    Emission,
+    EmissionSequence,
+    EmissionValue,
     InitialSampler,
     InitialSamplerWithInput,
     InputSequence,
@@ -164,7 +169,7 @@ def bootstrap_init(
     init_key: PRNGKeyT,
     initial_sampler: InitialSampler | InitialSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
-    first_emission: Float[Array, " emission_dim"],
+    first_emission: EmissionValue,
     num_particles: int,
     *,
     input_t: Float[Array, " input_dim"] | None = None,
@@ -176,7 +181,8 @@ def bootstrap_init(
         initial_sampler: Initial-state callback, optionally input-aware.
         log_observation_fn: Observation log-density callback returning a
             scalar with at least float32 precision.
-        first_emission: Observation ``y[0]``.
+        first_emission: Scalar or vector observation ``y[0]``. Scalars
+            reach callbacks as length-one vectors; dtype is preserved.
         num_particles: Number of particles.
         input_t: Optional ``inputs[0]`` passed to both callbacks.
 
@@ -189,6 +195,10 @@ def bootstrap_init(
     """
     if num_particles < 1:
         raise ValueError(f"num_particles must be >= 1; got {num_particles}")
+    first_emission = _canonicalize_emission(
+        first_emission,
+        name="first_emission",
+    )
     log_n = jnp.asarray(math.log(num_particles))
     initialized = _init_standard(
         init_key,
@@ -222,7 +232,7 @@ def _bootstrap_particle_step(
     current_ess: Float[Array, ""],
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
-    emission_t: Float[Array, " emission_dim"],
+    emission_t: Emission,
     resampling_fn: ResamplingFn,
     resampling_threshold: float | ResamplingCriterion,
     input_t: Float[Array, " input_dim"] | None,
@@ -293,7 +303,7 @@ def _bootstrap_step(
     checkpoint: BootstrapCheckpoint,
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
-    emission_t: Float[Array, " emission_dim"],
+    emission_t: Emission,
     resampling_fn: ResamplingFn,
     resampling_threshold: float,
     input_t: Float[Array, " input_dim"] | None,
@@ -336,7 +346,7 @@ def bootstrap_step(
     checkpoint: BootstrapCheckpoint,
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
-    emission_t: Float[Array, " emission_dim"],
+    emission_t: EmissionValue,
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float = 0.5,
     *,
@@ -352,7 +362,8 @@ def bootstrap_step(
         transition_sampler: Transition callback, optionally input-aware.
         log_observation_fn: Observation log-density callback returning a
             scalar with at least float32 precision.
-        emission_t: Current observation ``y[t]``.
+        emission_t: Current scalar or vector observation ``y[t]``. Scalars
+            reach callbacks as length-one vectors; dtype is preserved.
         resampling_fn: Particle resampling algorithm.
         resampling_threshold: Finite, nonnegative ESS fraction. Zero disables
             resampling; values above one force it at every update.
@@ -373,6 +384,7 @@ def bootstrap_step(
         checks are skipped and malformed values propagate into the result.
     """
     _validate_resampling_threshold(resampling_threshold)
+    emission_t = _canonicalize_emission(emission_t, name="emission_t")
     state_signature = _validate_checkpoint(checkpoint)
 
     def body(carry, args):
@@ -407,7 +419,7 @@ def bootstrap_update(
     checkpoint: BootstrapCheckpoint,
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
-    emissions_chunk: Float[Array, "ntime emission_dim"],
+    emissions_chunk: EmissionSequence,
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float = 0.5,
     *,
@@ -427,7 +439,8 @@ def bootstrap_update(
         transition_sampler: Transition callback, optionally input-aware.
         log_observation_fn: Observation log-density callback returning a
             scalar with at least float32 precision.
-        emissions_chunk: Consecutive observations after the checkpoint.
+        emissions_chunk: Consecutive scalar ``(T,)`` or vector
+            ``(T, emission_dim)`` observations after the checkpoint.
         resampling_fn: Particle resampling algorithm.
         resampling_threshold: Finite, nonnegative ESS fraction. Zero disables
             resampling; values above one force it at every update.
@@ -446,9 +459,11 @@ def bootstrap_update(
             importance weights cannot normalize.
     """
     _validate_resampling_threshold(resampling_threshold)
+    emissions_chunk = _canonicalize_emissions(
+        emissions_chunk,
+        name="emissions_chunk",
+    )
     num_steps = emissions_chunk.shape[0]
-    if num_steps == 0:
-        raise ValueError("emissions_chunk must contain at least one row")
     key_error = "step_keys must be a batched PRNG key array"
     try:
         key_data = jr.key_data(step_keys)
@@ -591,7 +606,7 @@ def bootstrap_filter(
     initial_sampler: InitialSampler | InitialSamplerWithInput,
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
-    emissions: Float[Array, "ntime emission_dim"],
+    emissions: EmissionSequence,
     num_particles: int,
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float | ResamplingCriterion = 0.5,
@@ -617,7 +632,8 @@ def bootstrap_filter(
             It must return a scalar with at least float32 precision.
             Will be ``vmap``-ped over the particle dimension (second
             argument) internally.
-        emissions: Observed emissions, shape ``(T, D)``.
+        emissions: Scalar ``(T,)`` or vector ``(T, D)`` observations.
+            Rank-one data become ``(T, 1)``; dtype is preserved.
         num_particles: Number of particles $N$.
         resampling_fn: Resampling algorithm matching the BlackJAX
             signature ``(key, weights, num_samples) -> indices``.
@@ -656,7 +672,10 @@ def bootstrap_filter(
             state contract, or an observation callback output is malformed.
     """
     _validate_resampling_threshold(resampling_threshold)
-    num_timesteps = _validate_filter_inputs(emissions, num_particles)
+    emissions, num_timesteps = _validate_filter_inputs(
+        emissions,
+        num_particles,
+    )
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
     )

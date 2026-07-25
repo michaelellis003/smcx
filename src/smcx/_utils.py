@@ -24,6 +24,8 @@ from jaxtyping import Array, Bool, Float, Int, Int32, PyTree, Shaped
 from smcx._numerics import _validate_minimum_float_precision
 from smcx.containers import ParticleState
 from smcx.types import (
+    Emission,
+    EmissionSequence,
     InitialSampler,
     InitialSamplerWithInput,
     InputSequence,
@@ -103,22 +105,59 @@ def _validate_resampling_threshold(
         _validate_numeric_ess_threshold(threshold, name="resampling_threshold")
 
 
-def _validate_filter_inputs(
-    emissions: Float[Array, "ntime emission_dim"],
-    num_particles: int,
-) -> int:
-    """Validate the common structural inputs of a particle filter."""
+def _canonicalize_emissions(
+    emissions: object,
+    *,
+    name: str = "emissions",
+) -> Shaped[Array, "ntime emission_dim"]:
+    """Validate observations and give scalar events a singleton dimension."""
+    if not isinstance(emissions, (jax.Array, Tracer)):
+        raise ValueError(
+            f"{name} must be a JAX array with shape (T,) or (T, emission_dim)"
+        )
+    if emissions.ndim == 1:
+        emissions = emissions[:, None]
     if emissions.ndim != 2:
         raise ValueError(
-            "emissions must have shape (T, emission_dim); "
+            f"{name} must have shape (T,) or (T, emission_dim); "
             f"got ndim={emissions.ndim}"
         )
-    num_timesteps = emissions.shape[0]
-    if num_timesteps == 0:
-        raise ValueError("emissions must contain at least one row")
+    if emissions.shape[0] == 0:
+        raise ValueError(f"{name} must contain at least one row")
+    if emissions.shape[1] == 0:
+        raise ValueError(f"{name} must have emission_dim >= 1")
+    return emissions
+
+
+def _canonicalize_emission(
+    emission: object,
+    *,
+    name: str,
+) -> Emission:
+    """Validate one observation and turn a scalar into a length-one vector."""
+    if not isinstance(emission, (jax.Array, Tracer)):
+        raise ValueError(
+            f"{name} must be a JAX array with shape () or (emission_dim,)"
+        )
+    if emission.ndim == 0:
+        emission = emission[None]
+    if emission.ndim != 1 or emission.shape[0] == 0:
+        raise ValueError(
+            f"{name} must have shape () or (emission_dim,) with "
+            f"emission_dim >= 1; got {emission.shape}"
+        )
+    return emission
+
+
+def _validate_filter_inputs(
+    emissions: EmissionSequence,
+    num_particles: int,
+) -> tuple[Shaped[Array, "ntime emission_dim"], int]:
+    """Validate the common structural inputs of a particle filter."""
+    emissions_arr = _canonicalize_emissions(emissions)
     if num_particles < 1:
         raise ValueError(f"num_particles must be >= 1; got {num_particles}")
-    return num_timesteps
+    return emissions_arr, emissions_arr.shape[0]
 
 
 def _validate_log_density_batch(
@@ -496,7 +535,7 @@ def _init_standard(
     init_key: PRNGKeyT,
     initial_sampler: InitialSampler | InitialSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
-    first_emission: Array,
+    first_emission: Emission,
     num_particles: int,
     log_n: Array,
     input_t: Float[Array, " input_dim"] | None = None,

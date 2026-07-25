@@ -56,16 +56,23 @@ class _ReplicatedLogMLFn(Protocol):
     def __call__(self, key: PRNGKeyT, /) -> Scalar: ...  # pragma: no cover
 
 
-# Static checkers see the accepted rank-one/rank-two contract. At runtime,
-# beartype must admit any rank so the public plain-Python validator can raise
-# the documented ValueError instead of a wrapper-specific type-check error.
+# Callback-driven models own the meaning and dtype of observations. Scalar
+# events are canonicalized to length-one vectors before callbacks run. At
+# runtime, beartype admits any rank at public observation boundaries so the
+# plain-Python validator can raise the documented ValueError.
 if TYPE_CHECKING:
-    EmissionSequence: TypeAlias = Float[Array, "ntime emission_dim"]
+    Emission: TypeAlias = Shaped[Array, " emission_dim"]
+    EmissionValue: TypeAlias = Shaped[Array, ""] | Emission
+    EmissionSequence: TypeAlias = (
+        Shaped[Array, " ntime"] | Shaped[Array, "ntime emission_dim"]
+    )
     InputSequence: TypeAlias = (
         Float[Array, " ntime"] | Float[Array, "ntime input_dim"]
     )
 else:
-    EmissionSequence: TypeAlias = Float[Array, "*emission_shape"]
+    Emission: TypeAlias = Shaped[Array, " emission_dim"]
+    EmissionValue: TypeAlias = Shaped[Array, "*emission_shape"]
+    EmissionSequence: TypeAlias = Shaped[Array, "*emission_shape"]
     InputSequence: TypeAlias = Float[Array, "*input_shape"]
 
 
@@ -281,7 +288,7 @@ class LogObservationFn(Protocol):
 
     def __call__(
         self,
-        emission: Float[Array, " emission_dim"],
+        emission: Emission,
         state: StateTree,
         /,
     ) -> Scalar: ...
@@ -293,7 +300,7 @@ class LogObservationFnWithInput(Protocol):
 
     def __call__(
         self,
-        emission: Float[Array, " emission_dim"],
+        emission: Emission,
         state: StateTree,
         input_t: Float[Array, " input_dim"],
         /,
@@ -308,7 +315,7 @@ class ProposalSampler(Protocol):
         self,
         key: PRNGKeyT,
         state: StateTree,
-        emission: Float[Array, " emission_dim"],
+        emission: Emission,
         /,
     ) -> StateTree: ...
 
@@ -321,7 +328,7 @@ class ProposalSamplerWithInput(Protocol):
         self,
         key: PRNGKeyT,
         state: StateTree,
-        emission: Float[Array, " emission_dim"],
+        emission: Emission,
         input_t: Float[Array, " input_dim"],
         /,
     ) -> StateTree: ...
@@ -333,7 +340,7 @@ class LogProposalFn(Protocol):
 
     def __call__(
         self,
-        emission: Float[Array, " emission_dim"],
+        emission: Emission,
         new_state: StateTree,
         old_state: StateTree,
         /,
@@ -346,7 +353,7 @@ class LogProposalFnWithInput(Protocol):
 
     def __call__(
         self,
-        emission: Float[Array, " emission_dim"],
+        emission: Emission,
         new_state: StateTree,
         old_state: StateTree,
         input_t: Float[Array, " input_dim"],
@@ -504,7 +511,7 @@ class ParamLogObservationFn(Protocol):
 
     def __call__(
         self,
-        emission: Float[Array, " emission_dim"],
+        emission: Emission,
         state: Float[Array, " state_dim"],
         params: Float[Array, " param_dim"],
         /,
@@ -517,7 +524,7 @@ class ParamLogObservationFnWithInput(Protocol):
 
     def __call__(
         self,
-        emission: Float[Array, " emission_dim"],
+        emission: Emission,
         state: Float[Array, " state_dim"],
         params: Float[Array, " param_dim"],
         input_t: Float[Array, " input_dim"],
@@ -562,7 +569,7 @@ class ParticleFilterInitFn(Protocol):
     def __call__(
         self,
         time_index: Int[Array, ""],
-        emission_t: Float[Array, " emission_dim"],
+        emission_t: Emission,
         key_t: PRNGKeyT,
         /,
     ) -> "tuple[FilterCarry, ParticleFilterRecord]": ...
@@ -575,7 +582,7 @@ class ParticleFilterInitFnWithInput(Protocol):
     def __call__(
         self,
         time_index: Int[Array, ""],
-        emission_t: Float[Array, " emission_dim"],
+        emission_t: Emission,
         input_t: Float[Array, " input_dim"],
         key_t: PRNGKeyT,
         /,
@@ -590,7 +597,7 @@ class ParticleFilterStepFn(Protocol):
         self,
         carry: FilterCarry,
         time_index: Int[Array, ""],
-        emission_t: Float[Array, " emission_dim"],
+        emission_t: Emission,
         key_t: PRNGKeyT,
         /,
     ) -> "tuple[FilterCarry, ParticleFilterRecord]": ...
@@ -604,7 +611,7 @@ class ParticleFilterStepFnWithInput(Protocol):
         self,
         carry: FilterCarry,
         time_index: Int[Array, ""],
-        emission_t: Float[Array, " emission_dim"],
+        emission_t: Emission,
         input_t: Float[Array, " input_dim"],
         key_t: PRNGKeyT,
         /,

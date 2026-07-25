@@ -70,6 +70,8 @@ from smcx.resampling import systematic
 from smcx.types import (
     DenseInitialSampler,
     DenseInitialSamplerWithInput,
+    Emission,
+    EmissionSequence,
     InputSequence,
     ParamCloudInitialStateSampler,
     ParamCloudInitialStateSamplerWithInput,
@@ -97,7 +99,7 @@ class _LiuWestStepCarry(NamedTuple):
 
 
 class _LiuWestStepInput(NamedTuple):
-    emission: Float[Array, " emission_dim"]
+    emission: Emission
     input_t: Float[Array, " input_dim"] | None
     time_index: Int[Array, ""]
 
@@ -212,7 +214,7 @@ def _init_liu_west(
     initial_sampler: DenseInitialSampler | DenseInitialSamplerWithInput | None,
     param_initial_sampler: ParamInitialSampler,
     log_observation_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
-    first_emission: Array,
+    first_emission: Emission,
     num_particles: int,
     input_t: Float[Array, " input_dim"] | None = None,
     param_initial_state_sampler: ParamCloudInitialStateSampler
@@ -458,7 +460,7 @@ def liu_west_filter(
     log_observation_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
     log_auxiliary_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
     param_initial_sampler: ParamInitialSampler,
-    emissions: Float[Array, "ntime emission_dim"],
+    emissions: EmissionSequence,
     num_particles: int,
     shrinkage: float = 0.95,
     resampling_fn: ResamplingFn = systematic,
@@ -499,7 +501,8 @@ def liu_west_filter(
             prior parameter distribution. Returns a nonempty floating array
             of shape ``(num_particles, param_dim)``. Float16 and bfloat16
             kernel arithmetic is promoted to float32, then cast back.
-        emissions: Observed emissions, shape ``(T, D)``.
+        emissions: Scalar ``(T,)`` or vector ``(T, D)`` observations.
+            Rank-one data become ``(T, 1)``; dtype is preserved.
         num_particles: Number of particles $N$.
         shrinkage: Shrinkage parameter $a \in (0, 1)$. Larger values apply
             less shrinkage toward the ensemble mean and inject less kernel
@@ -547,7 +550,10 @@ def liu_west_filter(
             structurally invalid.
     """
     _validate_resampling_threshold(resampling_threshold)
-    num_timesteps = _validate_filter_inputs(emissions, num_particles)
+    emissions, num_timesteps = _validate_filter_inputs(
+        emissions,
+        num_particles,
+    )
     if not 0.0 < shrinkage < 1.0:
         raise ValueError(
             f"shrinkage must be in the open interval (0, 1); got {shrinkage}"

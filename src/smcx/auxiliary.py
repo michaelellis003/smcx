@@ -57,6 +57,8 @@ from smcx._utils import (
 from smcx.containers import ParticleFilterPosterior, ParticleState
 from smcx.resampling import systematic
 from smcx.types import (
+    Emission,
+    EmissionSequence,
     InitialSampler,
     InitialSamplerWithInput,
     InputSequence,
@@ -85,7 +87,7 @@ class _AuxiliaryStepCarry(NamedTuple):
 class _AuxiliaryStepInput(NamedTuple):
     """Observation-aligned inputs for one auxiliary-filter step."""
 
-    emission: Float[Array, " emission_dim"]
+    emission: Emission
     input_t: Float[Array, " input_dim"] | None
     time_index: Int[Array, ""]
 
@@ -228,7 +230,7 @@ def auxiliary_filter(
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
     log_auxiliary_fn: LogObservationFn | LogObservationFnWithInput,
-    emissions: Float[Array, "ntime emission_dim"],
+    emissions: EmissionSequence,
     num_particles: int,
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float | ResamplingCriterion = 0.5,
@@ -262,7 +264,8 @@ def auxiliary_filter(
             Will be ``vmap``-ped over the particle dimension (second
             argument) internally.  When this returns zero for all
             inputs the APF reduces to the bootstrap filter.
-        emissions: Observed emissions, shape ``(T, D)``.
+        emissions: Scalar ``(T,)`` or vector ``(T, D)`` observations.
+            Rank-one data become ``(T, 1)``; dtype is preserved.
         num_particles: Number of particles $N$.
         resampling_fn: Resampling algorithm matching the BlackJAX
             signature ``(key, weights, num_samples) -> indices``.
@@ -300,7 +303,10 @@ def auxiliary_filter(
             state contract, or a log-density callback output is malformed.
     """
     _validate_resampling_threshold(resampling_threshold)
-    num_timesteps = _validate_filter_inputs(emissions, num_particles)
+    emissions, num_timesteps = _validate_filter_inputs(
+        emissions,
+        num_particles,
+    )
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
     )
