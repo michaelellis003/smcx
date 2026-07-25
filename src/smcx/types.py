@@ -132,7 +132,7 @@ class ParamCloudInitialStateSampler(Protocol):
         num_particles: int,
         params: Float[Array, "num_particles param_dim"],
         /,
-    ) -> Float[Array, "num_particles state_dim"]: ...
+    ) -> Float[Array, "num_particles state_dim"]: ...  # pragma: no cover
 
 
 @runtime_checkable
@@ -146,7 +146,7 @@ class ParamCloudInitialStateSamplerWithInput(Protocol):
         params: Float[Array, "num_particles param_dim"],
         input_t: Float[Array, " input_dim"],
         /,
-    ) -> Float[Array, "num_particles state_dim"]: ...
+    ) -> Float[Array, "num_particles state_dim"]: ...  # pragma: no cover
 
 
 @runtime_checkable
