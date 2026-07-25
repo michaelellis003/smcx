@@ -126,6 +126,11 @@ record evidence increments must have at least float32 precision. smcx rejects
 float16 and bfloat16 at these boundaries instead of silently changing the
 arithmetic or fixed-key draws.
 
+Log-weight normalization and ESS are invariant to a finite constant offset
+whenever the relative differences remain representable in the input dtype.
+The absolute log normalizer remains in that dtype, so a correction smaller
+than one unit in its last place cannot be represented in the returned scalar.
+
 ## Bind a plain JAX model
 
 The following user-owned classes are one possible model representation. The
