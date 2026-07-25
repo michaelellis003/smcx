@@ -29,7 +29,7 @@ def _weighted_covariance_factor(
     w = w / w.sum()
     mean = w @ x
     centered = x - mean
-    covariance = scale * (centered * w[:, None]).T @ centered
+    covariance = scale * ((centered * w[:, None]).T @ centered)
 
     dimension = covariance.shape[0]
     identity = np.eye(dimension)
