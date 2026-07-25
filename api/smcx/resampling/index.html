@@ -1450,7 +1450,12 @@ values with positive total mass. Data-dependent validation is skipped for
 traced values, where Python exceptions cannot be staged. Query grids are
 clamped strictly below 1 so a grid point that rounds to 1.0 in float32 cannot
 select past the final positive-weight slot. This endpoint guard is inherited
-from smcx's former MLX implementation.</p>
+from smcx's former MLX implementation. Normalized CDFs are capped at one,
+repaired with a cumulative maximum, and given an exact unit endpoint before
+search. This can change fixed-key ancestors relative to releases that passed
+locally inverted float32 CDFs to <code>searchsorted</code>; already-ordered seeded
+fixtures retain their draws. Numerical correctness fixes are not a promise of
+cross-version random-stream identity.</p>
 
 
 
