@@ -48,6 +48,10 @@ dense ``(T, N, D)`` particle history. Parameter summaries accept
 `smcx.containers.LiuWestPosterior` and
 `smcx.containers.SMC2Posterior`. `smcx.diagnose` converts results to Python
 scalars and strings, so it is intentionally host-only.
+Axis-sensitive state, parameter, predictive, and genealogy diagnostics
+validate the time, particle, and event axes they consume. State, parameter,
+and predictive summaries accept final-only histories; genealogy diagnostics
+require full history.
 """
 
 import math
@@ -64,6 +68,7 @@ from jaxtyping import Array, Float, Int
 
 from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
+    _array_tree_signature,
     _gather_particles,
     _validate_emission,
     _validate_particle_cloud,
@@ -180,6 +185,7 @@ def _require_dense_particle_history(
     diagnostic: str,
 ) -> Float[Array, "ntime num_particles state_dim"]:
     """Return dense particles or explain the structured-state boundary."""
+    expected_axes = _validate_log_weight_history(posterior, diagnostic)
     particles = posterior.filtered_particles
     is_array = isinstance(particles, (jax.Array, Tracer))
     is_float = is_array and jnp.issubdtype(particles.dtype, jnp.floating)
@@ -190,22 +196,167 @@ def _require_dense_particle_history(
             "project a structured-state leaf before using this Euclidean "
             "diagnostic"
         )
+    if particles.shape[2] == 0:
+        raise ValueError(
+            f"{diagnostic} requires posterior.filtered_particles to have "
+            "shape (T, N, state_dim) with state_dim >= 1; "
+            f"got {particles.shape}"
+        )
+    if particles.shape[:2] != expected_axes:
+        raise ValueError(
+            f"{diagnostic} requires posterior.filtered_particles time and "
+            "particle axes to match posterior.filtered_log_weights "
+            f"{expected_axes}; got {particles.shape[:2]}"
+        )
     return particles
 
 
-def _require_full_particle_history(
-    posterior: ParticleFilterResult,
+def _require_history_array(
+    value: object,
+    name: str,
+    ndim: int,
+    shape_contract: str,
+    diagnostic: str,
     *,
+    integer: bool = False,
+) -> Array:
+    """Require a nonempty floating or integer history array."""
+    dtype_kind = jnp.integer if integer else jnp.floating
+    dtype_name = "integer" if integer else "floating"
+    if (
+        not isinstance(value, (jax.Array, Tracer))
+        or value.ndim != ndim
+        or 0 in value.shape
+        or not jnp.issubdtype(value.dtype, dtype_kind)
+    ):
+        raise ValueError(
+            f"{diagnostic} requires {name} to be a nonempty {dtype_name} "
+            f"JAX array with {shape_contract}; got shape "
+            f"{getattr(value, 'shape', None)} and dtype "
+            f"{getattr(value, 'dtype', None)}"
+        )
+    return value
+
+
+def _validate_log_weight_history(
+    posterior: ParticleFilterResult | SMC2Posterior,
+    diagnostic: str,
+) -> tuple[int, int]:
+    """Validate the common nonempty ``(T, N)`` log-weight history."""
+    log_weights = _require_history_array(
+        posterior.filtered_log_weights,
+        "posterior.filtered_log_weights",
+        2,
+        "shape (T, N)",
+        diagnostic,
+    )
+    return log_weights.shape[0], log_weights.shape[1]
+
+
+def _validate_float_trace(values: object, name: str, diagnostic: str) -> int:
+    """Validate one nonempty floating time trace."""
+    trace = _require_history_array(values, name, 1, "shape (T,)", diagnostic)
+    return trace.shape[0]
+
+
+def _validate_particle_axes(
+    particles: object,
+    expected_axes: tuple[int, int],
     diagnostic: str,
 ) -> None:
-    """Reject final-only storage for diagnostics that need every time step."""
-    history_steps = posterior.filtered_log_weights.shape[0]
-    trace_steps = posterior.log_evidence_increments.shape[0]
-    if history_steps != trace_steps:
+    """Require every latent-state leaf to share ``(T, N)`` leading axes."""
+    history = _array_tree_signature(
+        particles,
+        name="posterior.filtered_particles",
+    )
+    for path, shape in zip(history.paths, history.shapes, strict=True):
+        if len(shape) < 2:
+            raise ValueError(
+                f"{diagnostic} requires posterior.filtered_particles leaf "
+                f"{path} to have leading time and particle axes; got {shape}"
+            )
+        if shape[:2] != expected_axes:
+            raise ValueError(
+                f"{diagnostic} requires posterior.filtered_particles leaf "
+                f"{path} time and particle axes to match "
+                f"posterior.filtered_log_weights {expected_axes}; "
+                f"got {shape[:2]}"
+            )
+
+
+def _require_parameter_history(
+    posterior: LiuWestPosterior | SMC2Posterior,
+    diagnostic: str,
+) -> Float[Array, "ntime num_particles param_dim"]:
+    """Validate and return a parameter history aligned with its weights."""
+    axes = _validate_log_weight_history(posterior, diagnostic)
+    params = _require_history_array(
+        posterior.filtered_params,
+        "posterior.filtered_params",
+        3,
+        "shape (T, N, param_dim), param_dim >= 1",
+        diagnostic,
+    )
+    if params.shape[:2] != axes:
+        raise ValueError(
+            f"{diagnostic} requires posterior.filtered_params time and "
+            "particle axes to match posterior.filtered_log_weights "
+            f"{axes}; got {params.shape[:2]}"
+        )
+    return params
+
+
+def _validate_particle_result_axes(
+    posterior: ParticleFilterResult,
+    diagnostic: str,
+    *,
+    particles: bool = False,
+    ancestors: bool = False,
+    full_history: bool = False,
+    ess: bool = False,
+) -> tuple[int, int]:
+    """Validate only the posterior axes consumed by one diagnostic."""
+    axes = _validate_log_weight_history(posterior, diagnostic)
+    trace_steps = axes[0]
+    if full_history or ess:
+        trace_steps = _validate_float_trace(
+            posterior.log_evidence_increments,
+            "posterior.log_evidence_increments",
+            diagnostic,
+        )
+    if full_history and axes[0] != trace_steps:
         raise ValueError(
             f"{diagnostic} requires full particle history; rerun the filter "
             "with store_history=True"
         )
+    if particles:
+        _validate_particle_axes(posterior.filtered_particles, axes, diagnostic)
+    if ancestors:
+        ancestry = _require_history_array(
+            posterior.ancestors,
+            "posterior.ancestors",
+            2,
+            "shape (T, N)",
+            diagnostic,
+            integer=True,
+        )
+        if ancestry.shape != axes:
+            raise ValueError(
+                f"{diagnostic} requires posterior.ancestors time and "
+                "particle axes to match posterior.filtered_log_weights "
+                f"{axes}; got {ancestry.shape}"
+            )
+    if ess:
+        ess_steps = _validate_float_trace(
+            posterior.ess, "posterior.ess", diagnostic
+        )
+        if ess_steps != trace_steps:
+            raise ValueError(
+                f"{diagnostic} requires posterior.ess time axis to match "
+                "posterior.log_evidence_increments "
+                f"({trace_steps}); got {ess_steps}"
+            )
+    return axes
 
 
 def _weighted_mean_field(
@@ -267,6 +418,7 @@ def weighted_mean(
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
+        ValueError: Consumed posterior arrays are malformed or misaligned.
     """
     particles = _require_dense_particle_history(
         posterior, diagnostic="weighted_mean"
@@ -290,6 +442,7 @@ def weighted_variance(
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
+        ValueError: Consumed posterior arrays are malformed or misaligned.
     """
     particles = _require_dense_particle_history(
         posterior, diagnostic="weighted_variance"
@@ -322,8 +475,8 @@ def weighted_quantile(
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
-        ValueError: ``q`` is not a nonempty rank-one floating array, or an
-            eager level lies outside [0, 1].
+        ValueError: Posterior arrays or ``q`` are malformed/misaligned, or an
+            eager quantile lies outside [0, 1].
     """
     q = _validate_quantile_levels(q)
     particles = _require_dense_particle_history(
@@ -383,11 +536,14 @@ def particle_diversity(
         construction.
 
     Raises:
-        ValueError: The posterior retains only its final particle cloud.
+        ValueError: Consumed posterior arrays are malformed or misaligned,
+            or the posterior retains only its final particle cloud.
     """
-    _require_full_particle_history(
+    _validate_particle_result_axes(
         posterior,
-        diagnostic="particle_diversity",
+        "particle_diversity",
+        ancestors=True,
+        full_history=True,
     )
     eves = _eve_indices(posterior.ancestors)
     num_particles = eves.shape[1]
@@ -430,11 +586,15 @@ def reconstruct_trajectories(
         leaf has shape ``(ntime, num_particles, ...)``.
 
     Raises:
-        ValueError: The posterior retains only its final particle cloud.
+        ValueError: Consumed posterior arrays are malformed or misaligned,
+            or the posterior retains only its final particle cloud.
     """
-    _require_full_particle_history(
+    _validate_particle_result_axes(
         posterior,
-        diagnostic="reconstruct_trajectories",
+        "reconstruct_trajectories",
+        particles=True,
+        ancestors=True,
+        full_history=True,
     )
     ancestors = posterior.ancestors
     num_particles = ancestors.shape[1]
@@ -528,8 +688,9 @@ def log_ml_variance(
         Per-step variance estimates, shape ``(ntime,)``.
 
     Raises:
-        ValueError: The lag is not a nonnegative integer, or the posterior
-            retains only its final particle cloud.
+        ValueError: Consumed posterior arrays are malformed or misaligned,
+            the lag is not a nonnegative integer, or the posterior retains
+            only its final particle cloud.
 
     References:
         Chan, H. P., and Lai, T. L. (2013). A general theory of particle
@@ -548,9 +709,11 @@ def log_ml_variance(
             domain="nonnegative integer",
         )
 
-    _require_full_particle_history(
+    _validate_particle_result_axes(
         posterior,
-        diagnostic="log_ml_variance",
+        "log_ml_variance",
+        ancestors=True,
+        full_history=True,
     )
     ancestors = posterior.ancestors
     ntime, num_particles = ancestors.shape
@@ -665,11 +828,12 @@ def param_weighted_mean(
 
     Returns:
         Weighted parameter means, shape ``(ntime, param_dim)``.
+
+    Raises:
+        ValueError: Consumed posterior arrays are malformed or misaligned.
     """
-    return _weighted_mean_field(
-        posterior.filtered_log_weights,
-        posterior.filtered_params,
-    )
+    params = _require_parameter_history(posterior, "param_weighted_mean")
+    return _weighted_mean_field(posterior.filtered_log_weights, params)
 
 
 def param_weighted_quantile(
@@ -688,15 +852,12 @@ def param_weighted_quantile(
         Weighted quantiles, shape ``(ntime, num_quantiles, param_dim)``.
 
     Raises:
-        ValueError: ``q`` is not a nonempty rank-one floating array, or an
-            eager level lies outside [0, 1].
+        ValueError: Posterior arrays or ``q`` are malformed/misaligned, or an
+            eager quantile lies outside [0, 1].
     """
     q = _validate_quantile_levels(q)
-    return _weighted_quantile_field(
-        posterior.filtered_log_weights,
-        posterior.filtered_params,
-        q,
-    )
+    params = _require_parameter_history(posterior, "param_weighted_quantile")
+    return _weighted_quantile_field(posterior.filtered_log_weights, params, q)
 
 
 # --- Posterior predictive checks -------------------------------------------
@@ -748,7 +909,12 @@ def posterior_predictive_sample(
             minimum=1,
             domain=">= 1 (a positive integer)",
         )
-    ntime, n_particles = posterior.filtered_log_weights.shape
+    axes = _validate_particle_result_axes(
+        posterior,
+        "posterior_predictive_sample",
+        particles=True,
+    )
+    ntime, n_particles = axes
     num_samples = n_particles if num_samples is None else num_samples
 
     def _sample_one_step(
@@ -1010,7 +1176,11 @@ def pareto_k_diagnostic(
     Returns:
         Per-step Pareto-k estimates, shape ``(ntime,)``. Estimates are NaN
         when the posterior contains fewer than two particles.
+
+    Raises:
+        ValueError: The posterior log-weight history is malformed.
     """
+    _validate_log_weight_history(posterior, "pareto_k_diagnostic")
     return vmap(_fit_pareto_k)(posterior.filtered_log_weights)
 
 
@@ -1049,7 +1219,7 @@ def tail_ess(
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
-        ValueError: ``q`` is not finite and in (0, 0.5].
+        ValueError: Malformed/misaligned posterior arrays or invalid ``q``.
     """
     if not isinstance(q, Real):
         raise ValueError(f"q must be finite and in (0, 0.5]; got {q!r}")
@@ -1180,10 +1350,19 @@ def diagnose(
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
-        ValueError: The posterior retains only its final particle cloud.
+        ValueError: Posterior arrays are malformed/misaligned or final-only.
     """
-    _require_full_particle_history(posterior, diagnostic="diagnose")
-    _require_dense_particle_history(posterior, diagnostic="diagnose")
+    _validate_particle_result_axes(
+        posterior,
+        "diagnose",
+        ancestors=True,
+        full_history=True,
+        ess=True,
+    )
+    _require_dense_particle_history(
+        posterior,
+        diagnostic="diagnose",
+    )
     n = posterior.filtered_log_weights.shape[1]
     ess_vals = posterior.ess
     diversity = particle_diversity(posterior)
