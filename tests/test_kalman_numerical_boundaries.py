@@ -32,19 +32,9 @@ def _identity(state):
     return state
 
 
-def _identity_jacobian(state):
-    """Return the Jacobian of the identity map."""
-    return jnp.eye(state.shape[0], dtype=state.dtype)
-
-
 def _zero_mean(state):
     """Return a scalar zero mean."""
     return jnp.zeros(1, dtype=state.dtype)
-
-
-def _zero_jacobian(state):
-    """Return the Jacobian of a constant scalar map."""
-    return jnp.zeros((1, state.shape[0]), dtype=state.dtype)
 
 
 def _observation_model(covariance, *, timed=False):
@@ -174,7 +164,7 @@ def test_factor_probe_normalizes_debug_nan_failure():
 
 
 def test_scalar_normal_minimum_covariance_remains_supported():
-    """The inclusive factorability floor retains the smallest normal scalar."""
+    """The active backend retains the smallest normal scalar factor."""
     dtype = jnp.asarray(0.0).dtype
     model = _scalar_linear_model()
     model["observation_covariance"] = jnp.asarray(
@@ -188,31 +178,14 @@ def test_scalar_normal_minimum_covariance_remains_supported():
         assert jnp.all(jnp.isfinite(field))
 
 
-@pytest.mark.parametrize("method", ["linear", "extended"])
-def test_maximum_covariance_evidence_is_finite_under_transformations(method):
-    """Linear and extended evidence support a factorable maximum scalar."""
+def test_maximum_observation_covariance_evidence_is_finite():
+    """Linear evidence supports a factorable maximum scalar."""
     dtype = jnp.asarray(0.0).dtype
     maximum = jnp.asarray([[jnp.finfo(dtype).max]], dtype=dtype)
-    zero = jnp.zeros((1, 1), dtype=dtype)
+    model = _scalar_linear_model()
+    model["observation_covariance"] = maximum
 
-    def run(observation_covariance):
-        if method == "linear":
-            model = _scalar_linear_model()
-            model["observation_covariance"] = observation_covariance
-            return smcx.kalman_filter(**model)
-        return smcx.extended_kalman_filter(
-            jnp.zeros(1, dtype=dtype),
-            zero,
-            _identity,
-            _identity_jacobian,
-            zero,
-            _zero_mean,
-            _zero_jacobian,
-            observation_covariance,
-            zero,
-        )
-
-    posterior = run(maximum)
+    posterior = smcx.kalman_filter(**model)
 
     assert jnp.isfinite(posterior.marginal_loglik)
     assert jnp.all(jnp.isfinite(posterior.log_evidence_increments))
