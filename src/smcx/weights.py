@@ -56,8 +56,10 @@ def _log_normalize_axis(
     maximum = jnp.max(log_weights, axis=axis, keepdims=True)
     # Preserve the established nonfinite behavior: all -inf rows have an
     # absolute normalizer of -inf, while their normalized values are NaN.
-    shift = jnp.where(jnp.isfinite(maximum), maximum, jnp.zeros_like(maximum))
-    shifted = log_weights - jax.lax.stop_gradient(shift)
+    shift = jax.lax.stop_gradient(
+        jnp.where(jnp.isfinite(maximum), maximum, jnp.zeros_like(maximum))
+    )
+    shifted = log_weights - shift
     shifted_log_normalizer = jax.nn.logsumexp(
         shifted,
         axis=axis,

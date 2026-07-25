@@ -79,6 +79,31 @@ def test_weight_utilities_remain_jit_compatible(weight_utility):
 class TestLogNormalize:
     """Tests for log_normalize."""
 
+    @pytest.mark.parametrize("compiled", [False, True], ids=["eager", "jit"])
+    def test_log_normalizer_gradient_is_softmax(self, compiled):
+        """The restored offset does not alter log-sum-exp gradients."""
+        log_weights = jnp.asarray(
+            [0.0, -2.0, -4.0], dtype=jnp.float32
+        ) + jnp.float32(2**24)
+
+        def normalizer(values):
+            return log_normalize(values)[1]
+
+        gradient = jax.grad(normalizer)
+        if compiled:
+            gradient = jax.jit(gradient)
+
+        actual = gradient(log_weights)
+        expected = jax.nn.softmax(log_weights)
+        # Five f32 eps cover eager and compiled reduction rounding.
+        tolerance = float(5 * np.finfo(np.float32).eps)
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+
     @pytest.mark.parametrize(
         "log_weights",
         [
