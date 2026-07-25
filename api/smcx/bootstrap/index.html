@@ -1449,7 +1449,7 @@ Monte Carlo algorithm.  At each time step it:</p>
 <li><strong>Propagates</strong> particles through the transition prior.</li>
 <li><strong>Weights</strong> particles by the observation likelihood.</li>
 </ol>
-<p>The implementation expresses the full time-loop as one <code>jax.lax.scan</code>.</p>
+<p>MPS uses a sequence of one-step scans; other platforms use one full scan.</p>
 
 
 
@@ -1673,7 +1673,7 @@ observation at t.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>When False, the scan stacks no
+                <p>When False, the filter retains no
 per-step particle/weight/ancestor histories — the returned
 arrays cover only the final step (time axis length 1)
 while <code>ess</code>/<code>log_evidence_increments</code> stay full —

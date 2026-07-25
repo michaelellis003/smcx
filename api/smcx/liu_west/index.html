@@ -1387,7 +1387,7 @@ Parameters are propagated using kernel density smoothing:</p>
 <p>where <span class="arithmatex">\(a\)</span> is the shrinkage parameter, <span class="arithmatex">\(\bar{\phi}\)</span> is the weighted
 parameter mean, <span class="arithmatex">\(V\)</span> is the weighted parameter covariance, and
 <span class="arithmatex">\(h^2 = 1 - a^2\)</span>.</p>
-<p>The implementation expresses the full time-loop as one <code>jax.lax.scan</code>.</p>
+<p>MPS uses a sequence of one-step scans; other platforms use one full scan.</p>
 
 
 <details class="references" open>

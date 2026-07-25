@@ -1391,7 +1391,7 @@ likely to match the next observation <strong>before</strong> propagation.</p>
 </ol>
 <p>When <code>log_auxiliary_fn</code> returns zero for all inputs, the APF
 reduces to the bootstrap filter.</p>
-<p>The implementation expresses the full time-loop as one <code>jax.lax.scan</code>.</p>
+<p>MPS uses a sequence of one-step scans; other platforms use one full scan.</p>
 
 
 
@@ -1638,7 +1638,7 @@ callbacks aligned at the same time step.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>When False, the scan stacks no
+                <p>When False, the filter retains no
 per-step particle/weight/ancestor histories — the returned
 arrays cover only the final step (time axis length 1)
 while <code>ess</code>/<code>log_evidence_increments</code> stay full.</p>

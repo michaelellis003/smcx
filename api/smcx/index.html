@@ -3985,7 +3985,7 @@ callbacks aligned at the same time step.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>When False, the scan stacks no
+                <p>When False, the filter retains no
 per-step particle/weight/ancestor histories — the returned
 arrays cover only the final step (time axis length 1)
 while <code>ess</code>/<code>log_evidence_increments</code> stay full.</p>
@@ -4306,7 +4306,7 @@ observation at t.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>When False, the scan stacks no
+                <p>When False, the filter retains no
 per-step particle/weight/ancestor histories — the returned
 arrays cover only the final step (time axis length 1)
 while <code>ess</code>/<code>log_evidence_increments</code> stay full —
@@ -6184,7 +6184,7 @@ input reaches every guided callback at that time step.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>When False, the scan stacks no
+                <p>When False, the filter retains no
 per-step particle/weight/ancestor histories — the returned
 arrays cover only the final step (time axis length 1)
 while <code>ess</code>/<code>log_evidence_increments</code> stay full.</p>
@@ -8989,10 +8989,7 @@ Rank-one inputs become <code>(T, 1)</code>.</p>
             <td>
               <div class="doc-md-description">
                 <p>If False, retain only the final particle, weight, and
-ancestor record while keeping full ESS and evidence traces.
-On MPS, multi-observation execution uses one eager callback step
-per observation and cannot be wrapped in a JAX transform until
-smcx #38 closes.</p>
+ancestor record while keeping full ESS and evidence traces.</p>
               </div>
             </td>
             <td>
@@ -9051,9 +9048,7 @@ smcx #38 closes.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A callback does not return <code>ParticleFilterRecord</code>.
-On MPS, also raised when a multi-step run is traced by a JAX
-transform.</p>
+                <p>A callback does not return <code>ParticleFilterRecord</code>.</p>
               </div>
             </td>
           </tr>

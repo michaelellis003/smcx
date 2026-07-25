@@ -1767,6 +1767,8 @@ Bootstrap and guided filters supply their carried weights and ESS. Auxiliary
 and Liu–West filters instead supply the normalized first-stage weights and
 their ESS, because those are the quantities governing ancestor selection.
 The numeric default <code>0.5</code> retains the strict rule <code>ESS &lt; 0.5 * N</code>.</p>
+<p>Until issue #38 closes, multi-observation MPS filters use a sequence of
+one-step scans.</p>
 <h2 id="compose-a-particle-filter-kernel">Compose a particle-filter kernel</h2>
 <p>Use <code>smcx.run_particle_filter</code> when a built-in filter does not provide the
 algorithmic pieces you want to combine. The runner accepts these callback
@@ -1799,12 +1801,13 @@ callback preconditions.</p>
 <p>CPU and other backends execute the later steps in one <code>jax.lax.scan</code> and
 support wrapping the runner in JAX transformations. Until
 <a href="https://github.com/michaelellis003/smcx/issues/38">smcx #38</a> closes, MPS
-instead executes one eager callback step per observation to contain an
-upstream Metal history-corruption defect. An outer <code>jax.jit</code>, <code>jax.vmap</code>, or
-gradient transform is unsupported for a multi-observation MPS run because it
-would restage those steps in one multi-step executable. The containment adds
-per-observation dispatch overhead on MPS; other backends retain the compiled
-scan.</p>
+instead uses a sequence of one-step scans to contain an upstream Metal
+history-corruption defect. Traced calls stage both paths and select the
+execution-platform branch during outer <code>jax.jit</code> lowering, so CPU-placed
+compiled inputs retain the full scan even when MPS is the default backend.
+The contained branch remains compatible with <code>jax.vmap</code> and gradients on the
+selected backend. Eager MPS calls add per-observation dispatch overhead;
+other backends retain the compiled scan.</p>
 <p>This always-resampling bootstrap kernel composes only public smcx operations
 with the <code>initial</code>, <code>transition</code>, and <code>log_observation</code> callbacks defined
 above:</p>
