@@ -7,9 +7,9 @@ Every kernel takes ``(key, weights, num_samples)`` — probability-space
 weights, any positive scale — and returns ``int32`` ancestor indices in
 ``[0, num_particles)``. Systematic, stratified, and multinomial outputs
 are nondecreasing; residual returns its deterministic block followed by
-iid remainder draws. Eager calls require finite, nonnegative weights with
-positive total mass. Data-dependent validation is skipped under JAX
-transformations, where Python exceptions cannot be staged. Query grids are
+iid remainder draws. Calls with concrete weights require finite, nonnegative
+values with positive total mass. Data-dependent validation is skipped for
+traced values, where Python exceptions cannot be staged. Query grids are
 clamped strictly below 1 so a grid point that rounds to 1.0 in float32 cannot
 select past the final positive-weight slot. This endpoint guard is inherited
 from smcx's former MLX implementation.
@@ -112,7 +112,7 @@ def systematic(
 
     Raises:
         ValueError: The weights or sample count are invalid. Data-dependent
-            weight checks run only in eager execution.
+            weight checks run while their values remain concrete.
     """
     _validate_inputs(weights, num_samples)
     u0 = jax.random.uniform(key)
@@ -139,7 +139,7 @@ def stratified(
 
     Raises:
         ValueError: The weights or sample count are invalid. Data-dependent
-            weight checks run only in eager execution.
+            weight checks run while their values remain concrete.
     """
     _validate_inputs(weights, num_samples)
     v = jax.random.uniform(key, (num_samples,))
@@ -173,7 +173,7 @@ def multinomial(
 
     Raises:
         ValueError: The weights or sample count are invalid. Data-dependent
-            weight checks run only in eager execution.
+            weight checks run while their values remain concrete.
     """
     _validate_inputs(weights, num_samples)
     e = -jnp.log1p(-jax.random.uniform(key, (num_samples + 1,)))
@@ -211,7 +211,7 @@ def residual(
 
     Raises:
         ValueError: The weights or sample count are invalid. Data-dependent
-            weight checks run only in eager execution.
+            weight checks run while their values remain concrete.
 
     References:
         Douc, R., Cappe, O., and Moulines, E. (2005). Comparison of
