@@ -89,6 +89,25 @@ def _make_posterior():
     )
 
 
+def _make_zero_weight_outlier_posterior(
+    values: list[float],
+) -> ParticleFilterPosterior:
+    """Return one weighted pair preceded by a represented-zero outlier."""
+    return _make_posterior()._replace(
+        filtered_particles=jnp.asarray(
+            values,
+            dtype=jnp.float32,
+        )[None, :, None],
+        filtered_log_weights=jnp.array(
+            [[-jnp.inf, jnp.log(0.5), jnp.log(0.5)]],
+            dtype=jnp.float32,
+        ),
+        ancestors=jnp.array([[0, 1, 2]], dtype=jnp.int32),
+        ess=jnp.array([2.0]),
+        log_evidence_increments=jnp.array([0.0]),
+    )
+
+
 def _neumaier_prefix_oracle(values: np.ndarray) -> np.ndarray:
     """Return sequential f32 Neumaier prefixes from NumPy scalars."""
     values = np.asarray(values)
@@ -271,23 +290,36 @@ class TestWeightedVariance:
         result = weighted_variance(_make_posterior())
         assert jnp.array_equal(result, jnp.full((3, 1), 341.0))
 
-    def test_zero_weight_outlier_cannot_anchor_weighted_moments(self):
-        """A material-weight particle defines the centered coordinates."""
-        posterior = _make_posterior()._replace(
-            filtered_particles=jnp.array(
-                [[[1e10], [0.0], [1.0]]], dtype=jnp.float32
-            ),
-            filtered_log_weights=jnp.array(
-                [[-jnp.inf, jnp.log(0.5), jnp.log(0.5)]],
-                dtype=jnp.float32,
-            ),
-            ancestors=jnp.array([[0, 1, 2]], dtype=jnp.int32),
-            ess=jnp.array([2.0]),
-            log_evidence_increments=jnp.array([0.0]),
-        )
+    @pytest.mark.parametrize(
+        ("values", "expected_mean", "expected_variance"),
+        [
+            ([1e20, 0.0, 1.0], 0.5, 0.25),
+            ([3e38, -3e38, -3e38], -3e38, 0.0),
+        ],
+        ids=["square-overflow", "subtraction-overflow"],
+    )
+    def test_zero_weight_extreme_cannot_poison_weighted_moments(
+        self,
+        values,
+        expected_mean,
+        expected_variance,
+    ):
+        """Represented-zero values are masked before centered arithmetic."""
+        posterior = _make_zero_weight_outlier_posterior(values)
 
-        np.testing.assert_array_equal(weighted_mean(posterior), [[0.5]])
-        np.testing.assert_array_equal(weighted_variance(posterior), [[0.25]])
+        mean = weighted_mean(posterior)
+        variance = weighted_variance(posterior)
+
+        assert jnp.all(jnp.isfinite(mean))
+        assert jnp.all(jnp.isfinite(variance))
+        np.testing.assert_array_equal(
+            mean,
+            jnp.asarray([[expected_mean]], dtype=jnp.float32),
+        )
+        np.testing.assert_array_equal(
+            variance,
+            jnp.asarray([[expected_variance]], dtype=jnp.float32),
+        )
 
     def test_large_translation_preserves_represented_central_moment(self):
         posterior = _make_large_offset_posterior()
@@ -472,6 +504,23 @@ class TestParamWeightedMean:
             jax.jit(param_weighted_mean)(liu_west),
         ):
             _assert_translation_stable_means(np.asarray(actual), expected)
+
+    def test_zero_weight_extreme_is_masked_before_parameter_mean(self):
+        from smcx.diagnostics import param_weighted_mean
+
+        posterior = _make_zero_weight_outlier_posterior([3e38, -3e38, -3e38])
+        liu_west = LiuWestPosterior(
+            *posterior,
+            filtered_params=posterior.filtered_particles,
+        )
+
+        actual = param_weighted_mean(liu_west)
+
+        assert jnp.all(jnp.isfinite(actual))
+        np.testing.assert_array_equal(
+            actual,
+            jnp.asarray([[-3e38]], dtype=jnp.float32),
+        )
 
     def test_smc2_parameter_summaries(self):
         from smcx.diagnostics import (

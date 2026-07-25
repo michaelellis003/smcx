@@ -384,7 +384,12 @@ def _weighted_mean_field(
     weights = _normalized_linear_weights(log_weights)
     anchor_indices = jnp.argmax(log_weights, axis=1)
     anchors = field[jnp.arange(field.shape[0]), anchor_indices]
-    offsets = field - anchors[:, None, :]
+    material = weights[:, :, None] > 0.0
+    offsets = jnp.where(
+        material,
+        field - anchors[:, None, :],
+        jnp.zeros_like(field),
+    )
     return anchors + jnp.sum(weights[:, :, None] * offsets, axis=1)
 
 
@@ -396,9 +401,18 @@ def _weighted_variance_field(
     weights = _normalized_linear_weights(log_weights)
     anchor_indices = jnp.argmax(log_weights, axis=1)
     anchors = field[jnp.arange(field.shape[0]), anchor_indices]
-    offsets = field - anchors[:, None, :]
+    material = weights[:, :, None] > 0.0
+    offsets = jnp.where(
+        material,
+        field - anchors[:, None, :],
+        jnp.zeros_like(field),
+    )
     offset_means = jnp.sum(weights[:, :, None] * offsets, axis=1)
-    deviations = offsets - offset_means[:, None, :]
+    deviations = jnp.where(
+        material,
+        offsets - offset_means[:, None, :],
+        jnp.zeros_like(offsets),
+    )
     return jnp.sum(weights[:, :, None] * deviations**2, axis=1)
 
 
@@ -436,8 +450,10 @@ def weighted_mean(
 ) -> Float[Array, "ntime state_dim"]:
     r"""Compute the weighted mean of particles at each time step.
 
-    The reduction is shifted by one particle before summation, so common
-    translations do not amplify floating-point weight-normalization error.
+    The reduction is shifted by a maximum-weight particle before summation,
+    so common translations do not amplify floating-point
+    weight-normalization error. Particles with represented-zero linear
+    weight are masked before centered arithmetic.
 
     Args:
         posterior: Particle filter posterior output.
@@ -468,7 +484,9 @@ def weighted_variance(
     Uses the formula $V = \sum_i w_i (x_i - \mu)^2$, where $\mu$ is the
     weighted mean. Both $\mu$ and the deviations are computed in coordinates
     shifted by one particle, avoiding reconstruction of the rounded absolute
-    mean inside the central-moment calculation.
+    mean inside the central-moment calculation. Particles with
+    represented-zero linear weight are masked before subtraction and
+    squaring.
 
     Args:
         posterior: Particle filter posterior output.
@@ -872,7 +890,8 @@ def param_weighted_mean(
 ) -> Float[Array, "ntime param_dim"]:
     r"""Compute the weighted mean of parameter particles at each step.
 
-    Uses the same anchor-centered reduction as `weighted_mean`.
+    Uses the same represented-zero-safe, anchor-centered reduction as
+    `weighted_mean`.
 
     Args:
         posterior: Liu-West or SMC² posterior output.
