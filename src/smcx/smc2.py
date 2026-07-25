@@ -52,24 +52,77 @@ from smcx.types import (
     ResamplingFn,
     StaticLogDensity,
 )
+from smcx.weights import _log_normalize_axis_parts, _LogExpansion
 from smcx.weights import ess as compute_ess
 
 _RWM_SCALE = 2.38
 
 
-def _lse_rows(x: Array) -> Array:
-    """Max-shifted log-sum-exp along axis 1; all -inf -> -inf, not NaN."""
-    m = jnp.max(x, axis=1, keepdims=True)
-    m_safe = jnp.where(jnp.isinf(m), 0.0, m)
-    return (
-        m_safe + jnp.log(jnp.sum(jnp.exp(x - m_safe), axis=1, keepdims=True))
-    ).squeeze(1)
+def _normalize_rows(log_w: Array) -> tuple[Array, _LogExpansion]:
+    """Row-normalize while retaining each absolute shift separately."""
+    return _log_normalize_axis_parts(log_w, axis=1)
 
 
-def _normalize_rows(log_w: Array) -> tuple[Array, Array]:
-    """Row-wise log-normalize; returns (normalized, per-row LSE)."""
-    lse = _lse_rows(log_w)
-    return log_w - lse[:, None], lse
+def _add_log_expansion(
+    total: _LogExpansion,
+    value: _LogExpansion,
+) -> _LogExpansion:
+    """Add a shifted log value without resolving its small component."""
+    shift, correction = _neumaier_add(*total, value.shift)
+    return _LogExpansion(*_neumaier_add(shift, correction, value.correction))
+
+
+def _normalize_outer(
+    log_w: Array,
+    log_likelihood: _LogExpansion,
+) -> tuple[Array, _LogExpansion]:
+    """Normalize outer weights without resolving large row normalizers."""
+    zero = jnp.zeros_like(log_w)
+    combined = _add_log_expansion(
+        _LogExpansion(log_w, zero),
+        log_likelihood,
+    )
+    finite_terms = (
+        jnp.isfinite(log_w)
+        & jnp.isfinite(log_likelihood.shift)
+        & jnp.isfinite(log_likelihood.correction)
+    )
+    ordinary_sum = log_w + log_likelihood.shift + log_likelihood.correction
+    combined = _LogExpansion(
+        jnp.where(finite_terms, combined.shift, zero),
+        jnp.where(finite_terms, combined.correction, ordinary_sum),
+    )
+    finite_high = jnp.where(
+        jnp.isfinite(combined.correction),
+        combined.shift,
+        -jnp.inf,
+    )
+    maximum = jnp.max(finite_high)
+    common_shift = jax.lax.stop_gradient(
+        jnp.where(jnp.isfinite(maximum), maximum, jnp.zeros_like(maximum))
+    )
+    centered = _LogExpansion(*_neumaier_add(*combined, -common_shift))
+    centered_log_normalizer = jax.nn.logsumexp(centered.resolve())
+    normalized = _LogExpansion(
+        *_neumaier_add(*centered, -centered_log_normalizer)
+    )
+    return normalized.resolve(), _LogExpansion(
+        shift=common_shift,
+        correction=centered_log_normalizer,
+    )
+
+
+def _compensated_log_ratio(
+    prior_difference: Array,
+    log_z_difference: Array,
+    log_z_correction_difference: Array,
+) -> Array:
+    """Resolve a PMMH ratio after compensated component cancellation."""
+    ratio = _add_log_expansion(
+        _LogExpansion(prior_difference, jnp.zeros_like(prior_difference)),
+        _LogExpansion(log_z_difference, log_z_correction_difference),
+    )
+    return ratio.resolve()
 
 
 def _batched_inner_resample(
@@ -209,7 +262,7 @@ def smc2(
     ) -> tuple[
         Float[Array, "num_theta num_x state_dim"],
         Float[Array, "num_theta num_x"],
-        Float[Array, " num_theta"],
+        _LogExpansion,
     ]:
         k_init = jr.split(k0, num_theta)
         inner = vmap(lambda k, p: initial_sampler(k, num_x, p))(k_init, th)
@@ -241,8 +294,12 @@ def smc2(
             name="log_observation_fn",
         )
         log_g = flat_log_g.reshape(num_theta, num_x)
-        inner_log_w, log_g_lse = _normalize_rows(log_g)
-        return inner, inner_log_w, log_g_lse - log_n_x
+        inner_log_w, log_g = _normalize_rows(log_g)
+        log_ell = _LogExpansion(
+            log_g.shift,
+            log_g.correction - log_n_x,
+        )
+        return inner, inner_log_w, log_ell
 
     @jit
     def inner_step(
@@ -255,7 +312,7 @@ def smc2(
     ) -> tuple[
         Float[Array, "num_theta num_x state_dim"],
         Float[Array, "num_theta num_x"],
-        Float[Array, " num_theta"],
+        _LogExpansion,
     ]:
         idx = _batched_inner_resample(kr, jnp.exp(inner_log_w), num_x)
         parents = jnp.take_along_axis(inner, idx[:, :, None], axis=1)
@@ -291,21 +348,24 @@ def smc2(
             name="log_observation_fn",
         )
         log_g = flat_log_g.reshape(num_theta, num_x)
-        inner_log_w, log_g_lse = _normalize_rows(log_g)
-        return moved, inner_log_w, log_g_lse - log_n_x
+        inner_log_w, log_g = _normalize_rows(log_g)
+        log_ell = _LogExpansion(
+            log_g.shift,
+            log_g.correction - log_n_x,
+        )
+        return moved, inner_log_w, log_ell
 
     def inner_forward(fwd_key, th, upto):
-        """Fresh inner filter over emissions[0:upto]; resolved logZ."""
+        """Fresh inner filter with compensated logZ over emissions[:upto]."""
         keys = jr.split(fwd_key, max(upto, 1))
-        inner, inner_log_w, log_ell = inner_init(keys[0], th, emissions[0])
-        lz, lz_c = log_ell, jnp.zeros_like(log_ell)
+        inner, inner_log_w, log_z = inner_init(keys[0], th, emissions[0])
         for tp in range(1, upto):
             kr, kt = jr.split(keys[tp])
             inner, inner_log_w, log_ell = inner_step(
                 kr, kt, inner, inner_log_w, th, emissions[tp]
             )
-            lz, lz_c = _neumaier_add(lz, lz_c, log_ell)
-        return inner, inner_log_w, lz + lz_c
+            log_z = _add_log_expansion(log_z, log_ell)
+        return inner, inner_log_w, log_z
 
     def rejuvenate(rkey, t, th, log_omega, inner, inner_log_w, log_z):
         k_res, k_move = jr.split(rkey)
@@ -317,7 +377,10 @@ def smc2(
         th = th[idx]
         inner = inner[idx]
         inner_log_w = inner_log_w[idx]
-        log_z = log_z[idx]
+        log_z = _LogExpansion(
+            shift=log_z.shift[idx],
+            correction=log_z.correction[idx],
+        )
         logprior = batch_prior(th)
         acc_sum = jnp.zeros(())
         for _ in range(num_pmmh_steps):
@@ -328,12 +391,23 @@ def smc2(
             inner_s, inner_log_w_s, log_z_s = inner_forward(
                 k_run, th_star, t + 1
             )
-            log_alpha = (logprior_star + log_z_s) - (logprior + log_z)
+            log_alpha = _compensated_log_ratio(
+                logprior_star - logprior,
+                log_z_s.shift - log_z.shift,
+                log_z_s.correction - log_z.correction,
+            )
             u = jr.uniform(k_u, (num_theta,))
             accept = jnp.log(jnp.maximum(u, _TINY)) < log_alpha
             th = jnp.where(accept[:, None], th_star, th)
             logprior = jnp.where(accept, logprior_star, logprior)
-            log_z = jnp.where(accept, log_z_s, log_z)
+            log_z = _LogExpansion(
+                shift=jnp.where(accept, log_z_s.shift, log_z.shift),
+                correction=jnp.where(
+                    accept,
+                    log_z_s.correction,
+                    log_z.correction,
+                ),
+            )
             inner = jnp.where(accept[:, None, None], inner_s, inner)
             inner_log_w = jnp.where(accept[:, None], inner_log_w_s, inner_log_w)
             acc_sum = acc_sum + jnp.mean(accept.astype(jnp.float32))
@@ -355,27 +429,29 @@ def smc2(
     step_keys = jr.split(k_loop, max(n_time, 1))
     k_init0, k_rej0 = jr.split(step_keys[0], 2)
     inner, inner_log_w, log_ell = inner_init(k_init0, theta, emissions[0])
-    log_omega, inc0 = _normalize_rows((-log_n_theta + log_ell)[None, :])
-    log_omega = log_omega.squeeze(0)
-    m_tot, m_comp = inc0.squeeze(0), jnp.zeros(())
-    lz_tot, lz_comp = log_ell, jnp.zeros_like(log_ell)
+    log_omega, inc = _normalize_outer(
+        jnp.full_like(log_ell.shift, -log_n_theta),
+        log_ell,
+    )
+    marginal_loglik = inc
+    log_z = log_ell
+    inc_value = inc.resolve()
 
-    _check(0, m_tot)
+    _check(0, inc_value)
     threshold = ess_threshold * num_theta
 
     # Rejuvenate at t=0 too (a collapsed initial cloud must be
     # refreshed before more data arrives).
     rate0 = jnp.zeros(())
     if threshold > 0.0 and float(compute_ess(log_omega)) < threshold:
-        theta, log_omega, inner, inner_log_w, lz_res, rate0 = rejuvenate(
-            k_rej0, 0, theta, log_omega, inner, inner_log_w, lz_tot + lz_comp
+        theta, log_omega, inner, inner_log_w, log_z, rate0 = rejuvenate(
+            k_rej0, 0, theta, log_omega, inner, inner_log_w, log_z
         )
-        lz_tot, lz_comp = lz_res, jnp.zeros_like(lz_res)
 
     params_hist = [theta]
     omega_hist = [log_omega]
     ess_hist = [jnp.asarray(compute_ess(log_omega))]
-    inc_hist = [m_tot]
+    inc_hist = [inc_value]
     accept_hist = [rate0]
 
     # --- t >= 1: advance every inner filter one datum -----------------
@@ -385,41 +461,31 @@ def smc2(
         inner, inner_log_w, log_ell = inner_step(
             kr, kt, inner, inner_log_w, theta, emissions[t]
         )
-        log_omega, inc = _normalize_rows((log_omega + log_ell)[None, :])
-        log_omega = log_omega.squeeze(0)
-        inc = inc.squeeze(0)
-        m_tot, m_comp = _neumaier_add(m_tot, m_comp, inc)
-        lz_tot, lz_comp = _neumaier_add(lz_tot, lz_comp, log_ell)
+        log_omega, inc = _normalize_outer(log_omega, log_ell)
+        inc_value = inc.resolve()
+        marginal_loglik = _add_log_expansion(marginal_loglik, inc)
+        log_z = _add_log_expansion(log_z, log_ell)
 
         rate = jnp.zeros(())
         if threshold > 0.0 and float(compute_ess(log_omega)) < threshold:
-            theta, log_omega, inner, inner_log_w, lz_resolved, rate = (
-                rejuvenate(
-                    k_rej,
-                    t,
-                    theta,
-                    log_omega,
-                    inner,
-                    inner_log_w,
-                    lz_tot + lz_comp,
-                )
+            theta, log_omega, inner, inner_log_w, log_z, rate = rejuvenate(
+                k_rej, t, theta, log_omega, inner, inner_log_w, log_z
             )
-            lz_tot, lz_comp = lz_resolved, jnp.zeros_like(lz_resolved)
 
         if store_history:
             params_hist.append(theta)
             omega_hist.append(log_omega)
         ess_hist.append(jnp.asarray(compute_ess(log_omega)))
-        inc_hist.append(inc)
+        inc_hist.append(inc_value)
         accept_hist.append(rate)
-        _check(t, inc)
+        _check(t, inc_value)
 
     if not store_history:
         params_hist = [theta]
         omega_hist = [log_omega]
 
     return SMC2Posterior(
-        marginal_loglik=m_tot + m_comp,
+        marginal_loglik=marginal_loglik.resolve(),
         filtered_params=jnp.stack(params_hist),
         filtered_log_weights=jnp.stack(omega_hist),
         ess=jnp.stack(ess_hist),
