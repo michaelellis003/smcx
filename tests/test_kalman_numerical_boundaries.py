@@ -12,9 +12,9 @@ import smcx
 import smcx.kalman as kalman_module
 
 
-def _scalar_linear_model() -> dict[str, jax.Array]:
+def _scalar_linear_model(dtype=None) -> dict[str, jax.Array]:
     """Return a deterministic scalar model in the test-platform dtype."""
-    dtype = jnp.asarray(0.0).dtype
+    dtype = jnp.asarray(0.0).dtype if dtype is None else dtype
     zero = jnp.zeros((1, 1), dtype=dtype)
     return {
         "initial_mean": jnp.zeros(1, dtype=dtype),
@@ -41,7 +41,7 @@ def _observation_model(covariance, *, timed=False):
     """Return a zero-state model exposing one observation factor path."""
     observation_dim = covariance.shape[-1]
     dtype = covariance.dtype
-    model = _scalar_linear_model()
+    model = _scalar_linear_model(dtype)
     model["observation_matrix"] = jnp.zeros((observation_dim, 1), dtype=dtype)
     model["observation_covariance"] = (
         jnp.stack((jnp.eye(observation_dim, dtype=dtype), covariance))
@@ -64,9 +64,9 @@ def _backend_factorable(covariance):
     return bool(np.all(np.isfinite(factor)) and np.all(diagonal > 0.0))
 
 
-def _hilbert_correlation(dtype):
+def _hilbert_correlation(dtype, dimension=None):
     """Return a represented SPD matrix near the backend factor boundary."""
-    dimension = 13 if dtype == jnp.dtype(jnp.float64) else 8
+    dimension = dimension or (13 if dtype == jnp.dtype(jnp.float64) else 8)
     index = np.arange(dimension, dtype=np.float64)
     hilbert = 1.0 / (index[:, None] + index[None, :] + 1.0)
     scale = np.sqrt(np.diag(hilbert))
@@ -82,10 +82,7 @@ def test_concrete_covariance_rejects_nonzero_subnormal():
         np.asarray(1.0, dtype=host_dtype),
     )
     model = _scalar_linear_model()
-    model["initial_covariance"] = jnp.asarray(
-        [[subnormal]],
-        dtype=dtype,
-    )
+    model["initial_covariance"] = jnp.asarray([[subnormal]], dtype=dtype)
 
     with pytest.raises(
         ValueError,
@@ -136,15 +133,17 @@ def test_factorized_covariance_accepts_backend_factorable_roundoff():
     assert all(jnp.all(jnp.isfinite(field)) for field in posterior)
 
 
-def test_factorized_covariance_rejects_negative_backend_diagonal():
+@pytest.mark.parametrize("timed", [False, True])
+def test_factorized_covariance_rejects_negative_backend_diagonal(timed):
     """A finite but nonpositive backend factor is not positive definite."""
-    covariance = jnp.asarray([[1.0, 2.0], [2.0, 1.0]])
-
-    with pytest.raises(
-        ValueError,
-        match="observation_covariance must be positive definite",
-    ):
-        smcx.kalman_filter(**_observation_model(covariance))
+    covariance = _hilbert_correlation(jnp.float32, dimension=10)
+    factor = np.asarray(jnp.linalg.cholesky(covariance, symmetrize_input=False))
+    diagonal = np.diagonal(factor)
+    assert not _backend_factorable(covariance)
+    if jax.default_backend() == "mps":
+        assert np.all(np.isfinite(factor)) and np.any(diagonal <= 0.0)
+    with pytest.raises(ValueError, match="must be positive definite"):
+        smcx.kalman_filter(**_observation_model(covariance, timed=timed))
 
 
 def test_factor_probe_normalizes_debug_nan_failure():
