@@ -26,7 +26,10 @@ import jax.random as jr
 from jax import core, device_put, lax, tree, vmap
 from jaxtyping import Array, Float, Int, Shaped
 
-from smcx._numerics import _neumaier_add
+from smcx._numerics import (
+    _neumaier_add,
+    _validate_minimum_float_precision,
+)
 from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
@@ -66,8 +69,17 @@ from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
 
 
+def _checkpoint_tolerance(dtype: object, num_particles: int) -> float:
+    """Return a reduction-depth-scaled checkpoint comparison budget."""
+    reduction_depth = max(1, math.ceil(math.log2(num_particles)))
+    # Normalization and ESS use up to two logaddexp reductions plus scalar
+    # arithmetic. Thirty-two dtype eps per reduction level covers the
+    # observed CPU/Metal f32 rounding without admitting an O(1) shift.
+    return 32.0 * float(jnp.finfo(dtype).eps) * reduction_depth
+
+
 def _validate_checkpoint(checkpoint: BootstrapCheckpoint) -> _TreeSignature:
-    """Validate the structural checkpoint invariants at the host shell."""
+    """Validate structural and concrete semantic checkpoint invariants."""
     state = checkpoint.state
     log_weights = jnp.asarray(state.log_weights)
     if log_weights.ndim != 1:
@@ -77,9 +89,14 @@ def _validate_checkpoint(checkpoint: BootstrapCheckpoint) -> _TreeSignature:
         raise ValueError("checkpoint must contain at least one particle")
     if not jnp.issubdtype(log_weights.dtype, jnp.floating):
         raise ValueError("checkpoint log_weights must be floating")
+    _validate_minimum_float_precision(
+        log_weights,
+        name="checkpoint log_weights",
+    )
     signature = _validate_particle_cloud(
         state.particles, num_particles, name="checkpoint particles"
     )
+    scalar_values: dict[str, Array] = {}
     for name, value in (
         ("log_marginal_likelihood", state.log_marginal_likelihood),
         ("ess", checkpoint.ess),
@@ -90,9 +107,52 @@ def _validate_checkpoint(checkpoint: BootstrapCheckpoint) -> _TreeSignature:
             raise ValueError(f"checkpoint {name} must be scalar")
         if not jnp.issubdtype(value.dtype, jnp.floating):
             raise ValueError(f"checkpoint {name} must be floating")
-    ess_value = float(jnp.asarray(checkpoint.ess))
+        _validate_minimum_float_precision(
+            value,
+            name=f"checkpoint {name}",
+        )
+        scalar_values[name] = value
+
+    # Value checks belong to concrete public shells. A transformed
+    # bootstrap_step retains the same traceable behavior as the pure step;
+    # malformed values then propagate instead of raising during tracing.
+    if isinstance(log_weights, core.Tracer) or any(
+        isinstance(value, core.Tracer) for value in scalar_values.values()
+    ):
+        return signature
+
+    _, log_total = log_normalize(log_weights)
+    expected_ess = compute_ess(log_weights)
+    evidence_total = (
+        scalar_values["log_marginal_likelihood"]
+        + scalar_values["log_evidence_compensation"]
+    )
+    # Arrays closed over by a transformed function are concrete at entry,
+    # but their first value operation is traced.
+    if any(
+        isinstance(value, core.Tracer)
+        for value in (log_total, expected_ess, evidence_total)
+    ):
+        return signature
+
+    ess_value = float(scalar_values["ess"])
     if not math.isfinite(ess_value) or ess_value < 0:
         raise ValueError("checkpoint ess must be finite and nonnegative")
+    tolerance = _checkpoint_tolerance(log_weights.dtype, num_particles)
+    log_total_value = float(log_total)
+    if not math.isfinite(log_total_value) or abs(log_total_value) > tolerance:
+        raise ValueError(
+            "checkpoint log_weights must be normalized (logsumexp = 0)"
+        )
+    expected_ess_value = float(expected_ess)
+    if not math.isclose(
+        ess_value,
+        expected_ess_value,
+        rel_tol=tolerance,
+        abs_tol=tolerance,
+    ):
+        raise ValueError("checkpoint ess must match checkpoint log_weights")
+    _raise_if_degenerate(evidence_total)
     return signature
 
 
@@ -279,7 +339,9 @@ def bootstrap_step(
 
     Args:
         step_key: Explicit key for resampling and propagation.
-        checkpoint: State returned by initialization or a prior step.
+        checkpoint: State returned by initialization or a prior step. Its
+            log weights must be normalized and its stored ESS must agree
+            with them.
         transition_sampler: Transition callback, optionally input-aware.
         log_observation_fn: Observation log-density callback returning a
             scalar with at least float32 precision.
@@ -293,7 +355,13 @@ def bootstrap_step(
 
     Raises:
         ValueError: The checkpoint or propagated state is malformed.
-        DegenerateWeightsError: Updated importance weights cannot normalize.
+        DegenerateWeightsError: Checkpoint evidence is nonfinite or updated
+            importance weights cannot normalize.
+
+    Note:
+        Concrete calls validate the checkpoint's weight normalization, ESS,
+        and evidence state. Under a JAX transform, those data-dependent
+        checks are skipped and malformed values propagate into the result.
     """
     state_signature = _validate_checkpoint(checkpoint)
 
@@ -339,6 +407,8 @@ def bootstrap_update(
     Args:
         step_keys: One explicit PRNG key per chunk observation.
         checkpoint: State returned by initialization or an earlier update.
+            Its log weights must be normalized and its stored ESS must agree
+            with them.
         transition_sampler: Transition callback, optionally input-aware.
         log_observation_fn: Observation log-density callback returning a
             scalar with at least float32 precision.
@@ -356,7 +426,8 @@ def bootstrap_update(
         TypeError: The host shell is called with traced checkpoint arrays.
         ValueError: The checkpoint, chunk, keys, inputs, or transition output
             is malformed.
-        DegenerateWeightsError: Cumulative importance weights cannot normalize.
+        DegenerateWeightsError: Checkpoint evidence is nonfinite or cumulative
+            importance weights cannot normalize.
     """
     num_steps = emissions_chunk.shape[0]
     if num_steps == 0:

@@ -38,6 +38,14 @@ def _checkpoint():
     )[0]
 
 
+def _replace_checkpoint_field(checkpoint, field, value):
+    if field in checkpoint.state._fields:
+        return checkpoint._replace(
+            state=checkpoint.state._replace(**{field: value})
+        )
+    return checkpoint._replace(**{field: value})
+
+
 def _advance(key, checkpoint, emission=EMISSIONS[1], **kwargs):
     observation = kwargs.pop("observation", _log_observation)
     return smcx.bootstrap_step(
@@ -159,6 +167,154 @@ def test_init_rejects_nonpositive_particle_count_before_callbacks(
         )
 
 
+def test_checkpoint_semantics_accept_valid_round_trip():
+    """A library-produced checkpoint remains valid for later public calls."""
+    checkpoint = _checkpoint()
+    advanced, _ = _advance(jr.key(67), checkpoint)
+    _validate_checkpoint(advanced)
+    actual, actual_info = _advance(jr.key(68), advanced, EMISSIONS[2])
+    expected, expected_posterior = smcx.bootstrap_update(
+        jr.key(68)[None],
+        advanced,
+        _transition,
+        _log_observation,
+        EMISSIONS[2:3],
+    )
+    _assert_tree_equal(actual, expected)
+    _assert_tree_equal(
+        (
+            actual_info.ancestors,
+            actual_info.ess,
+            actual_info.log_evidence_increment,
+        ),
+        (
+            expected_posterior.ancestors[0],
+            expected_posterior.ess[0],
+            expected_posterior.log_evidence_increments[0],
+        ),
+    )
+
+
+@pytest.mark.parametrize("transformed", [False, True], ids=["eager", "jit"])
+@pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "log_weights",
+        "log_marginal_likelihood",
+        "ess",
+        "log_evidence_compensation",
+    ],
+)
+def test_checkpoint_rejects_low_precision_numerical_fields(
+    field, dtype, transformed
+):
+    """Checkpoint precision is a structural invariant, including under JIT."""
+    checkpoint = _checkpoint()
+    source = (
+        getattr(checkpoint.state, field)
+        if field in checkpoint.state._fields
+        else getattr(checkpoint, field)
+    )
+    checkpoint = _replace_checkpoint_field(
+        checkpoint, field, source.astype(dtype)
+    )
+    message = rf"checkpoint {field} must have at least float32 precision"
+    with pytest.raises(ValueError, match=message):
+        if transformed:
+            jax.jit(lambda current: _advance(jr.key(69), current))(checkpoint)
+        else:
+            _advance(jr.key(69), checkpoint)
+
+
+@pytest.mark.parametrize("shell", ["step", "update"])
+def test_checkpoint_rejects_shifted_log_weights(shell):
+    """A distribution-preserving shift cannot alter resumed evidence."""
+    checkpoint = _checkpoint()
+    shifted = checkpoint.state._replace(
+        log_weights=checkpoint.state.log_weights + 5.0
+    )
+    checkpoint = checkpoint._replace(state=shifted)
+    with pytest.raises(ValueError, match="must be normalized"):
+        if shell == "step":
+            _advance(jr.key(3), checkpoint)
+        else:
+            _update(jr.key(3)[None], checkpoint, EMISSIONS[1:2])
+
+
+@pytest.mark.parametrize("shell", ["step", "update"])
+def test_checkpoint_rejects_stale_ess(shell):
+    """Stored ESS must agree with the checkpoint's normalized weights."""
+    checkpoint = _checkpoint()._replace(ess=jnp.array(1.0))
+    with pytest.raises(ValueError, match="must match checkpoint log_weights"):
+        if shell == "step":
+            _advance(jr.key(3), checkpoint)
+        else:
+            _update(jr.key(3)[None], checkpoint, EMISSIONS[1:2])
+
+
+def test_step_skips_semantic_checkpoint_checks_when_traced():
+    """Traced steps retain JIT support; eager shells own value validation."""
+
+    @jax.jit
+    def compiled(key, checkpoint, emission):
+        return _advance(key, checkpoint, emission)
+
+    checkpoint = _checkpoint()
+    actual_checkpoint, actual_info = compiled(
+        jr.key(73), checkpoint, EMISSIONS[1]
+    )
+    expected = _advance(jr.key(73), checkpoint, EMISSIONS[1])
+    # Fixed keys remove MC error; five f32 eps covers compiler rounding.
+    tolerance = float(5 * np.finfo(np.float32).eps)
+    assert_close = partial(
+        np.testing.assert_allclose, rtol=tolerance, atol=tolerance
+    )
+    jax.tree.map(assert_close, (actual_checkpoint, actual_info), expected)
+
+    shifted = _replace_checkpoint_field(
+        checkpoint,
+        "log_weights",
+        checkpoint.state.log_weights + 5.0,
+    )
+    shifted_checkpoint, shifted_info = compiled(
+        jr.key(73), shifted, EMISSIONS[1]
+    )
+    assert float(
+        shifted_info.log_evidence_increment - actual_info.log_evidence_increment
+    ) == pytest.approx(5.0)
+    assert float(
+        shifted_checkpoint.state.log_marginal_likelihood
+        - actual_checkpoint.state.log_marginal_likelihood
+    ) == pytest.approx(5.0)
+
+    stale = _replace_checkpoint_field(
+        checkpoint,
+        "ess",
+        jnp.asarray(1.0, dtype=checkpoint.ess.dtype),
+    )
+    _, stale_info = compiled(jr.key(73), stale, EMISSIONS[1])
+    assert not bool(actual_info.resampled)
+    assert bool(stale_info.resampled)
+
+
+def test_step_accepts_valid_checkpoint_closed_over_by_jit():
+    """Derived checkpoint values may become tracers under a closure."""
+    checkpoint = _checkpoint()
+
+    @jax.jit
+    def compiled(key, emission):
+        return _advance(key, checkpoint, emission)
+
+    actual = compiled(jr.key(74), EMISSIONS[1])
+    expected = _advance(jr.key(74), checkpoint, EMISSIONS[1])
+    tolerance = float(5 * np.finfo(np.float32).eps)
+    assert_close = partial(
+        np.testing.assert_allclose, rtol=tolerance, atol=tolerance
+    )
+    jax.tree.map(assert_close, actual, expected)
+
+
 @pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
 def test_init_step_and_update_reject_nonfinite_weights(value):
     """Each resumable shell rejects a non-normalizable update."""
@@ -183,12 +339,30 @@ def test_init_step_and_update_reject_nonfinite_weights(value):
         )
 
 
-def test_step_rejects_nonfinite_checkpoint_evidence():
-    """A nonfinite cumulative checkpoint is rejected after its update."""
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("log_marginal_likelihood", jnp.nan),
+        ("log_evidence_compensation", jnp.inf),
+    ],
+)
+@pytest.mark.parametrize("shell", ["step", "update"])
+def test_resumable_shells_reject_nonfinite_checkpoint_evidence(
+    field, value, shell
+):
+    """A nonfinite cumulative checkpoint is rejected at eager entry."""
     checkpoint = _checkpoint()
-    state = checkpoint.state._replace(log_marginal_likelihood=jnp.nan)
+    if field in checkpoint.state._fields:
+        checkpoint = checkpoint._replace(
+            state=checkpoint.state._replace(**{field: value})
+        )
+    else:
+        checkpoint = checkpoint._replace(**{field: value})
     with pytest.raises(smcx.DegenerateWeightsError):
-        _advance(jr.key(2), checkpoint._replace(state=state))
+        if shell == "step":
+            _advance(jr.key(2), checkpoint)
+        else:
+            _update(jr.key(2)[None], checkpoint, EMISSIONS[1:2])
 
 
 @pytest.mark.parametrize(
