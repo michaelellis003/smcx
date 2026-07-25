@@ -1025,7 +1025,12 @@ def crps(
         dimension="num_samples",
     )
     obs = _require_float_scalar(observation, name="observation")
-    centered = jnp.sort(predictions - obs)
+    ordered = jnp.sort(predictions)
+    opposite_sign = ((ordered < 0.0) & (obs > 0.0)) | (
+        (ordered > 0.0) & (obs < 0.0)
+    )
+    safe_observation = jnp.where(opposite_sign, ordered, obs)
+    centered = ordered - safe_observation
     n = predictions.shape[0]
     reciprocal_n = jnp.reciprocal(jnp.asarray(n, dtype=centered.dtype))
     lower_midpoint_mass = (
@@ -1035,13 +1040,17 @@ def crps(
         jnp.arange(n, 0, -1, dtype=centered.dtype) - 0.5
     ) * reciprocal_n
     quantile_weight = jnp.where(
-        centered < 0.0,
+        ordered < obs,
         lower_midpoint_mass,
         upper_midpoint_mass,
     )
-    return jnp.asarray(
-        jnp.sum(jnp.abs(centered) * (2.0 * reciprocal_n * quantile_weight))
+    scale = 2.0 * reciprocal_n * quantile_weight
+    scaled_deviation = jnp.where(
+        opposite_sign,
+        scale * jnp.abs(ordered) + scale * jnp.abs(obs),
+        scale * jnp.abs(centered),
     )
+    return jnp.asarray(jnp.sum(scaled_deviation))
 
 
 # --- Pareto-k diagnostic ---------------------------------------------------
