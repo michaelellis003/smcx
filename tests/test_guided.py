@@ -333,9 +333,11 @@ class TestGuidedPosterior:
 class TestDegenerateRaises:
     """Collapsed weights raise host-side in eager execution."""
 
-    def test_impossible_observation_raises(self):
+    @pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
+    def test_nonfinite_observation_raises(self, value):
         def impossible(y, z):
-            return jnp.array(-jnp.inf)
+            del y, z
+            return value
 
         sample, log_q = _optimal_proposal()
         with pytest.raises(smcx.DegenerateWeightsError):

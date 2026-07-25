@@ -394,17 +394,23 @@ log_step = log_g + log_f - log_q
 log_scores = jnp.where(do_resample, log_step - log_m[ancestors], W + log_step)
 log_weights, second_total = smcx.log_normalize(log_scores)
 increment = jnp.where(
-    do_resample,
-    first_total + second_total - jnp.log(num_particles),
-    second_total,
+    jnp.isfinite(first_total),
+    jnp.where(
+        do_resample,
+        first_total + second_total - jnp.log(num_particles),
+        second_total,
+    ),
+    first_total,
 )
 ```
 
 Return `particles`, `log_weights`, `ancestors`, and `increment` in a
 `ParticleFilterRecord`. The look-ahead correction appears only after
 first-stage resampling; without resampling, the ordinary guided score is
-`W + log(g) + log(f) - log(q)`. In an input-aware step, pass the aligned
-`input_t` to the look-ahead, proposal, and all three density callbacks.
+`W + log(g) + log(f) - log(q)`. The outer `where` carries a nonfinite
+first-stage normalizer into the runner's eager evidence check even when
+resampling is skipped. In an input-aware step, pass the aligned `input_t` to
+the look-ahead, proposal, and all three density callbacks.
 
 ## Write input-aware callbacks explicitly
 

@@ -121,7 +121,7 @@ def bootstrap_init(
 
     Raises:
         ValueError: The particle count or sampled particle cloud is invalid.
-        DegenerateWeightsError: Every initial importance weight collapses.
+        DegenerateWeightsError: Initial importance weights cannot normalize.
     """
     if num_particles < 1:
         raise ValueError(f"num_particles must be >= 1; got {num_particles}")
@@ -293,7 +293,7 @@ def bootstrap_step(
 
     Raises:
         ValueError: The checkpoint or propagated state is malformed.
-        DegenerateWeightsError: Every updated importance weight collapses.
+        DegenerateWeightsError: Updated importance weights cannot normalize.
     """
     state_signature = _validate_checkpoint(checkpoint)
 
@@ -356,7 +356,7 @@ def bootstrap_update(
         TypeError: The host shell is called with traced checkpoint arrays.
         ValueError: The checkpoint, chunk, keys, inputs, or transition output
             is malformed.
-        DegenerateWeightsError: Cumulative importance weights collapse.
+        DegenerateWeightsError: Cumulative importance weights cannot normalize.
     """
     num_steps = emissions_chunk.shape[0]
     if num_steps == 0:
@@ -543,8 +543,9 @@ def bootstrap_filter(
         leaf.
 
     Raises:
-        DegenerateWeightsError: All weights collapsed (eager execution
-            only; under ``jax.jit`` the ``-inf`` marginal propagates).
+        DegenerateWeightsError: A particle-weight stage cannot be normalized
+            (eager execution only; under ``jax.jit`` its nonfinite signal
+            propagates).
         ValueError: Inputs are malformed, a criterion result is not a scalar
             Boolean, the initial state tree is empty or has a wrong leading
             axis, a transition changes its state contract, or an observation

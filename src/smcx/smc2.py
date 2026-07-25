@@ -152,8 +152,8 @@ def smc2(
     Raises:
         ValueError: Counts, emissions, or a callback output is structurally
             invalid.
-        DegenerateWeightsError: The outer weights collapse (every
-            parameter particle is assigned an inner likelihood of ``-inf``).
+        DegenerateWeightsError: An outer particle-weight stage cannot be
+            normalized.
     """
     if emissions.ndim not in (1, 2):
         raise ValueError(
@@ -343,9 +343,9 @@ def smc2(
 
     def _check(t: int, inc_val: Array) -> None:
         v = float(inc_val)
-        if v == float("-inf") or v != v:
+        if not math.isfinite(v):
             raise DegenerateWeightsError(
-                f"outer weights collapsed at step {t} "
+                f"outer weights cannot be normalized at step {t} "
                 f"(log-evidence increment {v})"
             )
 

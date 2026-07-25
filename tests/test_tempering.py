@@ -485,11 +485,13 @@ class TestMechanics:
             atol=frozen_atol,
         )
 
-    def test_degenerate_likelihood_raises(self):
+    @pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
+    def test_nonfinite_reweight_normalizer_raises(self, value):
         init, log_prior, _ = _model()
 
         def impossible(x):
-            return jnp.array(-jnp.inf)
+            del x
+            return value
 
         with pytest.raises(smcx.DegenerateWeightsError):
             smcx.temper(jr.key(6), init, log_prior, impossible, 500)

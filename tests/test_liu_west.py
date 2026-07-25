@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 import smcx.liu_west as lw
+from smcx.exceptions import DegenerateWeightsError
 from smcx.liu_west import liu_west_filter
 from tests.conftest import _mvn_logpdf, _mvn_sample
 
@@ -186,6 +187,29 @@ def test_uncompiled_step_matches_compiled_scan():
     ):
         np.testing.assert_allclose(
             actual, expected, rtol=tolerance, atol=tolerance
+        )
+
+
+@pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
+def test_nonfinite_first_stage_raises(value):
+    """A discarded invalid look-ahead normalizer still fails the run."""
+    initial, transition, observation, _, param_initial = _make_conjugate_fns()
+
+    def invalid_auxiliary(emission, state, params):
+        del emission, state, params
+        return value
+
+    with pytest.raises(DegenerateWeightsError):
+        liu_west_filter(
+            jr.key(24),
+            initial,
+            transition,
+            observation,
+            invalid_auxiliary,
+            param_initial,
+            jnp.asarray(CONJUGATE_OBSERVATIONS[:2])[:, None],
+            16,
+            resampling_threshold=0.0,
         )
 
 

@@ -190,8 +190,7 @@ def run_particle_filter(
             transform.
         ValueError: Emissions, inputs, or a callback record are structurally
             invalid, or a later record changes its particle or dtype contract.
-        DegenerateWeightsError: Eager evidence accumulation ends at NaN or
-            negative infinity.
+        DegenerateWeightsError: Eager evidence accumulation is nonfinite.
     """
     if emissions.ndim != 2:
         raise ValueError(

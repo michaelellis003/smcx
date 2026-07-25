@@ -11,6 +11,7 @@ These utilities are extracted from the individual filter modules to
 eliminate duplication.  They are not part of the public API.
 """
 
+import math
 from typing import NamedTuple, TypeAlias, cast
 
 import jax
@@ -456,21 +457,22 @@ def _conditional_resample(
     return do_resample, ancestors
 
 
-def _raise_if_degenerate(marginal_loglik) -> None:
-    """Raise `smcx.DegenerateWeightsError` on a collapsed filter.
+def _raise_if_degenerate(log_value) -> None:
+    """Raise `smcx.DegenerateWeightsError` on a nonfinite checked value.
 
-    This eager shell check rejects a checked evidence state of ``-inf`` or
-    NaN. Under a user ``jax.jit`` the value is a tracer, so the check is
-    skipped and the non-finite value propagates instead.
+    This eager shell check rejects a nonfinite log normalizer or evidence
+    state. Under a user ``jax.jit`` the value is a tracer, so the check is
+    skipped and the nonfinite value propagates instead.
     """
     from jax.core import Tracer
 
     from smcx.exceptions import DegenerateWeightsError
 
-    if isinstance(marginal_loglik, Tracer):
+    if isinstance(log_value, Tracer):
         return
-    value = float(marginal_loglik)
-    if value != value or value == float("-inf"):
+    value = float(log_value)
+    if not math.isfinite(value):
         raise DegenerateWeightsError(
-            f"all particle weights collapsed (marginal log-likelihood {value})"
+            "particle weights or evidence cannot be normalized "
+            f"(checked log value {value})"
         )
