@@ -32,6 +32,7 @@ from jax import jit, vmap
 from jax.core import Tracer
 from jaxtyping import Array, Float
 
+from smcx._covariance import _weighted_covariance_factor
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _raise_invalid_ancestors,
@@ -45,7 +46,6 @@ from smcx._utils import (
 from smcx.containers import SMC2Posterior
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import _TINY, _below_one, _monotone_cdf, systematic
-from smcx.tempering import _chol_with_jitter, _weighted_cov_f64
 from smcx.types import (
     ParamInitialSampler,
     ParamInitialStateSampler,
@@ -375,8 +375,11 @@ def smc2(
     def rejuvenate(rkey, t, th, log_omega, inner, inner_log_w, log_z):
         k_res, k_move = jr.split(rkey)
         # Proposal scale from the weighted theta cloud (pre-resample).
-        cov = _weighted_cov_f64(th, jnp.exp(log_omega))
-        scale_tril = _chol_with_jitter(scale2 * cov)
+        scale_tril = _weighted_covariance_factor(
+            th,
+            jnp.exp(log_omega),
+            scale=scale2,
+        )
         # Resample theta with its attached inner state (monotone gather).
         idx, invalid_resampling = _validate_ancestors(
             resampling_fn(k_res, jnp.exp(log_omega), num_theta),
@@ -398,7 +401,11 @@ def smc2(
         acc_sum = jnp.zeros(())
         for _ in range(num_pmmh_steps):
             k_prop, k_run, k_u, k_move = jr.split(k_move, 4)
-            z = jr.normal(k_prop, (num_theta, d_theta))
+            z = jr.normal(
+                k_prop,
+                (num_theta, d_theta),
+                dtype=th.dtype,
+            )
             th_star = th + z @ scale_tril.T
             logprior_star = batch_prior(th_star)
             inner_s, inner_log_w_s, log_z_s = inner_forward(

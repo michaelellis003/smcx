@@ -118,6 +118,42 @@ def _small_model():
 class TestStructure:
     """Shapes, invariants, determinism, degeneracy."""
 
+    @pytest.mark.parametrize("num_param_particles", [1, 2])
+    def test_rejuvenation_handles_identical_float32_parameters(
+        self, num_param_particles
+    ):
+        def param_init(_key, count):
+            return jnp.zeros((count, 1), dtype=jnp.float32)
+
+        def log_prior(theta):
+            return -0.5 * jnp.sum(theta**2)
+
+        def inner_init(_key, count, theta):
+            return jnp.broadcast_to(theta, (count, 1))
+
+        def inner_transition(_key, state, _theta):
+            return state
+
+        def inner_log_observation(_emission, state, _theta):
+            return -0.5 * jnp.sum(state**2)
+
+        posterior = smcx.smc2(
+            jr.key(6),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_transition,
+            inner_log_observation,
+            jnp.zeros((2, 1), dtype=jnp.float32),
+            num_param_particles,
+            1,
+            ess_threshold=1.1,
+            num_pmmh_steps=1,
+        )
+
+        assert posterior.filtered_params.dtype == jnp.float32
+        assert np.all(np.isfinite(np.asarray(posterior.filtered_params)))
+
     def test_container_shapes(self):
         post = _run(0)
         assert post.filtered_params.shape == (T, 64, 1)
