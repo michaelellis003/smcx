@@ -52,6 +52,34 @@ def test_near_zero_rank_deficient_factor_remains_positive():
     )
 
 
+def test_underflowed_target_factor_uses_variance_floor():
+    spread = np.nextafter(np.float32(0.0), np.float32(1.0))
+
+    factor = _degenerate_factor(spread)
+
+    factor_variance = np.asarray(factor) @ np.asarray(factor).T
+    assert np.all(np.diag(factor_variance) >= np.finfo(np.float32).eps)
+
+
+def test_unrepresentable_target_factor_raises():
+    maximum = np.finfo(np.float32).max
+    particles = jnp.asarray(np.array([[-maximum], [maximum]], dtype=np.float32))
+    weights = jnp.full(2, 0.5, dtype=jnp.float32)
+
+    with (
+        np.errstate(over="ignore"),
+        pytest.raises(
+            np.linalg.LinAlgError,
+            match="regularized covariance is not positive definite",
+        ),
+    ):
+        _weighted_covariance_factor(
+            particles,
+            weights,
+            scale=2.38**2,
+        )
+
+
 @pytest.mark.parametrize("magnitude", [1.0, 1e-3])
 def test_factor_leaves_well_conditioned_covariance_unregularized(magnitude):
     particles = magnitude * jnp.asarray(
