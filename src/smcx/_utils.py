@@ -50,7 +50,7 @@ _SampledCloud: TypeAlias = PyTree[Shaped[Array, "num_samples ..."]]
 def _filter_scan(step: Any, carry: Any, xs: Any) -> tuple[Any, Any]:
     """Run a filter scan without the jax-mps history defect."""
     num_steps = tree.leaves(xs)[0].shape[0]
-    if num_steps == 0:
+    if num_steps == 0:  # pragma: no branch - both paths are tested
         return lax.scan(step, carry, xs)
 
     def full_scan(current: Any, inputs: Any) -> tuple[Any, Any]:
@@ -76,7 +76,9 @@ def _filter_scan(step: Any, carry: Any, xs: Any) -> tuple[Any, Any]:
             mps=mps_scan,
             default=full_scan,
         )
-    if next(iter(leaves[0].devices())).platform == "mps":
+    if (  # pragma: no cover - exercised by the physical Metal gate
+        next(iter(leaves[0].devices())).platform == "mps"
+    ):
         return mps_scan(carry, xs)
     return full_scan(carry, xs)
 
