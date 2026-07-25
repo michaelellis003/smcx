@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.13.13 (2026-07-25)
+
+### Bug Fixes
+
+- **resampling**: Restore monotone float32 CDFs
+  ([#198](https://github.com/michaelellis003/smcx/pull/198),
+  [`b3d1ac8`](https://github.com/michaelellis003/smcx/commit/b3d1ac82699c950b70ef4374677da80a371cafe2))
+
+
 ## v1.13.12 (2026-07-25)
 
 ### Bug Fixes
