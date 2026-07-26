@@ -2873,6 +2873,26 @@ callers passing traced levels must preserve this domain.</p>
               </div>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_quantiles param_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A time step with no positive weight has undefined quantiles,</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_quantiles param_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>represented by NaN.</p>
+              </div>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -2900,6 +2920,11 @@ eager quantile lies outside [0, 1].</p>
       </tbody>
     </table>
 
+
+<details class="notes" open>
+  <summary>Notes</summary>
+  <p>Exactly zero-mass parameter values are excluded before interpolation.</p>
+</details>
 
     </div>
 
@@ -3690,7 +3715,27 @@ implementation.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Per-step minimum tail-ESS, shape <code>(ntime,)</code>.</p>
+                <p>Per-step minimum tail-ESS, shape <code>(ntime,)</code>. Exactly zero-mass</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>particles do not affect the result; a time step with no positive</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>weight returns NaN.</p>
               </div>
             </td>
           </tr>
@@ -3865,8 +3910,9 @@ https://doi.org/10.1137/030601818</p>
     <div class="doc doc-contents ">
 
         <p>Compute weighted quantiles of particles at each time step.</p>
-<p>Uses a sorted resampling approach for JIT compatibility:
-sorts particles, computes cumulative weights, and interpolates.</p>
+<p>Sorts particles, excludes exactly zero-mass values, computes a
+midpoint cumulative-weight axis, and interpolates. The compaction
+retains a static shape for JIT compatibility.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -3934,6 +3980,26 @@ callers passing traced levels must preserve this domain.</p>
             <td>
               <div class="doc-md-description">
                 <p>Weighted quantiles, shape <code>(ntime, num_quantiles, state_dim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_quantiles state_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A time step with no positive weight has undefined quantiles,</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_quantiles state_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>represented by NaN.</p>
               </div>
             </td>
           </tr>
