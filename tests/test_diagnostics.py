@@ -475,6 +475,61 @@ class TestCRPS:
             expected,
         )
 
+    def test_crps_exact_quotient_rounds_binary32_boundaries(self):
+        """Exact division honors ties-to-even and the normal boundary."""
+        from smcx.diagnostics import crps
+
+        outlier_bits = np.asarray(
+            [
+                0x00000005,
+                0x00000015,
+                0x00000025,
+                0x027FFFFE,
+                0x02800000,
+                0x02800001,
+            ],
+            dtype=np.uint32,
+        )
+        prediction_bits = np.zeros((outlier_bits.size, 4), dtype=np.uint32)
+        prediction_bits[:, 2] = 1
+        prediction_bits[:, 3] = outlier_bits
+        predictions_np = prediction_bits.view(np.float32)
+        observations_np = np.zeros(outlier_bits.size, dtype=np.float32)
+        minimum_subnormal = Fraction(1, 2**149)
+        for values, observation in zip(
+            predictions_np,
+            observations_np,
+            strict=True,
+        ):
+            outlier = Fraction.from_float(float(values[-1]))
+            difference = (
+                _exact_crps_oracle(values, observation)
+                - (outlier + 3 * minimum_subnormal) / 16
+            )
+            assert difference.numerator == 0
+
+        expected_bits = np.asarray(
+            [0, 2, 2, 0x007FFFFF, 0x00800000, 0x00800001],
+            dtype=np.uint32,
+        )
+        predictions = jnp.asarray(predictions_np)
+        observations = jnp.asarray(observations_np)
+        expected = jnp.asarray(expected_bits.view(np.float32))
+        eager = jnp.stack([
+            crps(values, observation)
+            for values, observation in zip(
+                predictions,
+                observations,
+                strict=True,
+            )
+        ])
+
+        assert jnp.array_equal(eager, expected)
+        assert jnp.array_equal(
+            jax.jit(jax.vmap(crps))(predictions, observations),
+            expected,
+        )
+
     @pytest.mark.parametrize(
         ("num_samples", "value"),
         [(10_000, 1e35), (1, 2e38), (100, 1e-37)],
