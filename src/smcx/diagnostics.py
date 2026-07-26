@@ -989,7 +989,8 @@ def crps(
     where $Y, Y'$ are iid predictive samples and $y$ is the observation.
 
     Args:
-        predictions: iid samples from the predictive distribution.
+        predictions: iid samples from the predictive distribution. The
+            empirical distribution assigns each sample equal weight.
         observation: Observed scalar value.
 
     Returns:
@@ -999,6 +1000,12 @@ def crps(
         ValueError: Predictions are not a nonempty rank-one floating array,
             or the observation is not a floating scalar.
 
+    Notes:
+        The empirical-CDF integral is evaluated over power-of-two-scaled
+        ordered spacings. Its nonnegative interval terms retain
+        :math:`O(N \log N)` complexity while avoiding cancellation between
+        raw order statistics and integer scaling by :math:`N^2`.
+
     References:
         Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
         continuous probability distributions.
@@ -1007,6 +1014,10 @@ def crps(
         Gneiting, T., and Raftery, A. E. (2007). Strictly proper scoring
         rules, prediction, and estimation.
         https://doi.org/10.1198/016214506000001437
+
+        Jordan, A., Krüger, F., and Lerch, S. (2019). Evaluating
+        probabilistic forecasts with scoringRules.
+        https://doi.org/10.18637/jss.v090.i12
     """
     predictions = _require_float_vector(
         predictions,
@@ -1014,15 +1025,85 @@ def crps(
         dimension="num_samples",
     )
     obs = _require_float_scalar(observation, name="observation")
+    prediction_dtype = predictions.dtype
+    is_float8 = jnp.finfo(prediction_dtype).bits == 8
+    output_dtype = (
+        prediction_dtype
+        if is_float8
+        else jnp.result_type(prediction_dtype, obs.dtype)
+    )
+    if jnp.finfo(prediction_dtype).bits < 32:
+        # Float8 lacks frexp/ldexp, and float16 cannot represent large
+        # sample ranks. Evaluate lower-precision forecasts at least in f32.
+        work_dtype = (
+            jnp.float32
+            if is_float8
+            else jnp.result_type(output_dtype, jnp.float32)
+        )
+        predictions = predictions.astype(work_dtype)
+        obs = obs.astype(work_dtype)
+    ordered = jnp.sort(predictions)
     n = predictions.shape[0]
-    # E|Y - y|
-    term1 = jnp.mean(jnp.abs(predictions - obs))
-    # E|Y - Y'| via sort-based O(N log N) identity:
-    #   E|Y-Y'| = (2 / N^2) * sum_i (2i - N + 1) * Y_{(i)}
-    y_sorted = jnp.sort(predictions)
-    i = jnp.arange(n, dtype=predictions.dtype)
-    term2 = 2.0 * jnp.sum((2.0 * i - n + 1.0) * y_sorted) / (n * n)
-    return jnp.asarray(term1 - 0.5 * term2)
+    value_scale = jnp.maximum(
+        jnp.max(jnp.abs(ordered)),
+        jnp.abs(obs),
+    )
+    safe_scale = jnp.where(
+        value_scale > 0.0,
+        value_scale,
+        jnp.asarray(1.0, dtype=ordered.dtype),
+    )
+    _, scale_exponent = jnp.frexp(safe_scale)
+    scaled_ordered = jnp.ldexp(ordered, -scale_exponent)
+    scaled_observation = jnp.ldexp(obs, -scale_exponent)
+    left_tail = jnp.maximum(
+        scaled_ordered[0] - scaled_observation,
+        0.0,
+    )
+    right_tail = jnp.maximum(
+        scaled_observation - scaled_ordered[-1],
+        0.0,
+    )
+    left = scaled_ordered[:-1]
+    right = scaled_ordered[1:]
+    split = jnp.clip(scaled_observation, left, right)
+    lower_width = split - left
+    upper_width = right - split
+    interval_width = right - left
+    sample_count = lax.optimization_barrier(jnp.asarray(n, dtype=ordered.dtype))
+    lower_rank = jnp.arange(1, n, dtype=ordered.dtype)
+    upper_rank = jnp.arange(n - 1, 0, -1, dtype=ordered.dtype)
+    minimum_rank = jnp.minimum(lower_rank, upper_rank)
+    rank_difference = jnp.abs(lower_rank - upper_rank)
+    extra_width = jnp.where(
+        lower_rank >= upper_rank,
+        lower_width,
+        upper_width,
+    )
+    # Decompose each interval into its smaller squared CDF mass plus a
+    # nonnegative |lower_mass - upper_mass| correction on the wider-mass side.
+    # Preserve the two divisions: a rounded reciprocal square loses the
+    # finite/overflow distinction at dtype max.
+    baseline_first = lax.optimization_barrier(
+        (interval_width * minimum_rank) / sample_count
+    )
+    baseline_interval = (baseline_first * minimum_rank) / sample_count
+    extra_interval = lax.optimization_barrier(
+        (extra_width * rank_difference) / sample_count
+    )
+    interval_score = jnp.sum(baseline_interval + extra_interval)
+    scaled_score = left_tail + right_tail + interval_score
+    # CRPS cannot exceed the largest absolute forecast error. Enforcing this
+    # exact bound contains reduction rounding without hiding true overflow.
+    max_error = jnp.maximum(
+        jnp.abs(scaled_ordered[0] - scaled_observation),
+        jnp.abs(scaled_ordered[-1] - scaled_observation),
+    )
+    scaled_score = jnp.minimum(scaled_score, max_error)
+    score = jnp.asarray(
+        jnp.ldexp(scaled_score, scale_exponent),
+    )
+    return score.astype(output_dtype)
 
 
 # --- Pareto-k diagnostic ---------------------------------------------------

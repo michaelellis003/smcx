@@ -353,6 +353,165 @@ class TestParamWeightedQuantile:
 class TestCRPS:
     """Tests for crps."""
 
+    @pytest.mark.parametrize(
+        ("num_samples", "value"),
+        [(100, 1e10), (1000, 1e5)],
+    )
+    def test_crps_constant_large_offset_is_exactly_zero(
+        self, num_samples, value
+    ):
+        """A perfect empirical forecast stays nonnegative at large offsets."""
+        from smcx.diagnostics import crps
+
+        predictions = jnp.full((num_samples,), value, dtype=jnp.float32)
+        result = crps(predictions, jnp.float32(value))
+        assert jnp.array_equal(result, jnp.float32(0.0))
+
+    def test_crps_is_invariant_to_represented_translation(self):
+        """Centering an already represented sample leaves CRPS unchanged."""
+        from smcx.diagnostics import crps
+
+        offset = jnp.float32(1e7)
+        pattern = jnp.asarray(
+            [-8.0, -3.0, -1.0, 0.0, 2.0, 5.0, 9.0],
+            dtype=jnp.float32,
+        )
+        shifted = jnp.tile(pattern + offset, 128)
+        centered = shifted - offset
+
+        shifted_score = crps(shifted, offset)
+        centered_score = crps(centered, jnp.float32(0.0))
+
+        assert jnp.array_equal(shifted_score, centered_score)
+
+    @pytest.mark.parametrize(
+        ("num_samples", "value"),
+        [(10_000, 1e35), (1, 2e38), (100, 1e-37)],
+    )
+    def test_crps_large_finite_score_does_not_overflow(
+        self, num_samples, value
+    ):
+        from smcx.diagnostics import crps
+
+        predictions = jnp.full((num_samples,), value, dtype=jnp.float32)
+
+        result = crps(predictions, jnp.float32(0.0))
+
+        assert jnp.isfinite(result)
+        # Thirty-two eps cover interval weights and the final reduction.
+        relative_tolerance = 32.0 * float(jnp.finfo(jnp.float32).eps)
+        assert float(result) == pytest.approx(
+            float(predictions[0]),
+            rel=relative_tolerance,
+            abs=0.0,
+        )
+
+    @pytest.mark.parametrize(
+        "endpoint",
+        [jnp.finfo(jnp.float32).min, jnp.finfo(jnp.float32).max],
+    )
+    def test_crps_dtype_endpoint_cloud_stays_finite(self, endpoint):
+        from smcx.diagnostics import crps
+
+        predictions = jnp.full((7,), endpoint, dtype=jnp.float32)
+        observation = jnp.asarray(0.0, dtype=jnp.float32)
+        expected = jnp.abs(jnp.asarray(endpoint, dtype=jnp.float32))
+
+        assert jnp.array_equal(crps(predictions, observation), expected)
+        assert jnp.array_equal(
+            jax.jit(crps)(predictions, observation), expected
+        )
+
+    def test_crps_mixed_endpoint_cloud_stays_finite(self):
+        from smcx.diagnostics import crps
+
+        dtype_max = jnp.asarray(
+            jnp.finfo(jnp.float32).max,
+            dtype=jnp.float32,
+        )
+        predictions = jnp.concatenate([
+            jnp.full((9,), -dtype_max, dtype=jnp.float32),
+            jnp.full((3,), dtype_max, dtype=jnp.float32),
+        ])
+        observation = jnp.float32(0.75) * dtype_max
+        expected = jnp.asarray(dtype_max, dtype=jnp.float32)
+
+        assert jnp.array_equal(crps(predictions, observation), expected)
+        assert jnp.array_equal(
+            jax.jit(crps)(predictions, observation), expected
+        )
+
+    @pytest.mark.parametrize(
+        "dtype",
+        [jnp.float8_e4m3fn, jnp.float8_e5m2],
+    )
+    @pytest.mark.skipif(
+        jax.default_backend() == "mps",
+        reason="jax-mps cannot represent float8 buffers",
+    )
+    def test_crps_preserves_float8_support(self, dtype):
+        from smcx.diagnostics import crps
+
+        predictions = jnp.asarray([0.0, 1.0], dtype=dtype)
+        observation = jnp.asarray(0.5, dtype=dtype)
+        expected = jnp.asarray(0.25, dtype=dtype)
+
+        result = crps(predictions, observation)
+        compiled = jax.jit(crps)(predictions, observation)
+
+        assert jnp.array_equal(result, expected)
+        assert jnp.array_equal(compiled, expected)
+
+    def test_crps_float16_large_sample_uses_wide_ranks(self):
+        from smcx.diagnostics import crps
+
+        predictions = jnp.concatenate([
+            jnp.zeros((32_753,), dtype=jnp.float16),
+            jnp.ones((32_753,), dtype=jnp.float16),
+        ])
+        observation = jnp.asarray(0.5, dtype=jnp.float16)
+        expected = jnp.asarray(0.25, dtype=jnp.float16)
+
+        assert jnp.array_equal(crps(predictions, observation), expected)
+
+    def test_crps_bfloat16_rank_precision(self):
+        from smcx.diagnostics import crps
+
+        dtype = jnp.bfloat16
+        predictions = jnp.concatenate([
+            jnp.zeros((179,), dtype=dtype),
+            jnp.ones((78,), dtype=dtype),
+        ])
+        observation = jnp.asarray(0.2, dtype=dtype)
+        mass = Fraction(179, 257)
+        represented_observation = Fraction(205, 1024)
+        exact = (
+            represented_observation * mass**2
+            + (1 - represented_observation) * (1 - mass) ** 2
+        )
+        expected = jnp.asarray(float(exact), dtype=dtype)
+
+        assert jnp.array_equal(crps(predictions, observation), expected)
+        assert jnp.array_equal(
+            jax.jit(crps)(predictions, observation),
+            expected,
+        )
+
+    @pytest.mark.parametrize("observation", [-3e38, 3e38, 0.0, -0.0])
+    def test_crps_extreme_opposite_signs_remain_finite(self, observation):
+        from smcx.diagnostics import crps
+
+        predictions = jnp.asarray([-3e38, 3e38], dtype=jnp.float32)
+
+        result = crps(predictions, jnp.float32(observation))
+
+        assert jnp.isfinite(result)
+        relative_tolerance = 8.0 * float(jnp.finfo(jnp.float32).eps)
+        assert float(result) == pytest.approx(
+            float(jnp.float32(1.5e38)),
+            rel=relative_tolerance,
+        )
+
     def test_crps_zero_for_perfect_prediction(self):
         """CRPS = 0 when all predictions equal observation."""
         from smcx.diagnostics import crps
@@ -376,34 +535,55 @@ class TestCRPS:
         result = crps(predictions, jnp.float64(0.5))
         assert float(result) == pytest.approx(0.25, abs=1e-10)
 
-    def test_crps_large_sample_matches_formula(self):
-        """Sort-based CRPS matches brute-force on N=500.
-
-        Cross-checks that the O(N log N) implementation gives the same
-        answer as the naive O(N^2) all-pairs formula.
-        """
+    def test_crps_matches_pairwise_oracle_with_repeated_values(self):
+        """Order-statistic CRPS matches the independent pairwise identity."""
         from smcx.diagnostics import crps
 
-        key = jr.PRNGKey(77)
-        predictions = jr.normal(key, (500,))
-        obs = jnp.float64(0.5)
+        samples = [-2.0, -2.0, 0.0, 1.0, 1.0, 4.0]
+        observation = 0.25
+        n = len(samples)
+        term1 = sum(abs(x - observation) for x in samples) / n
+        term2 = sum(abs(x - y) for x in samples for y in samples) / (n * n)
+        expected = term1 - 0.5 * term2
 
-        # Brute-force reference
-        term1 = jnp.mean(jnp.abs(predictions - obs))
-        diffs = jnp.abs(predictions[:, None] - predictions[None, :])
-        term2 = jnp.mean(diffs)
-        expected = float(term1 - 0.5 * term2)
+        result = float(
+            crps(
+                jnp.asarray(samples, dtype=jnp.float32),
+                jnp.float32(observation),
+            )
+        )
+        # Five f32 eps at the score's unit scale covers the final reduction.
+        tolerance = 5.0 * float(jnp.finfo(jnp.float32).eps)
+        assert result == pytest.approx(expected, rel=0.0, abs=tolerance)
 
-        result = float(crps(predictions, obs))
-        assert result == pytest.approx(expected, abs=1e-6)
-
-    def test_crps_jit_compatible(self):
-        """CRPS should work under jax.jit."""
+    def test_crps_jit_vmap_compatible(self):
+        """CRPS batches observations and empirical forecasts under JIT."""
         from smcx.diagnostics import crps
 
-        predictions = jnp.array([1.0, 2.0, 3.0])
-        result = jax.jit(crps)(predictions, jnp.float64(2.0))
-        assert jnp.isfinite(result)
+        predictions = jnp.array([[0.0, 1.0], [1.0, 1.0]])
+        observations = jnp.array([0.5, 2.0])
+        result = jax.jit(jax.vmap(crps))(predictions, observations)
+        assert jnp.array_equal(result, jnp.array([0.25, 1.0]))
+
+    @pytest.mark.parametrize("outlier", [-1.0, 1.0])
+    def test_crps_large_sample_preserves_reflected_outlier(self, outlier):
+        """Large empirical forecasts retain reflected tail contributions."""
+        from smcx.diagnostics import crps
+
+        num_samples = 6_556_022
+        predictions = (
+            jnp.zeros((num_samples,), dtype=jnp.float32).at[-1].set(outlier)
+        )
+        result = float(crps(predictions, jnp.asarray(0.0, dtype=jnp.float32)))
+        expected = 1.0 / (num_samples * num_samples)
+        # fl(1/N) contributes at most eps/2 relative error; squaring it
+        # and the two final products remain below five float32 eps.
+        relative_tolerance = 5.0 * float(jnp.finfo(jnp.float32).eps)
+        assert result == pytest.approx(
+            expected,
+            rel=relative_tolerance,
+            abs=0.0,
+        )
 
 
 class TestPosteriorPredictiveSample:

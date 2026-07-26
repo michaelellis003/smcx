@@ -163,6 +163,19 @@ dtype, and JIT contract are unchanged. Following
 [NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html),
 smcx treats the change as a clear bug fix.
 
+`smcx.crps` scores its prediction vector as an equally weighted empirical
+distribution. Its power-of-two-scaled empirical-CDF spacing calculation is
+translation-stable and nonnegative for finite float32 inputs whose represented
+spacings remain in the normal range, and it remains safe when the sample count
+squared would exceed the backend integer range. Scores affected by the earlier
+raw-value calculation can change at fixed inputs; following
+[NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html), smcx
+treats this as the correction of a clear numerical bug. The signature and
+$O(N \log N)$ complexity are unchanged. Translations that expose subnormal
+float32 spacings and exact finite-versus-infinity classification near the
+overflow midpoint remain tracked in
+[issue #153](https://github.com/michaelellis003/smcx/issues/153).
+
 ## Cut the variance with a guided proposal
 
 The bootstrap proposal ignores the current observation. The guided
