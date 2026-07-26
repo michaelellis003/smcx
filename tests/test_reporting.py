@@ -12,8 +12,10 @@ import jax.random as jr
 import numpy as np
 import pytest
 
+import smcx.reporting as reporting
 from smcx.containers import ParticleFilterPosterior, TemperedPosterior
 from smcx.reporting import to_arviz
+from smcx.types import ParticleCloud
 
 
 def _filter() -> ParticleFilterPosterior:
@@ -29,6 +31,26 @@ def _filter() -> ParticleFilterPosterior:
         ess=jnp.array([2.74, 2.74]),
         log_evidence_increments=jnp.array([0.5, 0.75]),
     )
+
+
+def _tempered(particles: ParticleCloud) -> TemperedPosterior:
+    """Return a minimal tempered posterior over one particle PyTree."""
+    return TemperedPosterior(
+        particles=particles,
+        log_weights=jnp.full(4, -jnp.log(4.0)),
+        marginal_loglik=jnp.asarray(1.0),
+        temperatures=jnp.array([0.0, 1.0]),
+        ess=jnp.array([4.0, 4.0]),
+        acceptance_rates=jnp.array([0.0, 0.8]),
+    )
+
+
+def _colliding_particles() -> ParticleCloud:
+    """Return two leaves with the same simple dotted path."""
+    return {
+        "a": {"b": jnp.ones((4, 1))},
+        "a.b": 2 * jnp.ones((4, 1)),
+    }
 
 
 def _group(result, name):
@@ -94,14 +116,7 @@ def test_final_only_filter_requires_full_history():
 
 def test_dense_and_structured_states_have_stable_names_and_dims():
     post = _filter()
-    tempered = TemperedPosterior(
-        particles=post.filtered_particles[0],
-        log_weights=jnp.full(4, -jnp.log(4.0)),
-        marginal_loglik=jnp.asarray(1.0),
-        temperatures=jnp.array([0.0, 1.0]),
-        ess=jnp.array([4.0, 4.0]),
-        acceptance_rates=jnp.array([0.0, 0.8]),
-    )
+    tempered = _tempered(post.filtered_particles[0])
     dense_result = to_arviz(tempered, key=jr.key(2), num_draws=3)
     dense = _group(dense_result, "posterior")
     dense_diagnostics = _group(dense_result, "particle_diagnostics")
@@ -120,6 +135,64 @@ def test_dense_and_structured_states_have_stable_names_and_dims():
     assert dense_diagnostics["log_weights"].dims == ("run", "particle")
     assert dense_diagnostics["temperatures"].dims == ("run", "stage")
     assert structured["x"].dims == ("chain", "draw", "time", "axis")
+
+
+@pytest.mark.parametrize("collision_group", ["posterior", "unconstrained"])
+@pytest.mark.parametrize(
+    ("target", "num_draws"),
+    [
+        ("_stack", None),
+        ("systematic", 3),
+        ("getitem", None),
+        ("_host", None),
+    ],
+)
+def test_dotted_paths_are_rejected_before_value_operations(
+    monkeypatch: pytest.MonkeyPatch,
+    collision_group: str,
+    target: str,
+    num_draws: int | None,
+) -> None:
+    """Ambiguous raw paths fail before aliases or device-valued work."""
+
+    def touched(*args: object, **kwargs: object) -> None:
+        raise AssertionError(f"{target} ran before schema preflight")
+
+    monkeypatch.setattr(reporting, target, touched)
+    collision = _colliding_particles()
+    posterior = _tempered(
+        collision if collision_group == "posterior" else jnp.ones((4, 1))
+    )
+    unconstrained = collision if collision_group == "unconstrained" else None
+
+    with pytest.raises(
+        ValueError,
+        match=r"ambiguous ArviZ tree path 'a\.b'.*rename a tree key",
+    ):
+        to_arviz(
+            posterior,
+            key=jr.key(10),
+            num_draws=num_draws,
+            var_names={"a.b": "renamed"},
+            unconstrained=unconstrained,
+        )
+
+
+def test_var_names_must_resolve_to_unique_aliases() -> None:
+    posterior = _tempered({
+        "location": jnp.ones((4, 1)),
+        "scale": 2 * jnp.ones((4, 1)),
+    })
+
+    with pytest.raises(
+        ValueError,
+        match=r"duplicate ArviZ variable name 'parameter'.*unique var_names",
+    ):
+        to_arviz(
+            posterior,
+            key=jr.key(11),
+            var_names={"location": "parameter", "scale": "parameter"},
+        )
 
 
 def test_adaptive_tempered_runs_pad_stage_diagnostics_with_validity_mask():
