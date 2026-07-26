@@ -23,6 +23,42 @@ from smcx.types import PRNGKeyT
 _Posterior = ParticleFilterPosterior | TemperedPosterior
 
 
+def _resolve_names(
+    value: object,
+    var_names: Mapping[str, str] | None,
+) -> tuple[str, ...]:
+    """Resolve one tree's names without touching its leaf values."""
+    path_leaves, _ = jax.tree.flatten_with_path(value)
+    raw_sources: dict[str, str] = {}
+    raw_names = []
+    sources = []
+    for path, _ in path_leaves:
+        raw_name = keystr(path, simple=True, separator=".") or "theta"
+        source = keystr(path) or "<root>"
+        if raw_name in raw_sources:
+            raise ValueError(
+                f"ambiguous ArviZ tree path {raw_name!r} resolved from "
+                f"{raw_sources[raw_name]} and {source}; rename a tree key"
+            )
+        raw_sources[raw_name] = source
+        raw_names.append(raw_name)
+        sources.append(source)
+
+    resolved_sources: dict[str, str] = {}
+    names = []
+    for raw_name, source in zip(raw_names, sources, strict=True):
+        name = (var_names or {}).get(raw_name, raw_name)
+        if name in resolved_sources:
+            raise ValueError(
+                f"duplicate ArviZ variable name {name!r} resolved from "
+                f"{resolved_sources[name]} and {source}; assign unique "
+                "var_names aliases"
+            )
+        resolved_sources[name] = source
+        names.append(name)
+    return tuple(names)
+
+
 def _host(value: object) -> np.ndarray:
     """Transfer one reporting value to NumPy."""
     return np.asarray(jax.device_get(value))
@@ -68,7 +104,7 @@ def _resampled_group(
     values: Sequence[object],
     indices: Array,
     num_particles: int,
-    var_names: Mapping[str, str] | None,
+    names: Sequence[str],
     dims: Mapping[str, Sequence[str]] | None,
     *,
     timed: bool,
@@ -79,16 +115,13 @@ def _resampled_group(
     leaves = jax.tree.leaves(stacked)
     if any(leaf.shape[: len(expected)] != expected for leaf in leaves):
         raise ValueError("particle axes must match posterior weights")
-    path_leaves, _ = jax.tree.flatten_with_path(stacked)
     group = {}
     dimensions = {}
-    for path, particles in path_leaves:
+    for name, particles in zip(names, leaves, strict=True):
         particles = cast(Array, particles)
         gather = jax.vmap(jax.vmap(getitem)) if timed else jax.vmap(getitem)
         selected = gather(particles, indices)
         selected = jnp.swapaxes(selected, 1, 2) if timed else selected
-        path_name = keystr(path, simple=True, separator=".") or "theta"
-        name = (var_names or {}).get(path_name, path_name)
         event_rank = particles.ndim - (3 if timed else 2)
         default = [f"{name}_dim_{axis}" for axis in range(event_rank)]
         event_dims = list((dims or {}).get(name, default))
@@ -199,17 +232,34 @@ def to_arviz(
                 "to_arviz requires full particle history; rerun the filter "
                 "with store_history=True"
             )
-        log_weights = _stack(filter_runs, "filtered_log_weights")
+        ntime, num_particles = filter_runs[0].filtered_log_weights.shape
+        values = [run.filtered_particles for run in filter_runs]
+        timed = True
     else:
         tempered_runs = cast(tuple[TemperedPosterior, ...], runs)
-        log_weights = _stack(tempered_runs, "log_weights")
-    num_particles = log_weights.shape[-1]
+        num_particles = tempered_runs[0].log_weights.shape[-1]
+        values = [run.particles for run in tempered_runs]
+        timed = False
     draws = num_particles if num_draws is None else num_draws
     if draws <= 0:
         raise ValueError("num_draws must be positive")
 
+    u_values = None
+    if unconstrained is not None:
+        u_values = (
+            (unconstrained,)
+            if num_chains == 1
+            else tuple(cast(Any, unconstrained))
+        )
+        if len(u_values) != num_chains:
+            raise ValueError("unconstrained must provide one value per run")
+    posterior_names = _resolve_names(values[0], var_names)
+    u_names = (
+        _resolve_names(u_values[0], var_names) if u_values is not None else None
+    )
+
     if isinstance(runs[0], ParticleFilterPosterior):
-        ntime = log_weights.shape[1]
+        log_weights = _stack(filter_runs, "filtered_log_weights")
         indices = jax.vmap(systematic, in_axes=(0, 0, None))(
             jr.split(key, num_chains * ntime),
             jnp.exp(log_weights.reshape(-1, num_particles)),
@@ -228,8 +278,8 @@ def to_arviz(
         }
         stat_dims = {name: ["time"] for name in stats}
         stat_dims["log_weights"] = ["time", "particle"]
-        timed = True
     else:
+        log_weights = _stack(tempered_runs, "log_weights")
         if draws == num_particles:
             indices = jnp.broadcast_to(
                 jnp.arange(num_particles), (num_chains, draws)
@@ -245,24 +295,16 @@ def to_arviz(
         }
         stat_dims = {name: ["stage"] for name in stats}
         stat_dims["log_weights"] = ["particle"]
-        timed = False
 
     posterior_group, dimensions = _resampled_group(
-        values, indices, num_particles, var_names, dims, timed=timed
+        values, indices, num_particles, posterior_names, dims, timed=timed
     )
     groups = {
         "posterior": posterior_group,
     }
-    if unconstrained is not None:
-        u_values = (
-            (unconstrained,)
-            if num_chains == 1
-            else tuple(cast(Any, unconstrained))
-        )
-        if len(u_values) != num_chains:
-            raise ValueError("unconstrained must provide one value per run")
+    if u_values is not None and u_names is not None:
         groups["unconstrained_posterior"], u_dims = _resampled_group(
-            u_values, indices, num_particles, var_names, dims, timed=timed
+            u_values, indices, num_particles, u_names, dims, timed=timed
         )
         dimensions.update(u_dims)
     if emissions is not None:
