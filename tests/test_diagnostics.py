@@ -431,49 +431,30 @@ class TestCRPS:
 
         assert jnp.array_equal(shifted_score, centered_score)
 
-    def test_crps_subnormal_translation_matches_exact_oracle(self):
-        """A represented translation preserves an exact tiny CRPS."""
-        from smcx.diagnostics import crps
+    def test_crps_normal_translation_preserves_tiny_score(self):
+        """All-normal translated inputs retain a subnormal CRPS."""
+        prediction_bits = np.asarray(
+            [[0x00800000, 0x00800020], [0, 0x20]],
+            dtype=np.uint32,
+        )
+        observation_bits = np.asarray(
+            [0x00800000, 0],
+            dtype=np.uint32,
+        )
+        predictions_np = prediction_bits.view(np.float32)
+        observations_np = observation_bits.view(np.float32)
+        exact = Fraction(8, 2**149)
+        for values, observation in zip(
+            predictions_np, observations_np, strict=True
+        ):
+            assert _exact_crps_oracle(values, observation) == exact
 
-        scale = np.float32(2.0**-129)
-        offset = np.float32(2.0**-120)
-        centered = (
-            np.asarray([-100.0, -10.0, 5.0, 90.0], dtype=np.float32) * scale
+        predictions = jnp.asarray(predictions_np)
+        observations = jnp.asarray(observations_np, dtype=jnp.bfloat16)
+        expected = jnp.asarray(
+            np.full((2,), 8, dtype=np.uint32).view(np.float32)
         )
-        shifted = offset + centered
-        centered_observation = np.float32(0.0)
-        shifted_observation = offset
-        assert np.array_equal(shifted - offset, centered)
-
-        exact_centered = _exact_crps_oracle(
-            centered,
-            centered_observation,
-        )
-        exact_shifted = _exact_crps_oracle(
-            shifted,
-            shifted_observation,
-        )
-        assert exact_centered == exact_shifted
-        expected_scalar = np.float32(float(exact_centered))
-        assert Fraction.from_float(float(expected_scalar)) == exact_centered
-
-        predictions = jnp.asarray(np.stack([centered, shifted]))
-        observations = jnp.asarray([centered_observation, shifted_observation])
-        expected = jnp.full((2,), expected_scalar, dtype=jnp.float32)
-        eager = jnp.stack([
-            crps(predictions[0], observations[0]),
-            crps(predictions[1], observations[1]),
-        ])
-
-        assert jnp.array_equal(eager, expected)
-        assert jnp.array_equal(
-            jax.jit(crps)(predictions[0], observations[0]),
-            expected[0],
-        )
-        assert jnp.array_equal(
-            jax.jit(jax.vmap(crps))(predictions, observations),
-            expected,
-        )
+        _assert_crps_modes(predictions, observations, expected)
 
     def test_crps_exact_quotient_rounds_binary32_boundaries(self):
         """Exact division honors ties-to-even and the normal boundary."""
