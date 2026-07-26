@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.2 (2026-07-26)
+
+### Bug Fixes
+
+- **diagnostics**: Warn on undefined Pareto-k
+  ([#212](https://github.com/michaelellis003/smcx/pull/212),
+  [`d85e259`](https://github.com/michaelellis003/smcx/commit/d85e259b6bda33ac6cf5e4bf5955c1aeac96c79c))
+
+
 ## v1.14.1 (2026-07-25)
 
 ### Bug Fixes
