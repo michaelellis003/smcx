@@ -372,8 +372,10 @@ def _weighted_quantile_1d(
 ) -> Float[Array, " num_quantiles"]:
     """Compute weighted quantiles for a single 1-D vector.
 
-    Sorts particles, removes represented-zero weights from the support,
-    builds a midpoint CDF, and interpolates at the requested levels.
+    Sorts particles and interpolates on directional midpoint
+    cumulative-weight axes. Lower quantiles accumulate from the minimum;
+    upper quantiles accumulate from the maximum against ``1 - q`` so
+    small positive upper-tail weights remain represented.
 
     Args:
         particles: Particle values for one dimension.
@@ -383,6 +385,10 @@ def _weighted_quantile_1d(
     Returns:
         Interpolated quantile values. A support with no positive mass
         returns NaN.
+
+    References:
+        Sterbenz, P. H. (1974). *Floating-Point Computation*.
+        Prentice-Hall.
     """
     sort_idx = jnp.argsort(particles)
     p_sorted = particles[sort_idx]
@@ -390,14 +396,41 @@ def _weighted_quantile_1d(
     p_supported, w_supported, num_positive = _compact_positive_weight_support(
         p_sorted, w_sorted
     )
+    zero = jnp.zeros(1, dtype=w_supported.dtype)
     cum_w = jnp.cumsum(w_supported)
-    # Midpoint CDF: centre each particle's mass in its interval
-    # after removing zero-weight particles from the support.
-    mid_cdf = (jnp.concatenate([jnp.zeros(1), cum_w[:-1]]) + cum_w) / 2
-    # Tiny tiebreaker ensures strict monotonicity for jnp.interp.
-    n = p_supported.shape[0]
-    eps = jnp.arange(n, dtype=p_supported.dtype) * 1e-12
-    result = jnp.interp(q, mid_cdf + eps, p_supported)
+    lower_mid = (jnp.concatenate([zero, cum_w[:-1]]) + cum_w) / 2.0
+    lower = jnp.interp(q * cum_w[-1], lower_mid, p_supported)
+    half = jnp.asarray(0.5, dtype=q.dtype)
+    forward_median = jnp.interp(
+        half * cum_w[-1],
+        lower_mid,
+        p_supported,
+    )
+
+    p_descending = p_supported[::-1]
+    w_descending = w_supported[::-1]
+    reverse_cum_w = jnp.cumsum(w_descending)
+    upper_mid = (
+        jnp.concatenate([zero, reverse_cum_w[:-1]]) + reverse_cum_w
+    ) / 2.0
+    upper = jnp.interp(
+        (jnp.ones_like(q) - q) * reverse_cum_w[-1],
+        upper_mid,
+        p_descending,
+    )
+    final_index = jnp.maximum(num_positive - 1, 0)
+    final_support = p_supported[final_index]
+    upper_clamped = jnp.minimum(
+        jnp.maximum(upper, forward_median),
+        final_support,
+    )
+    # The clamp corrects the represented primal splice; retain the
+    # directional interpolation tangent with respect to q.
+    upper = lax.stop_gradient(upper_clamped) + (
+        upper - lax.stop_gradient(upper)
+    )
+
+    result = jnp.where(q < half, lower, upper)
     return jnp.where(num_positive > 0, result, jnp.nan)
 
 

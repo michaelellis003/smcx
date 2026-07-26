@@ -1915,16 +1915,33 @@ def tail_ess(
     q = float(q)
     if not math.isfinite(q) or not 0.0 < q <= 0.5:
         raise ValueError(f"q must be finite and in (0, 0.5]; got {q!r}")
-    qs = jnp.array([q, 1.0 - q])
+    tail_level = jnp.asarray(q)
     particles = _require_dense_particle_history(
         posterior, diagnostic="tail_ess"
     )
     ntime, _, dim = particles.shape
 
-    def n_eff(tw):
-        s2 = jnp.sum(tw * tw)
+    def n_eff(
+        tw: Float[Array, " num_particles"],
+    ) -> Float[Array, ""]:
+        scale = jnp.max(tw)
+        has_tail_mass = scale > 0.0
+        scaled = tw / jnp.where(
+            has_tail_mass,
+            scale,
+            jnp.ones_like(scale),
+        )
+        total = jnp.sum(scaled)
+        denominator = jnp.sum(scaled * scaled)
+        safe_denominator = jnp.where(
+            has_tail_mass,
+            denominator,
+            jnp.ones_like(denominator),
+        )
         return jnp.where(
-            s2 > 0.0, jnp.sum(tw) ** 2 / jnp.maximum(s2, 1e-30), 0.0
+            has_tail_mass,
+            total * (total / safe_denominator),
+            0.0,
         )
 
     # Plain Python loops over the small time/dim axes — diagnostics
@@ -1946,12 +1963,35 @@ def tail_ess(
             cum = jnp.cumsum(w_supported)
             # Midpoint CDF: centre each particle's mass in its
             # interval, normalized so the axis is [0, 1].
-            mid = (jnp.concatenate([jnp.zeros(1), cum[:-1]]) + cum) / (
+            zero = jnp.zeros(1, dtype=w_supported.dtype)
+            mid = (jnp.concatenate([zero, cum[:-1]]) + cum) / (
                 2.0 * jnp.maximum(cum[-1], 1e-30)
             )
-            edges = jnp.interp(qs, mid, v_supported)
-            lo = jnp.where(vals <= edges[0], w, 0.0)
-            hi = jnp.where(vals >= edges[1], w, 0.0)
+            lower_edge = jnp.interp(tail_level, mid, v_supported)
+            forward_median = jnp.interp(
+                jnp.asarray(0.5, dtype=tail_level.dtype),
+                mid,
+                v_supported,
+            )
+
+            reverse_values = v_supported[::-1]
+            reverse_weights = w_supported[::-1]
+            reverse_cum = jnp.cumsum(reverse_weights)
+            reverse_mid = (
+                jnp.concatenate([zero, reverse_cum[:-1]]) + reverse_cum
+            ) / (2.0 * jnp.maximum(reverse_cum[-1], 1e-30))
+            upper_edge = jnp.interp(
+                tail_level,
+                reverse_mid,
+                reverse_values,
+            )
+            final_index = jnp.maximum(num_positive - 1, 0)
+            upper_edge = jnp.minimum(
+                jnp.maximum(upper_edge, forward_median),
+                v_supported[final_index],
+            )
+            lo = jnp.where(vals <= lower_edge, w, 0.0)
+            hi = jnp.where(vals >= upper_edge, w, 0.0)
             per_dim.append(
                 jnp.where(
                     num_positive > 0,
