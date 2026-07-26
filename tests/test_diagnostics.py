@@ -462,16 +462,34 @@ class TestCRPS:
         assert jnp.array_equal(result, expected)
         assert jnp.array_equal(compiled, expected)
 
-    @pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
-    def test_crps_low_precision_large_sample_uses_wide_ranks(self, dtype):
+    def test_crps_float16_large_sample_uses_wide_ranks(self):
         from smcx.diagnostics import crps
 
         predictions = jnp.concatenate([
-            jnp.zeros((35_000,), dtype=dtype),
-            jnp.ones((35_000,), dtype=dtype),
+            jnp.zeros((32_753,), dtype=jnp.float16),
+            jnp.ones((32_753,), dtype=jnp.float16),
         ])
-        observation = jnp.asarray(0.5, dtype=dtype)
-        expected = jnp.asarray(0.25, dtype=dtype)
+        observation = jnp.asarray(0.5, dtype=jnp.float16)
+        expected = jnp.asarray(0.25, dtype=jnp.float16)
+
+        assert jnp.array_equal(crps(predictions, observation), expected)
+
+    def test_crps_bfloat16_rank_precision(self):
+        from smcx.diagnostics import crps
+
+        dtype = jnp.bfloat16
+        predictions = jnp.concatenate([
+            jnp.zeros((179,), dtype=dtype),
+            jnp.ones((78,), dtype=dtype),
+        ])
+        observation = jnp.asarray(0.2, dtype=dtype)
+        mass = Fraction(179, 257)
+        represented_observation = Fraction(205, 1024)
+        exact = (
+            represented_observation * mass**2
+            + (1 - represented_observation) * (1 - mass) ** 2
+        )
+        expected = jnp.asarray(float(exact), dtype=dtype)
 
         assert jnp.array_equal(crps(predictions, observation), expected)
         assert jnp.array_equal(
