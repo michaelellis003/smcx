@@ -6,10 +6,10 @@ r"""Adaptive tempered SMC for static targets.
 Anneals from the prior to the posterior
 $\pi_\phi \propto p(x)\, L(x)^\phi$ along an adaptive schedule
 [Del Moral, Doucet & Jasra, 2006]: the next temperature solves
-``ESS(phi) = target_ess * N`` by bisection on the *resident*
-log-likelihood vector when that target lies before ``phi = 1``. The
-terminal stage may instead stop above the target ESS. The solve is
-deterministic and uses no fresh sampling.
+``ESS(phi) / ESS(uniform weights) = target_ess`` by bisection on the
+*resident* log-likelihood vector when that target lies before
+``phi = 1``. The terminal stage may instead stop above the target ESS.
+The solve is deterministic and uses no fresh sampling.
 Each stage reweights by
 $\ell \cdot \Delta\phi$ (evidence increment at the reweight,
 pre-move — the Del Moral et al. collapse), resamples, and applies a
