@@ -533,7 +533,9 @@ class TestCRPS:
         # CRPS = 0.5 - 0.5*0.5 = 0.25
         predictions = jnp.array([0.0, 1.0])
         result = crps(predictions, jnp.float64(0.5))
-        assert float(result) == pytest.approx(0.25, abs=1e-10)
+        # Four f32 eps cover normalized interval arithmetic and rescaling.
+        tolerance = 4.0 * float(jnp.finfo(jnp.float32).eps)
+        assert float(result) == pytest.approx(0.25, rel=tolerance, abs=0.0)
 
     def test_crps_matches_pairwise_oracle_with_repeated_values(self):
         """Order-statistic CRPS matches the independent pairwise identity."""
@@ -563,7 +565,14 @@ class TestCRPS:
         predictions = jnp.array([[0.0, 1.0], [1.0, 1.0]])
         observations = jnp.array([0.5, 2.0])
         result = jax.jit(jax.vmap(crps))(predictions, observations)
-        assert jnp.array_equal(result, jnp.array([0.25, 1.0]))
+        # Four f32 eps cover normalized interval arithmetic and rescaling.
+        tolerance = 4.0 * float(jnp.finfo(jnp.float32).eps)
+        assert jnp.allclose(
+            result,
+            jnp.array([0.25, 1.0]),
+            rtol=tolerance,
+            atol=0.0,
+        )
 
     @pytest.mark.parametrize("outlier", [-1.0, 1.0])
     def test_crps_large_sample_preserves_reflected_outlier(self, outlier):
