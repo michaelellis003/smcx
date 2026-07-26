@@ -1001,10 +1001,10 @@ def crps(
             or the observation is not a floating scalar.
 
     Notes:
-        The quantile-decomposition identity is evaluated on values centered
-        at the observation. This retains :math:`O(N \log N)` complexity while
-        avoiding cancellation between raw order statistics and integer
-        scaling by :math:`N^2`.
+        The empirical-CDF integral is evaluated over power-of-two-scaled
+        ordered spacings. Its nonnegative interval terms retain
+        :math:`O(N \log N)` complexity while avoiding cancellation between
+        raw order statistics and integer scaling by :math:`N^2`.
 
     References:
         Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
@@ -1025,54 +1025,74 @@ def crps(
         dimension="num_samples",
     )
     obs = _require_float_scalar(observation, name="observation")
+    output_dtype = predictions.dtype
+    is_float8 = jnp.finfo(output_dtype).bits == 8
+    if is_float8:
+        # JAX does not implement frexp/ldexp for its float8 dtypes.
+        predictions = predictions.astype(jnp.float32)
+        obs = obs.astype(jnp.float32)
     ordered = jnp.sort(predictions)
-    opposite_sign = ((ordered < 0.0) & (obs > 0.0)) | (
-        (ordered > 0.0) & (obs < 0.0)
-    )
-    safe_observation = jnp.where(opposite_sign, ordered, obs)
-    centered = ordered - safe_observation
     n = predictions.shape[0]
-    reciprocal_n = jnp.reciprocal(jnp.asarray(n, dtype=centered.dtype))
-    lower_midpoint_mass = (
-        jnp.arange(n, dtype=centered.dtype) + 0.5
-    ) * reciprocal_n
-    upper_midpoint_mass = (
-        jnp.arange(n, 0, -1, dtype=centered.dtype) - 0.5
-    ) * reciprocal_n
-    quantile_weight = jnp.where(
-        ordered < obs,
-        lower_midpoint_mass,
-        upper_midpoint_mass,
-    )
-    same_sign_magnitude = jnp.abs(centered)
-    opposite_sign_scale = jnp.maximum(jnp.abs(ordered), jnp.abs(obs))
-    deviation_scale = jnp.max(
-        jnp.where(opposite_sign, opposite_sign_scale, same_sign_magnitude)
+    value_scale = jnp.maximum(
+        jnp.max(jnp.abs(ordered)),
+        jnp.abs(obs),
     )
     safe_scale = jnp.where(
-        deviation_scale > 0.0,
-        deviation_scale,
-        jnp.asarray(1.0, dtype=centered.dtype),
+        value_scale > 0.0,
+        value_scale,
+        jnp.asarray(1.0, dtype=ordered.dtype),
     )
-    scale_mantissa, scale_exponent = jnp.frexp(safe_scale)
-    normalized_same_sign = (
-        jnp.ldexp(same_sign_magnitude, -scale_exponent) / scale_mantissa
+    _, scale_exponent = jnp.frexp(safe_scale)
+    scaled_ordered = jnp.ldexp(ordered, -scale_exponent)
+    scaled_observation = jnp.ldexp(obs, -scale_exponent)
+    left_tail = jnp.maximum(
+        scaled_ordered[0] - scaled_observation,
+        0.0,
     )
-    normalized_ordered = (
-        jnp.ldexp(jnp.abs(ordered), -scale_exponent) / scale_mantissa
+    right_tail = jnp.maximum(
+        scaled_observation - scaled_ordered[-1],
+        0.0,
     )
-    normalized_observation = (
-        jnp.ldexp(jnp.abs(obs), -scale_exponent) / scale_mantissa
+    left = scaled_ordered[:-1]
+    right = scaled_ordered[1:]
+    split = jnp.clip(scaled_observation, left, right)
+    lower_width = split - left
+    upper_width = right - split
+    interval_width = right - left
+    sample_count = lax.optimization_barrier(jnp.asarray(n, dtype=ordered.dtype))
+    lower_rank = jnp.arange(1, n, dtype=ordered.dtype)
+    upper_rank = jnp.arange(n - 1, 0, -1, dtype=ordered.dtype)
+    minimum_rank = jnp.minimum(lower_rank, upper_rank)
+    rank_difference = jnp.abs(lower_rank - upper_rank)
+    extra_width = jnp.where(
+        lower_rank >= upper_rank,
+        lower_width,
+        upper_width,
     )
-    normalized_deviation = jnp.where(
-        opposite_sign,
-        normalized_ordered + normalized_observation,
-        normalized_same_sign,
+    # Decompose each interval into its smaller squared CDF mass plus a
+    # nonnegative |lower_mass - upper_mass| correction on the wider-mass side.
+    # Preserve the two divisions: a rounded reciprocal square loses the
+    # finite/overflow distinction at dtype max.
+    baseline_first = lax.optimization_barrier(
+        (interval_width * minimum_rank) / sample_count
     )
-    normalized_score = jnp.sum(
-        normalized_deviation * (2.0 * reciprocal_n * quantile_weight)
+    baseline_interval = (baseline_first * minimum_rank) / sample_count
+    extra_interval = lax.optimization_barrier(
+        (extra_width * rank_difference) / sample_count
     )
-    return jnp.asarray(safe_scale * normalized_score)
+    interval_score = jnp.sum(baseline_interval + extra_interval)
+    scaled_score = left_tail + right_tail + interval_score
+    # CRPS cannot exceed the largest absolute forecast error. Enforcing this
+    # exact bound contains reduction rounding without hiding true overflow.
+    max_error = jnp.maximum(
+        jnp.abs(scaled_ordered[0] - scaled_observation),
+        jnp.abs(scaled_ordered[-1] - scaled_observation),
+    )
+    scaled_score = jnp.minimum(scaled_score, max_error)
+    score = jnp.asarray(
+        jnp.ldexp(scaled_score, scale_exponent),
+    )
+    return score.astype(output_dtype) if is_float8 else score
 
 
 # --- Pareto-k diagnostic ---------------------------------------------------
