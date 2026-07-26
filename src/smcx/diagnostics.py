@@ -3,7 +3,8 @@
 
 # Descends from smcjax@e93d527 (https://github.com/michaelellis003/smcjax),
 # Apache-2.0. Modified: corrected Pareto-k and tail-ESS semantics,
-# genealogy and scoring diagnostics, and structured-state support.
+# genealogy and scoring diagnostics, translation-stable moments, and
+# structured-state support.
 
 r"""Diagnostic utilities for particle filter posteriors.
 
@@ -359,11 +360,70 @@ def _validate_particle_result_axes(
     return axes
 
 
+def _normalized_linear_weights(
+    log_weights: Float[Array, "ntime num_particles"],
+) -> Float[Array, "ntime num_particles"]:
+    """Return linear weights with their reduction residual removed."""
+    weights = vmap(normalize)(log_weights)
+    return weights / jnp.sum(weights, axis=1, keepdims=True)
+
+
+def _weighted_moment_coordinates(
+    log_weights: Float[Array, "ntime num_particles"],
+    field: Float[Array, "ntime num_particles dim"],
+) -> tuple[
+    Float[Array, "ntime num_particles"],
+    Float[Array, "ntime dim"],
+    Float[Array, "ntime num_particles dim"],
+    Float[Array, "ntime num_particles dim"],
+    Int[Array, "ntime dim"],
+]:
+    """Return weights and overflow-safe maximum-weight coordinates."""
+    weights = _normalized_linear_weights(log_weights)
+    anchor_indices = jnp.argmax(log_weights, axis=1)
+    anchors = field[jnp.arange(field.shape[0]), anchor_indices]
+    material = weights[:, :, None] > 0.0
+    raw_offsets = jnp.where(
+        material,
+        field - anchors[:, None, :],
+        jnp.zeros_like(field),
+    )
+    # Halving finite endpoints makes every possible difference representable.
+    shifts = jnp.any(jnp.isinf(raw_offsets), axis=1).astype(jnp.int32)
+    # Explicit exact multipliers preserve reverse-mode particle gradients;
+    # ldexp has a zero tangent for these extreme exponents on CPU and MPS.
+    downscale = jnp.where(
+        shifts > 0,
+        jnp.asarray(0.5, dtype=field.dtype),
+        jnp.asarray(1.0, dtype=field.dtype),
+    )
+    scaled_field = (
+        jnp.where(material, field, jnp.zeros_like(field))
+        * downscale[:, None, :]
+    )
+    scaled_anchors = scaled_field[jnp.arange(field.shape[0]), anchor_indices]
+    offsets = jnp.where(
+        material,
+        scaled_field - scaled_anchors[:, None, :],
+        jnp.zeros_like(field),
+    )
+    # Carry the same-dtype TwoDiff residual separately from the main offset.
+    virtual_anchor = scaled_field - offsets
+    virtual_field = offsets + virtual_anchor
+    tails = jnp.where(
+        material,
+        (scaled_field - virtual_field)
+        + (virtual_anchor - scaled_anchors[:, None, :]),
+        jnp.zeros_like(field),
+    )
+    return weights, scaled_anchors, offsets, tails, shifts
+
+
 def _weighted_mean_field(
     log_weights: Float[Array, "ntime num_particles"],
     field: Float[Array, "ntime num_particles dim"],
 ) -> Float[Array, "ntime dim"]:
-    """Compute weighted mean of a (ntime, N, D) field.
+    """Compute an anchor-centered weighted mean of a (T, N, D) field.
 
     Args:
         log_weights: Log weights, shape ``(ntime, num_particles)``.
@@ -372,8 +432,49 @@ def _weighted_mean_field(
     Returns:
         Weighted means, shape ``(ntime, D)``.
     """
-    weights = vmap(normalize)(log_weights)
-    return jnp.einsum("tn,tnd->td", weights, field)
+    weights, anchors, offsets, tails, shifts = _weighted_moment_coordinates(
+        log_weights,
+        field,
+    )
+    scaled_mean = anchors + jnp.sum(
+        weights[:, :, None] * offsets,
+        axis=1,
+    )
+    scaled_mean = scaled_mean + jnp.sum(weights[:, :, None] * tails, axis=1)
+    upscale = jnp.where(
+        shifts > 0,
+        jnp.asarray(2.0, dtype=field.dtype),
+        jnp.asarray(1.0, dtype=field.dtype),
+    )
+    return scaled_mean * upscale
+
+
+def _weighted_variance_field(
+    log_weights: Float[Array, "ntime num_particles"],
+    field: Float[Array, "ntime num_particles dim"],
+) -> Float[Array, "ntime dim"]:
+    """Compute a weighted variance entirely in shifted coordinates."""
+    weights, _, offsets, _, shifts = _weighted_moment_coordinates(
+        log_weights,
+        field,
+    )
+    material = weights[:, :, None] > 0.0
+    offset_means = jnp.sum(weights[:, :, None] * offsets, axis=1)
+    deviations = jnp.where(
+        material,
+        offsets - offset_means[:, None, :],
+        jnp.zeros_like(offsets),
+    )
+    scaled_variance = jnp.sum(
+        weights[:, :, None] * deviations**2,
+        axis=1,
+    )
+    upscale = jnp.where(
+        shifts > 0,
+        jnp.asarray(4.0, dtype=field.dtype),
+        jnp.asarray(1.0, dtype=field.dtype),
+    )
+    return scaled_variance * upscale
 
 
 def _weighted_quantile_field(
@@ -410,6 +511,13 @@ def weighted_mean(
 ) -> Float[Array, "ntime state_dim"]:
     r"""Compute the weighted mean of particles at each time step.
 
+    The reduction is shifted by a maximum-weight particle before summation,
+    so common translations do not amplify floating-point
+    weight-normalization error. Particles with represented-zero linear weight
+    are masked before centered arithmetic. A coordinate whose finite anchor
+    difference would overflow is reduced after an exact one-bit downshift;
+    each centered subtraction carries its same-dtype compensation term.
+
     Args:
         posterior: Particle filter posterior output.
 
@@ -419,6 +527,11 @@ def weighted_mean(
     Raises:
         TypeError: The posterior has structured rather than dense particles.
         ValueError: Consumed posterior arrays are malformed or misaligned.
+
+    References:
+        Ogita, T., Rump, S. M., and Oishi, S. (2005).
+        Accurate sum and dot product.
+        https://doi.org/10.1137/030601818
     """
     particles = _require_dense_particle_history(
         posterior, diagnostic="weighted_mean"
@@ -432,7 +545,12 @@ def weighted_variance(
     r"""Compute the weighted variance of particles at each time step.
 
     Uses the formula $V = \sum_i w_i (x_i - \mu)^2$, where $\mu$ is the
-    weighted mean.
+    weighted mean. Both $\mu$ and the deviations are computed in coordinates
+    shifted by one particle, avoiding reconstruction of the rounded absolute
+    mean inside the central-moment calculation. Particles with
+    represented-zero linear weight are masked before subtraction and
+    squaring. A coordinate whose finite anchor difference would overflow is
+    reduced after an exact one-bit downshift.
 
     Args:
         posterior: Particle filter posterior output.
@@ -443,15 +561,19 @@ def weighted_variance(
     Raises:
         TypeError: The posterior has structured rather than dense particles.
         ValueError: Consumed posterior arrays are malformed or misaligned.
+
+    References:
+        Pébay, P., Terriberry, T. B., Kolla, H., and Bennett, J. (2016).
+        Numerically stable, scalable formulas for parallel and online
+        computation of higher-order multivariate central moments with
+        arbitrary weights. https://doi.org/10.1007/s00180-015-0637-z
     """
     particles = _require_dense_particle_history(
         posterior, diagnostic="weighted_variance"
     )
-    means = _weighted_mean_field(posterior.filtered_log_weights, particles)
-    deviations = particles - means[:, None, :]
-    return _weighted_mean_field(
+    return _weighted_variance_field(
         posterior.filtered_log_weights,
-        deviations**2,
+        particles,
     )
 
 
@@ -831,6 +953,9 @@ def param_weighted_mean(
     posterior: LiuWestPosterior | SMC2Posterior,
 ) -> Float[Array, "ntime param_dim"]:
     r"""Compute the weighted mean of parameter particles at each step.
+
+    Uses the same represented-zero-safe, anchor-centered reduction as
+    `weighted_mean`.
 
     Args:
         posterior: Liu-West or SMC² posterior output.
