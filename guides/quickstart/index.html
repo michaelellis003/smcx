@@ -1592,9 +1592,12 @@ squared would exceed the backend integer range. Scores affected by the earlier
 raw-value calculation can change at fixed inputs; following
 <a href="https://numpy.org/neps/nep-0023-backwards-compatibility.html">NEP 23</a>, smcx
 treats this as the correction of a clear numerical bug. The signature and
-<span class="arithmatex">\(O(N \log N)\)</span> complexity are unchanged. Translations that expose subnormal
-float32 spacings and exact finite-versus-infinity classification near the
-overflow midpoint remain tracked in
+<span class="arithmatex">\(O(N \log N)\)</span> complexity are unchanged. Backend-addressable forecasts must
+contain fewer than <span class="arithmatex">\(2^{31}\)</span> samples; larger static shapes are rejected before
+materialization. A fixed-width <code>uint32</code> accumulator exactly classifies
+round-to-nearest at float32 overflow, including mixed narrower observation
+dtypes, without backend <code>uint64</code> support. Translations that expose subnormal
+float32 spacings remain backend-FTZ-sensitive and tracked in
 <a href="https://github.com/michaelellis003/smcx/issues/153">issue #153</a>.</p>
 <h2 id="cut-the-variance-with-a-guided-proposal">Cut the variance with a guided proposal</h2>
 <p>The bootstrap proposal ignores the current observation. The guided
