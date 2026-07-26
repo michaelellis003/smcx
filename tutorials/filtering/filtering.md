@@ -102,6 +102,15 @@ posterior = smcx.bootstrap_filter(
 Weighted summaries preserve the unequal particle weights. Here the interval
 uses the 5th and 95th weighted quantiles at each time step.
 
+Weighted quantiles accumulate midpoint mass from the nearest endpoint:
+upward for lower quantiles and downward for upper quantiles. This preserves
+small positive upper-tail weights in float32, returns the supported extrema
+at `q=0` and `q=1`, and ignores exactly zero-mass particles. The directional
+quantile and scale-safe `tail_ess` corrections can change fixed-posterior
+results; as wrong-result corrections under
+[NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html), they
+have no legacy compatibility mode.
+
 ```python
 state = np.asarray(states)[:, 0]
 observation = np.asarray(observations)[:, 0]
