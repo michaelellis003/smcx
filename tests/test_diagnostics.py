@@ -609,6 +609,54 @@ class TestWeightedQuantile:
                 )
             assert jnp.array_equal(actual[2], expected[2])
 
+    def test_tied_support_ignores_zero_mass_slots(self):
+        """Zero-mass slots do not perturb aggregation of positive ties."""
+        positive_values = jnp.asarray(
+            [0.0, 1.0, 2.0, 0.0, 1.0, 2.0, 0.0, 1.0],
+            dtype=jnp.float32,
+        )
+        numerators = jnp.asarray(
+            [6.0, 16.0, 20.0, 11.0, 14.0, 6.0, 9.0, 15.0],
+            dtype=jnp.float32,
+        )
+        positive_weights = numerators / jnp.sum(numerators)
+        zero_values = jnp.asarray(
+            [1.0, 1.0, 2.0, 1.0, 3.0, 3.0, -1.0, 2.0],
+            dtype=jnp.float32,
+        )
+        expanded_values = jnp.concatenate([positive_values, zero_values])
+        expanded_weights = jnp.concatenate([
+            positive_weights,
+            jnp.zeros_like(zero_values),
+        ])
+        levels = jnp.asarray([0.5], dtype=jnp.float32)
+
+        def evaluate(
+            values: jax.Array,
+            weights: jax.Array,
+            q: jax.Array,
+        ) -> tuple[jax.Array, jax.Array]:
+            posterior = _make_weighted_posterior(values, weights)
+            return (
+                tail_ess(posterior, q=0.5),
+                weighted_quantile(posterior, q)[0, :, 0],
+            )
+
+        compiled = jax.jit(evaluate)
+        for reference, actual in (
+            (
+                evaluate(positive_values, positive_weights, levels),
+                evaluate(expanded_values, expanded_weights, levels),
+            ),
+            (
+                compiled(positive_values, positive_weights, levels),
+                compiled(expanded_values, expanded_weights, levels),
+            ),
+        ):
+            assert jax.tree.all(
+                jax.tree.map(jnp.array_equal, actual, reference)
+            )
+
     def test_weighted_quantile_median_exact(self):
         posterior = _make_posterior()
         result = weighted_quantile(posterior, jnp.array([0.5]))
