@@ -372,8 +372,8 @@ def _weighted_quantile_1d(
 ) -> Float[Array, " num_quantiles"]:
     """Compute weighted quantiles for a single 1-D vector.
 
-    Sorts particles, builds a midpoint CDF from the normalised
-    weights, and interpolates at the requested quantile levels.
+    Sorts particles, removes represented-zero weights from the support,
+    builds a midpoint CDF, and interpolates at the requested levels.
 
     Args:
         particles: Particle values for one dimension.
@@ -381,7 +381,8 @@ def _weighted_quantile_1d(
         q: Quantile levels in [0, 1].
 
     Returns:
-        Interpolated quantile values.
+        Interpolated quantile values. A support with no positive mass
+        returns NaN.
     """
     sort_idx = jnp.argsort(particles)
     p_sorted = particles[sort_idx]

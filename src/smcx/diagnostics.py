@@ -592,8 +592,9 @@ def weighted_quantile(
 ) -> Float[Array, "ntime num_quantiles state_dim"]:
     r"""Compute weighted quantiles of particles at each time step.
 
-    Uses a sorted resampling approach for JIT compatibility:
-    sorts particles, computes cumulative weights, and interpolates.
+    Sorts particles, excludes exactly zero-mass values, computes a
+    midpoint cumulative-weight axis, and interpolates. The compaction
+    retains a static shape for JIT compatibility.
 
     Args:
         posterior: Particle filter posterior output.
@@ -603,6 +604,8 @@ def weighted_quantile(
 
     Returns:
         Weighted quantiles, shape ``(ntime, num_quantiles, state_dim)``.
+        A time step with no positive weight has undefined quantiles,
+        represented by NaN.
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
@@ -993,10 +996,15 @@ def param_weighted_quantile(
 
     Returns:
         Weighted quantiles, shape ``(ntime, num_quantiles, param_dim)``.
+        A time step with no positive weight has undefined quantiles,
+        represented by NaN.
 
     Raises:
         ValueError: Posterior arrays or ``q`` are malformed/misaligned, or an
             eager quantile lies outside [0, 1].
+
+    Notes:
+        Exactly zero-mass parameter values are excluded before interpolation.
     """
     q = _validate_quantile_levels(q)
     params = _require_parameter_history(posterior, "param_weighted_quantile")
@@ -1894,7 +1902,9 @@ def tail_ess(
             ``q`` / ``1 - q`` quantile).
 
     Returns:
-        Per-step minimum tail-ESS, shape ``(ntime,)``.
+        Per-step minimum tail-ESS, shape ``(ntime,)``. Exactly zero-mass
+        particles do not affect the result; a time step with no positive
+        weight returns NaN.
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
