@@ -566,7 +566,7 @@ class TestCRPS:
         )
 
     def test_crps_exact_infinite_overflow_boundary_returns_infinity(self):
-        """Rounding above the float32 overflow midpoint returns infinity."""
+        """Rounding at or above the overflow midpoint returns infinity."""
         from smcx.diagnostics import crps
 
         value_scale = 2.0**80
@@ -583,6 +583,16 @@ class TestCRPS:
         observation = np.float32(np.finfo(np.float32).max)
         overflow_midpoint = Fraction(2**128 - 2**103)
         assert _exact_crps_oracle(predictions, observation) > overflow_midpoint
+        tie_predictions = np.asarray([-(2.0**103)], dtype=np.float32)
+        assert (
+            _exact_crps_oracle(tie_predictions, observation)
+            == overflow_midpoint
+        )
+        tie_observation = jnp.asarray(observation)
+        assert jnp.isinf(crps(jnp.asarray(tie_predictions), tie_observation))
+        assert jnp.isinf(
+            jax.jit(crps)(jnp.asarray(tie_predictions), tie_observation)
+        )
 
         batched_predictions = jnp.asarray(np.stack([predictions, -predictions]))
         batched_observations = jnp.asarray([observation, -observation])

@@ -64,7 +64,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, tree, vmap
 from jax.core import Tracer
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Bool, Float, Int, UInt
 
 from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
@@ -973,6 +973,261 @@ def posterior_predictive_sample(
     )
 
 
+_CRPS_ACCUMULATOR_LIMBS = 11
+"""Number of uint32 limbs needed for an exact float32 CRPS numerator."""
+
+
+def _crps_add_word(
+    accumulator: UInt[Array, " limbs"],
+    word: UInt[Array, ""],
+    target_limb: Int[Array, ""],
+) -> UInt[Array, " limbs"]:
+    """Add one uint32 word at a dynamic limb, propagating its carry."""
+
+    def add_limb(
+        limb: Int[Array, ""],
+        state: tuple[UInt[Array, " limbs"], UInt[Array, ""]],
+    ) -> tuple[UInt[Array, " limbs"], UInt[Array, ""]]:
+        current_accumulator, carry = state
+        current = current_accumulator[limb]
+        active = limb >= target_limb
+        addend = jnp.where(limb == target_limb, word, carry)
+        updated = current + jnp.where(active, addend, jnp.uint32(0))
+        next_carry = jnp.where(
+            active & (updated < current),
+            jnp.uint32(1),
+            jnp.uint32(0),
+        )
+        return current_accumulator.at[limb].set(updated), next_carry
+
+    accumulator, _ = lax.fori_loop(
+        0,
+        _CRPS_ACCUMULATOR_LIMBS,
+        add_limb,
+        (accumulator, jnp.uint32(0)),
+    )
+    return accumulator
+
+
+def _crps_add_shifted_word(
+    accumulator: UInt[Array, " limbs"],
+    word: UInt[Array, ""],
+    bit_shift: Int[Array, ""],
+) -> UInt[Array, " limbs"]:
+    """Add a uint32 word shifted by a dynamic number of bits."""
+    target_limb = bit_shift >> 5
+    offset = bit_shift.astype(jnp.uint32) & jnp.uint32(31)
+    low_word = word << offset
+    high_shift = (jnp.uint32(32) - offset) & jnp.uint32(31)
+    high_word = jnp.where(
+        offset == 0,
+        jnp.uint32(0),
+        word >> high_shift,
+    )
+    accumulator = _crps_add_word(accumulator, low_word, target_limb)
+    return _crps_add_word(accumulator, high_word, target_limb + 1)
+
+
+def _crps_add_scaled_magnitude(
+    accumulator: UInt[Array, " limbs"],
+    mantissa: UInt[Array, ""],
+    weight: UInt[Array, ""],
+    bit_shift: Int[Array, ""],
+) -> UInt[Array, " limbs"]:
+    """Add ``mantissa * weight << bit_shift`` without uint64."""
+    half_mask = jnp.uint32(0xFFFF)
+    mantissa_low = mantissa & half_mask
+    mantissa_high = mantissa >> 16
+    weight_low = weight & half_mask
+    weight_high = weight >> 16
+    accumulator = _crps_add_shifted_word(
+        accumulator,
+        mantissa_low * weight_low,
+        bit_shift,
+    )
+    accumulator = _crps_add_shifted_word(
+        accumulator,
+        mantissa_low * weight_high,
+        bit_shift + 16,
+    )
+    accumulator = _crps_add_shifted_word(
+        accumulator,
+        mantissa_high * weight_low,
+        bit_shift + 16,
+    )
+    return _crps_add_shifted_word(
+        accumulator,
+        mantissa_high * weight_high,
+        bit_shift + 32,
+    )
+
+
+def _crps_add_scaled_float(
+    accumulators: tuple[
+        UInt[Array, " limbs"],
+        UInt[Array, " limbs"],
+    ],
+    value: Float[Array, ""],
+    weight: UInt[Array, ""],
+    negative_coefficient: Bool[Array, ""],
+) -> tuple[UInt[Array, " limbs"], UInt[Array, " limbs"]]:
+    """Route one weighted float32 bit pattern by its resulting sign."""
+    bits = lax.bitcast_convert_type(value, jnp.uint32)
+    exponent = (bits >> 23) & jnp.uint32(0xFF)
+    fraction = bits & jnp.uint32(0x7FFFFF)
+    mantissa = jnp.where(
+        exponent == 0,
+        fraction,
+        fraction | jnp.uint32(0x800000),
+    )
+    bit_shift = jnp.where(exponent == 0, 0, exponent - 1).astype(jnp.int32)
+    is_negative = ((bits >> 31) != 0) ^ negative_coefficient
+
+    def add_positive(
+        state: tuple[
+            UInt[Array, " limbs"],
+            UInt[Array, " limbs"],
+        ],
+    ) -> tuple[UInt[Array, " limbs"], UInt[Array, " limbs"]]:
+        positive, negative = state
+        return (
+            _crps_add_scaled_magnitude(
+                positive,
+                mantissa,
+                weight,
+                bit_shift,
+            ),
+            negative,
+        )
+
+    def add_negative(
+        state: tuple[
+            UInt[Array, " limbs"],
+            UInt[Array, " limbs"],
+        ],
+    ) -> tuple[UInt[Array, " limbs"], UInt[Array, " limbs"]]:
+        positive, negative = state
+        return (
+            positive,
+            _crps_add_scaled_magnitude(
+                negative,
+                mantissa,
+                weight,
+                bit_shift,
+            ),
+        )
+
+    return lax.cond(
+        is_negative,
+        add_negative,
+        add_positive,
+        accumulators,
+    )
+
+
+def _crps_add_sample_count_square(
+    accumulator: UInt[Array, " limbs"],
+    sample_count: int,
+    bit_shift: int,
+) -> UInt[Array, " limbs"]:
+    """Add ``sample_count**2 << bit_shift`` using 16-bit products."""
+    count = jnp.asarray(sample_count, dtype=jnp.uint32)
+    count_low = count & jnp.uint32(0xFFFF)
+    count_high = count >> 16
+    accumulator = _crps_add_shifted_word(
+        accumulator,
+        count_low * count_low,
+        jnp.asarray(bit_shift, dtype=jnp.int32),
+    )
+    accumulator = _crps_add_shifted_word(
+        accumulator,
+        jnp.uint32(2) * count_low * count_high,
+        jnp.asarray(bit_shift + 16, dtype=jnp.int32),
+    )
+    return _crps_add_shifted_word(
+        accumulator,
+        count_high * count_high,
+        jnp.asarray(bit_shift + 32, dtype=jnp.int32),
+    )
+
+
+def _crps_accumulator_at_least(
+    left: UInt[Array, " limbs"],
+    right: UInt[Array, " limbs"],
+) -> Bool[Array, ""]:
+    """Compare equal-width unsigned accumulators from high limb to low."""
+
+    def compare_limb(
+        limb_offset: Int[Array, ""],
+        relation: Int[Array, ""],
+    ) -> Int[Array, ""]:
+        limb = _CRPS_ACCUMULATOR_LIMBS - limb_offset - 1
+        limb_relation = jnp.where(
+            left[limb] > right[limb],
+            1,
+            jnp.where(left[limb] < right[limb], -1, 0),
+        )
+        return jnp.where(relation == 0, limb_relation, relation)
+
+    relation = lax.fori_loop(
+        0,
+        _CRPS_ACCUMULATOR_LIMBS,
+        compare_limb,
+        jnp.asarray(0, dtype=jnp.int32),
+    )
+    return relation >= 0
+
+
+def _crps_float32_overflows(
+    ordered: Float[Array, " num_samples"],
+    observation: Float[Array, ""],
+) -> Bool[Array, ""]:
+    """Classify exact empirical CRPS rounding at float32 overflow."""
+    sample_count = ordered.shape[0]
+    zero = jnp.zeros((_CRPS_ACCUMULATOR_LIMBS,), dtype=jnp.uint32)
+
+    def add_sample(
+        index: Int[Array, ""],
+        accumulators: tuple[
+            UInt[Array, " limbs"],
+            UInt[Array, " limbs"],
+        ],
+    ) -> tuple[UInt[Array, " limbs"], UInt[Array, " limbs"]]:
+        value = ordered[index]
+        rank = jnp.asarray(index, dtype=jnp.uint32)
+        count = jnp.asarray(sample_count, dtype=jnp.uint32)
+        is_left = value <= observation
+        weight = jnp.where(
+            is_left,
+            jnp.uint32(2) * rank + jnp.uint32(1),
+            jnp.uint32(2) * (count - rank) - jnp.uint32(1),
+        )
+        accumulators = _crps_add_scaled_float(
+            accumulators,
+            value,
+            weight,
+            is_left,
+        )
+        return _crps_add_scaled_float(
+            accumulators,
+            observation,
+            weight,
+            ~is_left,
+        )
+
+    positive, negative = lax.fori_loop(
+        0,
+        sample_count,
+        add_sample,
+        (zero, zero),
+    )
+    # In units of 2**-149, compare the exact numerator against
+    # N**2 * (2**128 - 2**103), the ties-to-infinity midpoint.
+    positive = _crps_add_sample_count_square(positive, sample_count, 252)
+    negative = _crps_add_sample_count_square(negative, sample_count, 277)
+    return _crps_accumulator_at_least(positive, negative)
+
+
 def crps(
     predictions: _DiagnosticVector,
     observation: _DiagnosticScalar,
@@ -1004,7 +1259,9 @@ def crps(
         The empirical-CDF integral is evaluated over power-of-two-scaled
         ordered spacings. Its nonnegative interval terms retain
         :math:`O(N \log N)` complexity while avoiding cancellation between
-        raw order statistics and integer scaling by :math:`N^2`.
+        raw order statistics and integer scaling by :math:`N^2`. At the
+        float32 overflow boundary, a fixed-width uint32 accumulator compares
+        the exact empirical numerator with the round-to-nearest midpoint.
 
     References:
         Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
@@ -1103,6 +1360,24 @@ def crps(
     score = jnp.asarray(
         jnp.ldexp(scaled_score, scale_exponent),
     )
+    if output_dtype == jnp.float32 and obs.dtype == jnp.float32:
+        dtype_max = jnp.asarray(jnp.finfo(jnp.float32).max)
+        needs_exact_classification = (
+            jnp.all(jnp.isfinite(ordered))
+            & jnp.isfinite(obs)
+            & (score >= dtype_max)
+        )
+
+        def classify_overflow(_: None) -> Float[Array, ""]:
+            overflows = _crps_float32_overflows(ordered, obs)
+            return jnp.where(overflows, jnp.inf, dtype_max)
+
+        score = lax.cond(
+            needs_exact_classification,
+            classify_overflow,
+            lambda _: score,
+            operand=None,
+        )
     return score.astype(output_dtype)
 
 
