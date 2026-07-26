@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.7 (2026-07-26)
+
+### Bug Fixes
+
+- **diagnostics**: Round exact CRPS quotients
+  ([#219](https://github.com/michaelellis003/smcx/pull/219),
+  [`c974f84`](https://github.com/michaelellis003/smcx/commit/c974f84603ddbf8d08272532e16b2f38855e1a6f))
+
+
 ## v1.14.6 (2026-07-26)
 
 ### Bug Fixes
