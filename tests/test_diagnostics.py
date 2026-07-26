@@ -127,6 +127,25 @@ def _exact_crps_oracle(
     )
 
 
+def _assert_crps_modes(
+    predictions: jax.Array,
+    observations: jax.Array,
+    expected: jax.Array,
+) -> None:
+    """Check one lane eagerly, under JIT, and the batch under JIT-vmap."""
+    from smcx.diagnostics import crps
+
+    assert jnp.array_equal(crps(predictions[0], observations[0]), expected[0])
+    assert jnp.array_equal(
+        jax.jit(crps)(predictions[0], observations[0]),
+        expected[0],
+    )
+    assert jnp.array_equal(
+        jax.jit(jax.vmap(crps))(predictions, observations),
+        expected,
+    )
+
+
 def _posterior_for_increment_contract(
     increments: jax.Array,
 ) -> ParticleFilterPosterior:
@@ -542,8 +561,6 @@ class TestCRPS:
 
     def test_crps_exact_finite_overflow_boundary_stays_finite(self):
         """Rounding below the float32 overflow midpoint stays finite."""
-        from smcx.diagnostics import crps
-
         predictions = np.asarray([-(2.0**105), 1.0], dtype=np.float32)
         observation = np.float32(np.finfo(np.float32).max)
         overflow_midpoint = Fraction(2**128 - 2**103)
@@ -557,29 +574,14 @@ class TestCRPS:
             dtype=jnp.float32,
         )
 
-        assert jnp.array_equal(
-            crps(batched_predictions[0], batched_observations[0]),
-            expected[0],
-        )
-        assert jnp.array_equal(
-            jax.jit(crps)(
-                batched_predictions[0],
-                batched_observations[0],
-            ),
-            expected[0],
-        )
-        assert jnp.array_equal(
-            jax.jit(jax.vmap(crps))(
-                batched_predictions,
-                batched_observations,
-            ),
+        _assert_crps_modes(
+            batched_predictions,
+            batched_observations,
             expected,
         )
 
     def test_crps_exact_boundary_with_bfloat16_observation(self):
         """A narrower observation still uses exact float32 classification."""
-        from smcx.diagnostics import crps
-
         predictions = np.asarray(
             [-(2**122 - 2**105), 1.0],
             dtype=np.float32,
@@ -603,22 +605,9 @@ class TestCRPS:
             dtype=jnp.float32,
         )
 
-        assert jnp.array_equal(
-            crps(batched_predictions[0], batched_observations[0]),
-            expected[0],
-        )
-        assert jnp.array_equal(
-            jax.jit(crps)(
-                batched_predictions[0],
-                batched_observations[0],
-            ),
-            expected[0],
-        )
-        assert jnp.array_equal(
-            jax.jit(jax.vmap(crps))(
-                batched_predictions,
-                batched_observations,
-            ),
+        _assert_crps_modes(
+            batched_predictions,
+            batched_observations,
             expected,
         )
 
@@ -652,22 +641,9 @@ class TestCRPS:
         batched_observations = jnp.asarray([observation, -observation])
         expected = jnp.full((2,), jnp.inf, dtype=jnp.float32)
 
-        assert jnp.array_equal(
-            crps(batched_predictions[0], batched_observations[0]),
-            expected[0],
-        )
-        assert jnp.array_equal(
-            jax.jit(crps)(
-                batched_predictions[0],
-                batched_observations[0],
-            ),
-            expected[0],
-        )
-        assert jnp.array_equal(
-            jax.jit(jax.vmap(crps))(
-                batched_predictions,
-                batched_observations,
-            ),
+        _assert_crps_modes(
+            batched_predictions,
+            batched_observations,
             expected,
         )
 
