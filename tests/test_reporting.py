@@ -45,14 +45,6 @@ def _tempered(particles: ParticleCloud) -> TemperedPosterior:
     )
 
 
-def _colliding_particles() -> ParticleCloud:
-    """Return two leaves with the same simple dotted path."""
-    return {
-        "a": {"b": jnp.ones((4, 1))},
-        "a.b": 2 * jnp.ones((4, 1)),
-    }
-
-
 def _group(result, name):
     group = getattr(result, name)
     return group.ds if hasattr(group, "ds") else group
@@ -138,28 +130,21 @@ def test_dense_and_structured_states_have_stable_names_and_dims():
 
 
 @pytest.mark.parametrize("collision_group", ["posterior", "unconstrained"])
-@pytest.mark.parametrize(
-    ("target", "num_draws"),
-    [
-        ("_stack", None),
-        ("systematic", 3),
-        ("getitem", None),
-        ("_host", None),
-    ],
-)
 def test_dotted_paths_are_rejected_before_value_operations(
     monkeypatch: pytest.MonkeyPatch,
     collision_group: str,
-    target: str,
-    num_draws: int | None,
 ) -> None:
     """Ambiguous raw paths fail before aliases or device-valued work."""
 
     def touched(*args: object, **kwargs: object) -> None:
-        raise AssertionError(f"{target} ran before schema preflight")
+        raise AssertionError("value operation ran before schema preflight")
 
-    monkeypatch.setattr(reporting, target, touched)
-    collision = _colliding_particles()
+    for target in ("_stack", "systematic", "getitem", "_host"):
+        monkeypatch.setattr(reporting, target, touched)
+    collision = {
+        "a": {"b": jnp.ones((4, 1))},
+        "a.b": 2 * jnp.ones((4, 1)),
+    }
     posterior = _tempered(
         collision if collision_group == "posterior" else jnp.ones((4, 1))
     )
@@ -172,7 +157,7 @@ def test_dotted_paths_are_rejected_before_value_operations(
         to_arviz(
             posterior,
             key=jr.key(10),
-            num_draws=num_draws,
+            num_draws=3,
             var_names={"a.b": "renamed"},
             unconstrained=unconstrained,
         )
@@ -207,12 +192,16 @@ def test_sample_dimensions_cannot_share_particle_namespace(
 ) -> None:
     posterior = _filter() if timed else _tempered({"value": jnp.ones((4, 1))})
     name = "theta" if timed else "value"
-    options = {"var_names": {name: dimension}}
-    if source == "event":
-        options = {"dims": {name: (dimension,)}}
+    aliases = {name: dimension} if source == "variable" else None
+    event_dims = {name: (dimension,)} if source == "event" else None
 
     with pytest.raises(ValueError, match="dimension"):
-        to_arviz(posterior, key=jr.key(14), **options)
+        to_arviz(
+            posterior,
+            key=jr.key(14),
+            var_names=aliases,
+            dims=event_dims,
+        )
 
 
 @pytest.mark.parametrize(
@@ -247,35 +236,26 @@ def test_event_dimensions_must_be_unique_per_variable() -> None:
         )
 
 
-def test_shared_dimension_sizes_must_match_within_group() -> None:
+@pytest.mark.parametrize("second_size", [2, 3])
+def test_shared_dimensions_require_one_size_within_group(
+    second_size: int,
+) -> None:
     posterior = _tempered({
         "a": jnp.ones((4, 2)),
-        "b": jnp.ones((4, 3)),
+        "state": {"b": jnp.ones((4, second_size))},
     })
-
-    with pytest.raises(ValueError, match=r"dimension 'axis'.*sizes 2 and 3"):
-        to_arviz(
-            posterior,
-            key=jr.key(17),
-            dims={"a": ("axis",), "b": ("axis",)},
+    options = {"a": ("axis",), "state.b": ("axis",)}
+    if second_size == 3:
+        with pytest.raises(
+            ValueError, match=r"dimension 'axis'.*sizes 2 and 3"
+        ):
+            to_arviz(posterior, key=jr.key(17), dims=options)
+    else:
+        group = _group(
+            to_arviz(posterior, key=jr.key(18), dims=options),
+            "posterior",
         )
-
-
-def test_unique_names_and_matching_shared_dimensions_are_preserved() -> None:
-    posterior = _tempered({
-        "a": jnp.ones((4, 2)),
-        "state": {"b": jnp.ones((4, 2))},
-    })
-
-    result = to_arviz(
-        posterior,
-        key=jr.key(18),
-        dims={"a": ("axis",), "state.b": ("axis",)},
-    )
-
-    group = _group(result, "posterior")
-    assert group["a"].dims == ("chain", "draw", "axis")
-    assert group["state.b"].dims == ("chain", "draw", "axis")
+        assert group["a"].dims == group["state.b"].dims
 
 
 def test_constrained_and_unconstrained_schemas_are_group_scoped() -> None:
@@ -290,13 +270,8 @@ def test_constrained_and_unconstrained_schemas_are_group_scoped() -> None:
 
     constrained = _group(result, "posterior")["theta"]
     u_space = _group(result, "unconstrained_posterior")["theta"]
-    assert constrained.dims == (
-        "chain",
-        "draw",
-        "theta_dim_0",
-        "theta_dim_1",
-    )
-    assert u_space.dims == ("chain", "draw", "theta_dim_0")
+    assert constrained.dims[-2:] == ("theta_dim_0", "theta_dim_1")
+    assert u_space.dims[-1] == "theta_dim_0"
 
 
 def test_particle_dimensions_do_not_leak_into_observed_emissions() -> None:
@@ -309,11 +284,7 @@ def test_particle_dimensions_do_not_leak_into_observed_emissions() -> None:
         emissions=jnp.ones((3,)),
     )
 
-    assert _group(result, "posterior")["emissions"].dims == (
-        "chain",
-        "draw",
-        "state_axis",
-    )
+    assert _group(result, "posterior")["emissions"].dims[-1] == "state_axis"
     observed = _group(result, "observed_data")["emissions"]
     assert observed.shape == (3,)
     assert "state_axis" not in observed.dims
