@@ -506,10 +506,10 @@ mutation_step(key, state, tempered_logdensity_fn) -> (state, info)
 ```
 
 State is a JAX PyTree with a dense vector `position`; info is a JAX PyTree
-with a scalar floating `acceptance_rate`. NamedTuples are a convenient
-representation, and either object may carry extra fields. The target passed
-to both callbacks is the current stage density
-`log_prior + phi * log_likelihood`.
+with a scalar floating `acceptance_rate` that is finite and in `[0, 1]`.
+NamedTuples are a convenient representation, and either object may carry
+extra fields. The target passed to both callbacks is the current stage
+density `log_prior + phi * log_likelihood`.
 
 ```python
 posterior = smcx.temper(
@@ -525,10 +525,13 @@ posterior = smcx.temper(
 
 smcx batches independent states across particles and compiles the fixed-count
 sweep; `temper` itself remains host-driven. Mutation state is reinitialized
-after each resampling stage. The caller is responsible for making each step
-invariant for the supplied target. Omitting both callbacks selects the
-existing cloud-adaptive random-walk Metropolis mutation. Pass ordinary
-callbacks rather than pre-jitting a function that accepts the target callable.
+after each resampling stage. Every acceptance rate is checked when the sweep
+returns to that host-driven stage boundary. Stage means accumulate in at
+least float32 precision and round once to the callback rate dtype. The caller
+is responsible for making each step invariant for the supplied target.
+Omitting both callbacks selects the existing cloud-adaptive random-walk
+Metropolis mutation. Pass ordinary callbacks rather than pre-jitting a
+function that accepts the target callable.
 The built-in tempering and SMC² proposals retain trace-relative jitter for
 ill-conditioned clouds. If no positive factor survives in the parameter
 dtype, they use a machine-epsilon variance floor with squared parameter units,

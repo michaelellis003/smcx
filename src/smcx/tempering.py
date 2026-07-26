@@ -189,7 +189,9 @@ def temper(
         mutation_step_fn: Optional
             ``(key, state, tempered_logdensity_fn) -> (state, info)``
             callback. Info must expose a scalar floating
-            ``acceptance_rate``. Supply both mutation callbacks or neither.
+            ``acceptance_rate`` that is finite and in ``[0, 1]``. Stage
+            means retain that scalar's dtype. Supply both mutation callbacks
+            or neither.
         max_stages: Safety cap on the number of stages. Near-unit
             ``target_ess`` values may need a larger budget.
 
@@ -201,7 +203,8 @@ def temper(
     Raises:
         ValueError: Particle or mutation counts are invalid, ``target_ess``
             is outside its numerically viable interval, callback pairing is
-            incomplete, or a mutation state or diagnostic is malformed.
+            incomplete, or a mutation state or diagnostic is malformed or
+            outside its documented domain.
         DegenerateWeightsError: A tempering reweight stage cannot be
             normalized.
         RuntimeError: ``max_stages`` exceeded before reaching
