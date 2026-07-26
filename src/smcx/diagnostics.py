@@ -592,9 +592,11 @@ def weighted_quantile(
 ) -> Float[Array, "ntime num_quantiles state_dim"]:
     r"""Compute weighted quantiles of particles at each time step.
 
-    Sorts particles, excludes exactly zero-mass values, computes a
-    midpoint cumulative-weight axis, and interpolates. The compaction
-    retains a static shape for JIT compatibility.
+    Sorts particles, excludes exactly zero-mass values, and interpolates
+    on directional midpoint cumulative-weight axes. Lower quantiles
+    accumulate from the minimum and upper quantiles from the maximum,
+    preserving positive float32 tail mass. Static-shape compaction keeps
+    the calculation JIT-compatible.
 
     Args:
         posterior: Particle filter posterior output.
@@ -987,6 +989,9 @@ def param_weighted_quantile(
     q: _DiagnosticVector,
 ) -> Float[Array, "ntime num_quantiles param_dim"]:
     r"""Compute weighted quantiles of parameter particles at each step.
+
+    Uses the same directional midpoint construction as
+    `weighted_quantile`, including float32 upper-tail preservation.
 
     Args:
         posterior: Liu-West or SMC² posterior output.
@@ -1886,7 +1891,9 @@ def tail_ess(
     $(\sum w)^2 / \sum w^2$ — the effective number of particles
     estimating that tail. Returns the minimum over dimensions and both
     tails (in the spirit of the quantile tail-ESS of Vehtari, Gelman,
-    Simpson, Carpenter & Burkner 2021).
+    Simpson, Carpenter & Burkner 2021). The upper edge accumulates from
+    the maximum positive-mass particle, and each restricted tail is
+    max-scaled before evaluating the ESS ratio.
 
     Uniform weights give roughly ``q * N`` (a tail only ever holds a
     ``q`` fraction of the mass); compare against ``q * N``, not ``N``.
