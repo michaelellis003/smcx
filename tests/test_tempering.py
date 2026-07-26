@@ -21,6 +21,12 @@ import numpy as np
 import pytest
 
 import smcx
+from smcx.types import (
+    PRNGKeyT,
+    StaticLogDensity,
+    TemperingMutationInfo,
+    TemperingMutationState,
+)
 
 D = 3
 S0, SL = 2.0, 0.5
@@ -282,6 +288,48 @@ class TestMutationCallback:
                 mutation_init_fn=_mutation_init,
                 mutation_step_fn=_cancelling_invalid_acceptance_step,
             )
+
+    def test_negative_subnormal_acceptance_rate_is_rejected_across_jit(self):
+        """A traced float32 value below zero never flushes into the domain."""
+        negative_subnormal = jnp.asarray(
+            -jnp.finfo(jnp.float32).smallest_subnormal,
+            dtype=jnp.float32,
+        )
+
+        def init(_key: PRNGKeyT, count: int) -> jax.Array:
+            return jnp.full((count, 1), negative_subnormal, dtype=jnp.float32)
+
+        def log_density(_position: jax.Array) -> jax.Array:
+            return jnp.asarray(0.0, dtype=jnp.float32)
+
+        def mutation_step(
+            _key: PRNGKeyT,
+            state: TemperingMutationState,
+            _tempered_logdensity_fn: StaticLogDensity,
+        ) -> tuple[TemperingMutationState, TemperingMutationInfo]:
+            return state, _MutationInfo(
+                state.position[0],
+                jnp.asarray(False),
+            )
+
+        def run() -> None:
+            smcx.temper(
+                jr.key(168),
+                init,
+                log_density,
+                log_density,
+                4,
+                num_mcmc_steps=1,
+                mutation_init_fn=_mutation_init,
+                mutation_step_fn=mutation_step,
+                max_stages=1,
+            )
+
+        message = "acceptance_rate must be finite and in \\[0, 1\\]"
+        with jax.disable_jit(), pytest.raises(ValueError, match=message):
+            run()
+        with pytest.raises(ValueError, match=message):
+            run()
 
     def test_invalid_acceptance_rate_is_rejected_at_a_later_stage(self):
         init, log_prior, log_lik = _small_tempering_model()
