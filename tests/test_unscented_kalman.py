@@ -4,6 +4,7 @@
 """Tests for scaled unscented Kalman filtering."""
 
 import math
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -353,6 +354,38 @@ def test_unscented_filter_rejects_invalid_rule(parameters, message):
     """Invalid scaled-rule parameters use the public exception."""
     with pytest.raises(ValueError, match=message):
         _minimal_float32_ukf(**parameters)
+
+
+@pytest.mark.parametrize(
+    ("argument", "scalar", "constraint"),
+    [
+        ("initial_covariance", 0.0, "be positive definite"),
+        ("transition_covariance", 0.0, "be positive definite"),
+        ("observation_covariance", 0.0, "be positive definite"),
+        ("initial_covariance", jnp.nan, "contain only finite values"),
+    ],
+)
+def test_unscented_filter_rejects_invalid_covariance(
+    argument,
+    scalar,
+    constraint,
+):
+    """Every covariance factored by the UKF must be positive definite."""
+    zero = jnp.zeros(1, dtype=jnp.float32)
+    covariance = jnp.eye(1, dtype=jnp.float32)
+    model: dict[str, Any] = {
+        "initial_mean": zero,
+        "initial_covariance": covariance,
+        "transition_mean_fn": _identity,
+        "transition_covariance": covariance,
+        "observation_mean_fn": _identity,
+        "observation_covariance": covariance,
+        "emissions": zero[None],
+    }
+    model[argument] = jnp.array([[scalar]], dtype=jnp.float32)
+
+    with pytest.raises(ValueError, match=f"{argument} must {constraint}"):
+        smcx.unscented_kalman_filter(**model)
 
 
 def test_unscented_nondefault_rule_matches_scalar_oracle():

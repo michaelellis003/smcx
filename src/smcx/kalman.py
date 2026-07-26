@@ -34,7 +34,9 @@ import math
 from typing import NamedTuple, cast
 
 import jax.numpy as jnp
+import numpy as np
 from jax import lax, vmap
+from jax.core import Tracer
 from jax.scipy.linalg import solve_triangular
 from jaxtyping import Array, Float, Shaped
 
@@ -265,6 +267,57 @@ def _check_float_array(
         )
 
 
+def _check_covariance(
+    value: Shaped[Array, "*batch dimension dimension"],
+    name: str,
+    *,
+    positive_definite: bool,
+) -> None:
+    """Validate concrete covariance values at the public host boundary."""
+    if isinstance(value, Tracer):
+        return
+    covariance = np.asarray(value, dtype=np.float64)
+    if covariance.size == 0:
+        return
+    if not np.all(np.isfinite(covariance)):
+        raise ValueError(f"{name} must contain only finite values")
+    dimension = covariance.shape[-1]
+    # A normalized Rayleigh quotient sums at most dimension rounded terms;
+    # 8 covers input rounding and the explicit symmetrization below.
+    epsilon = float(np.finfo(value.dtype).eps)
+    psd_tolerance = 8.0 * dimension * epsilon
+    transpose = np.swapaxes(covariance, -1, -2)
+    scale = np.maximum(np.abs(covariance), np.abs(transpose))
+    scaled = covariance / np.where(np.equal(scale, 0.0), 1.0, scale)
+    if np.any(np.abs(scaled - np.swapaxes(scaled, -1, -2)) > 32.0 * epsilon):
+        raise ValueError(f"{name} must be symmetric")
+    lower = np.minimum(covariance, transpose)
+    symmetric = lower + 0.5 * (np.maximum(covariance, transpose) - lower)
+    diagonal = np.diagonal(symmetric, axis1=-2, axis2=-1)
+    domain = "definite" if positive_definite else "semidefinite"
+    invalid_diagonal = diagonal <= 0.0 if positive_definite else diagonal < 0.0
+    zero_diagonal = np.equal(diagonal, 0.0)
+    nonzero = np.not_equal(symmetric, 0.0)
+    incompatible_zero = zero_diagonal[..., :, None] & nonzero
+    if np.any(invalid_diagonal) or np.any(incompatible_zero):
+        raise ValueError(f"{name} must be positive {domain}")
+    diagonal_scale = np.sqrt(np.where(zero_diagonal, 1.0, diagonal))
+    with np.errstate(over="ignore", invalid="ignore"):
+        normalized = (
+            symmetric / diagonal_scale[..., :, None]
+        ) / diagonal_scale[..., None, :]
+    if not np.all(np.isfinite(normalized)):
+        raise ValueError(f"{name} must be positive {domain}")
+    minimum_eigenvalue = np.min(np.linalg.eigvalsh(normalized), axis=-1)
+    invalid = (
+        minimum_eigenvalue <= 0.0
+        if positive_definite
+        else minimum_eigenvalue < -psd_tolerance
+    )
+    if np.any(invalid):
+        raise ValueError(f"{name} must be positive {domain}")
+
+
 def _time_matrix(
     value: Shaped[Array, "*shape"],
     length: int,
@@ -329,6 +382,8 @@ def _prepare_nonlinear_filter(
     transition_covariance: Shaped[Array, "*transition_covariance_shape"],
     observation_covariance: Shaped[Array, "*observation_covariance_shape"],
     emissions: Shaped[Array, "*emissions_shape"],
+    *,
+    state_covariances_positive_definite: bool,
 ) -> _NonlinearFilterSetup:
     """Validate arrays shared by the extended and unscented filters."""
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
@@ -370,6 +425,21 @@ def _prepare_nonlinear_filter(
         observation_dim,
         observation_dim,
         "observation_covariance",
+    )
+    _check_covariance(
+        initial_covariance,
+        "initial_covariance",
+        positive_definite=state_covariances_positive_definite,
+    )
+    _check_covariance(
+        transition_covariance,
+        "transition_covariance",
+        positive_definite=state_covariances_positive_definite,
+    )
+    _check_covariance(
+        observation_covariance,
+        "observation_covariance",
+        positive_definite=True,
     )
     return _NonlinearFilterSetup(
         num_timesteps,
@@ -822,12 +892,15 @@ def kalman_filter(
 
     Raises:
         ValueError: An array has an invalid shape or dtype, timed terms
-            are misaligned, or control matrices are supplied without inputs.
+            are misaligned, a concrete covariance is outside its domain,
+            or control matrices are supplied without inputs.
 
     Note:
-        Arrays must use float32 or float64. Covariances must be finite,
-        symmetric, and positive definite. Missing observations are not
-        supported.
+        Arrays must use float32 or float64. Initial and transition
+        covariances must be finite, symmetric, and positive semidefinite;
+        observation covariances must be finite, symmetric, and positive
+        definite. Value checks run eagerly and are skipped for traced
+        arrays. Missing observations are not supported.
     """
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
         raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
@@ -943,6 +1016,21 @@ def kalman_filter(
             "initial_covariance must have shape "
             f"({state_dim}, {state_dim}); got {initial_covariance.shape}"
         )
+    _check_covariance(
+        initial_covariance,
+        "initial_covariance",
+        positive_definite=False,
+    )
+    _check_covariance(
+        transition_covariance,
+        "transition_covariance",
+        positive_definite=False,
+    )
+    _check_covariance(
+        observation_covariance,
+        "observation_covariance",
+        positive_definite=True,
+    )
     filtered_mean_0, filtered_covariance_0, increment_0 = _condition(
         initial_mean,
         initial_covariance,
@@ -1058,12 +1146,14 @@ def extended_kalman_filter(
 
     Raises:
         ValueError: An array or callback output has an invalid shape or
-            dtype.
+            dtype, or a concrete covariance is outside its domain.
 
     Note:
-        Arrays must share a float32 or float64 dtype. Covariances must be
-        finite, symmetric, and positive definite. Missing observations are
-        not supported.
+        Arrays must share a float32 or float64 dtype. Initial and transition
+        covariances must be finite, symmetric, and positive semidefinite;
+        observation covariances must be finite, symmetric, and positive
+        definite. Value checks run eagerly and are skipped for traced
+        arrays. Missing observations are not supported.
 
     References:
         Schmidt, S. F. (1966). Application of State-Space Methods to
@@ -1079,6 +1169,7 @@ def extended_kalman_filter(
         transition_covariance,
         observation_covariance,
         emissions,
+        state_covariances_positive_definite=False,
     )
     num_timesteps = setup.num_timesteps
     observation_dim = setup.observation_dim
@@ -1279,13 +1370,15 @@ def unscented_kalman_filter(
 
     Raises:
         ValueError: An array, callback output, or scaled-rule parameter is
-            invalid.
+            invalid, or a concrete covariance is outside its domain.
 
     Note:
-        Arrays must share a float32 or float64 dtype. Covariances must be
-        finite, symmetric, and positive definite. Missing observations are
-        not supported. Smaller ``alpha`` values may improve local quadrature
-        but are more cancellation-prone in float32.
+        Arrays must share a float32 or float64 dtype. Every covariance must
+        be finite, symmetric, and positive definite because the UKF takes
+        state and innovation Cholesky factors. Value checks run eagerly and
+        are skipped for traced arrays. Missing observations are not supported.
+        Smaller ``alpha`` values may improve local quadrature but are more
+        cancellation-prone in float32.
 
     References:
         Julier, S. J. (2002). The Scaled Unscented Transformation.
@@ -1300,6 +1393,7 @@ def unscented_kalman_filter(
         transition_covariance,
         observation_covariance,
         emissions,
+        state_covariances_positive_definite=True,
     )
     rule = _scaled_unscented_rule(
         setup.state_dim,
@@ -1447,6 +1541,21 @@ def _validate_filter_posterior(
             raise ValueError(
                 f"{name} must have shape {shape}; got {value.shape}"
             )
+    _check_covariance(
+        posterior.filtered_covariances,
+        "filtered_covariances",
+        positive_definite=False,
+    )
+    _check_covariance(
+        posterior.predicted_covariances[:1],
+        "predicted_covariances[:1]",
+        positive_definite=False,
+    )
+    _check_covariance(
+        posterior.predicted_covariances[1:],
+        "predicted_covariances[1:]",
+        positive_definite=True,
+    )
     marginal = jnp.asarray(posterior.marginal_loglik)
     if marginal.ndim != 0:
         raise ValueError("marginal_loglik must be scalar")
@@ -1512,11 +1621,14 @@ def rts_smoother(
 
     Raises:
         ValueError: The posterior or transition array has an invalid shape
-            or dtype.
+            or dtype, or a concrete covariance is outside its domain.
 
     Note:
-        Predicted covariances must be finite, symmetric, and positive
-        definite.
+        Filtered covariances and the first predicted covariance must be
+        finite, symmetric, and positive semidefinite. Positive-time
+        predicted covariances must be finite, symmetric, and positive
+        definite because the backward recursion factors them. Value checks
+        run eagerly and are skipped for traced arrays.
     """
     num_timesteps, state_dim, dtype = _validate_filter_posterior(
         filtered_posterior

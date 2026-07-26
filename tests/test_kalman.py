@@ -278,6 +278,19 @@ def test_scan_steps_uncompiled_match_public_two_step_run():
     )
 
 
+def _valid_linear_model() -> dict[str, jax.Array]:
+    """Return a valid two-dimensional linear model."""
+    return {
+        "initial_mean": jnp.zeros(2),
+        "initial_covariance": jnp.eye(2),
+        "transition_matrix": jnp.eye(2),
+        "transition_covariance": jnp.eye(2),
+        "observation_matrix": jnp.eye(2),
+        "observation_covariance": jnp.eye(2),
+        "emissions": jnp.zeros((2, 2)),
+    }
+
+
 @pytest.mark.parametrize(
     ("argument", "value", "message"),
     [
@@ -302,6 +315,88 @@ def test_kalman_filter_rejects_misaligned_shapes(argument, value, message):
 
     with pytest.raises(ValueError, match=message):
         smcx.kalman_filter(**model)
+
+
+@pytest.mark.filterwarnings("error::RuntimeWarning")
+@pytest.mark.parametrize(
+    ("argument", "value", "message"),
+    [
+        (
+            "initial_covariance",
+            jnp.nextafter(jnp.zeros((2, 2)), 1.0).at[1, 1].set(0.0),
+            "initial_covariance must be positive semidefinite",
+        ),
+        (
+            "transition_covariance",
+            jnp.array([[1.0e20, 0.0], [1.0, 1.0]]),
+            "transition_covariance must be symmetric",
+        ),
+        (
+            "observation_covariance",
+            jnp.array([[1.0, 0.0], [0.0, jnp.inf]]),
+            "observation_covariance must contain only finite values",
+        ),
+        (
+            "transition_covariance",
+            jnp.array([
+                [1.0, jnp.finfo(jnp.asarray(0.0).dtype).max],
+                [-jnp.finfo(jnp.asarray(0.0).dtype).max, 1.0],
+            ]),
+            "transition_covariance must be symmetric",
+        ),
+    ],
+)
+def test_kalman_filter_rejects_invalid_covariance(argument, value, message):
+    """Concrete covariance values obey the public Gaussian domain."""
+    model = _valid_linear_model()
+    model[argument] = value
+
+    with pytest.raises(ValueError, match=message):
+        smcx.kalman_filter(**model)
+
+
+def test_kalman_filter_accepts_semidefinite_state_covariances():
+    """Deterministic state components remain a supported linear model."""
+    model = _valid_linear_model()
+    model["initial_covariance"] = jnp.diag(jnp.array([1.0, 0.0]))
+    model["transition_covariance"] = jnp.zeros((2, 2))
+
+    posterior = smcx.kalman_filter(**model)
+
+    assert jnp.all(jnp.isfinite(posterior.filtered_covariances))
+
+
+def test_kalman_filter_checks_each_timed_covariance_scale():
+    """A large valid slice cannot hide an indefinite small slice."""
+    model = _valid_linear_model()
+    model["emissions"] = jnp.zeros((3, 2))
+    model["transition_covariance"] = jnp.array([
+        [[1.0e20, 0.0], [0.0, 1.0e20]],
+        [[1.0, 2.0], [2.0, 1.0]],
+    ])
+
+    with pytest.raises(
+        ValueError,
+        match="transition_covariance must be positive semidefinite",
+    ):
+        smcx.kalman_filter(**model)
+
+
+def test_kalman_filter_skips_covariance_value_checks_when_traced():
+    """JIT retains shape checks without concretizing covariance values."""
+    model = _valid_linear_model()
+    del model["initial_covariance"]
+
+    @jax.jit
+    def run(initial_covariance):
+        return smcx.kalman_filter(
+            **model,
+            initial_covariance=initial_covariance,
+        )
+
+    posterior = run(jnp.diag(jnp.array([1.0, -0.1])))
+
+    assert posterior.filtered_covariances.shape == (2, 2, 2)
 
 
 def test_kalman_filter_rejects_input_matrix_without_inputs():
@@ -443,6 +538,80 @@ def test_rts_smoother_rejects_misaligned_transition_history():
 
     with pytest.raises(ValueError, match="transition_matrix"):
         smcx.rts_smoother(filtered, jnp.ones((3, 1, 1)))
+
+
+def _valid_filter_posterior() -> smcx.GaussianFilterPosterior:
+    """Return a valid two-time filter posterior."""
+    means = jnp.zeros((2, 2))
+    covariances = jnp.broadcast_to(jnp.eye(2), (2, 2, 2))
+    return smcx.GaussianFilterPosterior(
+        jnp.asarray(0.0),
+        means,
+        covariances,
+        means,
+        covariances,
+        jnp.zeros(2),
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        (
+            "filtered_covariances",
+            jnp.array([
+                [[1.0, 0.0], [0.0, -0.1]],
+                [[1.0, 0.0], [0.0, 1.0]],
+            ]),
+            "filtered_covariances must be positive semidefinite",
+        ),
+        (
+            "predicted_covariances",
+            jnp.array([
+                [[1.0, 0.0], [0.0, 1.0]],
+                [[1.0, 0.5], [0.0, 1.0]],
+            ]),
+            "predicted_covariances\\[1:\\] must be symmetric",
+        ),
+        (
+            "predicted_covariances",
+            jnp.array([
+                [[1.0, 0.0], [0.0, 1.0]],
+                [[1.0, 0.0], [0.0, jnp.nan]],
+            ]),
+            "predicted_covariances\\[1:\\] must contain only finite values",
+        ),
+        (
+            "predicted_covariances",
+            jnp.array([
+                [[1.0, 0.0], [0.0, 1.0]],
+                [[1.0, 0.0], [0.0, 0.0]],
+            ]),
+            "predicted_covariances\\[1:\\] must be positive definite",
+        ),
+    ],
+)
+def test_rts_smoother_rejects_invalid_covariance(field, value, message):
+    """Caller-constructed moments obey the smoother's factorization domain."""
+    posterior = _valid_filter_posterior()._replace(**{field: value})
+
+    with pytest.raises(ValueError, match=message):
+        smcx.rts_smoother(posterior, jnp.eye(2))
+
+
+def test_rts_smoother_accepts_semidefinite_unfactored_covariances():
+    """Only positive-time predictions require strict definiteness."""
+    posterior = _valid_filter_posterior()._replace(
+        predicted_covariances=jnp.array([
+            [[1.0, 0.0], [0.0, 0.0]],
+            [[1.0, 0.0], [0.0, 1.0]],
+        ]),
+        filtered_covariances=jnp.zeros((2, 2, 2)),
+    )
+
+    smoothed = smcx.rts_smoother(posterior, jnp.eye(2))
+
+    assert jnp.all(jnp.isfinite(smoothed.smoothed_covariances))
 
 
 def test_joseph_update_preserves_float32_covariance_psd():
