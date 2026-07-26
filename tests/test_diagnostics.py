@@ -398,13 +398,65 @@ class TestCRPS:
         result = crps(predictions, jnp.float32(0.0))
 
         assert jnp.isfinite(result)
-        # Thirty-two eps cover reciprocal, products, and the pairwise reduction.
+        # Thirty-two eps cover interval weights and the final reduction.
         relative_tolerance = 32.0 * float(jnp.finfo(jnp.float32).eps)
         assert float(result) == pytest.approx(
             float(predictions[0]),
             rel=relative_tolerance,
             abs=0.0,
         )
+
+    @pytest.mark.parametrize(
+        "endpoint",
+        [jnp.finfo(jnp.float32).min, jnp.finfo(jnp.float32).max],
+    )
+    def test_crps_dtype_endpoint_cloud_stays_finite(self, endpoint):
+        from smcx.diagnostics import crps
+
+        predictions = jnp.full((7,), endpoint, dtype=jnp.float32)
+        observation = jnp.asarray(0.0, dtype=jnp.float32)
+        expected = jnp.abs(jnp.asarray(endpoint, dtype=jnp.float32))
+
+        assert jnp.array_equal(crps(predictions, observation), expected)
+        assert jnp.array_equal(
+            jax.jit(crps)(predictions, observation), expected
+        )
+
+    def test_crps_mixed_endpoint_cloud_stays_finite(self):
+        from smcx.diagnostics import crps
+
+        dtype_max = jnp.asarray(
+            jnp.finfo(jnp.float32).max,
+            dtype=jnp.float32,
+        )
+        predictions = jnp.concatenate([
+            jnp.full((9,), -dtype_max, dtype=jnp.float32),
+            jnp.full((3,), dtype_max, dtype=jnp.float32),
+        ])
+        observation = jnp.float32(0.75) * dtype_max
+        expected = jnp.asarray(dtype_max, dtype=jnp.float32)
+
+        assert jnp.array_equal(crps(predictions, observation), expected)
+        assert jnp.array_equal(
+            jax.jit(crps)(predictions, observation), expected
+        )
+
+    @pytest.mark.parametrize(
+        "dtype",
+        [jnp.float8_e4m3fn, jnp.float8_e5m2],
+    )
+    def test_crps_preserves_float8_support(self, dtype):
+        from smcx.diagnostics import crps
+
+        predictions = jnp.asarray([0.0, 1.0], dtype=dtype)
+        observation = jnp.asarray(0.5, dtype=dtype)
+        expected = jnp.asarray(0.25, dtype=dtype)
+
+        result = crps(predictions, observation)
+        compiled = jax.jit(crps)(predictions, observation)
+
+        assert jnp.array_equal(result, expected)
+        assert jnp.array_equal(compiled, expected)
 
     @pytest.mark.parametrize("observation", [-3e38, 3e38, 0.0, -0.0])
     def test_crps_extreme_opposite_signs_remain_finite(self, observation):
