@@ -384,9 +384,16 @@ def _coalesce_positive_weight_support(
     sorted_values = weight_sorted_values[value_order]
     sorted_weights = weight_sorted_weights[value_order]
 
+    # Remove represented-zero slots before the segmented reduction. Leaving
+    # them inside a tied run changes the scan association when inert slots
+    # are inserted. Stable compaction preserves the canonical positive order.
+    sorted_values, sorted_weights, num_positive = (
+        _compact_positive_weight_support(sorted_values, sorted_weights)
+    )
+    in_support = jnp.arange(values.shape[0]) < num_positive
     run_starts = jnp.concatenate([
         jnp.ones(1, dtype=jnp.bool_),
-        sorted_values[1:] != sorted_values[:-1],
+        (sorted_values[1:] != sorted_values[:-1]) | ~in_support[1:],
     ])
 
     def segmented_add(
@@ -407,8 +414,8 @@ def _coalesce_positive_weight_support(
         segmented_add,
         (sorted_weights, run_starts),
     )
-    run_ends = jnp.concatenate([
-        sorted_values[:-1] != sorted_values[1:],
+    run_ends = in_support & jnp.concatenate([
+        (sorted_values[:-1] != sorted_values[1:]) | ~in_support[1:],
         jnp.ones(1, dtype=jnp.bool_),
     ])
     group_weights = jnp.where(
