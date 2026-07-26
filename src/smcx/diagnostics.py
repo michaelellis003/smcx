@@ -1970,8 +1970,8 @@ def tail_ess(
             cum = jnp.cumsum(w_supported)
             # Midpoint CDF: centre each particle's mass in its
             # interval, normalized so the axis is [0, 1].
-            zero = jnp.zeros(1, dtype=w_supported.dtype)
-            mid = (jnp.concatenate([zero, cum[:-1]]) + cum) / (
+            forward_zero = jnp.zeros(1)
+            mid = (jnp.concatenate([forward_zero, cum[:-1]]) + cum) / (
                 2.0 * jnp.maximum(cum[-1], 1e-30)
             )
             lower_edge = jnp.interp(tail_level, mid, v_supported)
@@ -1984,8 +1984,9 @@ def tail_ess(
             reverse_values = v_supported[::-1]
             reverse_weights = w_supported[::-1]
             reverse_cum = jnp.cumsum(reverse_weights)
+            reverse_zero = jnp.zeros(1, dtype=w_supported.dtype)
             reverse_mid = (
-                jnp.concatenate([zero, reverse_cum[:-1]]) + reverse_cum
+                jnp.concatenate([reverse_zero, reverse_cum[:-1]]) + reverse_cum
             ) / (2.0 * jnp.maximum(reverse_cum[-1], 1e-30))
             upper_edge = jnp.interp(
                 tail_level,
