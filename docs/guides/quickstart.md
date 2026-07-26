@@ -184,8 +184,10 @@ on a maximum-weight particle. Particles whose normalized linear weights are
 represented as zero are masked before centered products and powers, so finite
 outliers cannot poison summaries through overflow. Material coordinates whose
 centered difference would overflow are reduced after an exact one-bit binary
-downshift. Affected fixed-input summaries can change as a clear numerical
-correction under NEP 23; their shapes, dtypes, and JIT contracts are unchanged.
+downshift. The mean carries each centered subtraction's same-dtype
+compensation term; backend flush-to-zero can still erase subnormal terms.
+Affected fixed-input summaries can change as a clear numerical correction
+under NEP 23; their shapes, dtypes, and JIT contracts are unchanged.
 
 ## Cut the variance with a guided proposal
 

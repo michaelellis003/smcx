@@ -513,10 +513,10 @@ def weighted_mean(
 
     The reduction is shifted by a maximum-weight particle before summation,
     so common translations do not amplify floating-point
-    weight-normalization error. Particles with represented-zero linear
-    weight are masked before centered arithmetic. A coordinate whose finite
-    anchor difference would overflow is reduced after an exact one-bit
-    downshift.
+    weight-normalization error. Particles with represented-zero linear weight
+    are masked before centered arithmetic. A coordinate whose finite anchor
+    difference would overflow is reduced after an exact one-bit downshift;
+    each centered subtraction carries its same-dtype compensation term.
 
     Args:
         posterior: Particle filter posterior output.
@@ -529,9 +529,9 @@ def weighted_mean(
         ValueError: Consumed posterior arrays are malformed or misaligned.
 
     References:
-        Chan, T. F., Golub, G. H., and LeVeque, R. J. (1983).
-        Algorithms for computing the sample variance: Analysis and
-        recommendations. https://doi.org/10.1080/00031305.1983.10483115
+        Ogita, T., Rump, S. M., and Oishi, S. (2005).
+        Accurate sum and dot product.
+        https://doi.org/10.1137/030601818
     """
     particles = _require_dense_particle_history(
         posterior, diagnostic="weighted_mean"
