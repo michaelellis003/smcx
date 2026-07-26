@@ -6,10 +6,10 @@ r"""Adaptive tempered SMC for static targets.
 Anneals from the prior to the posterior
 $\pi_\phi \propto p(x)\, L(x)^\phi$ along an adaptive schedule
 [Del Moral, Doucet & Jasra, 2006]: the next temperature solves
-``ESS(phi) = target_ess * N`` by bisection on the *resident*
-log-likelihood vector when that target lies before ``phi = 1``. The
-terminal stage may instead stop above the target ESS. The solve is
-deterministic and uses no fresh sampling.
+``ESS(phi) / ESS(uniform weights) = target_ess`` by bisection on the
+*resident* log-likelihood vector when that target lies before
+``phi = 1``. The terminal stage may instead stop above the target ESS.
+The solve is deterministic and uses no fresh sampling.
 Each stage reweights by
 $\ell \cdot \Delta\phi$ (evidence increment at the reweight,
 pre-move — the Del Moral et al. collapse), resamples, and applies a
@@ -18,6 +18,14 @@ Metropolis with proposal covariance
 $2.38^2/d \cdot \hat\Sigma$ from the *weighted* pre-resample cloud
 (Roberts & Rosenthal, 2001) — two-pass in float64 on the host
 (single-pass cancels catastrophically at ordinary posterior offsets).
+
+The target ESS ratio is capped one float32 machine epsilon below one.
+At exactly one, no positive temperature increment can satisfy the target
+for a heterogeneous likelihood; the finite gap also gives the ESS search
+one relative unit of float32 resolution below its uniform-cloud maximum.
+The search scales that ratio by the ESS of the represented uniform
+log-weight vector (mathematically $N$), so reduction rounding cannot put
+the accepted target above the backend's computed maximum.
 
 The adaptive schedule is host-driven (bisection reads ESS values), so
 ``temper`` itself is not jittable; each per-stage mutation sweep is jitted.
@@ -29,6 +37,7 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 from jax import jit, lax, vmap
 from jaxtyping import Array, Float
 
@@ -57,6 +66,7 @@ from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
 
 _BISECT_ITERS = 60
+_MAX_TARGET_ESS = 1.0 - float(np.finfo(np.float32).eps)
 _RWM_SCALE = 2.38
 
 
@@ -135,9 +145,14 @@ def temper(
         num_particles: Number of particles N.
         num_mcmc_steps: RWM sweeps per temperature stage. Five may under-mix
             in moderate or high dimensions.
-        target_ess: The bisection solves ``ESS = target_ess * N`` for
-            nonterminal stages. The terminal jump to ``phi = 1`` may finish
-            above the target.
+        target_ess: The bisection solves
+            ``ESS / ESS(uniform weights) = target_ess`` for nonterminal
+            stages, where the denominator is mathematically N. The terminal
+            jump to ``phi = 1`` may finish above the target. Must lie in
+            ``(0, 1 - numpy.finfo(numpy.float32).eps]``; the common float32
+            bound keeps the accepted domain consistent across backends.
+            Values near the upper bound can require raising ``max_stages``
+            for heterogeneous likelihoods.
         resampling_fn: Resampler applied at every
             stage.
         mutation_init_fn: Optional
@@ -147,7 +162,8 @@ def temper(
             ``(key, state, tempered_logdensity_fn) -> (state, info)``
             callback. Info must expose a scalar floating
             ``acceptance_rate``. Supply both mutation callbacks or neither.
-        max_stages: Safety cap on the number of stages.
+        max_stages: Safety cap on the number of stages. Near-unit
+            ``target_ess`` values may need a larger budget.
 
     Returns:
         `smcx.containers.TemperedPosterior` with an equal-weight particle
@@ -155,8 +171,9 @@ def temper(
         per-stage temperature/ESS/acceptance traces.
 
     Raises:
-        ValueError: Particle or mutation counts are invalid, callback pairing
-            is incomplete, or a mutation state or diagnostic is malformed.
+        ValueError: Particle or mutation counts are invalid, ``target_ess``
+            is outside its numerically viable interval, callback pairing is
+            incomplete, or a mutation state or diagnostic is malformed.
         DegenerateWeightsError: A tempering reweight stage cannot be
             normalized.
         RuntimeError: ``max_stages`` exceeded before reaching
@@ -166,9 +183,11 @@ def temper(
         raise ValueError(f"num_particles must be >= 1; got {num_particles}")
     if num_mcmc_steps < 1:
         raise ValueError(f"num_mcmc_steps must be >= 1; got {num_mcmc_steps}")
-    if not 0.0 < target_ess <= 1.0:
+    if not 0.0 < target_ess <= _MAX_TARGET_ESS:
         raise ValueError(
-            f"target_ess must be in the interval (0, 1]; got {target_ess}"
+            "target_ess must be in the interval "
+            f"(0, 1 - eps32] (upper bound {_MAX_TARGET_ESS}); "
+            f"got {target_ess}"
         )
     if max_stages < 1:
         raise ValueError(f"max_stages must be >= 1; got {max_stages}")
@@ -318,10 +337,13 @@ def temper(
     acc_trace: list[Array] = []
     total = jnp.zeros(())
     comp = jnp.zeros(())
-    target = target_ess * n
 
     for _ in range(max_stages):
         # --- adaptive schedule: bisect ESS(phi') = target ----------
+        # Match ess_at's promotion by constructing the zero increment with
+        # loglik's dtype before adding it to log_w.
+        represented_uniform = log_w + jnp.zeros_like(loglik)
+        target = target_ess * float(compute_ess(represented_uniform))
         probe_delta = min(1e-6, 1.0 - phi)
         _, probe_log_sum = log_normalize(log_w + probe_delta * loglik)
         _raise_if_degenerate(probe_log_sum)

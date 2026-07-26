@@ -527,6 +527,21 @@ well-conditioned covariances. Following
 [NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html), smcx
 treats that wrong-dtype result as a direct bug fix.
 
+`target_ess` is a ratio in
+`(0, 1 - numpy.finfo(numpy.float32).eps]` (an upper bound of approximately
+`0.99999988`). This backend-independent cap leaves the ESS search one float32
+machine epsilon below the uniform-cloud maximum. The schedule scales the
+ratio by the ESS computed for the represented uniform log weights, which is
+mathematically the particle count. This prevents backend reduction rounding
+from placing an accepted target above the computed maximum.
+
+Exact one is rejected before model callbacks run, including for constant
+likelihoods. The cap removes exact one's categorical no-positive-increment
+case for heterogeneous likelihoods; it does not guarantee a positive
+represented increment or completion within a fixed stage budget for every
+finite likelihood scale. Targets near the cap can require a larger
+`max_stages`, so choose the ratio and stage budget together.
+
 ## Optional Equinox representation
 
 If an application already uses Equinox, a callable module can be captured by

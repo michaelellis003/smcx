@@ -436,6 +436,23 @@ def _run_temper(initial_sampler=_initial_sampler, **kwargs):
 
 
 @pytest.mark.parametrize(
+    "target_ess",
+    [
+        1.0,
+        1.0 - float(jnp.finfo(jnp.float32).eps) / 2.0,
+    ],
+)
+def test_temper_rejects_unsupported_upper_target_before_initialization(
+    target_ess,
+):
+    def unexpected_sampler(_key, _count):
+        pytest.fail("target_ess validation must precede model callbacks")
+
+    with pytest.raises(ValueError, match="target_ess must be in"):
+        _run_temper(unexpected_sampler, target_ess=target_ess)
+
+
+@pytest.mark.parametrize(
     ("initial_sampler", "kwargs", "message"),
     [
         (_initial_sampler, {"num_particles": 0}, "num_particles must be >= 1"),

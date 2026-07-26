@@ -110,6 +110,41 @@ def _mutation_step(key, state, tempered_logdensity_fn):
     return next_state, _MutationInfo(acceptance_rate, is_accepted)
 
 
+def _upper_target_run(scale, *, num_particles=2, max_stages):
+    def init(_key, count):
+        return jnp.linspace(0.0, 1.0, count, dtype=jnp.float32)[:, None]
+
+    def log_prior(x):
+        return jnp.asarray(0.0, dtype=x.dtype)
+
+    def log_likelihood(x):
+        return jnp.asarray(scale, dtype=x.dtype) * x[0]
+
+    def mutation_step(_key, state, _tempered_logdensity_fn):
+        info = _MutationInfo(
+            jnp.asarray(1.0, dtype=state.position.dtype),
+            jnp.asarray(True),
+        )
+        return state, info
+
+    def identity_resampling(_key, _weights, num_samples):
+        return jnp.arange(num_samples, dtype=jnp.int32)
+
+    return smcx.temper(
+        jr.key(31),
+        init,
+        log_prior,
+        log_likelihood,
+        num_particles,
+        num_mcmc_steps=1,
+        target_ess=1.0 - float(np.finfo(np.float32).eps),
+        resampling_fn=identity_resampling,
+        mutation_init_fn=_mutation_init,
+        mutation_step_fn=mutation_step,
+        max_stages=max_stages,
+    )
+
+
 def _bad_mutation_init(position, tempered_logdensity_fn):
     state = _mutation_init(position, tempered_logdensity_fn)
     return state._replace(position=position[None])
@@ -235,6 +270,44 @@ class TestEvidence:
 
 class TestSchedule:
     """Adaptive ESS-bisection schedule properties."""
+
+    @pytest.mark.parametrize("num_particles", [63, 8192])
+    def test_float32_upper_target_finishes_for_uniform_cloud_sizes(
+        self,
+        num_particles,
+    ):
+        posterior = _upper_target_run(
+            0.0,
+            num_particles=num_particles,
+            max_stages=1,
+        )
+
+        np.testing.assert_array_equal(
+            np.asarray(posterior.temperatures),
+            [1.0],
+        )
+
+    def test_float32_upper_target_finishes_in_four_short_stages(self):
+        posterior = _upper_target_run(0.002, max_stages=4)
+        temperatures = np.asarray(posterior.temperatures, dtype=np.float64)
+
+        assert temperatures.shape == (4,)
+        assert np.all(np.diff(np.concatenate(([0.0], temperatures))) > 0.0)
+        np.testing.assert_array_equal(temperatures[-1], 1.0)
+
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu",
+        reason="long accepted-boundary stress test",
+    )
+    def test_float32_upper_target_finishes_for_variable_likelihood(self):
+        posterior = _upper_target_run(1.0, max_stages=2_000)
+        temperatures = np.asarray(posterior.temperatures, dtype=np.float64)
+
+        # This ordinary [0, 1] cloud needs 1,356 CPU stages. The upper bound
+        # has a represented solution but cannot promise a fixed stage budget.
+        assert temperatures.shape == (1_356,)
+        assert np.all(np.diff(np.concatenate(([0.0], temperatures))) > 0.0)
+        np.testing.assert_array_equal(temperatures[-1], 1.0)
 
     def test_temperatures_increase_and_end_at_one(self):
         post = _run(1)
