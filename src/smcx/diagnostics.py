@@ -1416,10 +1416,10 @@ def crps(
         The empirical-CDF integral is evaluated over power-of-two-scaled
         ordered spacings. Its nonnegative interval terms retain
         :math:`O(N \log N)` complexity while avoiding cancellation between
-        raw order statistics and integer scaling by :math:`N^2`. For
-        subnormal or top-bin float32 inputs, a fixed-width uint32
-        accumulator forms the exact numerator and rounds its quotient
-        directly to binary32.
+        raw order statistics and integer scaling by :math:`N^2`. A
+        fixed-width uint32 accumulator rounds the exact quotient for
+        subnormal or top-bin float32 inputs and whenever the conservative
+        largest-error-over-:math:`N^2` bound can enter the subnormal range.
 
     References:
         Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for

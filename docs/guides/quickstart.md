@@ -173,11 +173,11 @@ raw-value calculation can change at fixed inputs; following
 treats this as the correction of a clear numerical bug. The signature and
 $O(N \log N)$ complexity are unchanged. Backend-addressable forecasts must
 contain fewer than $2^{31}$ samples; larger static shapes are rejected before
-materialization. For subnormal or top-bin float32 inputs, a fixed-width
-`uint32` accumulator divides the exact empirical numerator and assembles the
-correctly rounded result, including mixed narrower observation dtypes, without
-backend `uint64` support. This prevents backend flush-to-zero behavior from
-changing a score when a represented translation crosses the subnormal range.
+materialization. A fixed-width `uint32` accumulator assembles a correctly
+rounded result for subnormal or top-bin float32 inputs and whenever the
+conservative largest-error-over-$N^2$ bound can enter the subnormal range.
+This includes mixed narrower observation dtypes, needs no backend `uint64`,
+and prevents represented translations from exposing flush-to-zero behavior.
 
 ## Cut the variance with a guided proposal
 
