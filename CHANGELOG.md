@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.12 (2026-07-26)
+
+### Bug Fixes
+
+- **diagnostics**: Make tied quantiles mass-invariant
+  ([#225](https://github.com/michaelellis003/smcx/pull/225),
+  [`d3fe6fe`](https://github.com/michaelellis003/smcx/commit/d3fe6fe892ef937abbec988b58251f43cb039b8b))
+
+
 ## v1.14.11 (2026-07-26)
 
 ### Bug Fixes
