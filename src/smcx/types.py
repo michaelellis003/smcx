@@ -82,9 +82,7 @@ else:
     EmissionValue: TypeAlias = Any
     EmissionSequence: TypeAlias = Any
     GaussianEmission: TypeAlias = Shaped[Array, " observation_dim"]
-    GaussianEmissionSequence: TypeAlias = Shaped[
-        Array, "*observation_sequence_shape"
-    ]
+    GaussianEmissionSequence: TypeAlias = Any
     GaussianInput: TypeAlias = Shaped[Array, " input_dim"]
     GaussianInputSequence: TypeAlias = Shaped[Array, "*gaussian_input_shape"]
     InputSequence: TypeAlias = Float[Array, "*input_shape"]
