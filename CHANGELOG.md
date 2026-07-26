@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.3 (2026-07-26)
+
+### Bug Fixes
+
+- **diagnostics**: Validate posterior axes
+  ([#213](https://github.com/michaelellis003/smcx/pull/213),
+  [`f1f26f9`](https://github.com/michaelellis003/smcx/commit/f1f26f99a434753d3cd2461db17d6caef62273ee))
+
+
 ## v1.14.2 (2026-07-26)
 
 ### Bug Fixes
