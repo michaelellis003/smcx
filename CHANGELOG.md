@@ -2,6 +2,23 @@
 
 <!-- version list -->
 
+## v1.14.13 (2026-07-26)
+
+### Bug Fixes
+
+- **tempering**: Bound target ESS below one
+  ([#227](https://github.com/michaelellis003/smcx/pull/227),
+  [`7ede487`](https://github.com/michaelellis003/smcx/commit/7ede487692f2adc2a41cc8ba3fe6c991e335c333))
+
+### Chores
+
+- **ci**: Raise coverage timeout ([#228](https://github.com/michaelellis003/smcx/pull/228),
+  [`153d437`](https://github.com/michaelellis003/smcx/commit/153d4376439bd1fa2352ffc6f918bd52aa1e66cf))
+
+- **ci**: Raise full-suite timeouts ([#226](https://github.com/michaelellis003/smcx/pull/226),
+  [`83279eb`](https://github.com/michaelellis003/smcx/commit/83279ebb9990428ef7bd29e991fba0ec8341fb89))
+
+
 ## v1.14.12 (2026-07-26)
 
 ### Bug Fixes
