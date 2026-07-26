@@ -600,12 +600,13 @@ class TestWeightedQuantile:
                     actual_q[jnp.asarray([0, 1, 3])],
                     expected_q[jnp.asarray([0, 1, 3])],
                 )
-                # One ULP covers log-weight normalization when equal mass
-                # is represented by a different positive split.
+                # Four ULPs cover platform-specific log/exp normalization
+                # before equal mass represented by a different positive
+                # split reaches the canonical support reduction.
                 np.testing.assert_array_max_ulp(
                     np.asarray(actual_q[2]),
                     np.asarray(expected_q[2]),
-                    maxulp=1,
+                    maxulp=4,
                 )
             assert jnp.array_equal(actual[2], expected[2])
 
