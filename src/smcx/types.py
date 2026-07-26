@@ -11,7 +11,7 @@ Core array and key aliases follow the conventions used by Dynamax
 (``dynamax.types``); callback protocols describe smcx's public boundaries.
 """
 
-from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, runtime_checkable
 
 from jaxtyping import (
     Array,
@@ -71,8 +71,8 @@ if TYPE_CHECKING:
     )
 else:
     Emission: TypeAlias = Shaped[Array, " emission_dim"]
-    EmissionValue: TypeAlias = Shaped[Array, "*emission_shape"]
-    EmissionSequence: TypeAlias = Shaped[Array, "*emission_shape"]
+    EmissionValue: TypeAlias = Any
+    EmissionSequence: TypeAlias = Any
     InputSequence: TypeAlias = Float[Array, "*input_shape"]
 
 
