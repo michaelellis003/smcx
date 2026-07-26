@@ -2,6 +2,21 @@
 
 <!-- version list -->
 
+## v1.14.8 (2026-07-26)
+
+### Bug Fixes
+
+- **diagnostics**: Stabilize weighted posterior moments
+  ([#221](https://github.com/michaelellis003/smcx/pull/221),
+  [`1c2ad8c`](https://github.com/michaelellis003/smcx/commit/1c2ad8cda8b9457872bd9238bdb1554b60d5ea12))
+
+### Chores
+
+- **ci**: Bound Metal hangs and coverage runtime
+  ([#220](https://github.com/michaelellis003/smcx/pull/220),
+  [`c5cd064`](https://github.com/michaelellis003/smcx/commit/c5cd064396552e9c6eb0d2c4721bd9be723eaddf))
+
+
 ## v1.14.7 (2026-07-26)
 
 ### Bug Fixes
