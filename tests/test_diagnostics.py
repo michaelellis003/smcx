@@ -462,6 +462,23 @@ class TestCRPS:
         assert jnp.array_equal(result, expected)
         assert jnp.array_equal(compiled, expected)
 
+    @pytest.mark.parametrize("dtype", [jnp.float16, jnp.bfloat16])
+    def test_crps_low_precision_large_sample_uses_wide_ranks(self, dtype):
+        from smcx.diagnostics import crps
+
+        predictions = jnp.concatenate([
+            jnp.zeros((35_000,), dtype=dtype),
+            jnp.ones((35_000,), dtype=dtype),
+        ])
+        observation = jnp.asarray(0.5, dtype=dtype)
+        expected = jnp.asarray(0.25, dtype=dtype)
+
+        assert jnp.array_equal(crps(predictions, observation), expected)
+        assert jnp.array_equal(
+            jax.jit(crps)(predictions, observation),
+            expected,
+        )
+
     @pytest.mark.parametrize("observation", [-3e38, 3e38, 0.0, -0.0])
     def test_crps_extreme_opposite_signs_remain_finite(self, observation):
         from smcx.diagnostics import crps
