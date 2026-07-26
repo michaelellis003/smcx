@@ -2706,6 +2706,8 @@ of variance in particle filters. https://arxiv.org/abs/1701.01001</p>
     <div class="doc doc-contents ">
 
         <p>Compute the weighted mean of parameter particles at each step.</p>
+<p>Uses the same represented-zero-safe, anchor-centered reduction as
+<code>weighted_mean</code>.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -3745,6 +3747,12 @@ implementation.</p>
     <div class="doc doc-contents ">
 
         <p>Compute the weighted mean of particles at each time step.</p>
+<p>The reduction is shifted by a maximum-weight particle before summation,
+so common translations do not amplify floating-point
+weight-normalization error. Particles with represented-zero linear weight
+are masked before centered arithmetic. A coordinate whose finite anchor
+difference would overflow is reduced after an exact one-bit downshift;
+each centered subtraction carries its same-dtype compensation term.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -3833,6 +3841,13 @@ implementation.</p>
       </tbody>
     </table>
 
+
+<details class="references" open>
+  <summary>References</summary>
+  <p>Ogita, T., Rump, S. M., and Oishi, S. (2005).
+Accurate sum and dot product.
+https://doi.org/10.1137/030601818</p>
+</details>
 
     </div>
 
@@ -3977,7 +3992,12 @@ eager quantile lies outside [0, 1].</p>
 
         <p>Compute the weighted variance of particles at each time step.</p>
 <p>Uses the formula <span class="arithmatex">\(V = \sum_i w_i (x_i - \mu)^2\)</span>, where <span class="arithmatex">\(\mu\)</span> is the
-weighted mean.</p>
+weighted mean. Both <span class="arithmatex">\(\mu\)</span> and the deviations are computed in coordinates
+shifted by one particle, avoiding reconstruction of the rounded absolute
+mean inside the central-moment calculation. Particles with
+represented-zero linear weight are masked before subtraction and
+squaring. A coordinate whose finite anchor difference would overflow is
+reduced after an exact one-bit downshift.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4066,6 +4086,14 @@ weighted mean.</p>
       </tbody>
     </table>
 
+
+<details class="references" open>
+  <summary>References</summary>
+  <p>Pébay, P., Terriberry, T. B., Kolla, H., and Bennett, J. (2016).
+Numerically stable, scalable formulas for parallel and online
+computation of higher-order multivariate central moments with
+arbitrary weights. https://doi.org/10.1007/s00180-015-0637-z</p>
+</details>
 
     </div>
 

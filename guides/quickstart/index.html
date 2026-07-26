@@ -1599,6 +1599,15 @@ rounded result for subnormal or top-bin float32 inputs and whenever the
 conservative largest-error-over-<span class="arithmatex">\(N^2\)</span> bound can enter the subnormal range.
 This includes mixed narrower observation dtypes, needs no backend <code>uint64</code>,
 and prevents represented translations from exposing flush-to-zero behavior.</p>
+<p>Weighted mean and variance summaries likewise reduce in coordinates centered
+on a maximum-weight particle. Particles whose normalized linear weights are
+represented as zero are masked before centered products and powers, so finite
+outliers cannot poison summaries through overflow. Material coordinates whose
+centered difference would overflow are reduced after an exact one-bit binary
+downshift. The mean carries each centered subtraction's same-dtype
+compensation term; backend flush-to-zero can still erase subnormal terms.
+Affected fixed-input summaries can change as a clear numerical correction
+under NEP 23; their shapes, dtypes, and JIT contracts are unchanged.</p>
 <h2 id="cut-the-variance-with-a-guided-proposal">Cut the variance with a guided proposal</h2>
 <p>The bootstrap proposal ignores the current observation. The guided
 filter proposes from the <em>locally optimal</em> density
