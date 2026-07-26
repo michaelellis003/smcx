@@ -1202,7 +1202,8 @@ def crps(
 
     Raises:
         ValueError: Predictions are not a nonempty rank-one floating array,
-            or the observation is not a floating scalar.
+            contain at least :math:`2^{31}` samples, or the observation is
+            not a floating scalar.
 
     Notes:
         The empirical-CDF integral is evaluated over power-of-two-scaled
