@@ -529,6 +529,12 @@ class TestCRPS:
             jax.jit(jax.vmap(crps))(predictions, observations),
             expected,
         )
+        # For [0, u, 5u], CRPS = 8u/9, which rounds to u.
+        odd_values = jnp.asarray(
+            np.asarray([0, 1, 5], dtype=np.uint32).view(np.float32)
+        )
+        odd_score = jax.jit(crps)(odd_values, jnp.float32(0.0))
+        assert int(np.asarray(odd_score).view(np.uint32)) == 1
 
     @pytest.mark.parametrize(
         ("num_samples", "value"),
