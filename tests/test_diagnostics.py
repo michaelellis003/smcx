@@ -431,6 +431,50 @@ class TestCRPS:
 
         assert jnp.array_equal(shifted_score, centered_score)
 
+    def test_crps_subnormal_translation_matches_exact_oracle(self):
+        """A represented translation preserves an exact tiny CRPS."""
+        from smcx.diagnostics import crps
+
+        scale = np.float32(2.0**-129)
+        offset = np.float32(2.0**-120)
+        centered = (
+            np.asarray([-100.0, -10.0, 5.0, 90.0], dtype=np.float32) * scale
+        )
+        shifted = offset + centered
+        centered_observation = np.float32(0.0)
+        shifted_observation = offset
+        assert np.array_equal(shifted - offset, centered)
+
+        exact_centered = _exact_crps_oracle(
+            centered,
+            centered_observation,
+        )
+        exact_shifted = _exact_crps_oracle(
+            shifted,
+            shifted_observation,
+        )
+        assert exact_centered == exact_shifted
+        expected_scalar = np.float32(float(exact_centered))
+        assert Fraction.from_float(float(expected_scalar)) == exact_centered
+
+        predictions = jnp.asarray(np.stack([centered, shifted]))
+        observations = jnp.asarray([centered_observation, shifted_observation])
+        expected = jnp.full((2,), expected_scalar, dtype=jnp.float32)
+        eager = jnp.stack([
+            crps(predictions[0], observations[0]),
+            crps(predictions[1], observations[1]),
+        ])
+
+        assert jnp.array_equal(eager, expected)
+        assert jnp.array_equal(
+            jax.jit(crps)(predictions[0], observations[0]),
+            expected[0],
+        )
+        assert jnp.array_equal(
+            jax.jit(jax.vmap(crps))(predictions, observations),
+            expected,
+        )
+
     @pytest.mark.parametrize(
         ("num_samples", "value"),
         [(10_000, 1e35), (1, 2e38), (100, 1e-37)],
