@@ -155,6 +155,29 @@ def _bad_mutation_step(key, state, tempered_logdensity_fn):
     return next_state, info._replace(acceptance_rate=jnp.ones(2))
 
 
+def _fixed_acceptance_step(rate):
+    def step(_key, state, _tempered_logdensity_fn):
+        info = _MutationInfo(
+            jnp.asarray(rate, dtype=state.position.dtype),
+            jnp.asarray(False),
+        )
+        return state, info
+
+    return step
+
+
+def _cancelling_invalid_acceptance_step(
+    _key,
+    state,
+    _tempered_logdensity_fn,
+):
+    rate = jnp.where(state.step_index == 0, -0.1, 1.1)
+    return state._replace(step_index=state.step_index + 1), _MutationInfo(
+        rate,
+        jnp.asarray(False),
+    )
+
+
 class TestMutationCallback:
     """Caller-owned mutation state composes with tempering and JIT."""
 
@@ -225,6 +248,105 @@ class TestMutationCallback:
                 mutation_init_fn=initialize,
                 mutation_step_fn=step,
             )
+
+    @pytest.mark.parametrize("rate", [-0.1, 1.1, np.nan, np.inf])
+    def test_acceptance_rate_must_be_a_probability(self, rate):
+        init, log_prior, log_lik = _small_tempering_model()
+
+        with pytest.raises(
+            ValueError,
+            match="acceptance_rate must be finite and in \\[0, 1\\]",
+        ):
+            smcx.temper(
+                jr.key(47),
+                init,
+                log_prior,
+                log_lik,
+                5,
+                num_mcmc_steps=2,
+                mutation_init_fn=_mutation_init,
+                mutation_step_fn=_fixed_acceptance_step(rate),
+            )
+
+    def test_each_acceptance_rate_is_checked_before_reduction(self):
+        init, log_prior, log_lik = _small_tempering_model()
+
+        with pytest.raises(ValueError, match="must be finite and in"):
+            smcx.temper(
+                jr.key(48),
+                init,
+                log_prior,
+                log_lik,
+                5,
+                num_mcmc_steps=2,
+                mutation_init_fn=_mutation_init,
+                mutation_step_fn=_cancelling_invalid_acceptance_step,
+            )
+
+    def test_invalid_acceptance_rate_is_rejected_at_a_later_stage(self):
+        init, log_prior, log_lik = _small_tempering_model()
+
+        def step(_key, state, tempered_logdensity_fn):
+            probe = jnp.zeros_like(state.position)
+            phi = (tempered_logdensity_fn(probe) - log_prior(probe)) / log_lik(
+                probe
+            )
+            rate = jnp.where(phi < 0.9, 0.5, 1.1)
+            return state, _MutationInfo(rate, jnp.asarray(False))
+
+        def run(max_stages):
+            return smcx.temper(
+                jr.key(50),
+                init,
+                log_prior,
+                log_lik,
+                5,
+                num_mcmc_steps=1,
+                target_ess=0.95,
+                mutation_init_fn=_mutation_init,
+                mutation_step_fn=step,
+                max_stages=max_stages,
+            )
+
+        with pytest.raises(RuntimeError, match="within 1 stages"):
+            run(1)
+        with pytest.raises(ValueError, match="must be finite and in"):
+            run(2)
+
+    def test_valid_acceptance_rates_do_not_change_fixed_key_inference(self):
+        init, log_prior, log_lik = _small_tempering_model()
+        rates = (0.0, -0.0, 0.4, 1.0)
+        posteriors = [
+            smcx.temper(
+                jr.key(49),
+                init,
+                log_prior,
+                log_lik,
+                5,
+                num_mcmc_steps=2,
+                mutation_init_fn=_mutation_init,
+                mutation_step_fn=_fixed_acceptance_step(rate),
+            )
+            for rate in rates
+        ]
+
+        baseline = posteriors[0]
+        for rate, posterior in zip(rates, posteriors, strict=True):
+            acceptance_rates = np.asarray(posterior.acceptance_rates)
+            np.testing.assert_array_equal(
+                acceptance_rates,
+                np.full(
+                    acceptance_rates.shape,
+                    rate,
+                    dtype=acceptance_rates.dtype,
+                ),
+            )
+            for expected, actual in zip(
+                baseline[:-1],
+                posterior[:-1],
+                strict=True,
+            ):
+                np.testing.assert_array_equal(actual, expected)
 
     def test_requires_at_least_one_mutation_step(self):
         init, log_prior, log_lik = _small_tempering_model()
