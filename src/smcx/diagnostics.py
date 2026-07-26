@@ -974,7 +974,6 @@ def posterior_predictive_sample(
 
 
 _CRPS_ACCUMULATOR_LIMBS = 11
-"""Number of uint32 limbs needed for an exact float32 CRPS numerator."""
 
 
 def _crps_add_word(
@@ -1259,9 +1258,7 @@ def crps(
         The empirical-CDF integral is evaluated over power-of-two-scaled
         ordered spacings. Its nonnegative interval terms retain
         :math:`O(N \log N)` complexity while avoiding cancellation between
-        raw order statistics and integer scaling by :math:`N^2`. At the
-        float32 overflow boundary, a fixed-width uint32 accumulator compares
-        the exact empirical numerator with the round-to-nearest midpoint.
+        raw order statistics and integer scaling by :math:`N^2`.
 
     References:
         Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
@@ -1362,15 +1359,23 @@ def crps(
     )
     if output_dtype == jnp.float32 and obs.dtype == jnp.float32:
         dtype_max = jnp.asarray(jnp.finfo(jnp.float32).max)
+        top_bin_floor = jnp.asarray(2.0**127, dtype=jnp.float32)
+        # CRPS is bounded by the largest absolute error. Without a top-bin
+        # input, that error is below the float32 overflow midpoint, so the
+        # exact scan is unnecessary.
         needs_exact_classification = (
             jnp.all(jnp.isfinite(ordered))
             & jnp.isfinite(obs)
-            & (score >= dtype_max)
+            & (value_scale >= top_bin_floor)
         )
 
         def classify_overflow(_: None) -> Float[Array, ""]:
             overflows = _crps_float32_overflows(ordered, obs)
-            return jnp.where(overflows, jnp.inf, dtype_max)
+            return jnp.where(
+                overflows,
+                jnp.inf,
+                jnp.minimum(score, dtype_max),
+            )
 
         score = lax.cond(
             needs_exact_classification,

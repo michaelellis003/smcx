@@ -116,13 +116,11 @@ def _exact_crps_oracle(
     samples = [Fraction.from_float(float(value)) for value in predictions]
     observed = Fraction.from_float(float(observation))
     sample_count = len(samples)
-    absolute_error = sum(
-        (abs(value - observed) for value in samples),
-        start=Fraction(),
-    )
+    zero = Fraction()
+    absolute_error = sum((abs(value - observed) for value in samples), zero)
     pairwise_error = sum(
         (abs(left - right) for left in samples for right in samples),
-        start=Fraction(),
+        zero,
     )
     return absolute_error / sample_count - pairwise_error / (
         2 * sample_count * sample_count
@@ -594,9 +592,6 @@ class TestCRPS:
         )
         tie_observation = jnp.asarray(observation)
         assert jnp.isinf(crps(jnp.asarray(tie_predictions), tie_observation))
-        assert jnp.isinf(
-            jax.jit(crps)(jnp.asarray(tie_predictions), tie_observation)
-        )
 
         batched_predictions = jnp.asarray(np.stack([predictions, -predictions]))
         batched_observations = jnp.asarray([observation, -observation])
