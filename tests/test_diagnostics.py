@@ -359,6 +359,29 @@ class TestWeightedVariance:
         result = weighted_variance(_make_posterior())
         assert jnp.array_equal(result, jnp.full((3, 1), 341.0))
 
+    def test_safe_deviations_keep_square_first_product_order(self):
+        """Ordinary coordinates retain the established bitwise result."""
+        posterior = _make_weighted_moment_posterior(
+            [0.0, 0.5],
+            [0.1, 0.9],
+        )
+        weights = jnp.exp(posterior.filtered_log_weights[0])
+        weights /= jnp.sum(weights)
+        offsets = (
+            posterior.filtered_particles[0] - posterior.filtered_particles[0, 1]
+        )
+        deviations = offsets - jnp.sum(weights[:, None] * offsets, axis=0)
+        expected = jnp.sum(
+            weights[:, None] * deviations**2,
+            axis=0,
+        )[None, :]
+
+        for actual in (
+            weighted_variance(posterior),
+            jax.jit(weighted_variance)(posterior),
+        ):
+            assert jnp.array_equal(actual, expected)
+
     @pytest.mark.parametrize(
         ("values", "expected_mean", "expected_variance"),
         [
@@ -404,6 +427,53 @@ class TestWeightedVariance:
             actual[:2], expected[:2], rtol=tolerance, atol=0.0
         )
         np.testing.assert_array_equal(actual[2], np.zeros(1, np.float32))
+
+    def test_positive_mass_extreme_preserves_finite_variance(self):
+        """A finite weighted contribution survives an overflowing square."""
+        posterior = _make_weighted_moment_posterior(
+            [0.0, 1e30],
+            [1.0, 1e-30],
+        )
+        _, expected = _numpy_weighted_moments(posterior)
+        assert np.all(np.isfinite(expected))
+        # Two eps per normalization, centered mean, deviation, two ordered
+        # products, and final reduction remains below sixteen float32 eps.
+        tolerance = float(16 * np.finfo(np.float32).eps)
+
+        for result in (
+            weighted_variance(posterior),
+            jax.jit(weighted_variance)(posterior),
+        ):
+            actual = np.asarray(result)
+            assert actual.dtype == np.float32
+            np.testing.assert_allclose(
+                actual,
+                expected,
+                rtol=tolerance,
+                atol=0.0,
+            )
+
+    @pytest.mark.parametrize(
+        ("values", "weights"),
+        [
+            ([3e38, -3e38], [0.75, 0.25]),
+            ([3e38, -3e38, -3e38], [0.5, 0.25, 0.25]),
+        ],
+        ids=["finite-mean", "balanced-cancellation"],
+    )
+    def test_positive_mass_extremes_overflow_variance_without_nan(
+        self,
+        values,
+        weights,
+    ):
+        """An out-of-range finite variance is positive infinity, not NaN."""
+        posterior = _make_weighted_moment_posterior(values, weights)
+
+        for actual in (
+            weighted_variance(posterior),
+            jax.jit(weighted_variance)(posterior),
+        ):
+            assert jnp.all(jnp.isposinf(actual))
 
 
 class TestWeightedQuantile:

@@ -465,10 +465,15 @@ def _weighted_variance_field(
         offsets - offset_means[:, None, :],
         jnp.zeros_like(offsets),
     )
-    scaled_variance = jnp.sum(
-        weights[:, :, None] * deviations**2,
-        axis=1,
+    squared_deviations = deviations**2
+    safe_contributions = weights[:, :, None] * squared_deviations
+    overflow_contributions = (weights[:, :, None] * deviations) * deviations
+    contributions = jnp.where(
+        jnp.isinf(squared_deviations),
+        overflow_contributions,
+        safe_contributions,
     )
+    scaled_variance = jnp.sum(contributions, axis=1)
     upscale = jnp.where(
         shifts > 0,
         jnp.asarray(4.0, dtype=field.dtype),
@@ -550,7 +555,10 @@ def weighted_variance(
     mean inside the central-moment calculation. Particles with
     represented-zero linear weight are masked before subtraction and
     squaring. A coordinate whose finite anchor difference would overflow is
-    reduced after an exact one-bit downshift.
+    reduced after an exact one-bit downshift. Variance retains square-first
+    arithmetic unless a finite deviation square overflows. It then applies
+    the weight before the second deviation factor to recover a representable
+    variance.
 
     Args:
         posterior: Particle filter posterior output.
