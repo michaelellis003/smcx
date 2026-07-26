@@ -116,9 +116,13 @@ def _exact_crps_oracle(
     samples = [Fraction.from_float(float(value)) for value in predictions]
     observed = Fraction.from_float(float(observation))
     sample_count = len(samples)
-    absolute_error = sum(abs(value - observed) for value in samples)
+    absolute_error = sum(
+        (abs(value - observed) for value in samples),
+        start=Fraction(),
+    )
     pairwise_error = sum(
-        abs(left - right) for left in samples for right in samples
+        (abs(left - right) for left in samples for right in samples),
+        start=Fraction(),
     )
     return absolute_error / sample_count - pairwise_error / (
         2 * sample_count * sample_count
