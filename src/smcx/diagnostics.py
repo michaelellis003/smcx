@@ -1278,6 +1278,11 @@ def crps(
         name="predictions",
         dimension="num_samples",
     )
+    n = predictions.shape[0]
+    if n >= 2**31:
+        raise ValueError(
+            f"predictions must contain fewer than 2**31 samples; got {n}"
+        )
     obs = _require_float_scalar(observation, name="observation")
     prediction_dtype = predictions.dtype
     is_float8 = jnp.finfo(prediction_dtype).bits == 8
@@ -1299,7 +1304,6 @@ def crps(
     elif output_dtype == jnp.float32:
         obs = obs.astype(output_dtype)
     ordered = jnp.sort(predictions)
-    n = predictions.shape[0]
     value_scale = jnp.maximum(
         jnp.max(jnp.abs(ordered)),
         jnp.abs(obs),
