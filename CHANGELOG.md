@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.9 (2026-07-26)
+
+### Bug Fixes
+
+- **diagnostics**: Preserve finite extreme variances
+  ([#222](https://github.com/michaelellis003/smcx/pull/222),
+  [`e64a099`](https://github.com/michaelellis003/smcx/commit/e64a0990eb42703fcd69ea359b8493fdb88d7e24))
+
+
 ## v1.14.8 (2026-07-26)
 
 ### Bug Fixes
