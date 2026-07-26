@@ -185,6 +185,20 @@ def test_particle_filter_rejects_zero_width_inputs():
         )
 
 
+def test_particle_filter_rejects_non_jax_inputs():
+    """The shared sequence boundary owns the non-JAX structural error."""
+    with pytest.raises(ValueError, match="inputs must be a JAX array"):
+        smcx.bootstrap_filter(
+            jr.key(152),
+            _initial_sampler,
+            _transition_sampler,
+            _log_observation,
+            jnp.zeros((2, 1)),
+            4,
+            inputs=[[0.0], [1.0]],  # ty: ignore[invalid-argument-type]
+        )
+
+
 @pytest.mark.parametrize("run_filter", _PARTICLE_FILTERS)
 @pytest.mark.parametrize("threshold", [-1.0, float("nan"), float("inf")])
 def test_particle_filters_reject_invalid_numeric_resampling_threshold(

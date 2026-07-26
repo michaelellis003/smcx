@@ -130,6 +130,19 @@ def test_incremental_boundaries_canonicalize_scalar_discrete_model_data():
     assert posterior.log_evidence_increments.shape == (2,)
 
 
+@pytest.mark.parametrize("input_t", [[0.0], jnp.empty((0,))])
+def test_incremental_boundary_rejects_invalid_input(input_t):
+    with pytest.raises(ValueError, match="input_t must"):
+        smcx.bootstrap_init(
+            jr.key(152),
+            _initial,
+            _log_observation,
+            EMISSIONS[0],
+            NUM_PARTICLES,
+            input_t=input_t,
+        )
+
+
 @pytest.mark.parametrize(
     ("boundary", "emissions", "message"),
     [

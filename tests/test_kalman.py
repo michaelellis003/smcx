@@ -138,6 +138,52 @@ def test_kalman_filter_rejects_numpy_emissions_with_value_error():
         )
 
 
+def test_gaussian_filters_reject_non_jax_inputs_with_value_error():
+    """Every Gaussian input boundary owns the non-JAX structural error."""
+    mean = jnp.zeros(1)
+    covariance = jnp.eye(1)
+    emissions = jnp.zeros(2)
+    inputs = [[0.0], [1.0]]
+    calls = (
+        lambda: smcx.kalman_filter(
+            mean,
+            covariance,
+            covariance,
+            covariance,
+            covariance,
+            covariance,
+            emissions,
+            inputs=inputs,  # ty: ignore[invalid-argument-type]
+        ),
+        lambda: smcx.extended_kalman_filter(
+            mean,
+            covariance,
+            lambda state, _input: state,
+            lambda _state, _input: covariance,
+            covariance,
+            lambda state, _input: state,
+            lambda _state, _input: covariance,
+            covariance,
+            emissions,
+            inputs=inputs,  # ty: ignore[invalid-argument-type]
+        ),
+        lambda: smcx.unscented_kalman_filter(
+            mean,
+            covariance,
+            lambda state, _input: state,
+            covariance,
+            lambda state, _input: state,
+            covariance,
+            emissions,
+            inputs=inputs,  # ty: ignore[invalid-argument-type]
+        ),
+    )
+
+    for call in calls:
+        with pytest.raises(ValueError, match="inputs must be a JAX array"):
+            call()
+
+
 def test_kalman_filter_matches_frozen_dynamax_reference(
     lgssm_params, lgssm_data
 ):
