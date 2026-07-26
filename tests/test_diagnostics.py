@@ -372,6 +372,15 @@ class TestParamWeightedQuantile:
 class TestCRPS:
     """Tests for crps."""
 
+    def test_crps_rejects_unaddressable_sample_count(self):
+        """The static uint32 rank bound is checked without materialization."""
+        from smcx.diagnostics import crps
+
+        predictions = jax.ShapeDtypeStruct((2**31,), jnp.float32)
+        observation = jax.ShapeDtypeStruct((), jnp.float32)
+        with pytest.raises(ValueError, match=r"fewer than 2\*\*31"):
+            jax.eval_shape(crps, predictions, observation)
+
     @pytest.mark.parametrize(
         ("num_samples", "value"),
         [(100, 1e10), (1000, 1e5)],
