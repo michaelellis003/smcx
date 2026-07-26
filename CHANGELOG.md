@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.5 (2026-07-26)
+
+### Bug Fixes
+
+- **diagnostics**: Stabilize CRPS over CDF spacings
+  ([#215](https://github.com/michaelellis003/smcx/pull/215),
+  [`84303e3`](https://github.com/michaelellis003/smcx/commit/84303e3860401ac434112237afd7394671bdd74c))
+
+
 ## v1.14.4 (2026-07-26)
 
 ### Bug Fixes
