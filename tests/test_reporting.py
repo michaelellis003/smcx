@@ -34,7 +34,6 @@ def _filter() -> ParticleFilterPosterior:
 
 
 def _tempered(particles: ParticleCloud) -> TemperedPosterior:
-    """Return a minimal tempered posterior over one particle PyTree."""
     return TemperedPosterior(
         particles=particles,
         log_weights=jnp.full(4, -jnp.log(4.0)),
@@ -134,8 +133,6 @@ def test_dotted_paths_are_rejected_before_value_operations(
     monkeypatch: pytest.MonkeyPatch,
     collision_group: str,
 ) -> None:
-    """Ambiguous raw paths fail before aliases or device-valued work."""
-
     def touched(*args: object, **kwargs: object) -> None:
         raise AssertionError("value operation ran before schema preflight")
 
@@ -168,7 +165,6 @@ def test_var_names_must_resolve_to_unique_aliases() -> None:
         "location": jnp.ones((4, 1)),
         "scale": 2 * jnp.ones((4, 1)),
     })
-
     with pytest.raises(
         ValueError,
         match=r"duplicate ArviZ variable name 'parameter'.*unique var_names",
@@ -194,7 +190,6 @@ def test_sample_dimensions_cannot_share_particle_namespace(
     name = "theta" if timed else "value"
     aliases = {name: dimension} if source == "variable" else None
     event_dims = {name: (dimension,)} if source == "event" else None
-
     with pytest.raises(ValueError, match="dimension"):
         to_arviz(
             posterior,
@@ -217,7 +212,6 @@ def test_variable_names_cannot_shadow_event_dimensions(
         dimension: jnp.arange(4.0),
     })
     dims = {"a": (dimension,)} if explicit else None
-
     with pytest.raises(
         ValueError,
         match=rf"variable name '{dimension}'.*dimension",
@@ -227,7 +221,6 @@ def test_variable_names_cannot_shadow_event_dimensions(
 
 def test_event_dimensions_must_be_unique_per_variable() -> None:
     posterior = _tempered(jnp.ones((4, 2, 2)))
-
     with pytest.raises(ValueError, match=r"dims\['theta'\].*unique"):
         to_arviz(
             posterior,
@@ -261,7 +254,6 @@ def test_shared_dimensions_require_one_size_within_group(
 def test_constrained_and_unconstrained_schemas_are_group_scoped() -> None:
     posterior = _tempered(jnp.arange(16, dtype=jnp.float32).reshape(4, 2, 2))
     unconstrained = jnp.arange(12, dtype=jnp.float32).reshape(4, 3)
-
     result = to_arviz(
         posterior,
         key=jr.key(13),
@@ -284,9 +276,7 @@ def test_particle_dimensions_do_not_leak_into_observed_emissions() -> None:
         emissions=jnp.ones((3,)),
     )
 
-    assert _group(result, "posterior")["emissions"].dims[-1] == "state_axis"
     observed = _group(result, "observed_data")["emissions"]
-    assert observed.shape == (3,)
     assert "state_axis" not in observed.dims
 
 

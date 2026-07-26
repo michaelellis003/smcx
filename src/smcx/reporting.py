@@ -24,8 +24,6 @@ _Posterior = ParticleFilterPosterior | TemperedPosterior
 
 
 class _GroupPlan(NamedTuple):
-    """Static names and dimensions for one particle-valued ArviZ group."""
-
     names: tuple[str, ...]
     dimensions: dict[str, list[str]]
 
@@ -203,7 +201,6 @@ def _construct_arviz(
             isolated = arviz_base.from_dict(
                 {name: group},
                 dims=dimensions.get(name, {}),
-                attrs={name: attrs[name]} if name in attrs else None,
             )
             result[name] = isolated[name].to_dataset()
         result["particle_diagnostics"] = diagnostic_group
