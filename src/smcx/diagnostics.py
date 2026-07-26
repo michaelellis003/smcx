@@ -1296,6 +1296,8 @@ def crps(
         )
         predictions = predictions.astype(work_dtype)
         obs = obs.astype(work_dtype)
+    elif output_dtype == jnp.float32:
+        obs = obs.astype(output_dtype)
     ordered = jnp.sort(predictions)
     n = predictions.shape[0]
     value_scale = jnp.maximum(
@@ -1357,7 +1359,7 @@ def crps(
     score = jnp.asarray(
         jnp.ldexp(scaled_score, scale_exponent),
     )
-    if output_dtype == jnp.float32 and obs.dtype == jnp.float32:
+    if output_dtype == jnp.float32:
         dtype_max = jnp.asarray(jnp.finfo(jnp.float32).max)
         top_bin_floor = jnp.asarray(2.0**127, dtype=jnp.float32)
         # CRPS is bounded by the largest absolute error. Without a top-bin
