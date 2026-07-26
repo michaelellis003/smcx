@@ -1767,7 +1767,11 @@ preserve structured latent-state PyTrees; Euclidean summaries require a
 dense <code>(T, N, D)</code> particle history. Parameter summaries accept
 <code>smcx.containers.LiuWestPosterior</code> and
 <code>smcx.containers.SMC2Posterior</code>. <code>smcx.diagnose</code> converts results to Python
-scalars and strings, so it is intentionally host-only.</p>
+scalars and strings, so it is intentionally host-only.
+Axis-sensitive state, parameter, predictive, and genealogy diagnostics
+validate the time, particle, and event axes they consume. State, parameter,
+and predictive summaries accept final-only histories; genealogy diagnostics
+require full history.</p>
 
 
 
@@ -2244,7 +2248,7 @@ ESS &lt; <code>ess_threshold * N</code></li>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The posterior retains only its final particle cloud.</p>
+                <p>Posterior arrays are malformed/misaligned or final-only.</p>
               </div>
             </td>
           </tr>
@@ -2601,8 +2605,9 @@ exploratory diagnostics rather than calibrated variance estimates.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The lag is not a nonnegative integer, or the posterior
-retains only its final particle cloud.</p>
+                <p>Consumed posterior arrays are malformed or misaligned,
+the lag is not a nonnegative integer, or the posterior retains
+only its final particle cloud.</p>
               </div>
             </td>
           </tr>
@@ -2686,6 +2691,29 @@ of variance in particle filters. https://arxiv.org/abs/1701.01001</p>
             <td>
               <div class="doc-md-description">
                 <p>Weighted parameter means, shape <code>(ntime, param_dim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Consumed posterior arrays are malformed or misaligned.</p>
               </div>
             </td>
           </tr>
@@ -2798,8 +2826,8 @@ callers passing traced levels must preserve this domain.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>q</code> is not a nonempty rank-one floating array, or an
-eager level lies outside [0, 1].</p>
+                <p>Posterior arrays or <code>q</code> are malformed/misaligned, or an
+eager quantile lies outside [0, 1].</p>
               </div>
             </td>
           </tr>
@@ -2900,6 +2928,29 @@ statistics, including the small-sample floor and cap.</p>
             <td>
               <div class="doc-md-description">
                 <p>when the posterior contains fewer than two particles.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The posterior log-weight history is malformed.</p>
               </div>
             </td>
           </tr>
@@ -3022,7 +3073,8 @@ compatibility.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The posterior retains only its final particle cloud.</p>
+                <p>Consumed posterior arrays are malformed or misaligned,
+or the posterior retains only its final particle cloud.</p>
               </div>
             </td>
           </tr>
@@ -3333,7 +3385,8 @@ expectations.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The posterior retains only its final particle cloud.</p>
+                <p>Consumed posterior arrays are malformed or misaligned,
+or the posterior retains only its final particle cloud.</p>
               </div>
             </td>
           </tr>
@@ -3604,7 +3657,7 @@ implementation.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>q</code> is not finite and in (0, 0.5].</p>
+                <p>Malformed/misaligned posterior arrays or invalid <code>q</code>.</p>
               </div>
             </td>
           </tr>
@@ -3700,6 +3753,16 @@ implementation.</p>
             <td>
               <div class="doc-md-description">
                 <p>The posterior has structured rather than dense particles.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Consumed posterior arrays are malformed or misaligned.</p>
               </div>
             </td>
           </tr>
@@ -3824,8 +3887,8 @@ callers passing traced levels must preserve this domain.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>q</code> is not a nonempty rank-one floating array, or an
-eager level lies outside [0, 1].</p>
+                <p>Posterior arrays or <code>q</code> are malformed/misaligned, or an
+eager quantile lies outside [0, 1].</p>
               </div>
             </td>
           </tr>
@@ -3923,6 +3986,16 @@ weighted mean.</p>
             <td>
               <div class="doc-md-description">
                 <p>The posterior has structured rather than dense particles.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Consumed posterior arrays are malformed or misaligned.</p>
               </div>
             </td>
           </tr>
