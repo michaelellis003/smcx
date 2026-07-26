@@ -445,6 +445,10 @@ class TestCRPS:
         "dtype",
         [jnp.float8_e4m3fn, jnp.float8_e5m2],
     )
+    @pytest.mark.skipif(
+        jax.default_backend() == "mps",
+        reason="jax-mps cannot represent float8 buffers",
+    )
     def test_crps_preserves_float8_support(self, dtype):
         from smcx.diagnostics import crps
 
