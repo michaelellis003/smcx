@@ -517,6 +517,82 @@ class TestWeightedVariance:
 class TestWeightedQuantile:
     """Tests for weighted_quantile."""
 
+    def test_tied_support_is_canonical_in_transform_modes(self):
+        """Equal-value mass splitting and order do not change summaries."""
+        from smcx.diagnostics import param_weighted_quantile
+
+        particles = jnp.asarray(
+            [
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+            ],
+            dtype=jnp.float32,
+        )
+        weights = jnp.asarray(
+            [
+                [0.125, 0.5, 0.375],
+                [0.5, 0.125, 0.375],
+                [0.3125, 0.3125, 0.375],
+                [0.375, 0.5, 0.125],
+            ],
+            dtype=jnp.float32,
+        )
+        levels = jnp.asarray([0.4, 0.5, 0.6], dtype=jnp.float32)
+
+        def evaluate(
+            values: jax.Array,
+            linear_weights: jax.Array,
+            q: jax.Array,
+        ) -> tuple[jax.Array, jax.Array, jax.Array]:
+            posterior = _make_weighted_posterior(values, linear_weights)
+            parameter_posterior = LiuWestPosterior(
+                *posterior,
+                filtered_params=posterior.filtered_particles,
+            )
+            return (
+                weighted_quantile(posterior, q)[0, :, 0],
+                param_weighted_quantile(parameter_posterior, q)[0, :, 0],
+                tail_ess(posterior, q=0.45),
+            )
+
+        reference = evaluate(
+            jnp.asarray([0.0, 1.0], dtype=jnp.float32),
+            jnp.asarray([0.625, 0.375], dtype=jnp.float32),
+            levels,
+        )
+        expected = jax.tree.map(
+            lambda value: jnp.broadcast_to(
+                value,
+                (particles.shape[0], *value.shape),
+            ),
+            reference,
+        )
+        compiled = jax.jit(evaluate)
+        eager = jax.tree.map(
+            lambda *values: jnp.stack(values),
+            *(
+                evaluate(p, w, levels)
+                for p, w in zip(particles, weights, strict=True)
+            ),
+        )
+        jitted = jax.tree.map(
+            lambda *values: jnp.stack(values),
+            *(
+                compiled(p, w, levels)
+                for p, w in zip(particles, weights, strict=True)
+            ),
+        )
+        vectorized = jax.vmap(evaluate, in_axes=(0, 0, None))(
+            particles,
+            weights,
+            levels,
+        )
+
+        for actual in (eager, jitted, vectorized):
+            assert jax.tree.all(jax.tree.map(jnp.array_equal, actual, expected))
+
     def test_weighted_quantile_median_exact(self):
         posterior = _make_posterior()
         result = weighted_quantile(posterior, jnp.array([0.5]))
@@ -1642,6 +1718,24 @@ class TestParetoKDiagnostic:
 
 class TestTailESS:
     """Tests for tail_ess."""
+
+    def test_tied_edges_keep_particle_level_kish_weights(self):
+        """Coalesced edge finding does not coalesce the tail ESS ratio."""
+        posterior = _make_weighted_posterior(
+            jnp.asarray([0.0, 0.0, 1.0, 1.0]),
+            jnp.asarray([0.125, 0.375, 0.25, 0.25]),
+        )
+
+        actual = tail_ess(posterior, q=0.45)
+
+        # Four eps cover max scaling, two sums, and the ESS ratio.
+        tolerance = float(4 * jnp.finfo(jnp.float32).eps)
+        np.testing.assert_allclose(
+            actual,
+            jnp.asarray([1.6], dtype=jnp.float32),
+            rtol=tolerance,
+            atol=0.0,
+        )
 
     def test_tail_ess_shape(self, lgssm_params, lgssm_data):
         """Output shape matches (ntime,)."""
