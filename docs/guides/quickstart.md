@@ -173,11 +173,11 @@ raw-value calculation can change at fixed inputs; following
 treats this as the correction of a clear numerical bug. The signature and
 $O(N \log N)$ complexity are unchanged. Backend-addressable forecasts must
 contain fewer than $2^{31}$ samples; larger static shapes are rejected before
-materialization. A fixed-width `uint32` accumulator exactly classifies
-round-to-nearest at float32 overflow, including mixed narrower observation
-dtypes, without backend `uint64` support. Translations that expose subnormal
-float32 spacings remain backend-FTZ-sensitive and tracked in
-[issue #153](https://github.com/michaelellis003/smcx/issues/153).
+materialization. A fixed-width `uint32` accumulator assembles a correctly
+rounded result for subnormal or top-bin float32 inputs and whenever the
+conservative largest-error-over-$N^2$ bound can enter the subnormal range.
+This includes mixed narrower observation dtypes, needs no backend `uint64`,
+and prevents represented translations from exposing flush-to-zero behavior.
 
 ## Cut the variance with a guided proposal
 

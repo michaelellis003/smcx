@@ -1125,13 +1125,228 @@ def _crps_accumulator_at_least(
     return relation >= 0
 
 
-def _crps_float32_overflows(
-    ordered: Float[Array, " num_samples"],
-    observation: Float[Array, ""],
+def _crps_subtract_accumulators(
+    left: _CRPSAccumulator,
+    right: _CRPSAccumulator,
+) -> _CRPSAccumulator:
+    """Subtract equal-width accumulators, propagating the borrow."""
+
+    def subtract_limb(
+        limb: Int[Array, ""],
+        state: tuple[UInt[Array, " limbs"], UInt[Array, ""]],
+    ) -> tuple[UInt[Array, " limbs"], UInt[Array, ""]]:
+        result, borrow = state
+        difference = left[limb] - right[limb]
+        updated = difference - borrow
+        next_borrow = (left[limb] < right[limb]) | (difference < borrow)
+        return result.at[limb].set(updated), next_borrow.astype(jnp.uint32)
+
+    result, _ = lax.fori_loop(
+        0,
+        _CRPS_ACCUMULATOR_LIMBS,
+        subtract_limb,
+        (jnp.zeros_like(left), jnp.uint32(0)),
+    )
+    return result
+
+
+def _crps_accumulator_bit(
+    accumulator: UInt[Array, " limbs"],
+    bit_index: Int[Array, ""],
+) -> UInt[Array, ""]:
+    """Return one dynamic bit, or zero for a negative index."""
+    safe_index = jnp.maximum(bit_index, 0)
+    limb = safe_index >> 5
+    offset = safe_index.astype(jnp.uint32) & jnp.uint32(31)
+    bit = (accumulator[limb] >> offset) & jnp.uint32(1)
+    return jnp.where(bit_index >= 0, bit, jnp.uint32(0))
+
+
+def _crps_shift_left_one(
+    accumulator: UInt[Array, " limbs"],
+    low_bit: UInt[Array, ""],
+) -> UInt[Array, " limbs"]:
+    """Shift an accumulator left and insert one low bit."""
+
+    def shift_limb(
+        limb: Int[Array, ""],
+        state: tuple[UInt[Array, " limbs"], UInt[Array, ""]],
+    ) -> tuple[UInt[Array, " limbs"], UInt[Array, ""]]:
+        result, carry = state
+        word = accumulator[limb]
+        updated = (word << jnp.uint32(1)) | carry
+        return result.at[limb].set(updated), word >> jnp.uint32(31)
+
+    result, _ = lax.fori_loop(
+        0,
+        _CRPS_ACCUMULATOR_LIMBS,
+        shift_limb,
+        (jnp.zeros_like(accumulator), low_bit),
+    )
+    return result
+
+
+def _crps_divide_accumulators(
+    numerator: _CRPSAccumulator,
+    divisor: _CRPSAccumulator,
+) -> _CRPSAccumulators:
+    """Return the fixed-width quotient and remainder."""
+    zero = jnp.zeros_like(numerator)
+    num_bits = _CRPS_ACCUMULATOR_LIMBS * 32
+
+    def divide_bit(
+        bit_offset: Int[Array, ""],
+        state: _CRPSAccumulators,
+    ) -> _CRPSAccumulators:
+        quotient, remainder = state
+        bit_index = num_bits - bit_offset - 1
+        remainder = _crps_shift_left_one(
+            remainder,
+            _crps_accumulator_bit(numerator, bit_index),
+        )
+        subtracts = _crps_accumulator_at_least(remainder, divisor)
+        reduced = _crps_subtract_accumulators(remainder, divisor)
+        remainder = jnp.where(subtracts, reduced, remainder)
+        limb = bit_index >> 5
+        offset = bit_index.astype(jnp.uint32) & jnp.uint32(31)
+        word = quotient[limb] | (subtracts.astype(jnp.uint32) << offset)
+        return quotient.at[limb].set(word), remainder
+
+    return lax.fori_loop(0, num_bits, divide_bit, (zero, zero))
+
+
+def _crps_highest_accumulator_bit(
+    accumulator: UInt[Array, " limbs"],
+) -> Int[Array, ""]:
+    """Return the highest set-bit index, or -1 for zero."""
+    num_bits = _CRPS_ACCUMULATOR_LIMBS * 32
+
+    def inspect_bit(
+        bit_index: Int[Array, ""],
+        highest: Int[Array, ""],
+    ) -> Int[Array, ""]:
+        is_set = _crps_accumulator_bit(accumulator, bit_index) != 0
+        return jnp.where(is_set, bit_index, highest)
+
+    return lax.fori_loop(
+        0,
+        num_bits,
+        inspect_bit,
+        jnp.asarray(-1, dtype=jnp.int32),
+    )
+
+
+def _crps_any_accumulator_bits_below(
+    accumulator: UInt[Array, " limbs"],
+    bit_limit: Int[Array, ""],
 ) -> Bool[Array, ""]:
-    """Classify exact empirical CRPS rounding at float32 overflow."""
-    sample_count = ordered.shape[0]
+    """Return whether any bit below a dynamic limit is set."""
+    num_bits = _CRPS_ACCUMULATOR_LIMBS * 32
+
+    def inspect_bit(
+        bit_index: Int[Array, ""],
+        found: Bool[Array, ""],
+    ) -> Bool[Array, ""]:
+        is_set = _crps_accumulator_bit(accumulator, bit_index) != 0
+        return found | ((bit_index < bit_limit) & is_set)
+
+    return lax.fori_loop(
+        0,
+        num_bits,
+        inspect_bit,
+        jnp.asarray(False),
+    )
+
+
+def _crps_extract_accumulator_word(
+    accumulator: UInt[Array, " limbs"],
+    bit_shift: Int[Array, ""],
+) -> UInt[Array, ""]:
+    """Extract 24 bits beginning at a dynamic bit offset."""
+    limb = bit_shift >> 5
+    offset = bit_shift.astype(jnp.uint32) & jnp.uint32(31)
+    low = accumulator[limb] >> offset
+    high_shift = (jnp.uint32(32) - offset) & jnp.uint32(31)
+    high = jnp.where(
+        offset == 0,
+        jnp.uint32(0),
+        accumulator[limb + 1] << high_shift,
+    )
+    return (low | high) & jnp.uint32(0xFFFFFF)
+
+
+def _crps_round_accumulator_to_float32(
+    numerator: UInt[Array, " limbs"],
+    sample_count: int,
+) -> Float[Array, ""]:
+    """Divide by ``sample_count**2`` and round to binary32."""
+    zero = jnp.zeros_like(numerator)
+    count = jnp.asarray(sample_count, dtype=jnp.uint32)
+    divisor = _crps_add_scaled_magnitude(zero, count, count, jnp.int32(0))
+    quotient, remainder = _crps_divide_accumulators(numerator, divisor)
+    highest_bit = _crps_highest_accumulator_bit(quotient)
+    twice_remainder = _crps_shift_left_one(remainder, jnp.uint32(0))
+    at_half = _crps_accumulator_at_least(twice_remainder, divisor)
+    exact_half = jnp.all(twice_remainder == divisor)
+    integer_round_up = at_half & (
+        ~exact_half | ((quotient[0] & jnp.uint32(1)) != 0)
+    )
+
+    subnormal_bits = quotient[0] + integer_round_up.astype(jnp.uint32)
+    bit_shift = jnp.maximum(highest_bit - 23, 0)
+    significand = _crps_extract_accumulator_word(quotient, bit_shift)
+    guard = _crps_accumulator_bit(quotient, bit_shift - 1) != 0
+    sticky = _crps_any_accumulator_bits_below(
+        quotient, bit_shift - 1
+    ) | jnp.any(remainder != 0)
+    normal_round_up = jnp.where(
+        bit_shift == 0,
+        integer_round_up,
+        guard & (sticky | ((significand & jnp.uint32(1)) != 0)),
+    )
+    rounded = significand + normal_round_up.astype(jnp.uint32)
+    carry = rounded >= jnp.uint32(0x1000000)
+    rounded = jnp.where(carry, rounded >> jnp.uint32(1), rounded)
+    exponent = highest_bit + carry.astype(jnp.int32) - 22
+    normal_bits = (exponent.astype(jnp.uint32) << jnp.uint32(23)) | (
+        rounded & jnp.uint32(0x7FFFFF)
+    )
+    normal_bits = jnp.where(
+        exponent >= 255,
+        jnp.uint32(0x7F800000),
+        normal_bits,
+    )
+    bits = jnp.where(highest_bit < 23, subnormal_bits, normal_bits)
+    return lax.bitcast_convert_type(bits, jnp.float32)
+
+
+def _crps_exact_float32_score(
+    predictions: Float[Array, " num_samples"],
+    observation: Float[Array, ""],
+) -> Float[Array, ""]:
+    """Return an exact-numerator, correctly rounded binary32 CRPS."""
+    sample_count = predictions.shape[0]
     zero = jnp.zeros((_CRPS_ACCUMULATOR_LIMBS,), dtype=jnp.uint32)
+    sign_mask = jnp.uint32(0x80000000)
+    prediction_bits = lax.bitcast_convert_type(predictions, jnp.uint32)
+    prediction_keys = jnp.where(
+        (prediction_bits & sign_mask) != 0,
+        ~prediction_bits,
+        prediction_bits ^ sign_mask,
+    )
+    ordered_keys = jnp.sort(prediction_keys)
+    ordered_bits = jnp.where(
+        (ordered_keys & sign_mask) != 0,
+        ordered_keys ^ sign_mask,
+        ~ordered_keys,
+    )
+    ordered = lax.bitcast_convert_type(ordered_bits, jnp.float32)
+    observation_bits = lax.bitcast_convert_type(observation, jnp.uint32)
+    observation_key = jnp.where(
+        (observation_bits & sign_mask) != 0,
+        ~observation_bits,
+        observation_bits ^ sign_mask,
+    )
 
     def add_sample(
         index: Int[Array, ""],
@@ -1140,7 +1355,7 @@ def _crps_float32_overflows(
         value = ordered[index]
         rank = jnp.asarray(index, dtype=jnp.uint32)
         count = jnp.asarray(sample_count, dtype=jnp.uint32)
-        is_left = value <= observation
+        is_left = ordered_keys[index] <= observation_key
         weight = jnp.where(
             is_left,
             jnp.uint32(2) * rank + jnp.uint32(1),
@@ -1165,16 +1380,8 @@ def _crps_float32_overflows(
         add_sample,
         (zero, zero),
     )
-    # In units of 2**-149, compare the exact numerator against
-    # N**2 * (2**128 - 2**103), the ties-to-infinity midpoint.
-    count = jnp.asarray(sample_count, dtype=jnp.uint32)
-    positive = _crps_add_scaled_magnitude(
-        positive, count, count, jnp.int32(252)
-    )
-    negative = _crps_add_scaled_magnitude(
-        negative, count, count, jnp.int32(277)
-    )
-    return _crps_accumulator_at_least(positive, negative)
+    numerator = _crps_subtract_accumulators(positive, negative)
+    return _crps_round_accumulator_to_float32(numerator, sample_count)
 
 
 def crps(
@@ -1209,7 +1416,10 @@ def crps(
         The empirical-CDF integral is evaluated over power-of-two-scaled
         ordered spacings. Its nonnegative interval terms retain
         :math:`O(N \log N)` complexity while avoiding cancellation between
-        raw order statistics and integer scaling by :math:`N^2`.
+        raw order statistics and integer scaling by :math:`N^2`. A
+        fixed-width uint32 accumulator rounds the exact quotient for
+        subnormal or top-bin float32 inputs and whenever the conservative
+        largest-error-over-:math:`N^2` bound can enter the subnormal range.
 
     References:
         Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
@@ -1315,28 +1525,36 @@ def crps(
         jnp.ldexp(scaled_score, scale_exponent),
     )
     if output_dtype == jnp.float32:
-        dtype_max = jnp.asarray(jnp.finfo(jnp.float32).max)
-        top_bin_floor = jnp.asarray(2.0**127, dtype=jnp.float32)
-        # CRPS is bounded by the largest absolute error. Without a top-bin
-        # input, that error is below the float32 overflow midpoint, so the
-        # exact scan is unnecessary.
-        needs_exact_classification = (
-            jnp.all(jnp.isfinite(ordered))
-            & jnp.isfinite(obs)
-            & (value_scale >= top_bin_floor)
+        prediction_bits = lax.bitcast_convert_type(predictions, jnp.uint32)
+        observation_bits = lax.bitcast_convert_type(obs, jnp.uint32)
+        prediction_exponents = (prediction_bits >> jnp.uint32(23)) & jnp.uint32(
+            0xFF
         )
-
-        def classify_overflow(_: None) -> Float[Array, ""]:
-            overflows = _crps_float32_overflows(ordered, obs)
-            return jnp.where(
-                overflows,
-                jnp.inf,
-                jnp.minimum(score, dtype_max),
-            )
+        observation_exponent = (
+            observation_bits >> jnp.uint32(23)
+        ) & jnp.uint32(0xFF)
+        prediction_fractions = prediction_bits & jnp.uint32(0x7FFFFF)
+        observation_fraction = observation_bits & jnp.uint32(0x7FFFFF)
+        has_subnormal = jnp.any(
+            (prediction_exponents == 0) & (prediction_fractions != 0)
+        ) | ((observation_exponent == 0) & (observation_fraction != 0))
+        has_top_bin = jnp.any(prediction_exponents == 254) | (
+            observation_exponent == 254
+        )
+        _, error_exponent = jnp.frexp(max_error)
+        underflow_exponent = (n * n - 1).bit_length() - 124
+        may_underflow = (max_error > 0) & (
+            error_exponent + scale_exponent < underflow_exponent
+        )
+        needs_exact_classification = (
+            jnp.all(prediction_exponents != 255)
+            & (observation_exponent != 255)
+            & (has_subnormal | has_top_bin | may_underflow)
+        )
 
         score = lax.cond(
             needs_exact_classification,
-            classify_overflow,
+            lambda _: _crps_exact_float32_score(predictions, obs),
             lambda _: score,
             operand=None,
         )

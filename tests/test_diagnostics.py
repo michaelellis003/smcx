@@ -431,6 +431,92 @@ class TestCRPS:
 
         assert jnp.array_equal(shifted_score, centered_score)
 
+    def test_crps_normal_translation_preserves_tiny_score(self):
+        """All-normal translated inputs retain a subnormal CRPS."""
+        prediction_bits = np.asarray(
+            [[0x00800000, 0x00800020], [0, 0x20]],
+            dtype=np.uint32,
+        )
+        observation_bits = np.asarray(
+            [0x00800000, 0],
+            dtype=np.uint32,
+        )
+        predictions_np = prediction_bits.view(np.float32)
+        observations_np = observation_bits.view(np.float32)
+        exact = Fraction(8, 2**149)
+        for values, observation in zip(
+            predictions_np, observations_np, strict=True
+        ):
+            assert _exact_crps_oracle(values, observation) == exact
+
+        predictions = jnp.asarray(predictions_np)
+        observations = jnp.asarray(observations_np, dtype=jnp.bfloat16)
+        expected = jnp.asarray(
+            np.full((2,), 8, dtype=np.uint32).view(np.float32)
+        )
+        _assert_crps_modes(predictions, observations, expected)
+
+    def test_crps_exact_quotient_rounds_binary32_boundaries(self):
+        """Exact division honors ties-to-even and the normal boundary."""
+        from smcx.diagnostics import crps
+
+        outlier_bits = np.asarray(
+            [
+                0x00000005,
+                0x00000015,
+                0x00000025,
+                0x027FFFFE,
+                0x02800000,
+                0x02800001,
+            ],
+            dtype=np.uint32,
+        )
+        prediction_bits = np.zeros((outlier_bits.size, 4), dtype=np.uint32)
+        prediction_bits[:, 2] = 1
+        prediction_bits[:, 3] = outlier_bits
+        predictions_np = prediction_bits.view(np.float32)
+        observations_np = np.zeros(outlier_bits.size, dtype=np.float32)
+        minimum_subnormal = Fraction(1, 2**149)
+        for values, observation in zip(
+            predictions_np,
+            observations_np,
+            strict=True,
+        ):
+            outlier = Fraction.from_float(float(values[-1]))
+            difference = (
+                _exact_crps_oracle(values, observation)
+                - (outlier + 3 * minimum_subnormal) / 16
+            )
+            assert difference.numerator == 0
+
+        expected_bits = np.asarray(
+            [0, 2, 2, 0x007FFFFF, 0x00800000, 0x00800001],
+            dtype=np.uint32,
+        )
+        predictions = jnp.asarray(predictions_np)
+        observations = jnp.asarray(observations_np)
+        expected = jnp.asarray(expected_bits.view(np.float32))
+        eager = jnp.stack([
+            crps(values, observation)
+            for values, observation in zip(
+                predictions,
+                observations,
+                strict=True,
+            )
+        ])
+
+        assert jnp.array_equal(eager, expected)
+        assert jnp.array_equal(
+            jax.jit(jax.vmap(crps))(predictions, observations),
+            expected,
+        )
+        # For [0, u, 5u], CRPS = 8u/9, which rounds to u.
+        odd_values = jnp.asarray(
+            np.asarray([0, 1, 5], dtype=np.uint32).view(np.float32)
+        )
+        odd_score = jax.jit(crps)(odd_values, jnp.float32(0.0))
+        assert int(np.asarray(odd_score).view(np.uint32)) == 1
+
     @pytest.mark.parametrize(
         ("num_samples", "value"),
         [(10_000, 1e35), (1, 2e38), (100, 1e-37)],
