@@ -244,8 +244,8 @@ def to_arviz(
         posteriors: One supported posterior or independent runs.
         key: Explicit key for equal-weight resampling.
         num_draws: Output draws per chain. Defaults to the particle count.
-        var_names: Optional tree-path to output-variable mapping.
-        dims: Optional output-variable to event-dimension mapping.
+        var_names: Optional aliases for unique, unambiguous tree paths.
+        dims: Optional per-group dimensions with consistent names and sizes.
         emissions: Optional shared observations.
         unconstrained: Optional aligned u-space particle values.
 
