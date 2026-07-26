@@ -375,6 +375,7 @@ def _weighted_moment_coordinates(
     Float[Array, "ntime num_particles"],
     Float[Array, "ntime dim"],
     Float[Array, "ntime num_particles dim"],
+    Float[Array, "ntime num_particles dim"],
     Int[Array, "ntime dim"],
 ]:
     """Return weights and overflow-safe maximum-weight coordinates."""
@@ -406,7 +407,16 @@ def _weighted_moment_coordinates(
         scaled_field - scaled_anchors[:, None, :],
         jnp.zeros_like(field),
     )
-    return weights, scaled_anchors, offsets, shifts
+    # Carry the same-dtype TwoDiff residual separately from the main offset.
+    virtual_anchor = scaled_field - offsets
+    virtual_field = offsets + virtual_anchor
+    tails = jnp.where(
+        material,
+        (scaled_field - virtual_field)
+        + (virtual_anchor - scaled_anchors[:, None, :]),
+        jnp.zeros_like(field),
+    )
+    return weights, scaled_anchors, offsets, tails, shifts
 
 
 def _weighted_mean_field(
@@ -422,7 +432,7 @@ def _weighted_mean_field(
     Returns:
         Weighted means, shape ``(ntime, D)``.
     """
-    weights, anchors, offsets, shifts = _weighted_moment_coordinates(
+    weights, anchors, offsets, tails, shifts = _weighted_moment_coordinates(
         log_weights,
         field,
     )
@@ -430,6 +440,7 @@ def _weighted_mean_field(
         weights[:, :, None] * offsets,
         axis=1,
     )
+    scaled_mean = scaled_mean + jnp.sum(weights[:, :, None] * tails, axis=1)
     upscale = jnp.where(
         shifts > 0,
         jnp.asarray(2.0, dtype=field.dtype),
@@ -443,7 +454,7 @@ def _weighted_variance_field(
     field: Float[Array, "ntime num_particles dim"],
 ) -> Float[Array, "ntime dim"]:
     """Compute a weighted variance entirely in shifted coordinates."""
-    weights, _, offsets, shifts = _weighted_moment_coordinates(
+    weights, _, offsets, _, shifts = _weighted_moment_coordinates(
         log_weights,
         field,
     )
