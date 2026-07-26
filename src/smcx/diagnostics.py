@@ -1025,12 +1025,23 @@ def crps(
         dimension="num_samples",
     )
     obs = _require_float_scalar(observation, name="observation")
-    output_dtype = predictions.dtype
-    is_float8 = jnp.finfo(output_dtype).bits == 8
-    if is_float8:
-        # JAX does not implement frexp/ldexp for its float8 dtypes.
-        predictions = predictions.astype(jnp.float32)
-        obs = obs.astype(jnp.float32)
+    prediction_dtype = predictions.dtype
+    is_float8 = jnp.finfo(prediction_dtype).bits == 8
+    output_dtype = (
+        prediction_dtype
+        if is_float8
+        else jnp.result_type(prediction_dtype, obs.dtype)
+    )
+    if jnp.finfo(prediction_dtype).bits < 32:
+        # Float8 lacks frexp/ldexp, and float16 cannot represent large
+        # sample ranks. Evaluate lower-precision forecasts at least in f32.
+        work_dtype = (
+            jnp.float32
+            if is_float8
+            else jnp.result_type(output_dtype, jnp.float32)
+        )
+        predictions = predictions.astype(work_dtype)
+        obs = obs.astype(work_dtype)
     ordered = jnp.sort(predictions)
     n = predictions.shape[0]
     value_scale = jnp.maximum(
@@ -1092,7 +1103,7 @@ def crps(
     score = jnp.asarray(
         jnp.ldexp(scaled_score, scale_exponent),
     )
-    return score.astype(output_dtype) if is_float8 else score
+    return score.astype(output_dtype)
 
 
 # --- Pareto-k diagnostic ---------------------------------------------------
