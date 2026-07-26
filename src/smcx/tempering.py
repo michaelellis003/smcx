@@ -121,7 +121,21 @@ def _is_valid_acceptance_rate(
     rate: Float[Array, ""],
 ) -> Bool[Array, ""]:
     """Return whether a traced mutation acceptance rate is a probability."""
-    return jnp.isfinite(rate) & (rate >= 0.0) & (rate <= 1.0)
+    bit_width = jnp.finfo(rate.dtype).bits
+    unsigned_dtype = {
+        16: jnp.uint16,
+        32: jnp.uint32,
+        64: jnp.uint64,
+    }[bit_width]
+    bits = lax.bitcast_convert_type(rate, unsigned_dtype)
+    sign_mask = jnp.asarray(
+        1 << (bit_width - 1),
+        dtype=unsigned_dtype,
+    )
+    # Arithmetic comparisons can flush a negative subnormal to zero. Inspect
+    # its sign bit while admitting the sign-only negative-zero encoding.
+    nonnegative = ((bits & sign_mask) == 0) | (bits == sign_mask)
+    return jnp.isfinite(rate) & nonnegative & (rate <= 1.0)
 
 
 def temper(
