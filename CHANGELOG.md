@@ -2,6 +2,21 @@
 
 <!-- version list -->
 
+## v1.14.6 (2026-07-26)
+
+### Bug Fixes
+
+- **diagnostics**: Classify exact CRPS overflow
+  ([#217](https://github.com/michaelellis003/smcx/pull/217),
+  [`d146757`](https://github.com/michaelellis003/smcx/commit/d146757e48fddda64c925d0b2f38a1d1c710b016))
+
+### Testing
+
+- **diagnostics**: Use f32-honest CRPS tolerances
+  ([#216](https://github.com/michaelellis003/smcx/pull/216),
+  [`6e5317b`](https://github.com/michaelellis003/smcx/commit/6e5317b8017c42393489816c25d03b49f8616478))
+
+
 ## v1.14.5 (2026-07-26)
 
 ### Bug Fixes
