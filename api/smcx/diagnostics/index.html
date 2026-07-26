@@ -1833,7 +1833,8 @@ require full history.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>iid samples from the predictive distribution.</p>
+                <p>iid samples from the predictive distribution. The
+empirical distribution assigns each sample equal weight.</p>
               </div>
             </td>
             <td>
@@ -1911,6 +1912,14 @@ or the observation is not a floating scalar.</p>
     </table>
 
 
+<details class="notes" open>
+  <summary>Notes</summary>
+  <p>The empirical-CDF integral is evaluated over power-of-two-scaled
+ordered spacings. Its nonnegative interval terms retain
+:math:<code>O(N \log N)</code> complexity while avoiding cancellation between
+raw order statistics and integer scaling by :math:<code>N^2</code>.</p>
+</details>
+
 <details class="references" open>
   <summary>References</summary>
   <p>Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
@@ -1919,6 +1928,9 @@ https://doi.org/10.1287/mnsc.22.10.1087</p>
 <p>Gneiting, T., and Raftery, A. E. (2007). Strictly proper scoring
 rules, prediction, and estimation.
 https://doi.org/10.1198/016214506000001437</p>
+<p>Jordan, A., Krüger, F., and Lerch, S. (2019). Evaluating
+probabilistic forecasts with scoringRules.
+https://doi.org/10.18637/jss.v090.i12</p>
 </details>
 
     </div>
