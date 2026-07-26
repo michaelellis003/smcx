@@ -39,7 +39,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 from jax import jit, lax, vmap
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float
 
 from smcx._covariance import _weighted_covariance_factor
 from smcx._numerics import _neumaier_add
@@ -115,6 +115,13 @@ def _mutation_acceptance_rate(info: object) -> Array:
             f"got shape {rate.shape} and dtype {rate.dtype}"
         )
     return rate
+
+
+def _is_valid_acceptance_rate(
+    rate: Float[Array, ""],
+) -> Bool[Array, ""]:
+    """Return whether a traced mutation acceptance rate is a probability."""
+    return jnp.isfinite(rate) & (rate >= 0.0) & (rate <= 1.0)
 
 
 def temper(
@@ -286,6 +293,7 @@ def temper(
         ) -> tuple[
             Float[Array, "num_particles state_dim"],
             Float[Array, ""],
+            Bool[Array, ""],
         ]:
             """Run a caller-owned fixed-count mutation sweep."""
 
@@ -320,13 +328,25 @@ def temper(
                         particles.dtype,
                         source="mutation_step_fn",
                     )
-                    return next_state, _mutation_acceptance_rate(info)
+                    rate = _mutation_acceptance_rate(info)
+                    return next_state, (
+                        rate,
+                        _is_valid_acceptance_rate(rate),
+                    )
 
                 return vmap(apply_one)(particle_keys, states)
 
-            states, acceptance_rates = lax.scan(apply_sweep, states, sweep_keys)
+            states, (acceptance_rates, valid_rates) = lax.scan(
+                apply_sweep,
+                states,
+                sweep_keys,
+            )
             positions = cast(TemperingMutationState, states).position
-            return positions, jnp.mean(acceptance_rates)
+            return (
+                positions,
+                jnp.mean(acceptance_rates),
+                jnp.all(valid_rates),
+            )
 
     def ess_at(phi_new: float, phi: float) -> float:
         return float(compute_ess(log_w + (phi_new - phi) * loglik))
@@ -402,7 +422,16 @@ def temper(
                 l_prop,
             )
         else:
-            particles, acc = mutation_sweep(km, particles, jnp.asarray(phi_new))
+            particles, acc, valid_rates = mutation_sweep(
+                km,
+                particles,
+                jnp.asarray(phi_new),
+            )
+            if not bool(valid_rates):
+                raise ValueError(
+                    "mutation_step_fn acceptance_rate must be finite "
+                    "and in [0, 1]"
+                )
             loglik = jnp.asarray(batch_lik(particles))
             logprior = jnp.asarray(batch_prior(particles))
             _validate_log_density_batch(
