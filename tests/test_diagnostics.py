@@ -209,6 +209,24 @@ def _make_weighted_posterior(
     )
 
 
+def _make_log_weighted_posterior(
+    particles: jax.Array,
+    log_weights: jax.Array,
+) -> ParticleFilterPosterior:
+    """Wrap one scalar particle cloud with supplied log weights."""
+    particles = jnp.asarray(particles)
+    log_weights = jnp.asarray(log_weights)
+    num_particles = particles.shape[0]
+    return ParticleFilterPosterior(
+        marginal_loglik=jnp.zeros((), dtype=log_weights.dtype),
+        filtered_particles=particles[None, :, None],
+        filtered_log_weights=log_weights[None, :],
+        ancestors=jnp.arange(num_particles, dtype=jnp.int32)[None, :],
+        ess=jnp.ones((1,), dtype=log_weights.dtype),
+        log_evidence_increments=jnp.zeros((1,), dtype=log_weights.dtype),
+    )
+
+
 def _make_liu_west_posterior():
     """Add a deterministic parameter cloud to the small posterior."""
     posterior = _make_posterior()
@@ -600,6 +618,99 @@ class TestWeightedQuantile:
             eager[0, [0, -1], 0],
             jnp.asarray([1.0, 3.0]),
         )
+
+    def test_f32_upper_tail_matches_oracle_in_transform_modes(self):
+        """Directional accumulation retains represented upper-tail mass."""
+        num_particles = 10_000
+        particles = jnp.arange(num_particles, dtype=jnp.float32)
+        log_weights = -jnp.linspace(
+            0.0,
+            30.0,
+            num_particles,
+            dtype=jnp.float32,
+        )
+        posterior = _make_log_weighted_posterior(particles, log_weights)
+        levels = jnp.asarray(
+            [0.0, 0.5, 0.9, 0.9999999, 1.0],
+            dtype=jnp.float32,
+        )
+
+        def evaluate(q: jax.Array) -> jax.Array:
+            return weighted_quantile(posterior, q)[0, :, 0]
+
+        actual = jnp.stack([
+            evaluate(levels),
+            jax.jit(evaluate)(levels),
+            jax.jit(jax.vmap(evaluate))(jnp.stack([levels, levels]))[0],
+        ])
+        represented_weights = np.asarray(
+            jnp.exp(log_weights - jnp.logaddexp.reduce(log_weights)),
+            dtype=np.float64,
+        )
+        cumulative = np.cumsum(represented_weights / represented_weights.sum())
+        midpoint = (np.concatenate(([0.0], cumulative[:-1])) + cumulative) / 2.0
+        expected = np.interp(
+            np.asarray(levels),
+            midpoint,
+            np.asarray(particles),
+        )
+
+        # Metal's float32 scan and interpolation stay within eight output ULPs
+        # of the float64 represented-weight oracle.
+        np.testing.assert_array_max_ulp(
+            np.asarray(actual),
+            np.broadcast_to(expected.astype(np.float32), actual.shape),
+            maxulp=8,
+        )
+        assert jnp.array_equal(actual[:, -1], jnp.full((3,), particles[-1]))
+
+    def test_f32_directional_splice_is_monotone_with_level_tangent(self):
+        """The median floor keeps order without flattening the q tangent."""
+        posterior = _make_log_weighted_posterior(
+            jnp.asarray([0.0, 1.0], dtype=jnp.float32),
+            jnp.asarray(
+                [-2.5585379600524902, -6.023451805114746],
+                dtype=jnp.float32,
+            ),
+        )
+        half = jnp.float32(0.5)
+        levels = jnp.asarray(
+            [
+                jnp.nextafter(half, jnp.float32(0.0)),
+                half,
+                jnp.nextafter(half, jnp.float32(1.0)),
+            ],
+        )
+
+        def quantile(q: jax.Array) -> jax.Array:
+            return weighted_quantile(posterior, q[None])[0, 0, 0]
+
+        values = jnp.stack([
+            jax.vmap(quantile)(levels),
+            jax.jit(jax.vmap(quantile))(levels),
+        ])
+        gradients = jnp.stack([
+            jax.vmap(jax.grad(quantile))(levels),
+            jax.jit(jax.vmap(jax.grad(quantile)))(levels),
+        ])
+
+        assert jnp.all(jnp.diff(values, axis=1) >= 0.0)
+        assert jnp.array_equal(gradients, jnp.full_like(gradients, 2.0))
+
+    def test_f32_directional_splice_stays_inside_support(self):
+        """A rounded median floor cannot exceed the supported maximum."""
+        particles = jnp.asarray([-1.0, 0.1], dtype=jnp.float32)
+        posterior = _make_log_weighted_posterior(
+            particles,
+            jnp.asarray([-25.0, 0.0], dtype=jnp.float32),
+        )
+
+        actual = weighted_quantile(
+            posterior,
+            jnp.asarray([0.5, 0.9999999, 1.0], dtype=jnp.float32),
+        )[0, :, 0]
+
+        assert jnp.array_equal(actual, jnp.full_like(actual, particles[-1]))
 
 
 class TestLogMLIncrements:
@@ -1597,6 +1708,51 @@ class TestTailESS:
                 rtol=tolerance,
                 atol=0.0,
             )
+
+    def test_tiny_upper_tail_has_unit_ess(self):
+        """A positive maximum-support singleton has effective size one."""
+        num_particles = 10_000
+        log_weights = -jnp.linspace(
+            0.0,
+            30.0,
+            num_particles,
+            dtype=jnp.float32,
+        )
+        posterior = _make_log_weighted_posterior(
+            jnp.arange(num_particles, dtype=jnp.float32),
+            log_weights,
+        )
+
+        actual = jnp.stack([
+            tail_ess(posterior, q=1e-18),
+            jax.jit(lambda value: tail_ess(value, q=1e-18))(posterior),
+        ])
+
+        assert jnp.array_equal(actual, jnp.ones_like(actual))
+
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu",
+        reason="jax-mps does not accept float16 input buffers",
+    )
+    def test_float16_uniform_median_tail_avoids_ratio_overflow(self):
+        """A half-tail of 1000 uniform float16 particles has ESS 500."""
+        num_particles = 1_000
+        dtype = jnp.float16
+        posterior = _make_log_weighted_posterior(
+            jnp.arange(num_particles, dtype=dtype),
+            jnp.full(
+                (num_particles,),
+                -jnp.log(jnp.asarray(num_particles, dtype=dtype)),
+                dtype=dtype,
+            ),
+        )
+        expected = jnp.asarray([500.0], dtype=dtype)
+
+        for actual in (
+            tail_ess(posterior, q=0.5),
+            jax.jit(lambda value: tail_ess(value, q=0.5))(posterior),
+        ):
+            assert jnp.array_equal(actual, expected)
 
 
 class TestCumulativeLogScore:
