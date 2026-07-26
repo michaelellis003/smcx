@@ -5240,7 +5240,10 @@ not a floating scalar.</p>
   <p>The empirical-CDF integral is evaluated over power-of-two-scaled
 ordered spacings. Its nonnegative interval terms retain
 :math:<code>O(N \log N)</code> complexity while avoiding cancellation between
-raw order statistics and integer scaling by :math:<code>N^2</code>.</p>
+raw order statistics and integer scaling by :math:<code>N^2</code>. A
+fixed-width uint32 accumulator rounds the exact quotient for
+subnormal or top-bin float32 inputs and whenever the conservative
+largest-error-over-:math:<code>N^2</code> bound can enter the subnormal range.</p>
 </details>
 
 <details class="references" open>
