@@ -124,6 +124,36 @@ def test_incremental_boundaries_canonicalize_scalar_discrete_emissions():
     assert posterior.log_evidence_increments.shape == (2,)
 
 
+@pytest.mark.parametrize(
+    ("boundary", "emissions", "message"),
+    [
+        ("init", 0.0, "must be a JAX array"),
+        ("step", 0.0, "must be a JAX array"),
+        ("update", [0.0], "must be a JAX array"),
+        ("init", jnp.empty((0,)), "emission_dim >= 1"),
+        ("step", jnp.empty((1, 1)), r"shape \(\) or \(emission_dim,\)"),
+        ("update", jnp.empty((1, 1, 1)), r"shape \(T,\) or"),
+    ],
+)
+def test_incremental_boundaries_validate_emissions(
+    boundary, emissions, message
+):
+    checkpoint = _checkpoint()
+    with pytest.raises(ValueError, match=message):
+        if boundary == "init":
+            smcx.bootstrap_init(
+                jr.key(152),
+                _initial,
+                _log_observation,
+                emissions,
+                NUM_PARTICLES,
+            )
+        elif boundary == "step":
+            _advance(jr.key(153), checkpoint, emissions)
+        else:
+            _update(jr.key(154)[None], checkpoint, emissions)
+
+
 def _update(keys, checkpoint, emissions, **kwargs):
     return smcx.bootstrap_update(
         keys, checkpoint, _transition, _log_observation, emissions, **kwargs

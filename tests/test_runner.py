@@ -395,6 +395,7 @@ def test_runner_preserves_mps_history_and_compensated_evidence():
         (jnp.empty((0, 1)), "emissions must contain at least one row"),
         (jnp.empty((3, 0)), "emission_dim >= 1"),
         (jnp.zeros((3, 1, 1)), "emissions must have shape"),
+        ([0.0, 1.0], "must be a JAX array"),
     ],
 )
 def test_runner_rejects_malformed_emissions(emissions, message):

@@ -22,7 +22,8 @@ def _transition_sampler(key, state):
 
 
 def _log_observation(emission, state):
-    del emission, state
+    assert emission.ndim == 1
+    del state
     return jnp.asarray(0.0)
 
 
@@ -141,8 +142,9 @@ def test_callback_receives_rank_one_integer_emissions_as_vectors():
 
 
 @pytest.mark.parametrize("run_filter", _PARTICLE_FILTERS)
-def test_particle_filters_accept_scalar_discrete_emissions(run_filter):
-    emissions = jnp.array([0, 1], dtype=jnp.int32)
+@pytest.mark.parametrize("dtype", [jnp.int32, jnp.bool_])
+def test_particle_filters_accept_scalar_discrete_emissions(run_filter, dtype):
+    emissions = jnp.array([0, 1], dtype=dtype)
 
     posterior = run_filter(emissions, 4)
 
@@ -157,6 +159,7 @@ def test_particle_filters_accept_scalar_discrete_emissions(run_filter):
         (jnp.zeros((2, 1)), 0, "num_particles must be >= 1"),
         (jnp.zeros((2, 0)), 4, "emission_dim >= 1"),
         (jnp.zeros((2, 1, 1)), 4, r"shape \(T,\) or \(T, emission_dim\)"),
+        ([0.0, 1.0], 4, "must be a JAX array"),
     ],
 )
 def test_particle_filters_validate_structure(
