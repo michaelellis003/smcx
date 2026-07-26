@@ -171,11 +171,10 @@ squared would exceed the backend integer range. Scores affected by the earlier
 raw-value calculation can change at fixed inputs; following
 [NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html), smcx
 treats this as the correction of a clear numerical bug. The signature and
-$O(N \log N)$ complexity are unchanged. At the float32 overflow boundary, a
-fixed-width `uint32` accumulator compares the exact empirical numerator with
-the round-to-nearest overflow midpoint, including its tie, without requiring
-backend `uint64` support. Translations that expose subnormal float32 spacings
-remain tracked in
+$O(N \log N)$ complexity are unchanged. A fixed-width `uint32` accumulator
+exactly classifies round-to-nearest at float32 overflow without backend
+`uint64` support. Translations that expose subnormal float32 spacings remain
+backend-FTZ-sensitive and tracked in
 [issue #153](https://github.com/michaelellis003/smcx/issues/153).
 
 ## Cut the variance with a guided proposal
