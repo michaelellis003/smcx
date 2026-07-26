@@ -1084,6 +1084,12 @@ def posterior_predictive_sample(
             state is malformed, future inputs are misaligned, the transition
             changes its PyTree contract, or the emission is not a scalar or
             nonempty vector.
+
+    Warns:
+        FutureWarning: Passing a ``LiuWestPosterior`` ignores
+            ``filtered_params``. Replace this call with
+            ``param_posterior_predictive_sample`` before smcx 2.0, when
+            parameter-ignoring calls become errors.
     """
     if num_samples is not None:
         num_samples = _require_integer(
