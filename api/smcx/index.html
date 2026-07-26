@@ -9908,9 +9908,14 @@ in moderate or high dimensions.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The bisection solves <code>ESS = target_ess * N</code> for
-nonterminal stages. The terminal jump to <code>phi = 1</code> may finish
-above the target.</p>
+                <p>The bisection solves
+<code>ESS / ESS(uniform weights) = target_ess</code> for nonterminal
+stages, where the denominator is mathematically N. The terminal
+jump to <code>phi = 1</code> may finish above the target. Must lie in
+<code>(0, 1 - numpy.finfo(numpy.float32).eps]</code>; the common float32
+bound keeps the accepted domain consistent across backends.
+Values near the upper bound can require raising <code>max_stages</code>
+for heterogeneous likelihoods.</p>
               </div>
             </td>
             <td>
@@ -9980,7 +9985,8 @@ callback. Info must expose a scalar floating
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Safety cap on the number of stages.</p>
+                <p>Safety cap on the number of stages. Near-unit
+<code>target_ess</code> values may need a larger budget.</p>
               </div>
             </td>
             <td>
@@ -10049,8 +10055,9 @@ callback. Info must expose a scalar floating
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Particle or mutation counts are invalid, callback pairing
-is incomplete, or a mutation state or diagnostic is malformed.</p>
+                <p>Particle or mutation counts are invalid, <code>target_ess</code>
+is outside its numerically viable interval, callback pairing is
+incomplete, or a mutation state or diagnostic is malformed.</p>
               </div>
             </td>
           </tr>

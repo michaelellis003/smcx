@@ -1378,10 +1378,10 @@
 <p>Anneals from the prior to the posterior
 <span class="arithmatex">\(\pi_\phi \propto p(x)\, L(x)^\phi\)</span> along an adaptive schedule
 [Del Moral, Doucet &amp; Jasra, 2006]: the next temperature solves
-<code>ESS(phi) = target_ess * N</code> by bisection on the <em>resident</em>
-log-likelihood vector when that target lies before <code>phi = 1</code>. The
-terminal stage may instead stop above the target ESS. The solve is
-deterministic and uses no fresh sampling.
+<code>ESS(phi) / ESS(uniform weights) = target_ess</code> by bisection on the
+<em>resident</em> log-likelihood vector when that target lies before
+<code>phi = 1</code>. The terminal stage may instead stop above the target ESS.
+The solve is deterministic and uses no fresh sampling.
 Each stage reweights by
 <span class="arithmatex">\(\ell \cdot \Delta\phi\)</span> (evidence increment at the reweight,
 pre-move — the Del Moral et al. collapse), resamples, and applies a
@@ -1390,6 +1390,13 @@ Metropolis with proposal covariance
 <span class="arithmatex">\(2.38^2/d \cdot \hat\Sigma\)</span> from the <em>weighted</em> pre-resample cloud
 (Roberts &amp; Rosenthal, 2001) — two-pass in float64 on the host
 (single-pass cancels catastrophically at ordinary posterior offsets).</p>
+<p>The target ESS ratio is capped one float32 machine epsilon below one.
+At exactly one, no positive temperature increment can satisfy the target
+for a heterogeneous likelihood; the finite gap also gives the ESS search
+one relative unit of float32 resolution below its uniform-cloud maximum.
+The search scales that ratio by the ESS of the represented uniform
+log-weight vector (mathematically <span class="arithmatex">\(N\)</span>), so reduction rounding cannot put
+the accepted target above the backend's computed maximum.</p>
 <p>The adaptive schedule is host-driven (bisection reads ESS values), so
 <code>temper</code> itself is not jittable; each per-stage mutation sweep is jitted.</p>
 
@@ -1552,9 +1559,14 @@ in moderate or high dimensions.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The bisection solves <code>ESS = target_ess * N</code> for
-nonterminal stages. The terminal jump to <code>phi = 1</code> may finish
-above the target.</p>
+                <p>The bisection solves
+<code>ESS / ESS(uniform weights) = target_ess</code> for nonterminal
+stages, where the denominator is mathematically N. The terminal
+jump to <code>phi = 1</code> may finish above the target. Must lie in
+<code>(0, 1 - numpy.finfo(numpy.float32).eps]</code>; the common float32
+bound keeps the accepted domain consistent across backends.
+Values near the upper bound can require raising <code>max_stages</code>
+for heterogeneous likelihoods.</p>
               </div>
             </td>
             <td>
@@ -1624,7 +1636,8 @@ callback. Info must expose a scalar floating
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Safety cap on the number of stages.</p>
+                <p>Safety cap on the number of stages. Near-unit
+<code>target_ess</code> values may need a larger budget.</p>
               </div>
             </td>
             <td>
@@ -1693,8 +1706,9 @@ callback. Info must expose a scalar floating
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Particle or mutation counts are invalid, callback pairing
-is incomplete, or a mutation state or diagnostic is malformed.</p>
+                <p>Particle or mutation counts are invalid, <code>target_ess</code>
+is outside its numerically viable interval, callback pairing is
+incomplete, or a mutation state or diagnostic is malformed.</p>
               </div>
             </td>
           </tr>
