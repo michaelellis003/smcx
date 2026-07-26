@@ -172,8 +172,15 @@ def test_particle_filters_validate_structure(
         run_filter(emissions, num_particles)
 
 
-def test_particle_filter_rejects_zero_width_inputs():
-    with pytest.raises(ValueError, match="input_dim >= 1"):
+@pytest.mark.parametrize(
+    ("inputs", "message"),
+    [
+        (jnp.empty((2, 0)), "input_dim >= 1"),
+        ([[0.0], [1.0]], "inputs must be a JAX array"),
+    ],
+)
+def test_particle_filter_rejects_invalid_inputs(inputs, message):
+    with pytest.raises(ValueError, match=message):
         smcx.bootstrap_filter(
             jr.key(152),
             _initial_sampler,
@@ -181,21 +188,7 @@ def test_particle_filter_rejects_zero_width_inputs():
             _log_observation,
             jnp.zeros((2, 1)),
             4,
-            inputs=jnp.empty((2, 0)),
-        )
-
-
-def test_particle_filter_rejects_non_jax_inputs():
-    """The shared sequence boundary owns the non-JAX structural error."""
-    with pytest.raises(ValueError, match="inputs must be a JAX array"):
-        smcx.bootstrap_filter(
-            jr.key(152),
-            _initial_sampler,
-            _transition_sampler,
-            _log_observation,
-            jnp.zeros((2, 1)),
-            4,
-            inputs=[[0.0], [1.0]],  # ty: ignore[invalid-argument-type]
+            inputs=inputs,
         )
 
 

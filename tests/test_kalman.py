@@ -138,50 +138,40 @@ def test_kalman_filter_rejects_numpy_emissions_with_value_error():
         )
 
 
-def test_gaussian_filters_reject_non_jax_inputs_with_value_error():
+@pytest.mark.parametrize(
+    "filter_name",
+    ["kalman_filter", "extended_kalman_filter", "unscented_kalman_filter"],
+)
+def test_gaussian_filters_reject_non_jax_inputs_with_value_error(filter_name):
     """Every Gaussian input boundary owns the non-JAX structural error."""
     mean = jnp.zeros(1)
     covariance = jnp.eye(1)
     emissions = jnp.zeros(2)
-    inputs = [[0.0], [1.0]]
-    calls = (
-        lambda: smcx.kalman_filter(
-            mean,
-            covariance,
-            covariance,
-            covariance,
-            covariance,
-            covariance,
-            emissions,
-            inputs=inputs,  # ty: ignore[invalid-argument-type]
-        ),
-        lambda: smcx.extended_kalman_filter(
-            mean,
-            covariance,
+    middle_arguments = {
+        "kalman_filter": (covariance, covariance, covariance),
+        "extended_kalman_filter": (
             lambda state, _input: state,
             lambda _state, _input: covariance,
             covariance,
             lambda state, _input: state,
             lambda _state, _input: covariance,
-            covariance,
-            emissions,
-            inputs=inputs,  # ty: ignore[invalid-argument-type]
         ),
-        lambda: smcx.unscented_kalman_filter(
-            mean,
-            covariance,
+        "unscented_kalman_filter": (
             lambda state, _input: state,
             covariance,
             lambda state, _input: state,
-            covariance,
-            emissions,
-            inputs=inputs,  # ty: ignore[invalid-argument-type]
         ),
-    )
+    }[filter_name]
 
-    for call in calls:
-        with pytest.raises(ValueError, match="inputs must be a JAX array"):
-            call()
+    with pytest.raises(ValueError, match="inputs must be a JAX array"):
+        getattr(smcx, filter_name)(
+            mean,
+            covariance,
+            *middle_arguments,
+            covariance,
+            emissions,
+            inputs=[[0.0], [1.0]],
+        )
 
 
 def test_kalman_filter_matches_frozen_dynamax_reference(
