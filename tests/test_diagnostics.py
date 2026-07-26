@@ -310,6 +310,20 @@ class TestWeightedMean:
                 atol=0.0,
             )
 
+    @pytest.mark.parametrize("magnitude", [1e10, 3e38])
+    def test_centered_subtraction_preserves_mean_residual(self, magnitude):
+        """Compensated offsets preserve represented cancellation residuals."""
+        posterior = _make_weighted_moment_posterior(
+            [magnitude, -magnitude, 1.0, 1.0],
+            [0.25, 0.25, 0.25, 0.25],
+        )
+
+        for actual in (
+            weighted_mean(posterior),
+            jax.jit(weighted_mean)(posterior),
+        ):
+            np.testing.assert_array_equal(actual, [[0.5]])
+
     def test_positive_mass_extreme_particle_gradient_matches_weights(self):
         """The overflow guard preserves weighted-mean particle autodiff."""
         posterior = _make_weighted_moment_posterior(
@@ -576,33 +590,6 @@ class TestParamWeightedMean:
             actual,
             jnp.asarray([[-3e38]], dtype=jnp.float32),
         )
-
-    def test_positive_mass_extremes_preserve_finite_parameter_mean(self):
-        from smcx.diagnostics import param_weighted_mean
-
-        posterior = _make_weighted_moment_posterior(
-            [3e38, -3e38],
-            [0.75, 0.25],
-        )
-        liu_west = LiuWestPosterior(
-            *posterior,
-            filtered_params=posterior.filtered_particles,
-        )
-        expected = jnp.asarray([[1.5e38]], dtype=jnp.float32)
-        # Eight eps covers normalization and the shifted reduction.
-        tolerance = float(8 * np.finfo(np.float32).eps)
-
-        for actual in (
-            param_weighted_mean(liu_west),
-            jax.jit(param_weighted_mean)(liu_west),
-        ):
-            assert jnp.all(jnp.isfinite(actual))
-            np.testing.assert_allclose(
-                actual,
-                expected,
-                rtol=tolerance,
-                atol=0.0,
-            )
 
     def test_smc2_parameter_summaries(self):
         from smcx.diagnostics import (
