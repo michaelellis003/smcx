@@ -1541,13 +1541,15 @@ def crps(
         has_top_bin = jnp.any(prediction_exponents == 254) | (
             observation_exponent == 254
         )
-        # CRPS is bounded by the largest absolute error. Without a top-bin
-        # or subnormal input, exact packing cannot alter its classification
-        # or lose an input to backend flush-to-zero behavior.
+        _, error_exponent = jnp.frexp(max_error)
+        underflow_exponent = (n * n - 1).bit_length() - 124
+        may_underflow = (max_error > 0) & (
+            error_exponent + scale_exponent < underflow_exponent
+        )
         needs_exact_classification = (
             jnp.all(prediction_exponents != 255)
             & (observation_exponent != 255)
-            & (has_subnormal | has_top_bin)
+            & (has_subnormal | has_top_bin | may_underflow)
         )
 
         score = lax.cond(
