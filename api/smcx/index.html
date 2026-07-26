@@ -8000,8 +8000,9 @@ with at least float32 precision.</p>
     <div class="doc doc-contents ">
 
         <p>Compute weighted quantiles of parameter particles at each step.</p>
-<p>Uses the same directional midpoint construction as
-<code>weighted_quantile</code>, including float32 upper-tail preservation.</p>
+<p>Uses the same unique-support directional midpoint construction as
+<code>weighted_quantile</code>, including tied-value invariance and float32
+upper-tail preservation.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8122,7 +8123,8 @@ eager quantile lies outside [0, 1].</p>
 
 <details class="notes" open>
   <summary>Notes</summary>
-  <p>Exactly zero-mass parameter values are excluded before interpolation.</p>
+  <p>Equal represented parameter values are combined, and exactly
+zero-mass support is excluded before interpolation.</p>
 </details>
 
     </div>
@@ -9628,7 +9630,9 @@ estimating that tail. Returns the minimum over dimensions and both
 tails (in the spirit of the quantile tail-ESS of Vehtari, Gelman,
 Simpson, Carpenter &amp; Burkner 2021). The upper edge accumulates from
 the maximum positive-mass particle, and each restricted tail is
-max-scaled before evaluating the ESS ratio.</p>
+max-scaled before evaluating the ESS ratio. Quantile edges combine
+mass at equal represented values, while the ESS ratio retains the
+original particle weights.</p>
 <p>Uniform weights give roughly <code>q * N</code> (a tail only ever holds a
 <code>q</code> fraction of the mass); compare against <code>q * N</code>, not <code>N</code>.</p>
 <p>Note: this replaces the earlier smcjax quantity of the same name,
@@ -10768,11 +10772,12 @@ https://doi.org/10.1137/030601818</p>
     <div class="doc doc-contents ">
 
         <p>Compute weighted quantiles of particles at each time step.</p>
-<p>Sorts particles, excludes exactly zero-mass values, and interpolates
-on directional midpoint cumulative-weight axes. Lower quantiles
-accumulate from the minimum and upper quantiles from the maximum,
-preserving positive float32 tail mass. Static-shape compaction keeps
-the calculation JIT-compatible.</p>
+<p>Sorts particles, combines mass at equal represented values, excludes
+exactly zero-mass support, and interpolates on directional midpoint
+cumulative-weight axes. Lower quantiles accumulate from the minimum
+and upper quantiles from the maximum, preserving positive float32 tail
+mass. Static-shape coalescing and compaction keep the calculation
+JIT-compatible.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
