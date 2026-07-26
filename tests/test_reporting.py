@@ -195,6 +195,130 @@ def test_var_names_must_resolve_to_unique_aliases() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("dimension", "timed"),
+    [("chain", False), ("draw", False), ("time", True)],
+)
+@pytest.mark.parametrize("source", ["variable", "event"])
+def test_sample_dimensions_cannot_share_particle_namespace(
+    dimension: str,
+    timed: bool,
+    source: str,
+) -> None:
+    posterior = _filter() if timed else _tempered({"value": jnp.ones((4, 1))})
+    name = "theta" if timed else "value"
+    options = {"var_names": {name: dimension}}
+    if source == "event":
+        options = {"dims": {name: (dimension,)}}
+
+    with pytest.raises(ValueError, match="dimension"):
+        to_arviz(posterior, key=jr.key(14), **options)
+
+
+@pytest.mark.parametrize(
+    ("dimension", "explicit"),
+    [("a_dim_0", False), ("axis", True)],
+)
+def test_variable_names_cannot_shadow_event_dimensions(
+    dimension: str,
+    explicit: bool,
+) -> None:
+    posterior = _tempered({
+        "a": jnp.ones((4, 2)),
+        dimension: jnp.arange(4.0),
+    })
+    dims = {"a": (dimension,)} if explicit else None
+
+    with pytest.raises(
+        ValueError,
+        match=rf"variable name '{dimension}'.*dimension",
+    ):
+        to_arviz(posterior, key=jr.key(15), dims=dims)
+
+
+def test_event_dimensions_must_be_unique_per_variable() -> None:
+    posterior = _tempered(jnp.ones((4, 2, 2)))
+
+    with pytest.raises(ValueError, match=r"dims\['theta'\].*unique"):
+        to_arviz(
+            posterior,
+            key=jr.key(16),
+            dims={"theta": ("axis", "axis")},
+        )
+
+
+def test_shared_dimension_sizes_must_match_within_group() -> None:
+    posterior = _tempered({
+        "a": jnp.ones((4, 2)),
+        "b": jnp.ones((4, 3)),
+    })
+
+    with pytest.raises(ValueError, match=r"dimension 'axis'.*sizes 2 and 3"):
+        to_arviz(
+            posterior,
+            key=jr.key(17),
+            dims={"a": ("axis",), "b": ("axis",)},
+        )
+
+
+def test_unique_names_and_matching_shared_dimensions_are_preserved() -> None:
+    posterior = _tempered({
+        "a": jnp.ones((4, 2)),
+        "state": {"b": jnp.ones((4, 2))},
+    })
+
+    result = to_arviz(
+        posterior,
+        key=jr.key(18),
+        dims={"a": ("axis",), "state.b": ("axis",)},
+    )
+
+    group = _group(result, "posterior")
+    assert group["a"].dims == ("chain", "draw", "axis")
+    assert group["state.b"].dims == ("chain", "draw", "axis")
+
+
+def test_constrained_and_unconstrained_schemas_are_group_scoped() -> None:
+    posterior = _tempered(jnp.arange(16, dtype=jnp.float32).reshape(4, 2, 2))
+    unconstrained = jnp.arange(12, dtype=jnp.float32).reshape(4, 3)
+
+    result = to_arviz(
+        posterior,
+        key=jr.key(13),
+        unconstrained=unconstrained,
+    )
+
+    constrained = _group(result, "posterior")["theta"]
+    u_space = _group(result, "unconstrained_posterior")["theta"]
+    assert constrained.dims == (
+        "chain",
+        "draw",
+        "theta_dim_0",
+        "theta_dim_1",
+    )
+    assert u_space.dims == ("chain", "draw", "theta_dim_0")
+
+
+def test_particle_dimensions_do_not_leak_into_observed_emissions() -> None:
+    posterior = _tempered({"emissions": jnp.ones((4, 2))})
+
+    result = to_arviz(
+        posterior,
+        key=jr.key(19),
+        dims={"emissions": ("state_axis",)},
+        emissions=jnp.ones((3,)),
+    )
+
+    assert _group(result, "posterior")["emissions"].dims == (
+        "chain",
+        "draw",
+        "state_axis",
+    )
+    observed = _group(result, "observed_data")["emissions"]
+    assert observed.shape == (3,)
+    assert "state_axis" not in observed.dims
+
+
 def test_adaptive_tempered_runs_pad_stage_diagnostics_with_validity_mask():
     particles = jnp.arange(4, dtype=jnp.float32)[:, None]
     short = TemperedPosterior(
