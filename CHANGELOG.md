@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.4 (2026-07-26)
+
+### Bug Fixes
+
+- **diagnostics**: Validate evidence traces
+  ([#214](https://github.com/michaelellis003/smcx/pull/214),
+  [`82712d2`](https://github.com/michaelellis003/smcx/commit/82712d23793585238e6c83ffe4c2d7368dee96ab))
+
+
 ## v1.14.3 (2026-07-26)
 
 ### Bug Fixes
