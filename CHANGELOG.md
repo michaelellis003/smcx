@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.10 (2026-07-26)
+
+### Bug Fixes
+
+- **diagnostics**: Ignore zero-mass quantile support
+  ([#223](https://github.com/michaelellis003/smcx/pull/223),
+  [`a2a5f1d`](https://github.com/michaelellis003/smcx/commit/a2a5f1dec0cb70da74731565bbdf777274013845))
+
+
 ## v1.14.9 (2026-07-26)
 
 ### Bug Fixes
