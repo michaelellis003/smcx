@@ -631,7 +631,7 @@ class TestWeightedQuantile:
         )
         posterior = _make_log_weighted_posterior(particles, log_weights)
         levels = jnp.asarray(
-            [0.0, 0.5, 0.9, 0.9999999, 1.0],
+            [0.0, 0.1, 0.5, 0.9, 0.9999999, 1.0],
             dtype=jnp.float32,
         )
 
@@ -664,14 +664,45 @@ class TestWeightedQuantile:
         )
         assert jnp.array_equal(actual[:, -1], jnp.full((3,), particles[-1]))
 
+        shift = jnp.float32(16_384.0)
+        translated_particles = jnp.pad(
+            particles + shift,
+            (1, 1),
+            constant_values=(-1.0, 40_000.0),
+        )
+        translated_log_weights = jnp.pad(
+            log_weights,
+            (1, 1),
+            constant_values=-jnp.inf,
+        )
+        translated = weighted_quantile(
+            _make_log_weighted_posterior(
+                translated_particles,
+                translated_log_weights,
+            ),
+            levels,
+        )[0, :, 0]
+        translated_ulp = np.max(
+            np.spacing(np.asarray(translated, dtype=np.float32))
+        )
+        np.testing.assert_allclose(
+            np.asarray(translated[-3:] - shift),
+            np.asarray(actual[0, -3:]),
+            rtol=0.0,
+            atol=translated_ulp,
+        )
+        assert jnp.array_equal(translated[-1], particles[-1] + shift)
+
     def test_f32_directional_splice_is_monotone_with_level_tangent(self):
         """The median floor keeps order without flattening the q tangent."""
-        posterior = _make_log_weighted_posterior(
-            jnp.asarray([0.0, 1.0], dtype=jnp.float32),
-            jnp.asarray(
+        particles = jnp.asarray([0.0, 1.0], dtype=jnp.float32)
+        log_weights = jnp.asarray(
+            [
                 [-2.5585379600524902, -6.023451805114746],
-                dtype=jnp.float32,
-            ),
+                [-4.965611457824707, -6.548067092895508],
+                [-9.297615051269531, -11.764941215515137],
+            ],
+            dtype=jnp.float32,
         )
         half = jnp.float32(0.5)
         levels = jnp.asarray(
@@ -682,20 +713,34 @@ class TestWeightedQuantile:
             ],
         )
 
-        def quantile(q: jax.Array) -> jax.Array:
+        def quantile(log_weight: jax.Array, q: jax.Array) -> jax.Array:
+            posterior = _make_log_weighted_posterior(particles, log_weight)
             return weighted_quantile(posterior, q[None])[0, 0, 0]
 
+        evaluate = jax.vmap(
+            jax.vmap(quantile, in_axes=(None, 0)),
+            in_axes=(0, None),
+        )
+        level_gradient = jax.vmap(
+            jax.vmap(jax.grad(quantile, argnums=1), in_axes=(None, 0)),
+            in_axes=(0, None),
+        )
         values = jnp.stack([
-            jax.vmap(quantile)(levels),
-            jax.jit(jax.vmap(quantile))(levels),
+            evaluate(log_weights, levels),
+            jax.jit(evaluate)(log_weights, levels),
         ])
         gradients = jnp.stack([
-            jax.vmap(jax.grad(quantile))(levels),
-            jax.jit(jax.vmap(jax.grad(quantile)))(levels),
+            level_gradient(log_weights, levels),
+            jax.jit(level_gradient)(log_weights, levels),
         ])
 
-        assert jnp.all(jnp.diff(values, axis=1) >= 0.0)
-        assert jnp.array_equal(gradients, jnp.full_like(gradients, 2.0))
+        assert jnp.all(jnp.diff(values, axis=2) >= 0.0)
+        # One ULP covers independently represented directional totals.
+        np.testing.assert_array_max_ulp(
+            np.asarray(gradients),
+            np.full_like(np.asarray(gradients), 2.0),
+            maxulp=1,
+        )
 
     def test_f32_directional_splice_stays_inside_support(self):
         """A rounded median floor cannot exceed the supported maximum."""
@@ -1687,6 +1732,45 @@ class TestTailESS:
 
         assert jnp.all(jnp.isnan(result))
 
+    @pytest.mark.skipif(
+        not jax.config.read("jax_enable_x64"),
+        reason="regression distinguishes the inherited CPU x64 axis",
+    )
+    def test_lower_edge_keeps_inherited_inclusive_boundary(self):
+        """The #130 forward midpoint path retains an exactly hit particle."""
+        log_weights = jnp.asarray(
+            [
+                -2.1366892,
+                -0.4863596,
+                -7.530719,
+                -15.413752,
+                -5.6763515,
+                -28.143364,
+                -17.27018,
+                -1.3350992,
+            ],
+            dtype=jnp.float32,
+        )
+        posterior = _make_log_weighted_posterior(
+            jnp.arange(8, dtype=jnp.float32),
+            log_weights,
+        )
+        q = 0.42547520923466736
+        actual = jnp.stack([
+            tail_ess(posterior, q=q),
+            jax.jit(lambda value: tail_ess(value, q=q))(posterior),
+        ])
+        expected = jnp.full_like(actual, 1.0301667)
+        # Eight eps cover exponentiation, tail scaling, and the Kish ratio.
+        tolerance = float(8 * jnp.finfo(jnp.float32).eps)
+
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=tolerance,
+            atol=0.0,
+        )
+
     def test_uniform_median_tail_keeps_inclusive_boundary(self):
         """The represented midpoint includes the median particle."""
         num_particles = 11
@@ -1709,6 +1793,30 @@ class TestTailESS:
                 atol=0.0,
             )
 
+    def test_directional_upper_edge_controls_tail_ess(self):
+        """The upper-tail result depends on reverse midpoint accumulation."""
+        num_particles = 10_000
+        particles = jnp.arange(num_particles, dtype=jnp.float32)
+        particles = particles.at[:2_000].set(0.0)
+        posterior = _make_log_weighted_posterior(
+            particles,
+            -jnp.linspace(0.0, 14.0, num_particles, dtype=jnp.float32),
+        )
+        actual = jnp.stack([
+            tail_ess(posterior, q=1e-7),
+            jax.jit(lambda value: tail_ess(value, q=1e-7))(posterior),
+        ])
+        expected = jnp.full_like(actual, 80.91331)
+        # Eight eps cover the reverse scan, tail scaling, and Kish ratio.
+        tolerance = float(8 * jnp.finfo(jnp.float32).eps)
+
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=tolerance,
+            atol=0.0,
+        )
+
     def test_tiny_upper_tail_has_unit_ess(self):
         """A positive maximum-support singleton has effective size one."""
         num_particles = 10_000
@@ -1730,10 +1838,6 @@ class TestTailESS:
 
         assert jnp.array_equal(actual, jnp.ones_like(actual))
 
-    @pytest.mark.skipif(
-        jax.default_backend() != "cpu",
-        reason="jax-mps does not accept float16 input buffers",
-    )
     def test_float16_uniform_median_tail_avoids_ratio_overflow(self):
         """A half-tail of 1000 uniform float16 particles has ESS 500."""
         num_particles = 1_000
