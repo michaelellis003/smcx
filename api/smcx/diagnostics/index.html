@@ -3997,7 +3997,10 @@ shifted by one particle, avoiding reconstruction of the rounded absolute
 mean inside the central-moment calculation. Particles with
 represented-zero linear weight are masked before subtraction and
 squaring. A coordinate whose finite anchor difference would overflow is
-reduced after an exact one-bit downshift.</p>
+reduced after an exact one-bit downshift. Variance retains square-first
+arithmetic unless a finite deviation square overflows. It then applies
+the weight before the second deviation factor to recover a representable
+variance.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
