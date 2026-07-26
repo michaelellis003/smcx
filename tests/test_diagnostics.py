@@ -567,6 +567,52 @@ class TestCRPS:
             expected,
         )
 
+    def test_crps_exact_boundary_with_bfloat16_observation(self):
+        """A narrower observation still uses exact float32 classification."""
+        from smcx.diagnostics import crps
+
+        predictions = np.asarray(
+            [-(2**122 - 2**105), 1.0],
+            dtype=np.float32,
+        )
+        observation = jnp.asarray(
+            jnp.finfo(jnp.bfloat16).max,
+            dtype=jnp.bfloat16,
+        )
+        assert _exact_crps_oracle(
+            predictions,
+            np.float32(observation),
+        ) < Fraction(2**128 - 2**103)
+        batched_predictions = jnp.asarray(np.stack([predictions, -predictions]))
+        batched_observations = jnp.asarray(
+            [observation, -observation],
+            dtype=jnp.bfloat16,
+        )
+        expected = jnp.full(
+            (2,),
+            jnp.finfo(jnp.float32).max,
+            dtype=jnp.float32,
+        )
+
+        assert jnp.array_equal(
+            crps(batched_predictions[0], batched_observations[0]),
+            expected[0],
+        )
+        assert jnp.array_equal(
+            jax.jit(crps)(
+                batched_predictions[0],
+                batched_observations[0],
+            ),
+            expected[0],
+        )
+        assert jnp.array_equal(
+            jax.jit(jax.vmap(crps))(
+                batched_predictions,
+                batched_observations,
+            ),
+            expected,
+        )
+
     def test_crps_exact_infinite_overflow_boundary_returns_infinity(self):
         """Rounding at or above the overflow midpoint returns infinity."""
         from smcx.diagnostics import crps
