@@ -108,6 +108,44 @@ def _neumaier_prefix_oracle(values: np.ndarray) -> np.ndarray:
     return prefixes
 
 
+def _exact_crps_oracle(
+    predictions: np.ndarray,
+    observation: np.float32,
+) -> Fraction:
+    """Return the equal-weight empirical CRPS as an exact rational."""
+    samples = [Fraction.from_float(float(value)) for value in predictions]
+    observed = Fraction.from_float(float(observation))
+    sample_count = len(samples)
+    zero = Fraction()
+    absolute_error = sum((abs(value - observed) for value in samples), zero)
+    pairwise_error = sum(
+        (abs(left - right) for left in samples for right in samples),
+        zero,
+    )
+    return absolute_error / sample_count - pairwise_error / (
+        2 * sample_count * sample_count
+    )
+
+
+def _assert_crps_modes(
+    predictions: jax.Array,
+    observations: jax.Array,
+    expected: jax.Array,
+) -> None:
+    """Check one lane eagerly, under JIT, and the batch under JIT-vmap."""
+    from smcx.diagnostics import crps
+
+    assert jnp.array_equal(crps(predictions[0], observations[0]), expected[0])
+    assert jnp.array_equal(
+        jax.jit(crps)(predictions[0], observations[0]),
+        expected[0],
+    )
+    assert jnp.array_equal(
+        jax.jit(jax.vmap(crps))(predictions, observations),
+        expected,
+    )
+
+
 def _posterior_for_increment_contract(
     increments: jax.Array,
 ) -> ParticleFilterPosterior:
@@ -353,6 +391,15 @@ class TestParamWeightedQuantile:
 class TestCRPS:
     """Tests for crps."""
 
+    def test_crps_rejects_unaddressable_sample_count(self):
+        """The static uint32 rank bound is checked without materialization."""
+        from smcx.diagnostics import crps
+
+        predictions = jax.ShapeDtypeStruct((2**31,), jnp.float32)
+        observation = jax.ShapeDtypeStruct((), jnp.float32)
+        with pytest.raises(ValueError, match=r"fewer than 2\*\*31"):
+            jax.eval_shape(crps, predictions, observation)
+
     @pytest.mark.parametrize(
         ("num_samples", "value"),
         [(100, 1e10), (1000, 1e5)],
@@ -510,6 +557,94 @@ class TestCRPS:
         assert float(result) == pytest.approx(
             float(jnp.float32(1.5e38)),
             rel=relative_tolerance,
+        )
+
+    def test_crps_exact_finite_overflow_boundary_stays_finite(self):
+        """Rounding below the float32 overflow midpoint stays finite."""
+        predictions = np.asarray([-(2.0**105), 1.0], dtype=np.float32)
+        observation = np.float32(np.finfo(np.float32).max)
+        overflow_midpoint = Fraction(2**128 - 2**103)
+        assert _exact_crps_oracle(predictions, observation) < overflow_midpoint
+
+        batched_predictions = jnp.asarray(np.stack([predictions, -predictions]))
+        batched_observations = jnp.asarray([observation, -observation])
+        expected = jnp.full(
+            (2,),
+            jnp.finfo(jnp.float32).max,
+            dtype=jnp.float32,
+        )
+
+        _assert_crps_modes(
+            batched_predictions,
+            batched_observations,
+            expected,
+        )
+
+    def test_crps_exact_boundary_with_bfloat16_observation(self):
+        """A narrower observation still uses exact float32 classification."""
+        predictions = np.asarray(
+            [-(2**122 - 2**105), 1.0],
+            dtype=np.float32,
+        )
+        observation = jnp.asarray(
+            jnp.finfo(jnp.bfloat16).max,
+            dtype=jnp.bfloat16,
+        )
+        assert _exact_crps_oracle(
+            predictions,
+            np.float32(observation),
+        ) < Fraction(2**128 - 2**103)
+        batched_predictions = jnp.asarray(np.stack([predictions, -predictions]))
+        batched_observations = jnp.asarray(
+            [observation, -observation],
+            dtype=jnp.bfloat16,
+        )
+        expected = jnp.full(
+            (2,),
+            jnp.finfo(jnp.float32).max,
+            dtype=jnp.float32,
+        )
+
+        _assert_crps_modes(
+            batched_predictions,
+            batched_observations,
+            expected,
+        )
+
+    def test_crps_exact_infinite_overflow_boundary_returns_infinity(self):
+        """Rounding at or above the overflow midpoint returns infinity."""
+        from smcx.diagnostics import crps
+
+        value_scale = 2.0**80
+        threshold = 2.0**23
+        predictions = np.asarray(
+            [
+                (-threshold - 4.0) * value_scale,
+                (-threshold - 2.0) * value_scale,
+                (-threshold - 1.0) * value_scale,
+                (-threshold + 2.0) * value_scale,
+            ],
+            dtype=np.float32,
+        )
+        observation = np.float32(np.finfo(np.float32).max)
+        overflow_midpoint = Fraction(2**128 - 2**103)
+        assert _exact_crps_oracle(predictions, observation) > overflow_midpoint
+        tie_predictions = np.asarray([-(2.0**103)], dtype=np.float32)
+        assert (
+            _exact_crps_oracle(tie_predictions, observation)
+            == overflow_midpoint
+        )
+        tie_observation = jnp.asarray(observation)
+        assert jnp.isinf(crps(jnp.asarray(tie_predictions), tie_observation))
+
+        batched_predictions = jnp.asarray(np.stack([predictions, -predictions]))
+        batched_observations = jnp.asarray([observation, -observation])
+        expected = jnp.full((2,), jnp.inf, dtype=jnp.float32)
+
+        _assert_crps_modes(
+            batched_predictions,
+            batched_observations,
+            expected,
         )
 
     def test_crps_zero_for_perfect_prediction(self):
