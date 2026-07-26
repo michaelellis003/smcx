@@ -122,6 +122,13 @@ def _is_valid_acceptance_rate(
 ) -> Bool[Array, ""]:
     """Return whether a traced mutation acceptance rate is a probability."""
     bit_width = jnp.finfo(rate.dtype).bits
+    if bit_width < 16:
+        widened_rate = rate.astype(jnp.float32)
+        return (
+            jnp.isfinite(widened_rate)
+            & (widened_rate >= 0.0)
+            & (widened_rate <= 1.0)
+        )
     unsigned_dtype = {
         16: jnp.uint16,
         32: jnp.uint32,
@@ -356,9 +363,17 @@ def temper(
                 sweep_keys,
             )
             positions = cast(TemperingMutationState, states).position
+            mean_dtype = (
+                jnp.float32
+                if jnp.finfo(acceptance_rates.dtype).bits < 32
+                else acceptance_rates.dtype
+            )
+            mean_acceptance_rate = jnp.mean(
+                acceptance_rates.astype(mean_dtype)
+            ).astype(acceptance_rates.dtype)
             return (
                 positions,
-                jnp.mean(acceptance_rates),
+                mean_acceptance_rate,
                 jnp.all(valid_rates),
             )
 
