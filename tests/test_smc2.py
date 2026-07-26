@@ -179,6 +179,29 @@ class TestStructure:
                 4,
             )
 
+    def test_rejects_numpy_emissions_with_value_error(self):
+        """The public validator owns the non-JAX observation error."""
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            log_observation,
+        ) = _model()
+
+        with pytest.raises(ValueError, match="emissions must be a JAX array"):
+            smcx.smc2(
+                jr.key(152),
+                param_init,
+                log_prior,
+                inner_init,
+                inner_trans,
+                log_observation,
+                np.zeros((2, 1)),  # ty: ignore[invalid-argument-type]
+                4,
+                4,
+            )
+
     @pytest.mark.parametrize("num_param_particles", [1, 2])
     def test_rejuvenation_handles_identical_float32_parameters(
         self, num_param_particles

@@ -117,6 +117,22 @@ def test_gaussian_data_validation_raises_plain_value_errors(
         smcx.kalman_filter(**model)
 
 
+def test_kalman_filter_rejects_numpy_emissions_with_value_error():
+    """The public validator owns the non-JAX observation error."""
+    covariance = jnp.eye(1)
+
+    with pytest.raises(ValueError, match="emissions must be a JAX array"):
+        smcx.kalman_filter(
+            jnp.zeros(1),
+            covariance,
+            covariance,
+            covariance,
+            covariance,
+            covariance,
+            np.zeros((2, 1)),  # ty: ignore[invalid-argument-type]
+        )
+
+
 def test_kalman_filter_matches_frozen_dynamax_reference(
     lgssm_params, lgssm_data
 ):
