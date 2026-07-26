@@ -396,6 +396,59 @@ class TestMutationCallback:
             ):
                 np.testing.assert_array_equal(actual, expected)
 
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu",
+        reason="JAX sub-byte float support is backend-specific",
+    )
+    @pytest.mark.parametrize(
+        ("dtype", "invalid_rate"),
+        [
+            (jnp.float4_e2m1fn, -0.5),
+            (jnp.float8_e4m3fn, np.nan),
+        ],
+    )
+    def test_low_precision_acceptance_rate_preserves_domain_and_mean(
+        self,
+        dtype,
+        invalid_rate,
+    ):
+        init, log_prior, log_lik = _small_tempering_model()
+
+        def run(rate_value):
+            rate = jnp.asarray(rate_value, dtype=dtype)
+
+            def step(
+                _key: PRNGKeyT,
+                state: TemperingMutationState,
+                _tempered_logdensity_fn: StaticLogDensity,
+            ) -> tuple[TemperingMutationState, TemperingMutationInfo]:
+                return state, _MutationInfo(rate, jnp.asarray(False))
+
+            return smcx.temper(
+                jr.key(168),
+                init,
+                log_prior,
+                log_lik,
+                100,
+                num_mcmc_steps=1,
+                mutation_init_fn=_mutation_init,
+                mutation_step_fn=step,
+            )
+
+        posterior = run(0.5)
+
+        assert posterior.acceptance_rates.dtype == dtype
+        np.testing.assert_array_equal(
+            np.asarray(posterior.acceptance_rates),
+            np.full(
+                posterior.acceptance_rates.shape,
+                0.5,
+                dtype=np.asarray(jnp.asarray(0.5, dtype=dtype)).dtype,
+            ),
+        )
+        with pytest.raises(ValueError, match="must be finite and in"):
+            run(invalid_rate)
+
     def test_requires_at_least_one_mutation_step(self):
         init, log_prior, log_lik = _small_tempering_model()
         with pytest.raises(ValueError, match="num_mcmc_steps must be >= 1"):
