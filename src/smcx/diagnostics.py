@@ -70,7 +70,7 @@ from jaxtyping import Array, Bool, Float, Int, UInt
 from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
     _array_tree_signature,
-    _compact_positive_weight_support,
+    _coalesce_positive_weight_support,
     _gather_particles,
     _validate_emission,
     _validate_particle_cloud,
@@ -592,11 +592,12 @@ def weighted_quantile(
 ) -> Float[Array, "ntime num_quantiles state_dim"]:
     r"""Compute weighted quantiles of particles at each time step.
 
-    Sorts particles, excludes exactly zero-mass values, and interpolates
-    on directional midpoint cumulative-weight axes. Lower quantiles
-    accumulate from the minimum and upper quantiles from the maximum,
-    preserving positive float32 tail mass. Static-shape compaction keeps
-    the calculation JIT-compatible.
+    Sorts particles, combines mass at equal represented values, excludes
+    exactly zero-mass support, and interpolates on directional midpoint
+    cumulative-weight axes. Lower quantiles accumulate from the minimum
+    and upper quantiles from the maximum, preserving positive float32 tail
+    mass. Static-shape coalescing and compaction keep the calculation
+    JIT-compatible.
 
     Args:
         posterior: Particle filter posterior output.
@@ -990,8 +991,9 @@ def param_weighted_quantile(
 ) -> Float[Array, "ntime num_quantiles param_dim"]:
     r"""Compute weighted quantiles of parameter particles at each step.
 
-    Uses the same directional midpoint construction as
-    `weighted_quantile`, including float32 upper-tail preservation.
+    Uses the same unique-support directional midpoint construction as
+    `weighted_quantile`, including tied-value invariance and float32
+    upper-tail preservation.
 
     Args:
         posterior: Liu-West or SMC² posterior output.
@@ -1009,7 +1011,8 @@ def param_weighted_quantile(
             eager quantile lies outside [0, 1].
 
     Notes:
-        Exactly zero-mass parameter values are excluded before interpolation.
+        Equal represented parameter values are combined, and exactly
+        zero-mass support is excluded before interpolation.
     """
     q = _validate_quantile_levels(q)
     params = _require_parameter_history(posterior, "param_weighted_quantile")
@@ -1893,7 +1896,9 @@ def tail_ess(
     tails (in the spirit of the quantile tail-ESS of Vehtari, Gelman,
     Simpson, Carpenter & Burkner 2021). The upper edge accumulates from
     the maximum positive-mass particle, and each restricted tail is
-    max-scaled before evaluating the ESS ratio.
+    max-scaled before evaluating the ESS ratio. Quantile edges combine
+    mass at equal represented values, while the ESS ratio retains the
+    original particle weights.
 
     Uniform weights give roughly ``q * N`` (a tail only ever holds a
     ``q`` fraction of the mass); compare against ``q * N``, not ``N``.
@@ -1961,11 +1966,8 @@ def tail_ess(
         per_dim = []
         for d in range(dim):
             vals = particles[t, :, d]
-            order = jnp.argsort(vals)
-            v_sorted = vals[order]
-            w_sorted = w[order]
             v_supported, w_supported, num_positive = (
-                _compact_positive_weight_support(v_sorted, w_sorted)
+                _coalesce_positive_weight_support(vals, w)
             )
             cum = jnp.cumsum(w_supported)
             # Midpoint CDF: centre each particle's mass in its

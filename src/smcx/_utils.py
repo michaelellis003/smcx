@@ -365,6 +365,67 @@ def _compact_positive_weight_support(
     return supported_values, supported_weights, num_positive
 
 
+def _coalesce_positive_weight_support(
+    values: Float[Array, " num_particles"],
+    weights: Float[Array, " num_particles"],
+) -> tuple[
+    Float[Array, " num_particles"],
+    Float[Array, " num_particles"],
+    Int[Array, ""],
+]:
+    """Sort, sum equal-value mass, and compact the positive support."""
+    # Stable weight-then-value sorts give equal values a canonical weight
+    # order. Keep these as one-key sorts: jax-mps#224 misorders secondary
+    # keys in multi-key sorts.
+    weight_order = jnp.argsort(weights, stable=True)
+    weight_sorted_values = values[weight_order]
+    weight_sorted_weights = weights[weight_order]
+    value_order = jnp.argsort(weight_sorted_values, stable=True)
+    sorted_values = weight_sorted_values[value_order]
+    sorted_weights = weight_sorted_weights[value_order]
+
+    # Remove represented-zero slots before the segmented reduction. Leaving
+    # them inside a tied run changes the scan association when inert slots
+    # are inserted. Stable compaction preserves the canonical positive order.
+    sorted_values, sorted_weights, num_positive = (
+        _compact_positive_weight_support(sorted_values, sorted_weights)
+    )
+    in_support = jnp.arange(values.shape[0]) < num_positive
+    run_starts = jnp.concatenate([
+        jnp.ones(1, dtype=jnp.bool_),
+        (sorted_values[1:] != sorted_values[:-1]) | ~in_support[1:],
+    ])
+
+    def segmented_add(
+        left: tuple[Float[Array, " *run"], Bool[Array, " *run"]],
+        right: tuple[Float[Array, " *run"], Bool[Array, " *run"]],
+    ) -> tuple[Float[Array, " *run"], Bool[Array, " *run"]]:
+        """Combine adjacent partial sums without crossing a run start."""
+        left_total, left_starts = left
+        right_total, right_starts = right
+        total = jnp.where(
+            right_starts,
+            right_total,
+            left_total + right_total,
+        )
+        return total, left_starts | right_starts
+
+    run_totals, _ = lax.associative_scan(
+        segmented_add,
+        (sorted_weights, run_starts),
+    )
+    run_ends = in_support & jnp.concatenate([
+        (sorted_values[:-1] != sorted_values[1:]) | ~in_support[1:],
+        jnp.ones(1, dtype=jnp.bool_),
+    ])
+    group_weights = jnp.where(
+        run_ends,
+        run_totals,
+        jnp.zeros_like(run_totals),
+    )
+    return _compact_positive_weight_support(sorted_values, group_weights)
+
+
 def _weighted_quantile_1d(
     particles: Float[Array, " num_particles"],
     weights: Float[Array, " num_particles"],
@@ -390,11 +451,8 @@ def _weighted_quantile_1d(
         Sterbenz, P. H. (1974). *Floating-Point Computation*.
         Prentice-Hall.
     """
-    sort_idx = jnp.argsort(particles)
-    p_sorted = particles[sort_idx]
-    w_sorted = weights[sort_idx]
-    p_supported, w_supported, num_positive = _compact_positive_weight_support(
-        p_sorted, w_sorted
+    p_supported, w_supported, num_positive = _coalesce_positive_weight_support(
+        particles, weights
     )
     zero = jnp.zeros(1, dtype=w_supported.dtype)
     cum_w = jnp.cumsum(w_supported)

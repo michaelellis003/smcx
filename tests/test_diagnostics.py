@@ -517,6 +517,147 @@ class TestWeightedVariance:
 class TestWeightedQuantile:
     """Tests for weighted_quantile."""
 
+    def test_tied_support_is_canonical_in_transform_modes(self):
+        """Equal-value mass splitting and order do not change summaries."""
+        from smcx.diagnostics import param_weighted_quantile
+
+        particles = jnp.asarray(
+            [
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+            ],
+            dtype=jnp.float32,
+        )
+        weights = jnp.asarray(
+            [
+                [0.125, 0.5, 0.375],
+                [0.5, 0.125, 0.375],
+                [0.3125, 0.3125, 0.375],
+                [0.375, 0.5, 0.125],
+            ],
+            dtype=jnp.float32,
+        )
+        levels = jnp.asarray([0.4, 0.5, 0.6], dtype=jnp.float32)
+
+        def evaluate(
+            values: jax.Array,
+            linear_weights: jax.Array,
+            q: jax.Array,
+        ) -> tuple[jax.Array, jax.Array, jax.Array]:
+            posterior = _make_weighted_posterior(values, linear_weights)
+            parameter_posterior = LiuWestPosterior(
+                *posterior,
+                filtered_params=posterior.filtered_particles,
+            )
+            return (
+                weighted_quantile(posterior, q)[0, :, 0],
+                param_weighted_quantile(parameter_posterior, q)[0, :, 0],
+                tail_ess(posterior, q=0.45),
+            )
+
+        reference = evaluate(
+            jnp.asarray([0.0, 1.0], dtype=jnp.float32),
+            jnp.asarray([0.625, 0.375], dtype=jnp.float32),
+            levels,
+        )
+        expected = jax.tree.map(
+            lambda value: jnp.broadcast_to(
+                value,
+                (particles.shape[0], *value.shape),
+            ),
+            reference,
+        )
+        compiled = jax.jit(evaluate)
+        eager = jax.tree.map(
+            lambda *values: jnp.stack(values),
+            *(
+                evaluate(p, w, levels)
+                for p, w in zip(particles, weights, strict=True)
+            ),
+        )
+        jitted = jax.tree.map(
+            lambda *values: jnp.stack(values),
+            *(
+                compiled(p, w, levels)
+                for p, w in zip(particles, weights, strict=True)
+            ),
+        )
+        vectorized = jax.vmap(evaluate, in_axes=(0, 0, None))(
+            particles,
+            weights,
+            levels,
+        )
+
+        for actual in (eager, jitted, vectorized):
+            for actual_q, expected_q in zip(
+                actual[:2],
+                expected[:2],
+                strict=True,
+            ):
+                assert jnp.array_equal(
+                    actual_q[jnp.asarray([0, 1, 3])],
+                    expected_q[jnp.asarray([0, 1, 3])],
+                )
+                # Four ULPs cover platform-specific log/exp normalization
+                # before equal mass represented by a different positive
+                # split reaches the canonical support reduction.
+                np.testing.assert_array_max_ulp(
+                    np.asarray(actual_q[2]),
+                    np.asarray(expected_q[2]),
+                    maxulp=4,
+                )
+            assert jnp.array_equal(actual[2], expected[2])
+
+    def test_tied_support_ignores_zero_mass_slots(self):
+        """Zero-mass slots do not perturb aggregation of positive ties."""
+        positive_values = jnp.asarray(
+            [0.0, 1.0, 2.0, 0.0, 1.0, 2.0, 0.0, 1.0],
+            dtype=jnp.float32,
+        )
+        numerators = jnp.asarray(
+            [6.0, 16.0, 20.0, 11.0, 14.0, 6.0, 9.0, 15.0],
+            dtype=jnp.float32,
+        )
+        positive_weights = numerators / jnp.sum(numerators)
+        zero_values = jnp.asarray(
+            [1.0, 1.0, 2.0, 1.0, 3.0, 3.0, -1.0, 2.0],
+            dtype=jnp.float32,
+        )
+        expanded_values = jnp.concatenate([positive_values, zero_values])
+        expanded_weights = jnp.concatenate([
+            positive_weights,
+            jnp.zeros_like(zero_values),
+        ])
+        levels = jnp.asarray([0.5], dtype=jnp.float32)
+
+        def evaluate(
+            values: jax.Array,
+            weights: jax.Array,
+            q: jax.Array,
+        ) -> tuple[jax.Array, jax.Array]:
+            posterior = _make_weighted_posterior(values, weights)
+            return (
+                tail_ess(posterior, q=0.5),
+                weighted_quantile(posterior, q)[0, :, 0],
+            )
+
+        compiled = jax.jit(evaluate)
+        for reference, actual in (
+            (
+                evaluate(positive_values, positive_weights, levels),
+                evaluate(expanded_values, expanded_weights, levels),
+            ),
+            (
+                compiled(positive_values, positive_weights, levels),
+                compiled(expanded_values, expanded_weights, levels),
+            ),
+        ):
+            assert jax.tree.all(
+                jax.tree.map(jnp.array_equal, actual, reference)
+            )
+
     def test_weighted_quantile_median_exact(self):
         posterior = _make_posterior()
         result = weighted_quantile(posterior, jnp.array([0.5]))
@@ -1642,6 +1783,24 @@ class TestParetoKDiagnostic:
 
 class TestTailESS:
     """Tests for tail_ess."""
+
+    def test_tied_edges_keep_particle_level_kish_weights(self):
+        """Coalesced edge finding does not coalesce the tail ESS ratio."""
+        posterior = _make_weighted_posterior(
+            jnp.asarray([0.0, 0.0, 1.0, 1.0]),
+            jnp.asarray([0.125, 0.375, 0.25, 0.25]),
+        )
+
+        actual = tail_ess(posterior, q=0.45)
+
+        # Four eps cover max scaling, two sums, and the ESS ratio.
+        tolerance = float(4 * jnp.finfo(jnp.float32).eps)
+        np.testing.assert_allclose(
+            actual,
+            jnp.asarray([1.6], dtype=jnp.float32),
+            rtol=tolerance,
+            atol=0.0,
+        )
 
     def test_tail_ess_shape(self, lgssm_params, lgssm_data):
         """Output shape matches (ntime,)."""
