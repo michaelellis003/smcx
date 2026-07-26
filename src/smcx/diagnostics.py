@@ -1126,9 +1126,9 @@ def _crps_accumulator_at_least(
 
 
 def _crps_subtract_accumulators(
-    left: UInt[Array, " limbs"],
-    right: UInt[Array, " limbs"],
-) -> UInt[Array, " limbs"]:
+    left: _CRPSAccumulator,
+    right: _CRPSAccumulator,
+) -> _CRPSAccumulator:
     """Subtract equal-width accumulators, propagating the borrow."""
 
     def subtract_limb(
@@ -1187,20 +1187,17 @@ def _crps_shift_left_one(
 
 
 def _crps_divide_accumulators(
-    numerator: UInt[Array, " limbs"],
-    divisor: UInt[Array, " limbs"],
-) -> tuple[UInt[Array, " limbs"], UInt[Array, " limbs"]]:
+    numerator: _CRPSAccumulator,
+    divisor: _CRPSAccumulator,
+) -> _CRPSAccumulators:
     """Return the fixed-width quotient and remainder."""
     zero = jnp.zeros_like(numerator)
     num_bits = _CRPS_ACCUMULATOR_LIMBS * 32
 
     def divide_bit(
         bit_offset: Int[Array, ""],
-        state: tuple[
-            UInt[Array, " limbs"],
-            UInt[Array, " limbs"],
-        ],
-    ) -> tuple[UInt[Array, " limbs"], UInt[Array, " limbs"]]:
+        state: _CRPSAccumulators,
+    ) -> _CRPSAccumulators:
         quotient, remainder = state
         bit_index = num_bits - bit_offset - 1
         remainder = _crps_shift_left_one(
@@ -1285,12 +1282,7 @@ def _crps_round_accumulator_to_float32(
     """Divide by ``sample_count**2`` and round to binary32."""
     zero = jnp.zeros_like(numerator)
     count = jnp.asarray(sample_count, dtype=jnp.uint32)
-    divisor = _crps_add_scaled_magnitude(
-        zero,
-        count,
-        count,
-        jnp.int32(0),
-    )
+    divisor = _crps_add_scaled_magnitude(zero, count, count, jnp.int32(0))
     quotient, remainder = _crps_divide_accumulators(numerator, divisor)
     highest_bit = _crps_highest_accumulator_bit(quotient)
     twice_remainder = _crps_shift_left_one(remainder, jnp.uint32(0))
@@ -1305,8 +1297,7 @@ def _crps_round_accumulator_to_float32(
     significand = _crps_extract_accumulator_word(quotient, bit_shift)
     guard = _crps_accumulator_bit(quotient, bit_shift - 1) != 0
     sticky = _crps_any_accumulator_bits_below(
-        quotient,
-        bit_shift - 1,
+        quotient, bit_shift - 1
     ) | jnp.any(remainder != 0)
     normal_round_up = jnp.where(
         bit_shift == 0,
