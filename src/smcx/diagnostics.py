@@ -70,6 +70,7 @@ from jaxtyping import Array, Bool, Float, Int, UInt
 from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
     _array_tree_signature,
+    _compact_positive_weight_support,
     _gather_particles,
     _validate_emission,
     _validate_particle_cloud,
@@ -591,8 +592,9 @@ def weighted_quantile(
 ) -> Float[Array, "ntime num_quantiles state_dim"]:
     r"""Compute weighted quantiles of particles at each time step.
 
-    Uses a sorted resampling approach for JIT compatibility:
-    sorts particles, computes cumulative weights, and interpolates.
+    Sorts particles, excludes exactly zero-mass values, computes a
+    midpoint cumulative-weight axis, and interpolates. The compaction
+    retains a static shape for JIT compatibility.
 
     Args:
         posterior: Particle filter posterior output.
@@ -602,6 +604,8 @@ def weighted_quantile(
 
     Returns:
         Weighted quantiles, shape ``(ntime, num_quantiles, state_dim)``.
+        A time step with no positive weight has undefined quantiles,
+        represented by NaN.
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
@@ -992,10 +996,15 @@ def param_weighted_quantile(
 
     Returns:
         Weighted quantiles, shape ``(ntime, num_quantiles, param_dim)``.
+        A time step with no positive weight has undefined quantiles,
+        represented by NaN.
 
     Raises:
         ValueError: Posterior arrays or ``q`` are malformed/misaligned, or an
             eager quantile lies outside [0, 1].
+
+    Notes:
+        Exactly zero-mass parameter values are excluded before interpolation.
     """
     q = _validate_quantile_levels(q)
     params = _require_parameter_history(posterior, "param_weighted_quantile")
@@ -1893,7 +1902,9 @@ def tail_ess(
             ``q`` / ``1 - q`` quantile).
 
     Returns:
-        Per-step minimum tail-ESS, shape ``(ntime,)``.
+        Per-step minimum tail-ESS, shape ``(ntime,)``. Exactly zero-mass
+        particles do not affect the result; a time step with no positive
+        weight returns NaN.
 
     Raises:
         TypeError: The posterior has structured rather than dense particles.
@@ -1929,16 +1940,25 @@ def tail_ess(
             order = jnp.argsort(vals)
             v_sorted = vals[order]
             w_sorted = w[order]
-            cum = jnp.cumsum(w_sorted)
+            v_supported, w_supported, num_positive = (
+                _compact_positive_weight_support(v_sorted, w_sorted)
+            )
+            cum = jnp.cumsum(w_supported)
             # Midpoint CDF: centre each particle's mass in its
             # interval, normalized so the axis is [0, 1].
             mid = (jnp.concatenate([jnp.zeros(1), cum[:-1]]) + cum) / (
                 2.0 * jnp.maximum(cum[-1], 1e-30)
             )
-            edges = jnp.interp(qs, mid, v_sorted)
+            edges = jnp.interp(qs, mid, v_supported)
             lo = jnp.where(vals <= edges[0], w, 0.0)
             hi = jnp.where(vals >= edges[1], w, 0.0)
-            per_dim.append(jnp.minimum(n_eff(lo), n_eff(hi)))
+            per_dim.append(
+                jnp.where(
+                    num_positive > 0,
+                    jnp.minimum(n_eff(lo), n_eff(hi)),
+                    jnp.nan,
+                )
+            )
         out.append(jnp.min(jnp.stack(per_dim)))
     return jnp.stack(out)
 

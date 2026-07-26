@@ -189,6 +189,26 @@ def _posterior_for_increment_contract(
     )
 
 
+def _make_weighted_posterior(
+    particles: jax.Array,
+    weights: jax.Array,
+) -> ParticleFilterPosterior:
+    """Wrap one scalar particle cloud with probability-space weights."""
+    particles = jnp.asarray(particles, dtype=jnp.float32)
+    weights = jnp.asarray(weights, dtype=jnp.float32)
+    num_particles = particles.shape[0]
+    log_weights = jnp.where(weights > 0.0, jnp.log(weights), -jnp.inf)
+    squared_sum = jnp.sum(weights**2)
+    return ParticleFilterPosterior(
+        marginal_loglik=jnp.asarray(0.0),
+        filtered_particles=particles[None, :, None],
+        filtered_log_weights=log_weights[None, :],
+        ancestors=jnp.arange(num_particles, dtype=jnp.int32)[None, :],
+        ess=jnp.where(squared_sum > 0.0, 1.0 / squared_sum, jnp.nan)[None],
+        log_evidence_increments=jnp.asarray([0.0]),
+    )
+
+
 def _make_liu_west_posterior():
     """Add a deterministic parameter cloud to the small posterior."""
     posterior = _make_posterior()
@@ -508,6 +528,79 @@ class TestWeightedQuantile:
         # Median of {2, 3} with equal weight = 2.5
         assert float(result[0, 0, 0]) == pytest.approx(2.5, abs=0.1)
 
+    @pytest.mark.parametrize(
+        ("particles", "weights"),
+        [
+            ([0.0, 1.0, 2.0, 3.0], [0.5, 0.0, 0.0, 0.5]),
+            ([3.0, 1.0, 0.0, 2.0], [0.5, 0.0, 0.5, 0.0]),
+            ([0.0, 0.0, 3.0, 3.0], [0.0, 0.5, 0.0, 0.5]),
+        ],
+        ids=["inserted", "permuted", "repeated"],
+    )
+    def test_zero_mass_support_does_not_change_quantiles(
+        self,
+        particles,
+        weights,
+    ):
+        """Inserted, permuted, or repeated zero-mass values are inert."""
+        levels = jnp.asarray([0.0, 0.25, 0.5, 0.75, 1.0])
+        reference = weighted_quantile(
+            _make_weighted_posterior(
+                jnp.asarray([0.0, 3.0]),
+                jnp.asarray([0.5, 0.5]),
+            ),
+            levels,
+        )
+        actual = weighted_quantile(
+            _make_weighted_posterior(
+                jnp.asarray(particles),
+                jnp.asarray(weights),
+            ),
+            levels,
+        )
+
+        assert jnp.array_equal(actual, reference)
+
+    def test_all_zero_weights_have_undefined_quantiles(self):
+        """A cloud with no probability mass has no quantiles."""
+        posterior = _make_weighted_posterior(
+            jnp.asarray([0.0, 1.0]),
+            jnp.zeros(2),
+        )
+
+        result = weighted_quantile(posterior, jnp.asarray([0.5]))
+
+        assert jnp.all(jnp.isnan(result))
+
+    def test_zero_mass_compaction_is_eager_jit_vmap_safe(self):
+        """All transform modes retain only the positive-mass support."""
+        posterior = _make_weighted_posterior(
+            jnp.asarray([0.0, 1.0, 2.0, 3.0]),
+            jnp.asarray([0.0, 0.5, 0.0, 0.5]),
+        )
+        levels = jnp.asarray([0.0, 0.5, 1.0])
+        expected = weighted_quantile(
+            _make_weighted_posterior(
+                jnp.asarray([1.0, 3.0]),
+                jnp.asarray([0.5, 0.5]),
+            ),
+            levels,
+        )
+
+        eager = weighted_quantile(posterior, levels)
+        compiled = jax.jit(weighted_quantile)(posterior, levels)
+        vectorized = jax.vmap(
+            lambda current: weighted_quantile(posterior, current)
+        )(jnp.stack([levels, levels]))
+
+        assert jnp.array_equal(eager, expected)
+        assert jnp.array_equal(compiled, expected)
+        assert jnp.array_equal(vectorized, jnp.stack([expected, expected]))
+        assert jnp.array_equal(
+            eager[0, [0, -1], 0],
+            jnp.asarray([1.0, 3.0]),
+        )
+
 
 class TestLogMLIncrements:
     """Tests for log_ml_increments."""
@@ -692,6 +785,38 @@ class TestParamWeightedQuantile:
         assert jnp.allclose(
             result[:, 1, :], expected_median, rtol=0.0, atol=1e-6
         )
+
+    def test_zero_mass_parameter_values_do_not_change_quantiles(self):
+        """The parameter summary shares the positive-support contract."""
+        from smcx.diagnostics import param_weighted_quantile
+
+        posterior = _make_weighted_posterior(
+            jnp.asarray([0.0, 1.0, 2.0, 3.0]),
+            jnp.asarray([0.0, 0.5, 0.0, 0.5]),
+        )
+        parameter_posterior = LiuWestPosterior(
+            *posterior,
+            filtered_params=posterior.filtered_particles,
+        )
+        reference = _make_weighted_posterior(
+            jnp.asarray([1.0, 3.0]),
+            jnp.asarray([0.5, 0.5]),
+        )
+        reference_posterior = LiuWestPosterior(
+            *reference,
+            filtered_params=reference.filtered_particles,
+        )
+
+        actual = param_weighted_quantile(
+            parameter_posterior,
+            jnp.asarray([0.0, 0.5, 1.0]),
+        )
+        expected = param_weighted_quantile(
+            reference_posterior,
+            jnp.asarray([0.0, 0.5, 1.0]),
+        )
+
+        assert jnp.array_equal(actual, expected)
 
 
 class TestCRPS:
@@ -1409,6 +1534,69 @@ class TestTailESS:
         pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=500)
         result = jax.jit(tail_ess)(pf_post)
         assert jnp.all(jnp.isfinite(result))
+
+    @pytest.mark.parametrize(
+        ("particles", "weights"),
+        [
+            ([-1.0, 0.0, 3.0, 4.0], [0.0, 0.5, 0.5, 0.0]),
+            ([4.0, 3.0, -1.0, 0.0], [0.0, 0.5, 0.0, 0.5]),
+            ([0.0, 0.0, 3.0, 3.0], [0.0, 0.5, 0.0, 0.5]),
+        ],
+        ids=["inserted", "permuted", "repeated"],
+    )
+    def test_zero_mass_support_does_not_change_tail_ess(
+        self,
+        particles,
+        weights,
+    ):
+        """Tail ESS depends only on particles carrying positive mass."""
+        reference = tail_ess(
+            _make_weighted_posterior(
+                jnp.asarray([0.0, 3.0]),
+                jnp.asarray([0.5, 0.5]),
+            )
+        )
+        actual = tail_ess(
+            _make_weighted_posterior(
+                jnp.asarray(particles),
+                jnp.asarray(weights),
+            )
+        )
+
+        assert jnp.array_equal(actual, reference)
+
+    def test_all_zero_weights_have_undefined_tail_ess(self):
+        """A cloud with no probability mass has no tail ESS."""
+        posterior = _make_weighted_posterior(
+            jnp.asarray([0.0, 1.0]),
+            jnp.zeros(2),
+        )
+
+        result = tail_ess(posterior)
+
+        assert jnp.all(jnp.isnan(result))
+
+    def test_uniform_median_tail_keeps_inclusive_boundary(self):
+        """The represented midpoint includes the median particle."""
+        num_particles = 11
+        posterior = _make_weighted_posterior(
+            jnp.arange(1, num_particles + 1, dtype=jnp.float32),
+            jnp.full((num_particles,), 1.0 / num_particles),
+        )
+        expected = jnp.asarray([6.0])
+        # Eight eps cover represented normalization and midpoint arithmetic.
+        tolerance = float(8 * jnp.finfo(jnp.float32).eps)
+
+        for actual in (
+            tail_ess(posterior, q=0.5),
+            jax.jit(lambda value: tail_ess(value, q=0.5))(posterior),
+        ):
+            np.testing.assert_allclose(
+                actual,
+                expected,
+                rtol=tolerance,
+                atol=0.0,
+            )
 
 
 class TestCumulativeLogScore:
