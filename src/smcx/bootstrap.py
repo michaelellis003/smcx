@@ -190,7 +190,8 @@ def bootstrap_init(
         Normalized checkpoint plus identity, non-resampled time-zero details.
 
     Raises:
-        ValueError: The particle count or sampled particle cloud is invalid.
+        ValueError: The observation, particle count, or sampled particle
+            cloud is invalid.
         DegenerateWeightsError: Initial importance weights cannot normalize.
     """
     if num_particles < 1:
@@ -373,8 +374,8 @@ def bootstrap_step(
         Updated normalized checkpoint and current-step diagnostics.
 
     Raises:
-        ValueError: The threshold, checkpoint, or propagated state is
-            malformed.
+        ValueError: The observation, threshold, checkpoint, or propagated
+            state is malformed.
         DegenerateWeightsError: Checkpoint evidence is nonfinite or updated
             importance weights cannot normalize.
 
@@ -666,7 +667,7 @@ def bootstrap_filter(
         DegenerateWeightsError: A particle-weight stage cannot be normalized
             (eager execution only; under ``jax.jit`` its nonfinite signal
             propagates).
-        ValueError: Inputs or the numeric threshold are malformed, a
+        ValueError: Observations, inputs, or the threshold are malformed, a
             criterion result is not a scalar Boolean, the initial state tree
             is empty or has a wrong leading axis, a transition changes its
             state contract, or an observation callback output is malformed.

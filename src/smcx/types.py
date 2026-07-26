@@ -57,9 +57,9 @@ class _ReplicatedLogMLFn(Protocol):
 
 
 # Callback-driven models own the meaning and dtype of observations. Scalar
-# events are canonicalized to length-one vectors before callbacks run. At
-# runtime, beartype admits any rank at public observation boundaries so the
-# plain-Python validator can raise the documented ValueError.
+# events are canonicalized to length-one vectors before callbacks run.
+# Runtime boundary aliases admit malformed values so plain-Python validators
+# own the documented ValueError contract under the jaxtyping import hook.
 if TYPE_CHECKING:
     Emission: TypeAlias = Shaped[Array, " emission_dim"]
     EmissionValue: TypeAlias = Shaped[Array, ""] | Emission

@@ -297,7 +297,7 @@ def auxiliary_filter(
         DegenerateWeightsError: A particle-weight stage cannot be normalized
             (eager execution only; under ``jax.jit`` its nonfinite signal
             propagates).
-        ValueError: Inputs or the numeric threshold are malformed, a
+        ValueError: Observations, inputs, or the threshold are malformed, a
             criterion result is not a scalar Boolean, the initial state tree
             is empty or has a wrong leading axis, a transition changes its
             state contract, or a log-density callback output is malformed.

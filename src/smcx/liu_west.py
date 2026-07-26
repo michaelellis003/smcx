@@ -545,9 +545,9 @@ def liu_west_filter(
         DegenerateWeightsError: A particle-weight stage cannot be normalized
             (eager execution only; under ``jax.jit`` its nonfinite signal
             propagates).
-        ValueError: Initializer selection, inputs, particle count, shrinkage,
-            the numeric threshold, callback output, or a criterion result is
-            structurally invalid.
+        ValueError: Initializer selection, observations, inputs, particle
+            count, shrinkage, threshold, callback output, or criterion result
+            is structurally invalid.
     """
     _validate_resampling_threshold(resampling_threshold)
     emissions, num_timesteps = _validate_filter_inputs(
