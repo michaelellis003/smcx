@@ -70,6 +70,7 @@ from jaxtyping import Array, Bool, Float, Int, UInt
 from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
     _array_tree_signature,
+    _compact_positive_weight_support,
     _gather_particles,
     _validate_emission,
     _validate_particle_cloud,
@@ -1929,16 +1930,25 @@ def tail_ess(
             order = jnp.argsort(vals)
             v_sorted = vals[order]
             w_sorted = w[order]
-            cum = jnp.cumsum(w_sorted)
+            v_supported, w_supported, num_positive = (
+                _compact_positive_weight_support(v_sorted, w_sorted)
+            )
+            cum = jnp.cumsum(w_supported)
             # Midpoint CDF: centre each particle's mass in its
             # interval, normalized so the axis is [0, 1].
             mid = (jnp.concatenate([jnp.zeros(1), cum[:-1]]) + cum) / (
                 2.0 * jnp.maximum(cum[-1], 1e-30)
             )
-            edges = jnp.interp(qs, mid, v_sorted)
+            edges = jnp.interp(qs, mid, v_supported)
             lo = jnp.where(vals <= edges[0], w, 0.0)
             hi = jnp.where(vals >= edges[1], w, 0.0)
-            per_dim.append(jnp.minimum(n_eff(lo), n_eff(hi)))
+            per_dim.append(
+                jnp.where(
+                    num_positive > 0,
+                    jnp.minimum(n_eff(lo), n_eff(hi)),
+                    jnp.nan,
+                )
+            )
         out.append(jnp.min(jnp.stack(per_dim)))
     return jnp.stack(out)
 

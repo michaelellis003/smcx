@@ -333,6 +333,38 @@ def _canonicalize_inputs(
     return inputs
 
 
+def _compact_positive_weight_support(
+    values: Float[Array, " num_particles"],
+    weights: Float[Array, " num_particles"],
+) -> tuple[
+    Float[Array, " num_particles"],
+    Float[Array, " num_particles"],
+    Int[Array, ""],
+]:
+    """Compact an already value-sorted support without changing its shape."""
+    positive = weights > 0.0
+    num_positive = jnp.sum(positive)
+    # A stable boolean sort keeps positive values in their existing order
+    # while avoiding a data-dependent output shape under JIT and jax-mps.
+    order = jnp.argsort(~positive, stable=True)
+    supported_values = values[order]
+    supported_weights = weights[order]
+    in_support = jnp.arange(values.shape[0]) < num_positive
+    final_index = jnp.maximum(num_positive - 1, 0)
+    padding_value = supported_values[final_index]
+    supported_values = jnp.where(
+        in_support,
+        supported_values,
+        padding_value,
+    )
+    supported_weights = jnp.where(
+        in_support,
+        supported_weights,
+        0.0,
+    )
+    return supported_values, supported_weights, num_positive
+
+
 def _weighted_quantile_1d(
     particles: Float[Array, " num_particles"],
     weights: Float[Array, " num_particles"],
@@ -354,14 +386,18 @@ def _weighted_quantile_1d(
     sort_idx = jnp.argsort(particles)
     p_sorted = particles[sort_idx]
     w_sorted = weights[sort_idx]
-    cum_w = jnp.cumsum(w_sorted)
+    p_supported, w_supported, num_positive = _compact_positive_weight_support(
+        p_sorted, w_sorted
+    )
+    cum_w = jnp.cumsum(w_supported)
     # Midpoint CDF: centre each particle's mass in its interval
-    # so that zero-weight particles don't create flat regions.
+    # after removing zero-weight particles from the support.
     mid_cdf = (jnp.concatenate([jnp.zeros(1), cum_w[:-1]]) + cum_w) / 2
     # Tiny tiebreaker ensures strict monotonicity for jnp.interp.
-    n = p_sorted.shape[0]
-    eps = jnp.arange(n, dtype=p_sorted.dtype) * 1e-12
-    return jnp.interp(q, mid_cdf + eps, p_sorted)
+    n = p_supported.shape[0]
+    eps = jnp.arange(n, dtype=p_supported.dtype) * 1e-12
+    result = jnp.interp(q, mid_cdf + eps, p_supported)
+    return jnp.where(num_positive > 0, result, jnp.nan)
 
 
 def _init_standard(
