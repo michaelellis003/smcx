@@ -1989,10 +1989,10 @@ structural callback boundary:</p>
 </span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>mutation_step(key, state, tempered_logdensity_fn) -&gt; (state, info)
 </span></code></pre></div>
 <p>State is a JAX PyTree with a dense vector <code>position</code>; info is a JAX PyTree
-with a scalar floating <code>acceptance_rate</code>. NamedTuples are a convenient
-representation, and either object may carry extra fields. The target passed
-to both callbacks is the current stage density
-<code>log_prior + phi * log_likelihood</code>.</p>
+with a scalar floating <code>acceptance_rate</code> that is finite and in <code>[0, 1]</code>.
+NamedTuples are a convenient representation, and either object may carry
+extra fields. The target passed to both callbacks is the current stage
+density <code>log_prior + phi * log_likelihood</code>.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">posterior</span> <span class="o">=</span> <span class="n">smcx</span><span class="o">.</span><span class="n">temper</span><span class="p">(</span>
 </span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="n">jr</span><span class="o">.</span><span class="n">key</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span>
 </span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">initial</span><span class="p">,</span>
@@ -2005,10 +2005,13 @@ to both callbacks is the current stage density
 </span></code></pre></div>
 <p>smcx batches independent states across particles and compiles the fixed-count
 sweep; <code>temper</code> itself remains host-driven. Mutation state is reinitialized
-after each resampling stage. The caller is responsible for making each step
-invariant for the supplied target. Omitting both callbacks selects the
-existing cloud-adaptive random-walk Metropolis mutation. Pass ordinary
-callbacks rather than pre-jitting a function that accepts the target callable.
+after each resampling stage. Every acceptance rate is checked when the sweep
+returns to that host-driven stage boundary. Stage means accumulate in at
+least float32 precision and round once to the callback rate dtype. The caller
+is responsible for making each step invariant for the supplied target.
+Omitting both callbacks selects the existing cloud-adaptive random-walk
+Metropolis mutation. Pass ordinary callbacks rather than pre-jitting a
+function that accepts the target callable.
 The built-in tempering and SMC² proposals retain trace-relative jitter for
 ill-conditioned clouds. If no positive factor survives in the parameter
 dtype, they use a machine-epsilon variance floor with squared parameter units,

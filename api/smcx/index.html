@@ -9985,7 +9985,9 @@ State must be a JAX PyTree with a dense <code>position</code> field.</p>
                 <p>Optional
 <code>(key, state, tempered_logdensity_fn) -&gt; (state, info)</code>
 callback. Info must expose a scalar floating
-<code>acceptance_rate</code>. Supply both mutation callbacks or neither.</p>
+<code>acceptance_rate</code> that is finite and in <code>[0, 1]</code>. Stage
+means retain that scalar's dtype. Supply both mutation callbacks
+or neither.</p>
               </div>
             </td>
             <td>
@@ -10073,7 +10075,8 @@ callback. Info must expose a scalar floating
               <div class="doc-md-description">
                 <p>Particle or mutation counts are invalid, <code>target_ess</code>
 is outside its numerically viable interval, callback pairing is
-incomplete, or a mutation state or diagnostic is malformed.</p>
+incomplete, or a mutation state or diagnostic is malformed or
+outside its documented domain.</p>
               </div>
             </td>
           </tr>
