@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.16 (2026-07-27)
+
+### Bug Fixes
+
+- **tempering**: Validate mutation acceptance rates
+  ([#234](https://github.com/michaelellis003/smcx/pull/234),
+  [`bfbb36c`](https://github.com/michaelellis003/smcx/commit/bfbb36cc1ce3faa0c9ff92ea1ae9051c6ebc22f9))
+
+
 ## v1.14.15 (2026-07-27)
 
 ### Bug Fixes
