@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.14.15 (2026-07-27)
+
+### Bug Fixes
+
+- **kalman**: Validate covariance factorization
+  ([#233](https://github.com/michaelellis003/smcx/pull/233),
+  [`6411f05`](https://github.com/michaelellis003/smcx/commit/6411f05cbdf7a6e4c9941c7c87f92448ac88cafa))
+
+### Chores
+
+- **ci**: Restore bounded suite runtime ([#232](https://github.com/michaelellis003/smcx/pull/232),
+  [`19d25c2`](https://github.com/michaelellis003/smcx/commit/19d25c272899e9b9e709e6cf7639a8710d1d43f4))
+
+
 ## v1.14.14 (2026-07-27)
 
 ### Bug Fixes
