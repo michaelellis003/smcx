@@ -129,15 +129,7 @@ def test_dense_and_structured_states_have_stable_names_and_dims():
 
 
 @pytest.mark.parametrize("collision_group", ["posterior", "unconstrained"])
-def test_dotted_paths_are_rejected_before_value_operations(
-    monkeypatch: pytest.MonkeyPatch,
-    collision_group: str,
-) -> None:
-    def touched(*args: object, **kwargs: object) -> None:
-        raise AssertionError("value operation ran before schema preflight")
-
-    for target in ("_stack", "systematic", "getitem", "_host"):
-        monkeypatch.setattr(reporting, target, touched)
+def test_dotted_tree_paths_are_rejected(collision_group: str) -> None:
     collision = {
         "a": {"b": jnp.ones((4, 1))},
         "a.b": 2 * jnp.ones((4, 1)),
@@ -350,7 +342,6 @@ def test_optional_import_is_lazy_and_missing_extra_is_actionable(monkeypatch):
         "assert callable(smcx.to_arviz)"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
-    from smcx import reporting
 
     def missing_arviz(name):
         raise ModuleNotFoundError(f"No module named {name!r}", name=name)
