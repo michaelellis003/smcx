@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.14.18 (2026-07-27)
+
+### Bug Fixes
+
+- **api**: Normalize observation arrays ([#236](https://github.com/michaelellis003/smcx/pull/236),
+  [`d48cbac`](https://github.com/michaelellis003/smcx/commit/d48cbac743849b601488d890402ce800533f0914))
+
+
 ## v1.14.17 (2026-07-27)
 
 ### Bug Fixes
