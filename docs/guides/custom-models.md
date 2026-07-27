@@ -491,7 +491,7 @@ Choose `make_bootstrap_callbacks` or
 forms visible prevents an ambiguous runtime dispatch and makes input alignment
 part of the model code.
 
-## Align posterior-predictive inputs
+## Align posterior predictions
 
 `posterior_predictive_sample` draws one step beyond every retained filtering
 row. For an input-aware model, pass `future_inputs` with the same number of
