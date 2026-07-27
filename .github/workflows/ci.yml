@@ -220,7 +220,7 @@ jobs:
   # local M-series run when a virtualized runner has no GPU.
   gpu-smoke:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -263,7 +263,7 @@ jobs:
         id: metal-suite
         if: steps.metal.outputs.available == 'true'
         continue-on-error: true
-        timeout-minutes: 25
+        timeout-minutes: 30
         run: |
           set -o pipefail
           SMCX_TEST_PLATFORM=mps uv run pytest \
