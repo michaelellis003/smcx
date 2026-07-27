@@ -151,7 +151,7 @@ accept either a scalar or vector observation and apply the same
 canonicalization. Gaussian filters also accept scalar observation sequences,
 but retain their documented float32/float64 requirements.
 
-Inputs follow the same rule for callback-driven models: `(T,)` becomes
+Callback-driven inputs likewise preserve model-owned dtype: `(T,)` becomes
 `(T, 1)`, `(T, input_dim)` is preserved, and empty input dimensions are
 rejected. Incremental bootstrap calls accept either a scalar or vector input
 and apply the same canonicalization. Code that relied on the formerly
