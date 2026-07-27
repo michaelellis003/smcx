@@ -57,6 +57,7 @@ from smcx.types import (
     LogProposalFnWithInput,
     LogTransitionFn,
     LogTransitionFnWithInput,
+    ModelInput,
     ParticleCloud,
     PRNGKeyT,
     ProposalSampler,
@@ -79,7 +80,7 @@ class _GuidedCarry(NamedTuple):
 
 class _GuidedStepInput(NamedTuple):
     emission: Emission
-    model_input: Float[Array, " input_dim"] | None
+    model_input: ModelInput | None
     time_index: Int[Array, ""]
 
 
@@ -257,7 +258,8 @@ def guided_filter(
             The callback receives carried weights and ESS at the zero-based
             emission indices 1 through T - 1.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
-            or ``(T,)``. Input zero reaches initialization; each later
+            or ``(T,)`` and a nonempty event. Input zero reaches
+            initialization; each later
             input reaches every guided callback at that time step.
         store_history: When False, the filter retains no
             per-step particle/weight/ancestor histories — the returned

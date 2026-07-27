@@ -1551,13 +1551,12 @@ class TestPosteriorPredictiveSample:
         ("emission", "message"),
         [
             ([0.0], "must be a JAX array"),
-            (jnp.asarray(0.0), "shape \\(emission_dim,\\)"),
-            (jnp.empty((0,)), "shape \\(emission_dim,\\)"),
-            (jnp.asarray([0], dtype=jnp.int32), "floating dtype"),
+            (jnp.empty((0,)), "emission_dim >= 1"),
+            (jnp.empty((1, 1)), r"shape \(\) or \(emission_dim,\)"),
         ],
     )
     def test_rejects_invalid_emission(self, emission, message):
-        """Predictive emissions are nonempty floating vectors."""
+        """Predictive emissions are nonempty scalars or vectors."""
         with pytest.raises(ValueError, match=message):
             posterior_predictive_sample(
                 jr.key(0),
@@ -1566,6 +1565,19 @@ class TestPosteriorPredictiveSample:
                 lambda _key, _state: emission,
                 num_samples=2,
             )
+
+    def test_canonicalizes_scalar_discrete_emissions(self):
+        """A model-owned scalar becomes a length-one discrete event."""
+        samples = posterior_predictive_sample(
+            jr.key(152),
+            _make_posterior(),
+            lambda _key, state: state,
+            lambda _key, _state: jnp.asarray(1, dtype=jnp.int32),
+            num_samples=2,
+        )
+
+        assert samples.shape[-2:] == (2, 1)
+        assert samples.dtype == jnp.int32
 
     @pytest.mark.parametrize("num_samples", [0, -1])
     def test_num_samples_must_be_positive(self, num_samples):

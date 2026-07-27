@@ -85,19 +85,22 @@ def test_one_shot_equals_init_then_repeated_step():
     assert forced.resampled
 
 
-def test_incremental_boundaries_canonicalize_scalar_discrete_emissions():
-    def initial(key, num_particles):
+def test_incremental_boundaries_canonicalize_scalar_discrete_model_data():
+    def initial(key, num_particles, input_t):
         del key
+        assert input_t.shape == (1,)
+        assert input_t.dtype == jnp.bool_
         return jnp.zeros((num_particles, 1))
 
-    def transition(key, state):
+    def transition(key, state, input_t):
         del key
+        assert input_t.shape == (1,)
         return state
 
-    def log_observation(emission, state):
+    def log_observation(emission, state, input_t):
         assert emission.shape == (1,)
         assert emission.dtype == jnp.int32
-        return 0.0 * state[0]
+        return 0.0 * state[0] + input_t[0]
 
     checkpoint, _ = smcx.bootstrap_init(
         jr.key(152),
@@ -105,6 +108,7 @@ def test_incremental_boundaries_canonicalize_scalar_discrete_emissions():
         log_observation,
         jnp.asarray(0, dtype=jnp.int32),
         4,
+        input_t=jnp.asarray(False),
     )
     checkpoint, _ = smcx.bootstrap_step(
         jr.key(153),
@@ -112,6 +116,7 @@ def test_incremental_boundaries_canonicalize_scalar_discrete_emissions():
         transition,
         log_observation,
         jnp.asarray(1, dtype=jnp.int32),
+        input_t=jnp.asarray(True),
     )
     _, posterior = smcx.bootstrap_update(
         jr.split(jr.key(154), 2),
@@ -119,9 +124,23 @@ def test_incremental_boundaries_canonicalize_scalar_discrete_emissions():
         transition,
         log_observation,
         jnp.array([2, 3], dtype=jnp.int32),
+        inputs=jnp.array([False, True]),
     )
 
     assert posterior.log_evidence_increments.shape == (2,)
+
+
+@pytest.mark.parametrize("input_t", [[0.0], jnp.empty((0,))])
+def test_incremental_boundary_rejects_invalid_input(input_t):
+    with pytest.raises(ValueError, match="input_t must"):
+        smcx.bootstrap_init(
+            jr.key(152),
+            _initial,
+            _log_observation,
+            EMISSIONS[0],
+            NUM_PARTICLES,
+            input_t=input_t,
+        )
 
 
 @pytest.mark.parametrize(

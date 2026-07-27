@@ -65,14 +65,14 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, tree, vmap
 from jax.core import Tracer
-from jaxtyping import Array, Bool, Float, Int, UInt
+from jaxtyping import Array, Bool, Float, Int, Shaped, UInt
 
 from smcx._numerics import _neumaier_prefix_sum
 from smcx._utils import (
     _array_tree_signature,
+    _canonicalize_emission,
     _coalesce_positive_weight_support,
     _gather_particles,
-    _validate_emission,
     _validate_particle_cloud,
     _validate_state_tree,
     _weighted_quantile_1d,
@@ -1028,7 +1028,7 @@ def posterior_predictive_sample(
     transition_sampler: TransitionSampler,
     emission_sampler: EmissionSampler,
     num_samples: _IntegerArgument | None = None,
-) -> Float[Array, "ntime num_samples emission_dim"]:
+) -> Shaped[Array, "ntime num_samples emission_dim"]:
     r"""Draw one-step-ahead posterior predictive samples.
 
     At each time step $t$, we:
@@ -1048,7 +1048,8 @@ def posterior_predictive_sample(
         transition_sampler: Function ``(key, state) -> state``. ``state``
             may be a latent-state PyTree.
         emission_sampler: Function ``(key, state) -> emission`` accepting
-            the same state PyTree and returning a nonempty floating vector.
+            the same state PyTree and returning a scalar or nonempty vector.
+            Scalars become length-one vectors; dtype is preserved.
         num_samples: Number of predictive draws per time step.
             Defaults to the number of particles.
 
@@ -1059,7 +1060,7 @@ def posterior_predictive_sample(
     Raises:
         ValueError: ``num_samples`` is not a positive integer, the posterior
             state is malformed, the transition changes its PyTree contract,
-            or the emission is not a nonempty floating vector.
+            or the emission is not a scalar or nonempty vector.
     """
     if num_samples is not None:
         num_samples = _require_integer(
@@ -1080,7 +1081,7 @@ def posterior_predictive_sample(
         log_weights_t: Float[Array, " num_particles"],
         particles_t: ParticleCloud,
         step_key: PRNGKeyT,
-    ) -> Float[Array, "num_samples emission_dim"]:
+    ) -> Shaped[Array, "num_samples emission_dim"]:
         """Draw predictive samples at one time step."""
         k1, k2, k3 = jr.split(step_key, 3)
         weights = jnp.exp(log_weights_t - jnp.max(log_weights_t))
@@ -1109,9 +1110,10 @@ def posterior_predictive_sample(
         emit_keys = jr.split(k3, num_samples)
 
         def _emit(key_i, state_i):
-            emission = emission_sampler(key_i, state_i)
-            _validate_emission(emission, name="emission_sampler output")
-            return emission
+            return _canonicalize_emission(
+                emission_sampler(key_i, state_i),
+                name="emission_sampler output",
+            )
 
         return vmap(_emit)(emit_keys, propagated)
 

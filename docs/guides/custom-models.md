@@ -151,6 +151,10 @@ accept either a scalar or vector observation and apply the same
 canonicalization. Gaussian filters also accept scalar observation sequences,
 but retain their documented float32/float64 requirements.
 
+Callback inputs preserve dtype: `(T,)` becomes `(T, 1)`; rank-two inputs are
+unchanged and empty widths rejected. Callers relying on incremental scalar
+callback shapes must use length-one vectors; sampled emissions do likewise.
+
 Log-weight normalization and ESS are invariant to a finite constant offset
 whenever the relative differences remain representable in the input dtype.
 The absolute log normalizer remains in that dtype, so a correction smaller

@@ -94,6 +94,11 @@ def test_gaussian_filters_accept_scalar_observation_sequences():
             jnp.ones(2, dtype=jnp.int32),
             "inputs must have a floating dtype",
         ),
+        (
+            "inputs",
+            jnp.empty((2, 0)),
+            "input_dim >= 1",
+        ),
     ],
 )
 def test_gaussian_data_validation_raises_plain_value_errors(
@@ -130,6 +135,42 @@ def test_kalman_filter_rejects_numpy_emissions_with_value_error():
             covariance,
             covariance,
             np.zeros((2, 1)),  # ty: ignore[invalid-argument-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "filter_name",
+    ["kalman_filter", "extended_kalman_filter", "unscented_kalman_filter"],
+)
+def test_gaussian_filters_reject_non_jax_inputs_with_value_error(filter_name):
+    """Every Gaussian input boundary owns the non-JAX structural error."""
+    mean = jnp.zeros(1)
+    covariance = jnp.eye(1)
+    emissions = jnp.zeros(2)
+    middle_arguments = {
+        "kalman_filter": (covariance, covariance, covariance),
+        "extended_kalman_filter": (
+            lambda state, _input: state,
+            lambda _state, _input: covariance,
+            covariance,
+            lambda state, _input: state,
+            lambda _state, _input: covariance,
+        ),
+        "unscented_kalman_filter": (
+            lambda state, _input: state,
+            covariance,
+            lambda state, _input: state,
+        ),
+    }[filter_name]
+
+    with pytest.raises(ValueError, match="inputs must be a JAX array"):
+        getattr(smcx, filter_name)(
+            mean,
+            covariance,
+            *middle_arguments,
+            covariance,
+            emissions,
+            inputs=[[0.0], [1.0]],
         )
 
 

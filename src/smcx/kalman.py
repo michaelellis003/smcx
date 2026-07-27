@@ -1041,8 +1041,8 @@ def kalman_filter(
         ):
             raise ValueError("input matrices require inputs")
     else:
-        _check_float_array(inputs, "inputs", dtype)
         inputs = _canonicalize_inputs(inputs, num_timesteps)
+        _check_float_array(inputs, "inputs", dtype)
         input_dim = inputs.shape[1]
         if transition_input_matrix is not None:
             transition_controls = _time_matrix(
@@ -1250,8 +1250,8 @@ def extended_kalman_filter(
         observation_mean_0 = observation_fn(initial_mean)
         observation_jacobian_0 = observation_jacobian_function(initial_mean)
     else:
-        _check_float_array(inputs, "inputs", dtype)
         inputs_arr = _canonicalize_inputs(inputs, num_timesteps)
+        _check_float_array(inputs_arr, "inputs", dtype)
         observation_fn_u = cast(
             ObservationMeanFnWithInput,
             observation_mean_fn,
@@ -1473,8 +1473,8 @@ def unscented_kalman_filter(
         inputs_arr = None
         input_0 = None
     else:
-        _check_float_array(inputs, "inputs", setup.dtype)
         inputs_arr = _canonicalize_inputs(inputs, setup.num_timesteps)
+        _check_float_array(inputs_arr, "inputs", setup.dtype)
         input_0 = inputs_arr[0]
     filtered_mean_0, filtered_covariance_0, increment_0 = _unscented_condition(
         initial_mean,
