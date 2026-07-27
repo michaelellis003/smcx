@@ -96,6 +96,11 @@ requires all three covariances to be positive definite because it also takes
 Cholesky square roots of state covariances. These value checks run at eager
 Python entry and are skipped when the arrays are tracers inside a JAX
 transformation.
+Concrete entries must be zero or normal finite values. Positive-definite
+covariances must also be non-indefinite within dtype-scaled roundoff and yield
+a finite, positive-diagonal Cholesky factor on the active backend, as described
+in the [filtering quickstart](quickstart.md). These eager checks do not
+guarantee endpoint behavior under an outer JAX transformation.
 
 With `inputs=...`, every supplied callback accepts `(state, input_t)`.
 `inputs[t]` reaches the observation at `t` and the transition into `t`;

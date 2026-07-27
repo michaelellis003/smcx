@@ -107,6 +107,12 @@ The linear filter permits finite symmetric positive-semidefinite initial and
 transition covariances, while its observation covariance must be positive
 definite. The smoother also requires each positive-time predicted covariance
 to be positive definite because the backward recursion factors it.
+Concrete covariance entries must be zero or normal finite values. For any
+factored covariance, the diagonal-equilibrated spectrum must be
+non-indefinite within dtype-scaled roundoff and the active backend must
+produce a finite Cholesky factor with a strictly positive diagonal. These
+checks run at eager entry; outer JAX transformations can lower endpoint
+arithmetic differently.
 
 ## Run a particle filter
 

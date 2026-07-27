@@ -35,7 +35,7 @@ from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import numpy as np
-from jax import lax, vmap
+from jax import debug_infs, debug_nans, lax, vmap
 from jax.core import Tracer
 from jax.scipy.linalg import solve_triangular
 from jaxtyping import Array, Float, Shaped
@@ -121,10 +121,18 @@ class _NonlinearFilterSetup(NamedTuple):
 
 
 def _symmetrize(
-    covariance: Float[Array, "state_dim state_dim"],
-) -> Float[Array, "state_dim state_dim"]:
+    covariance: Float[Array, "*batch dimension dimension"],
+) -> Float[Array, "*batch dimension dimension"]:
     """Remove roundoff asymmetry from a covariance matrix."""
-    return 0.5 * (covariance + covariance.T)
+    transpose = jnp.swapaxes(covariance, -1, -2)
+    ordinary = 0.5 * (covariance + transpose)
+    lower = jnp.minimum(covariance, transpose)
+    fallback = lower + 0.5 * (jnp.maximum(covariance, transpose) - lower)
+    return jnp.where(
+        jnp.isinf(ordinary) & jnp.isfinite(fallback),
+        fallback,
+        ordinary,
+    )
 
 
 def _condition(
@@ -167,7 +175,10 @@ def _condition_from_residual(
         observation_matrix @ predicted_covariance @ observation_matrix.T
         + observation_covariance
     )
-    innovation_cholesky = jnp.linalg.cholesky(innovation_covariance)
+    innovation_cholesky = jnp.linalg.cholesky(
+        innovation_covariance,
+        symmetrize_input=False,
+    )
     covariance_observation = predicted_covariance @ observation_matrix.T
     lower_solution = solve_triangular(
         innovation_cholesky,
@@ -281,6 +292,10 @@ def _check_covariance(
         return
     if not np.all(np.isfinite(covariance)):
         raise ValueError(f"{name} must contain only finite values")
+    normal_minimum = float(np.finfo(value.dtype).tiny)
+    magnitude = np.abs(covariance)
+    if np.any(np.not_equal(magnitude, 0.0) & (magnitude < normal_minimum)):
+        raise ValueError(f"{name} must not contain nonzero subnormal values")
     dimension = covariance.shape[-1]
     # A normalized Rayleigh quotient sums at most dimension rounded terms;
     # 8 covers input rounding and the explicit symmetrization below.
@@ -309,13 +324,22 @@ def _check_covariance(
     if not np.all(np.isfinite(normalized)):
         raise ValueError(f"{name} must be positive {domain}")
     minimum_eigenvalue = np.min(np.linalg.eigvalsh(normalized), axis=-1)
-    invalid = (
-        minimum_eigenvalue <= 0.0
-        if positive_definite
-        else minimum_eigenvalue < -psd_tolerance
-    )
-    if np.any(invalid):
+    if np.any(minimum_eigenvalue < -psd_tolerance):
         raise ValueError(f"{name} must be positive {domain}")
+    if positive_definite:
+        symmetrized = _symmetrize(value)
+        if isinstance(symmetrized, Tracer):
+            return
+        with debug_nans(False), debug_infs(False):
+            factor = np.asarray(
+                jnp.linalg.cholesky(
+                    symmetrized,
+                    symmetrize_input=False,
+                )
+            )
+        factor_diagonal = np.diagonal(factor, axis1=-2, axis2=-1)
+        if not np.all(np.isfinite(factor)) or np.any(factor_diagonal <= 0.0):
+            raise ValueError(f"{name} must be positive {domain}")
 
 
 def _time_matrix(
@@ -516,7 +540,10 @@ def _sigma_points(
     rule: _ScaledUnscentedRule,
 ) -> Float[Array, "num_sigma state_dim"]:
     """Generate center-first, column-oriented symmetric sigma points."""
-    factor = jnp.linalg.cholesky(_symmetrize(covariance))
+    factor = jnp.linalg.cholesky(
+        _symmetrize(covariance),
+        symmetrize_input=False,
+    )
     offsets = (rule.sigma_scale * factor).T
     return jnp.concatenate((
         mean[None],
@@ -539,18 +566,35 @@ def _unscented_moments(
     negative_deltas = values[num_pairs + 1 :] - center
     delta_sum = (positive_deltas + negative_deltas).sum(axis=0)
     mean = center + rule.off_center_weight * delta_sum
-    covariance = rule.off_center_weight * (
-        jnp.einsum(
-            "ij,ik->jk",
-            positive_deltas,
-            positive_deltas,
-        )
-        + jnp.einsum(
-            "ij,ik->jk",
-            negative_deltas,
-            negative_deltas,
-        )
-    ) + rule.covariance_rank_one_weight * jnp.outer(delta_sum, delta_sum)
+    positive_moment = jnp.einsum(
+        "ij,ik->jk",
+        positive_deltas,
+        positive_deltas,
+    )
+    negative_moment = jnp.einsum(
+        "ij,ik->jk",
+        negative_deltas,
+        negative_deltas,
+    )
+    paired_moment = rule.off_center_weight * (positive_moment + negative_moment)
+    # Keep the weighted products distinct: XLA otherwise reassociates the
+    # finite fallback into the overflowing ordinary expression.
+    weighted_positive = lax.optimization_barrier(
+        rule.off_center_weight * positive_moment
+    )
+    weighted_negative = lax.optimization_barrier(
+        rule.off_center_weight * negative_moment
+    )
+    fallback = weighted_positive + weighted_negative
+    paired_moment = jnp.where(
+        jnp.isinf(paired_moment) & jnp.isfinite(fallback),
+        fallback,
+        paired_moment,
+    )
+    covariance = paired_moment + rule.covariance_rank_one_weight * jnp.outer(
+        delta_sum,
+        delta_sum,
+    )
     return mean, _symmetrize(covariance)
 
 
@@ -620,7 +664,10 @@ def _unscented_condition(
     innovation_covariance = _symmetrize(
         transformed_covariance + observation_covariance
     )
-    innovation_cholesky = jnp.linalg.cholesky(innovation_covariance)
+    innovation_cholesky = jnp.linalg.cholesky(
+        innovation_covariance,
+        symmetrize_input=False,
+    )
     lower_solution = solve_triangular(
         innovation_cholesky,
         cross_covariance.T,
@@ -900,7 +947,10 @@ def kalman_filter(
         covariances must be finite, symmetric, and positive semidefinite;
         observation covariances must be finite, symmetric, and positive
         definite. Value checks run eagerly and are skipped for traced
-        arrays. Missing observations are not supported.
+        arrays. Nonzero subnormal covariance entries are rejected;
+        positive-definite covariances must also yield a finite,
+        positive-diagonal factor on the active backend. Missing observations
+        are not supported.
     """
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
         raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
@@ -1153,7 +1203,10 @@ def extended_kalman_filter(
         covariances must be finite, symmetric, and positive semidefinite;
         observation covariances must be finite, symmetric, and positive
         definite. Value checks run eagerly and are skipped for traced
-        arrays. Missing observations are not supported.
+        arrays. Nonzero subnormal covariance entries are rejected;
+        positive-definite covariances must also yield a finite,
+        positive-diagonal factor on the active backend. Missing observations
+        are not supported.
 
     References:
         Schmidt, S. F. (1966). Application of State-Space Methods to
@@ -1376,9 +1429,11 @@ def unscented_kalman_filter(
         Arrays must share a float32 or float64 dtype. Every covariance must
         be finite, symmetric, and positive definite because the UKF takes
         state and innovation Cholesky factors. Value checks run eagerly and
-        are skipped for traced arrays. Missing observations are not supported.
-        Smaller ``alpha`` values may improve local quadrature but are more
-        cancellation-prone in float32.
+        are skipped for traced arrays. Nonzero subnormal entries are rejected,
+        and every covariance must yield a finite, positive-diagonal factor on
+        the active backend.
+        Missing observations are not supported. Smaller ``alpha`` values may
+        improve local quadrature but are more cancellation-prone in float32.
 
     References:
         Julier, S. J. (2002). The Scaled Unscented Transformation.
@@ -1576,7 +1631,10 @@ def _rts_step(
         transition_matrix,
     ) = args
     cross_covariance = filtered_covariance @ transition_matrix.T
-    predicted_cholesky = jnp.linalg.cholesky(next_predicted_covariance)
+    predicted_cholesky = jnp.linalg.cholesky(
+        _symmetrize(next_predicted_covariance),
+        symmetrize_input=False,
+    )
     lower_solution = solve_triangular(
         predicted_cholesky,
         cross_covariance.T,
@@ -1628,7 +1686,9 @@ def rts_smoother(
         finite, symmetric, and positive semidefinite. Positive-time
         predicted covariances must be finite, symmetric, and positive
         definite because the backward recursion factors them. Value checks
-        run eagerly and are skipped for traced arrays.
+        run eagerly and are skipped for traced arrays. Nonzero subnormal
+        covariance entries are rejected; positive-time predictions must yield
+        a finite, positive-diagonal factor on the active backend.
     """
     num_timesteps, state_dim, dtype = _validate_filter_posterior(
         filtered_posterior
