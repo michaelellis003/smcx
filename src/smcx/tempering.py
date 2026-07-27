@@ -411,11 +411,20 @@ def temper(
             lo, hi = phi, 1.0
             for _ in range(_BISECT_ITERS):
                 mid = 0.5 * (lo + hi)
+                # Once the midpoint rounds onto an endpoint, every later
+                # iteration recomputes the same midpoint and, ess_at
+                # being deterministic, takes the same branch — so after
+                # applying this update the pair is at its fixed point
+                # and breaking is bitwise-identical to finishing the
+                # loop. Each avoided probe is a host sync.
+                converged = mid in (lo, hi)
                 e_mid = ess_at(mid, phi)
                 if math.isnan(e_mid) or e_mid < target:
                     hi = mid
                 else:
                     lo = mid
+                if converged:
+                    break
             phi_new = lo if lo > phi else 0.5 * (phi + hi)
         delta = phi_new - phi
 
@@ -486,7 +495,12 @@ def temper(
             break
     else:
         raise RuntimeError(
-            f"tempering did not reach phi=1 within {max_stages} stages"
+            f"tempering did not reach phi=1 within {max_stages} stages; "
+            f"reached phi={phi:.9g} with last increment {delta:.3e} and "
+            f"last stage ESS {stage_ess:.6g} against target ESS "
+            f"{target_ess}. Raise max_stages or lower target_ess; "
+            "near-unit targets can need arbitrarily many stages at "
+            "some likelihood scales."
         )
 
     marginal: Float[Array, ""] = total + comp
