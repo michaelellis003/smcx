@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.15.0 (2026-07-27)
+
+### Features
+
+- **diagnostics**: Align future predictive inputs
+  ([#239](https://github.com/michaelellis003/smcx/pull/239),
+  [`260df35`](https://github.com/michaelellis003/smcx/commit/260df3571b761b0c1788cad2650ff2fab994cf1e))
+
+
 ## v1.14.20 (2026-07-27)
 
 ### Bug Fixes
