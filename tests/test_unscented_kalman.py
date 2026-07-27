@@ -360,7 +360,7 @@ def test_unscented_filter_rejects_invalid_rule(parameters, message):
     ("argument", "scalar", "constraint"),
     [
         ("initial_covariance", 0.0, "be positive definite"),
-        ("transition_covariance", 0.0, "be positive definite"),
+        ("transition_covariance", -1.0, "be positive semidefinite"),
         ("observation_covariance", 0.0, "be positive definite"),
         ("initial_covariance", jnp.nan, "contain only finite values"),
     ],
@@ -370,7 +370,7 @@ def test_unscented_filter_rejects_invalid_covariance(
     scalar,
     constraint,
 ):
-    """Every covariance factored by the UKF must be positive definite."""
+    """Factored covariances must be PD; the transition covariance PSD."""
     zero = jnp.zeros(1, dtype=jnp.float32)
     covariance = jnp.eye(1, dtype=jnp.float32)
     model: dict[str, Any] = {
@@ -386,6 +386,77 @@ def test_unscented_filter_rejects_invalid_covariance(
 
     with pytest.raises(ValueError, match=f"{argument} must {constraint}"):
         smcx.unscented_kalman_filter(**model)
+
+
+def test_unscented_accepts_singular_transition_covariance():
+    """A rank-deficient transition covariance is a valid model.
+
+    Noise enters only the second coordinate (constant-velocity shape).
+    The UKF never factors the transition covariance itself — only the
+    prior and the predicted covariance, which the propagated sigma
+    spread keeps positive definite here — so the filter must accept
+    the model and, with linear means, match the exact Kalman filter.
+    """
+    initial_mean = jnp.array([0.2, -0.1])
+    initial_covariance = jnp.array([[0.5, 0.03], [0.03, 0.4]])
+    transition_matrix = jnp.array([[1.0, 0.1], [0.0, 0.9]])
+    transition_covariance = jnp.array([[0.0, 0.0], [0.0, 0.25]])
+    observation_matrix = jnp.array([[1.0, 0.0]])
+    observation_covariance = jnp.array([[0.3]])
+    emissions = jnp.array([[0.1], [-0.2], [0.05]])
+
+    exact = smcx.kalman_filter(
+        initial_mean,
+        initial_covariance,
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        emissions,
+    )
+    unscented = smcx.unscented_kalman_filter(
+        initial_mean,
+        initial_covariance,
+        lambda state: transition_matrix @ state,
+        transition_covariance,
+        lambda state: observation_matrix @ state,
+        observation_covariance,
+        emissions,
+    )
+
+    for actual, expected in zip(unscented, exact, strict=True):
+        _assert_roundoff_close(actual, expected)
+
+
+def test_unscented_guard_boundary_keeps_covariance_psd():
+    """The PSD-guarantee boundary of the rule guard is safe, not a bug.
+
+    With ``s = alpha**2 * (d + kappa)``, the accepted domain
+    ``alpha**2 * kappa + d * beta >= 0`` equals
+    ``s + d * (beta - alpha**2) >= 0``, which by Cauchy-Schwarz over
+    the paired sigma deltas is exactly the condition for the paired
+    moment to dominate the negative rank-one correction. The boundary
+    configuration below has ``beta < alpha**2`` (a subtractive
+    rank-one weight) yet must be accepted and must keep every filtered
+    covariance PSD up to roundoff.
+    """
+    posterior = smcx.unscented_kalman_filter(
+        jnp.array([0.1], dtype=jnp.float32),
+        jnp.array([[1.0]], dtype=jnp.float32),
+        _identity,
+        jnp.array([[0.1]], dtype=jnp.float32),
+        _square,
+        jnp.array([[0.5]], dtype=jnp.float32),
+        jnp.array([[0.3], [0.2], [0.4]], dtype=jnp.float32),
+        alpha=2.0,
+        beta=0.0,
+        kappa=0.0,
+    )
+
+    eigenvalues = np.linalg.eigvalsh(np.asarray(posterior.filtered_covariances))
+    floor = -8 * np.finfo(np.float32).eps
+    assert np.all(np.isfinite(eigenvalues))
+    assert np.all(eigenvalues >= floor)
 
 
 def test_unscented_nondefault_rule_matches_scalar_oracle():

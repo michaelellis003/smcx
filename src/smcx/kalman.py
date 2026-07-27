@@ -410,9 +410,15 @@ def _prepare_nonlinear_filter(
     observation_covariance: Shaped[Array, "*observation_covariance_shape"],
     emissions: Shaped[Array, "*emissions_shape"],
     *,
-    state_covariances_positive_definite: bool,
+    initial_covariance_positive_definite: bool,
 ) -> _NonlinearFilterSetup:
-    """Validate arrays shared by the extended and unscented filters."""
+    """Validate arrays shared by the extended and unscented filters.
+
+    Only covariances a filter actually factors demand positive
+    definiteness: the unscented filter factors the prior (and, per
+    step, the predicted covariance), never the transition covariance,
+    so the transition domain is PSD for both nonlinear filters.
+    """
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
         raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
     if emissions.ndim != 2 or emissions.shape[0] == 0:
@@ -456,12 +462,12 @@ def _prepare_nonlinear_filter(
     _check_covariance(
         initial_covariance,
         "initial_covariance",
-        positive_definite=state_covariances_positive_definite,
+        positive_definite=initial_covariance_positive_definite,
     )
     _check_covariance(
         transition_covariance,
         "transition_covariance",
-        positive_definite=state_covariances_positive_definite,
+        positive_definite=False,
     )
     _check_covariance(
         observation_covariance,
@@ -495,6 +501,14 @@ def _scaled_unscented_rule(
     if state_dim + kappa <= 0.0:
         raise ValueError("state_dim + kappa must be greater than zero")
     alpha_squared = alpha * alpha
+    # This bound is the exact PSD guarantee, not a heuristic: with
+    # s = alpha**2 * (d + kappa), it equals s + d*(beta - alpha**2)
+    # >= 0, and Cauchy-Schwarz over the 2d paired sigma deltas gives
+    # sum(dd^T) >= (1/(2d)) * (sum d)(sum d)^T, so the paired moment
+    # dominates the w**2 * (beta - alpha**2) rank-one correction on
+    # exactly this domain. beta < alpha**2 (a subtractive rank-one
+    # weight) is therefore safe here; do not "fix" this to
+    # beta >= alpha**2.
     if alpha_squared * kappa + state_dim * beta < 0.0:
         raise ValueError(
             "alpha**2 * kappa + state_dim * beta must be nonnegative"
@@ -1231,7 +1245,7 @@ def extended_kalman_filter(
         transition_covariance,
         observation_covariance,
         emissions,
-        state_covariances_positive_definite=False,
+        initial_covariance_positive_definite=False,
     )
     num_timesteps = setup.num_timesteps
     observation_dim = setup.observation_dim
@@ -1437,12 +1451,19 @@ def unscented_kalman_filter(
             invalid, or a concrete covariance is outside its domain.
 
     Note:
-        Arrays must share a float32 or float64 dtype. Every covariance must
-        be finite, symmetric, and positive definite because the UKF takes
-        state and innovation Cholesky factors. Value checks run eagerly and
-        are skipped for traced arrays. Nonzero subnormal entries are rejected,
-        and every covariance must yield a finite, positive-diagonal factor on
-        the active backend.
+        Arrays must share a float32 or float64 dtype. The initial and
+        observation covariances must be finite, symmetric, and positive
+        definite because the UKF factors them directly. The transition
+        covariance must be finite, symmetric, and positive semidefinite:
+        it is never factored itself, but each predicted covariance
+        (sigma-point spread plus transition covariance) is, so with a
+        rank-deficient transition covariance the propagated spread must
+        keep the predicted covariance positive definite — under eager
+        execution a violation surfaces as a factorization error, under
+        ``jax.jit`` as NaN output. Value checks run eagerly and are
+        skipped for traced arrays. Nonzero subnormal entries are
+        rejected, and every checked covariance must yield a finite,
+        positive-diagonal factor on the active backend.
         Missing observations are not supported. Smaller ``alpha`` values may
         improve local quadrature but are more cancellation-prone in float32.
 
@@ -1460,7 +1481,7 @@ def unscented_kalman_filter(
         transition_covariance,
         observation_covariance,
         emissions,
-        state_covariances_positive_definite=True,
+        initial_covariance_positive_definite=True,
     )
     rule = _scaled_unscented_rule(
         setup.state_dim,
