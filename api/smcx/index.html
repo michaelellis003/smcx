@@ -1150,6 +1150,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#smcx.param_posterior_predictive_sample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        param_posterior_predictive_sample
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#smcx.param_weighted_mean" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2219,6 +2230,17 @@
     <span class="md-ellipsis">
       
         normalize
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.param_posterior_predictive_sample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        param_posterior_predictive_sample
       
     </span>
   </a>
@@ -7921,6 +7943,230 @@ with at least float32 precision.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="smcx.param_posterior_predictive_sample" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">param_posterior_predictive_sample</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">posterior</span><span class="p">,</span> <span class="n">transition_sampler</span><span class="p">,</span> <span class="n">emission_sampler</span><span class="p">,</span> <span class="n">num_samples</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">future_inputs</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Draw joint state-parameter one-step posterior predictions.</p>
+<p>Each state and parameter pair is resampled with one shared ancestor.
+The selected static parameter is passed to both model callbacks:</p>
+<div class="arithmatex">\[
+(x_t, \phi) \sim p(x_t, \phi \mid y_{1:t}),\qquad
+x_{t+1} \sim p(x_{t+1} \mid x_t, \phi, u_{t+1}),\qquad
+y_{t+1} \sim p(y_{t+1} \mid x_{t+1}, \phi, u_{t+1}).
+\]</div>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>key</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="PRNGKeyT = PRNGKeyArray
+
+  
+      module-attribute
+   (smcx.types.PRNGKeyT)" href="types/#smcx.types.PRNGKeyT">PRNGKeyT</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>JAX PRNG key.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>posterior</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="LiuWestPosterior (smcx.containers.LiuWestPosterior)" href="containers/#smcx.containers.LiuWestPosterior">LiuWestPosterior</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Liu-West posterior with aligned dense state and parameter
+particle histories.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>transition_sampler</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParamTransitionSampler (smcx.types.ParamTransitionSampler)" href="types/#smcx.types.ParamTransitionSampler">ParamTransitionSampler</a> | <a class="autorefs autorefs-internal" title="ParamTransitionSamplerWithInput (smcx.types.ParamTransitionSamplerWithInput)" href="types/#smcx.types.ParamTransitionSamplerWithInput">ParamTransitionSamplerWithInput</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Function
+<code>(key, state, params[, input_t]) -&gt; state</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>emission_sampler</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="ParamEmissionSampler (smcx.types.ParamEmissionSampler)" href="types/#smcx.types.ParamEmissionSampler">ParamEmissionSampler</a> | <a class="autorefs autorefs-internal" title="ParamEmissionSamplerWithInput (smcx.types.ParamEmissionSamplerWithInput)" href="types/#smcx.types.ParamEmissionSamplerWithInput">ParamEmissionSamplerWithInput</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Function
+<code>(key, state, params[, input_t]) -&gt; emission</code> returning a
+scalar or nonempty vector. Scalars become length-one vectors.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>num_samples</code>
+            </td>
+            <td>
+                  <code><span title="smcx.diagnostics._IntegerArgument">_IntegerArgument</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Number of predictive draws per retained row.
+Defaults to the number of particles.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>future_inputs</code>
+            </td>
+            <td>
+                  <code><span title="smcx.types.InputSequence">InputSequence</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional rank-one or rank-two input array with one
+row per retained posterior row. Row <code>t</code> is <span class="arithmatex">\(u_{t+1}\)</span> and
+reaches both callbacks after <code>params</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Predictive samples with shape</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>(ntime, num_samples, emission_dim)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The state history is not a dense floating array.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The sample count, posterior histories, future inputs,
+transition output, or emission output violate their contracts.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="references" open>
+  <summary>References</summary>
+  <p>Liu, J., and West, M. (2001). Combined parameter and state
+estimation in simulation-based filtering.
+https://doi.org/10.1007/978-1-4757-3437-9_10</p>
+<p>Carvalho, C. M., Johannes, M. S., Lopes, H. F., and Polson, N. G.
+(2010). Particle learning and smoothing.
+https://doi.org/10.1214/10-STS325</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="smcx.param_weighted_mean" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">param_weighted_mean</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span></code>
 
@@ -8605,6 +8851,32 @@ input-aware callback protocols.</p>
 state is malformed, future inputs are misaligned, the transition
 changes its PyTree contract, or the emission is not a scalar or
 nonempty vector.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Warns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code>FutureWarning</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Passing a <code>LiuWestPosterior</code> ignores
+<code>filtered_params</code>. Replace this call with
+<code>param_posterior_predictive_sample</code> before smcx 2.0, when
+parameter-ignoring calls become errors.</p>
               </div>
             </td>
           </tr>
