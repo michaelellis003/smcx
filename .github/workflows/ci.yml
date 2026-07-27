@@ -151,6 +151,29 @@ jobs:
       - name: Check lockfile is up to date
         run: uv lock --check
 
+  # Declared dependency floors are contractual: this leg resolves every
+  # direct dependency to its lowest satisfiable version and runs the
+  # full suite there. The universal resolution keeps the metal extra in
+  # the graph, so jax's effective floor is the one jax-mps pins.
+  pytest-lowest-bounds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Setup uv
+        uses: ./.github/actions/setup-uv
+        with:
+          # The oldest supported interpreter is the natural floor leg.
+          python-version: "3.11"
+
+      - name: Sync lowest satisfiable direct dependencies
+        run: uv sync --resolution lowest-direct --all-extras
+
+      - name: Run tests
+        run: uv run --no-sync pytest -v --durations=0
+
   release-control:
     permissions:
       actions: read
@@ -372,6 +395,7 @@ jobs:
       - ty-check
       - license-headers
       - pytest
+      - pytest-lowest-bounds
       - coverage
       - lock-check
       - release-control
