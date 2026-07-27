@@ -12,7 +12,10 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded runs only on pull requests. A canceled main run
+  # never reports success, so the Release workflow it should trigger
+  # silently folds into the next merge; main runs must all complete.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ruff-lint:
