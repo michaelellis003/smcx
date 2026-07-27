@@ -1550,11 +1550,12 @@ density <span class="arithmatex">\(\log f\)</span> with at least float32 precisi
                 <code>emissions</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]</code>
+                  <code><span title="smcx.types.EmissionSequence">EmissionSequence</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observations with leading time dimension.</p>
+                <p>Scalar <code>(T,)</code> or vector <code>(T, D)</code> observations.
+Rank-one data become <code>(T, 1)</code>; dtype is preserved.</p>
               </div>
             </td>
             <td>
@@ -1726,7 +1727,7 @@ propagates).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Inputs or the numeric threshold are malformed, a
+                <p>Observations, inputs, or the threshold are malformed, a
 criterion result is not a scalar Boolean, the initial state tree
 is empty or has a wrong leading axis, a proposal changes its
 state contract, or a log-density callback output is malformed.</p>

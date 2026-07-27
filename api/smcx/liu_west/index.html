@@ -1576,11 +1576,12 @@ kernel arithmetic is promoted to float32, then cast back.</p>
                 <code>emissions</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]</code>
+                  <code><span title="smcx.types.EmissionSequence">EmissionSequence</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observed emissions, shape <code>(T, D)</code>.</p>
+                <p>Scalar <code>(T,)</code> or vector <code>(T, D)</code> observations.
+Rank-one data become <code>(T, 1)</code>; dtype is preserved.</p>
               </div>
             </td>
             <td>
@@ -1798,9 +1799,9 @@ propagates).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Initializer selection, inputs, particle count, shrinkage,
-the numeric threshold, callback output, or a criterion result is
-structurally invalid.</p>
+                <p>Initializer selection, observations, inputs, particle
+count, shrinkage, threshold, callback output, or criterion result
+is structurally invalid.</p>
               </div>
             </td>
           </tr>

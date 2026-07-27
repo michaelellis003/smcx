@@ -1500,8 +1500,9 @@ structure, leaf shapes, and dtypes remain fixed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observation array with shape <code>(T, emission_dim)</code> and
-at least one row.</p>
+                <p>Scalar <code>(T,)</code> or vector <code>(T, emission_dim)</code>
+observations. Rank-one data become <code>(T, 1)</code>; dtype is
+preserved.</p>
               </div>
             </td>
             <td>

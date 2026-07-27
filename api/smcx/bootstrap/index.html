@@ -1580,11 +1580,12 @@ argument) internally.</p>
                 <code>emissions</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]</code>
+                  <code><span title="smcx.types.EmissionSequence">EmissionSequence</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observed emissions, shape <code>(T, D)</code>.</p>
+                <p>Scalar <code>(T,)</code> or vector <code>(T, D)</code> observations.
+Rank-one data become <code>(T, 1)</code>; dtype is preserved.</p>
               </div>
             </td>
             <td>
@@ -1780,7 +1781,7 @@ propagates).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Inputs or the numeric threshold are malformed, a
+                <p>Observations, inputs, or the threshold are malformed, a
 criterion result is not a scalar Boolean, the initial state tree
 is empty or has a wrong leading axis, a transition changes its
 state contract, or an observation callback output is malformed.</p>
@@ -1878,11 +1879,12 @@ scalar with at least float32 precision.</p>
                 <code>first_emission</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; emission_dim&#39;]</code>
+                  <code><span title="smcx.types.EmissionValue">EmissionValue</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observation <code>y[0]</code>.</p>
+                <p>Scalar or vector observation <code>y[0]</code>. Scalars
+reach callbacks as length-one vectors; dtype is preserved.</p>
               </div>
             </td>
             <td>
@@ -1963,7 +1965,8 @@ scalar with at least float32 precision.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The particle count or sampled particle cloud is invalid.</p>
+                <p>The observation, particle count, or sampled particle
+cloud is invalid.</p>
               </div>
             </td>
           </tr>
@@ -2086,11 +2089,12 @@ scalar with at least float32 precision.</p>
                 <code>emission_t</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; emission_dim&#39;]</code>
+                  <code><span title="smcx.types.EmissionValue">EmissionValue</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Current observation <code>y[t]</code>.</p>
+                <p>Current scalar or vector observation <code>y[t]</code>. Scalars
+reach callbacks as length-one vectors; dtype is preserved.</p>
               </div>
             </td>
             <td>
@@ -2188,8 +2192,8 @@ resampling; values above one force it at every update.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The threshold, checkpoint, or propagated state is
-malformed.</p>
+                <p>The observation, threshold, checkpoint, or propagated
+state is malformed.</p>
               </div>
             </td>
           </tr>
@@ -2318,11 +2322,12 @@ scalar with at least float32 precision.</p>
                 <code>emissions_chunk</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]</code>
+                  <code><span title="smcx.types.EmissionSequence">EmissionSequence</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Consecutive observations after the checkpoint.</p>
+                <p>Consecutive scalar <code>(T,)</code> or vector
+<code>(T, emission_dim)</code> observations after the checkpoint.</p>
               </div>
             </td>
             <td>
