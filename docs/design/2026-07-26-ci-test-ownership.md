@@ -17,8 +17,10 @@ squash merge, and generated release commit.
 Most of the CPU increase was concentrated in diagnostics and tempering. One
 tempering regression requested an accepted target near the float32 boundary,
 then asserted that the resulting schedule had exactly 1,356 stages. It cost
-44 seconds on hosted macOS CPU and 116–123 seconds on hosted Linux while
-checking an internal numerical schedule rather than a promised result.
+50.82 seconds on macOS CPU, 85.50 seconds on Python 3.13, and 126.27 seconds
+on Python 3.11 in
+[PR #230 CI](https://github.com/michaelellis003/smcx/actions/runs/30227166812)
+while checking an internal numerical schedule rather than a promised result.
 
 CI setup is not the runtime bottleneck, but an unpinned `uv` installer also
 caused an unrelated transient failure while resolving its latest release.
@@ -49,10 +51,10 @@ caused an unrelated transient failure while resolving its latest release.
 ## Consequences
 
 The replacement preserves the meaningful raised-budget behavior while taking
-seconds rather than minutes. Across the existing PR, main, and release-commit
-cycle, it avoids roughly 22 runner-minutes without reducing contract or
-platform coverage. Pinning the installer makes setup reproducible but is not
-presented as a test-runtime optimization.
+seconds rather than minutes. It removes the three measured per-leg costs
+above from each full workflow, and coverage execution also benefits, without
+reducing contract or platform coverage. Pinning the installer makes setup
+reproducible but is not presented as a test-runtime optimization.
 
 Future CI reductions must identify the contract owner before changing a test.
 Moment tests retain the repository's derived five-estimator-standard-error
