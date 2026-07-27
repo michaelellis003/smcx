@@ -8409,7 +8409,7 @@ or the posterior retains only its final particle cloud.</p>
 
 
 <h3 id="smcx.posterior_predictive_sample" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">posterior_predictive_sample</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">posterior</span><span class="p">,</span> <span class="n">transition_sampler</span><span class="p">,</span> <span class="n">emission_sampler</span><span class="p">,</span> <span class="n">num_samples</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">posterior_predictive_sample</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">posterior</span><span class="p">,</span> <span class="n">transition_sampler</span><span class="p">,</span> <span class="n">emission_sampler</span><span class="p">,</span> <span class="n">num_samples</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">future_inputs</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h3>
 
@@ -8424,9 +8424,10 @@ or the posterior retains only its final particle cloud.</p>
 <li>Draw an emission from <code>emission_sampler</code>.</li>
 </ol>
 <p>This gives iid samples from the posterior predictive
-<span class="arithmatex">\(p(y_{t+1} \mid y_{1:t})\)</span>, which can be compared with the actual
-observation <span class="arithmatex">\(y_{t+1}\)</span> for posterior predictive
-checking (Gelman et al., 2013, ch. 6).</p>
+<span class="arithmatex">\(p(y_{t+1} \mid y_{1:t}, u_{t+1})\)</span>, which can be compared with the actual
+observation <span class="arithmatex">\(y_{t+1}\)</span> for posterior predictive checking (Gelman et al.,
+2013, ch. 6). When <code>future_inputs</code> is supplied, row <code>t</code> reaches both
+the transition from retained filtering row <code>t</code> and its emission.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -8481,12 +8482,12 @@ checking (Gelman et al., 2013, ch. 6).</p>
                 <code>transition_sampler</code>
             </td>
             <td>
-                  <code><a class="autorefs autorefs-internal" title="TransitionSampler (smcx.types.TransitionSampler)" href="types/#smcx.types.TransitionSampler">TransitionSampler</a></code>
+                  <code><a class="autorefs autorefs-internal" title="TransitionSampler (smcx.types.TransitionSampler)" href="types/#smcx.types.TransitionSampler">TransitionSampler</a> | <a class="autorefs autorefs-internal" title="TransitionSamplerWithInput (smcx.types.TransitionSamplerWithInput)" href="types/#smcx.types.TransitionSamplerWithInput">TransitionSamplerWithInput</a></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Function <code>(key, state) -&gt; state</code>. <code>state</code>
-may be a latent-state PyTree.</p>
+                <p>Function <code>(key, state[, input_t]) -&gt; state</code>.
+<code>state</code> may be a latent-state PyTree.</p>
               </div>
             </td>
             <td>
@@ -8498,13 +8499,14 @@ may be a latent-state PyTree.</p>
                 <code>emission_sampler</code>
             </td>
             <td>
-                  <code><a class="autorefs autorefs-internal" title="EmissionSampler (smcx.types.EmissionSampler)" href="types/#smcx.types.EmissionSampler">EmissionSampler</a></code>
+                  <code><a class="autorefs autorefs-internal" title="EmissionSampler (smcx.types.EmissionSampler)" href="types/#smcx.types.EmissionSampler">EmissionSampler</a> | <a class="autorefs autorefs-internal" title="EmissionSamplerWithInput (smcx.types.EmissionSamplerWithInput)" href="types/#smcx.types.EmissionSamplerWithInput">EmissionSamplerWithInput</a></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Function <code>(key, state) -&gt; emission</code> accepting
-the same state PyTree and returning a scalar or nonempty vector.
-Scalars become length-one vectors; dtype is preserved.</p>
+                <p>Function <code>(key, state[, input_t]) -&gt; emission</code>
+accepting the same state PyTree and returning a scalar or
+nonempty vector. Scalars become length-one vectors; dtype is
+preserved.</p>
               </div>
             </td>
             <td>
@@ -8522,6 +8524,25 @@ Scalars become length-one vectors; dtype is preserved.</p>
               <div class="doc-md-description">
                 <p>Number of predictive draws per time step.
 Defaults to the number of particles.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>future_inputs</code>
+            </td>
+            <td>
+                  <code><span title="smcx.types.InputSequence">InputSequence</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional rank-one or rank-two input array with one
+row per retained posterior row. Row <code>t</code> is <span class="arithmatex">\(u_{t+1}\)</span>, not the
+input used to filter row <code>t</code>. Its presence selects the
+input-aware callback protocols.</p>
               </div>
             </td>
             <td>
@@ -8581,8 +8602,9 @@ Defaults to the number of particles.</p>
             <td>
               <div class="doc-md-description">
                 <p><code>num_samples</code> is not a positive integer, the posterior
-state is malformed, the transition changes its PyTree contract,
-or the emission is not a scalar or nonempty vector.</p>
+state is malformed, future inputs are misaligned, the transition
+changes its PyTree contract, or the emission is not a scalar or
+nonempty vector.</p>
               </div>
             </td>
           </tr>

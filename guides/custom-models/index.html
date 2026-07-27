@@ -704,6 +704,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#align-posterior-predictions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Align posterior predictions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#keep-the-two-pytree-roles-separate" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1500,6 +1511,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#align-posterior-predictions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Align posterior predictions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#keep-the-two-pytree-roles-separate" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2014,6 +2036,14 @@ The smcx-facing input is always the final callback argument.</p>
 <code>make_input_aware_bootstrap_callbacks</code> when configuring the run. Keeping both
 forms visible prevents an ambiguous runtime dispatch and makes input alignment
 part of the model code.</p>
+<h2 id="align-posterior-predictions">Align posterior predictions</h2>
+<p><code>posterior_predictive_sample</code> draws one step beyond every retained filtering
+row. For an input-aware model, pass <code>future_inputs</code> with the same number of
+rows as the retained particle history. <code>future_inputs[t]</code> reaches both the
+transition out of filtered row <code>t</code> and the resulting emission, so it denotes
+<span class="arithmatex">\(u_{t+1}\)</span> rather than the input that produced row <code>t</code>. A final-only posterior
+therefore needs one future input even though its evidence trace still covers
+the complete observed series.</p>
 <h2 id="keep-the-two-pytree-roles-separate">Keep the two PyTree roles separate</h2>
 <p>There are two useful, different PyTrees at this boundary.</p>
 <p>The <strong>latent-state PyTree</strong> is one particle's evolving state. Bootstrap,
