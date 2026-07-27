@@ -1,9 +1,8 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Long-horizon evidence regressions for one-shot particle filters."""
+"""Evidence-accumulation regressions for one-shot particle filters."""
 
-import math
 import os
 import subprocess
 import sys
@@ -136,8 +135,11 @@ def _run_filter(
     "filter_name",
     ["bootstrap", "auxiliary", "guided", "liu-west"],
 )
-def test_one_shot_filter_compensates_long_horizon_evidence(filter_name):
-    emissions = jnp.full((10_000, 1), -100.003, dtype=jnp.float32)
+def test_one_shot_filter_compensates_float32_cancellation(filter_name):
+    emissions = jnp.asarray(
+        [2**24, 1, -(2**24)],
+        dtype=jnp.float32,
+    )[:, None]
 
     with jax.enable_x64(False):
         posterior = _run_filter(filter_name, emissions)
@@ -146,19 +148,9 @@ def test_one_shot_filter_compensates_long_horizon_evidence(filter_name):
     np.testing.assert_array_equal(
         posterior.log_evidence_increments, expected_increments
     )
-    # math.fsum is an independent higher-precision oracle. Cast once to the
-    # public f32 result dtype. One ULP at the final total admits the rounding
-    # of the retained correction back into one public f32 scalar.
-    reference = np.asarray(
-        math.fsum(map(float, expected_increments)),
-        dtype=np.float32,
-    )
-    final_ulp = float(abs(np.spacing(reference)))
-    np.testing.assert_allclose(
+    np.testing.assert_array_equal(
         posterior.marginal_loglik,
-        reference,
-        rtol=0.0,
-        atol=final_ulp,
+        np.asarray(1.0, dtype=np.float32),
     )
 
 
