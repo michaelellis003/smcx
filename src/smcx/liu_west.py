@@ -514,7 +514,15 @@ def liu_west_filter(
                 The shrinkage parameter has no generative interpretation:
                 it introduces artificial dynamics into the parameter
                 evolution that do not correspond to any probabilistic
-                model. Results can be sensitive to this choice. Run the
+                model. The shrink-and-jitter move applies at every
+                observation, whether or not that step resamples. Each
+                move preserves the weighted cloud's mean and covariance
+                (the kernel is variance-matched), but on non-resampled
+                steps it acts outside the auxiliary-selection derivation
+                of Liu and West (2001), and with
+                ``resampling_threshold=0`` the parameter cloud evolves
+                by these uncorrected artificial dynamics for the whole
+                series. Results can be sensitive to this choice. Run the
                 filter under several values (e.g. 0.95, 0.975, 0.99) and
                 report the range of posterior and evidence estimates.
         resampling_fn: Resampling algorithm.  Defaults to systematic.
