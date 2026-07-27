@@ -1595,6 +1595,13 @@ automatic-differentiation policy. This example mixes both forms:</p>
 shape <code>(observation_dim, observation_dim)</code> or
 <code>(ntime, observation_dim, observation_dim)</code>. All arrays and callback outputs
 share one float32 or float64 dtype.</p>
+<p>All covariance arrays are finite and symmetric. The EKF permits positive
+semidefinite prior and transition covariances, including deterministic state
+components, and requires a positive-definite observation covariance. The UKF
+requires all three covariances to be positive definite because it also takes
+Cholesky square roots of state covariances. These value checks run at eager
+Python entry and are skipped when the arrays are tracers inside a JAX
+transformation.</p>
 <p>With <code>inputs=...</code>, every supplied callback accepts <code>(state, input_t)</code>.
 <code>inputs[t]</code> reaches the observation at <code>t</code> and the transition into <code>t</code>;
 <code>inputs[0]</code> does not transform the supplied prior. A rank-one input sequence

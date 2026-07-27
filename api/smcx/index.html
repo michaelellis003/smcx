@@ -5990,7 +5990,7 @@ transition into <code>t</code>; input zero does not alter the prior.</p>
             <td>
               <div class="doc-md-description">
                 <p>An array or callback output has an invalid shape or
-dtype.</p>
+dtype, or a concrete covariance is outside its domain.</p>
               </div>
             </td>
           </tr>
@@ -6000,9 +6000,11 @@ dtype.</p>
 
 <details class="note" open>
   <summary>Note</summary>
-  <p>Arrays must share a float32 or float64 dtype. Covariances must be
-finite, symmetric, and positive definite. Missing observations are
-not supported.</p>
+  <p>Arrays must share a float32 or float64 dtype. Initial and transition
+covariances must be finite, symmetric, and positive semidefinite;
+observation covariances must be finite, symmetric, and positive
+definite. Value checks run eagerly and are skipped for traced
+arrays. Missing observations are not supported.</p>
 </details>
 
 <details class="references" open>
@@ -6630,7 +6632,8 @@ alter the supplied prior.</p>
             <td>
               <div class="doc-md-description">
                 <p>An array has an invalid shape or dtype, timed terms
-are misaligned, or control matrices are supplied without inputs.</p>
+are misaligned, a concrete covariance is outside its domain,
+or control matrices are supplied without inputs.</p>
               </div>
             </td>
           </tr>
@@ -6640,9 +6643,11 @@ are misaligned, or control matrices are supplied without inputs.</p>
 
 <details class="note" open>
   <summary>Note</summary>
-  <p>Arrays must use float32 or float64. Covariances must be finite,
-symmetric, and positive definite. Missing observations are not
-supported.</p>
+  <p>Arrays must use float32 or float64. Initial and transition
+covariances must be finite, symmetric, and positive semidefinite;
+observation covariances must be finite, symmetric, and positive
+definite. Value checks run eagerly and are skipped for traced
+arrays. Missing observations are not supported.</p>
 </details>
 
     </div>
@@ -9095,7 +9100,7 @@ time-varying array with leading length <code>ntime - 1</code>. Entry
             <td>
               <div class="doc-md-description">
                 <p>The posterior or transition array has an invalid shape
-or dtype.</p>
+or dtype, or a concrete covariance is outside its domain.</p>
               </div>
             </td>
           </tr>
@@ -9105,8 +9110,11 @@ or dtype.</p>
 
 <details class="note" open>
   <summary>Note</summary>
-  <p>Predicted covariances must be finite, symmetric, and positive
-definite.</p>
+  <p>Filtered covariances and the first predicted covariance must be
+finite, symmetric, and positive semidefinite. Positive-time
+predicted covariances must be finite, symmetric, and positive
+definite because the backward recursion factors them. Value checks
+run eagerly and are skipped for traced arrays.</p>
 </details>
 
     </div>
@@ -10620,7 +10628,7 @@ transition into <code>t</code>; input zero does not alter the prior.</p>
             <td>
               <div class="doc-md-description">
                 <p>An array, callback output, or scaled-rule parameter is
-invalid.</p>
+invalid, or a concrete covariance is outside its domain.</p>
               </div>
             </td>
           </tr>
@@ -10630,10 +10638,12 @@ invalid.</p>
 
 <details class="note" open>
   <summary>Note</summary>
-  <p>Arrays must share a float32 or float64 dtype. Covariances must be
-finite, symmetric, and positive definite. Missing observations are
-not supported. Smaller <code>alpha</code> values may improve local quadrature
-but are more cancellation-prone in float32.</p>
+  <p>Arrays must share a float32 or float64 dtype. Every covariance must
+be finite, symmetric, and positive definite because the UKF takes
+state and innovation Cholesky factors. Value checks run eagerly and
+are skipped for traced arrays. Missing observations are not supported.
+Smaller <code>alpha</code> values may improve local quadrature but are more
+cancellation-prone in float32.</p>
 </details>
 
 <details class="references" open>

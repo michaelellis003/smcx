@@ -1536,6 +1536,10 @@ rerunning the model:</p>
 <p>The filter and smoother are independent pieces: a compatible
 <code>GaussianFilterPosterior</code> produced by research code can be passed to
 <code>rts_smoother</code> directly.</p>
+<p>The linear filter permits finite symmetric positive-semidefinite initial and
+transition covariances, while its observation covariance must be positive
+definite. The smoother also requires each positive-time predicted covariance
+to be positive definite because the backward recursion factors it.</p>
 <h2 id="run-a-particle-filter">Run a particle filter</h2>
 <p>The bootstrap filter proposes from the transition and weights by the
 observation density.</p>
