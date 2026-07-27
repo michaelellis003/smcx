@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.19 (2026-07-27)
+
+### Bug Fixes
+
+- **api**: Align remaining observation arrays
+  ([#237](https://github.com/michaelellis003/smcx/pull/237),
+  [`0854ec1`](https://github.com/michaelellis003/smcx/commit/0854ec16efb96f3595c642204862aa70480e8571))
+
+
 ## v1.14.18 (2026-07-27)
 
 ### Bug Fixes
