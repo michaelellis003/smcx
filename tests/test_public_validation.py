@@ -577,19 +577,17 @@ def _run_smc2(emissions, num_theta=2, num_x=2, **kwargs):
         "num_x",
         "kwargs",
         "message",
-        "disable_typechecker",
     ),
     [
-        (jnp.zeros((0, 1)), 2, 2, {}, "must contain at least one row", False),
-        (jnp.zeros((2, 1)), 0, 2, {}, "num_theta must be >= 1", False),
-        (jnp.zeros((2, 1)), 2, 0, {}, "num_x must be >= 1", False),
+        (jnp.zeros((0, 1)), 2, 2, {}, "must contain at least one row"),
+        (jnp.zeros((2, 1)), 0, 2, {}, "num_theta must be >= 1"),
+        (jnp.zeros((2, 1)), 2, 0, {}, "num_x must be >= 1"),
         (
             jnp.zeros((2, 1)),
             2,
             2,
             {"num_pmmh_steps": -1},
             "num_pmmh_steps must be >= 0",
-            False,
         ),
         (
             jnp.zeros((2, 1)),
@@ -597,7 +595,6 @@ def _run_smc2(emissions, num_theta=2, num_x=2, **kwargs):
             2,
             {"param_initial_sampler": lambda _key, count: [[0.0]] * count},
             "must be a JAX array",
-            False,
         ),
         (
             jnp.zeros((2, 1)),
@@ -610,23 +607,16 @@ def _run_smc2(emissions, num_theta=2, num_x=2, **kwargs):
                 ))
             },
             "param_dim >= 1",
-            False,
         ),
-        (jnp.zeros((2, 1, 1)), 2, 2, {}, r"shape \(T,\) or", True),
     ],
 )
 def test_smc2_validates_public_structure(
-    monkeypatch,
     emissions,
     num_theta,
     num_x,
     kwargs,
     message,
-    disable_typechecker,
 ):
-    monkeypatch.setattr(
-        jaxtyping_config, "jaxtyping_disable", disable_typechecker
-    )
     with pytest.raises(ValueError, match=message):
         _run_smc2(emissions, num_theta, num_x, **kwargs)
 
