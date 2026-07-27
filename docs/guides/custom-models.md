@@ -151,13 +151,9 @@ accept either a scalar or vector observation and apply the same
 canonicalization. Gaussian filters also accept scalar observation sequences,
 but retain their documented float32/float64 requirements.
 
-Callback-driven inputs likewise preserve model-owned dtype: `(T,)` becomes
-`(T, 1)`, `(T, input_dim)` is preserved, and empty input dimensions are
-rejected. Incremental bootstrap calls accept either a scalar or vector input
-and apply the same canonicalization. Code that relied on the formerly
-undocumented scalar callback shape at those incremental boundaries must now
-use the length-one vector. `simulate` and posterior-predictive sampling
-likewise turn scalar callback emissions into length-one vectors.
+Callback inputs preserve dtype: `(T,)` becomes `(T, 1)`; rank-two inputs are
+unchanged and empty widths rejected. Callers relying on incremental scalar
+callback shapes must use length-one vectors; sampled emissions do likewise.
 
 Log-weight normalization and ESS are invariant to a finite constant offset
 whenever the relative differences remain representable in the input dtype.

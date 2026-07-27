@@ -187,14 +187,13 @@ def bootstrap_init(
         first_emission: Scalar or vector observation ``y[0]``. Scalars
             reach callbacks as length-one vectors; dtype is preserved.
         num_particles: Number of particles.
-        input_t: Optional scalar or vector ``inputs[0]`` passed to both
-            callbacks as a vector.
+        input_t: Optional scalar/vector ``inputs[0]`` passed to both callbacks.
 
     Returns:
         Normalized checkpoint plus identity, non-resampled time-zero details.
 
     Raises:
-        ValueError: The observation, particle count, or sampled particle
+        ValueError: The observation, input, particle count, or sampled particle
             cloud is invalid.
         DegenerateWeightsError: Initial importance weights cannot normalize.
     """
@@ -373,14 +372,13 @@ def bootstrap_step(
         resampling_fn: Particle resampling algorithm.
         resampling_threshold: Finite, nonnegative ESS fraction. Zero disables
             resampling; values above one force it at every update.
-        input_t: Optional scalar or vector ``inputs[t]`` reaching the
-            transition and density as a vector.
+        input_t: Optional scalar/vector ``inputs[t]`` reaching both callbacks.
 
     Returns:
         Updated normalized checkpoint and current-step diagnostics.
 
     Raises:
-        ValueError: The observation, threshold, checkpoint, or propagated
+        ValueError: The observation, input, threshold, checkpoint, or propagated
             state is malformed.
         DegenerateWeightsError: Checkpoint evidence is nonfinite or updated
             importance weights cannot normalize.
@@ -652,9 +650,9 @@ def bootstrap_filter(
             Numeric values must be finite and nonnegative; zero disables
             resampling and values above one force it at every update.
             Time is the zero-based emission index from 1 through T - 1.
-        inputs: Optional exogenous inputs with shape ``(T, input_dim)``
-            or ``(T,)`` and a nonempty event. The latter becomes
-            ``(T, 1)``. ``inputs[0]`` reaches the initial sampler and
+        inputs: Optional nonempty inputs shaped ``(T,)`` or ``(T, input_dim)``.
+            Rank-one inputs become ``(T, 1)``; ``inputs[0]`` reaches the
+            initial sampler and
             observation callback;
             ``inputs[t]`` then reaches the transition into t and the
             observation at t.
