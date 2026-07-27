@@ -6,7 +6,7 @@
 import importlib
 from collections.abc import Mapping, Sequence
 from operator import getitem
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -21,6 +21,88 @@ from smcx.resampling import systematic
 from smcx.types import PRNGKeyT
 
 _Posterior = ParticleFilterPosterior | TemperedPosterior
+
+
+class _GroupPlan(NamedTuple):
+    names: tuple[str, ...]
+    dimensions: dict[str, list[str]]
+
+
+def _plan_group(
+    values: Sequence[object],
+    particle_shape: tuple[int, ...],
+    var_names: Mapping[str, str] | None,
+    dims: Mapping[str, Sequence[str]] | None,
+    *,
+    timed: bool,
+) -> _GroupPlan:
+    """Validate one group's static PyTree schema before value operations."""
+    path_leaves, tree_def = jax.tree.flatten_with_path(values[0])
+    raw_names = tuple(
+        keystr(path, simple=True, separator=".") or "theta"
+        for path, _ in path_leaves
+    )
+    if len(raw_names) != len(set(raw_names)):
+        duplicate = next(
+            name for name in raw_names if raw_names.count(name) > 1
+        )
+        raise ValueError(
+            f"ambiguous ArviZ tree path {duplicate!r}; rename a tree key"
+        )
+    names = tuple((var_names or {}).get(name, name) for name in raw_names)
+    if len(names) != len(set(names)):
+        duplicate = next(name for name in names if names.count(name) > 1)
+        raise ValueError(
+            f"duplicate ArviZ variable name {duplicate!r}; assign unique "
+            "var_names aliases"
+        )
+
+    leaf_shapes = [tuple(cast(Array, leaf).shape) for _, leaf in path_leaves]
+    for value in values[1:]:
+        other_leaves, other_tree = jax.tree.flatten_with_path(value)
+        if other_tree != tree_def or any(
+            tuple(cast(Array, leaf).shape) != shape
+            for shape, (_, leaf) in zip(leaf_shapes, other_leaves, strict=True)
+        ):
+            raise ValueError("particle leaf shapes must match across runs")
+    prefix_rank = len(particle_shape)
+    if any(shape[:prefix_rank] != particle_shape for shape in leaf_shapes):
+        raise ValueError("particle axes must match posterior weights")
+
+    dimensions = {}
+    sizes: dict[str, int] = {}
+    sample_dims = {"chain", "draw"}
+    if timed:
+        sample_dims.add("time")
+    for name, shape in zip(names, leaf_shapes, strict=True):
+        event_shape = shape[prefix_rank:]
+        default = [f"{name}_dim_{axis}" for axis in range(len(event_shape))]
+        event_dims = list((dims or {}).get(name, default))
+        if len(event_dims) != len(event_shape):
+            raise ValueError(
+                f"dims[{name!r}] needs {len(event_shape)} event axes"
+            )
+        group_dims = ["time", *event_dims] if timed else event_dims
+        if len(event_dims) != len(set(event_dims)) or sample_dims.intersection(
+            event_dims
+        ):
+            raise ValueError(f"dims[{name!r}] must use unique dimension names")
+        for dimension, size in zip(event_dims, event_shape, strict=True):
+            previous = sizes.get(dimension)
+            if previous is not None and previous != size:
+                raise ValueError(
+                    f"dimension {dimension!r} has inconsistent sizes "
+                    f"{previous} and {size} within one ArviZ group"
+                )
+            sizes[dimension] = size
+        dimensions[name] = group_dims
+    collisions = set(names).intersection(sample_dims.union(sizes))
+    if collisions:
+        name = min(collisions)
+        raise ValueError(
+            f"ArviZ variable name {name!r} collides with a dimension"
+        )
+    return _GroupPlan(names, dimensions)
 
 
 def _host(value: object) -> np.ndarray:
@@ -67,41 +149,26 @@ def _tempering_stats(
 def _resampled_group(
     values: Sequence[object],
     indices: Array,
-    num_particles: int,
-    var_names: Mapping[str, str] | None,
-    dims: Mapping[str, Sequence[str]] | None,
+    plan: _GroupPlan,
     *,
     timed: bool,
-) -> tuple[dict[str, np.ndarray], dict[str, list[str]]]:
+) -> dict[str, np.ndarray]:
     """Resample aligned PyTree leaves into one named ArviZ group."""
     stacked = jax.tree.map(lambda *leaves: jnp.stack(leaves), *values)
-    expected = (*indices.shape[:-1], num_particles)
     leaves = jax.tree.leaves(stacked)
-    if any(leaf.shape[: len(expected)] != expected for leaf in leaves):
-        raise ValueError("particle axes must match posterior weights")
-    path_leaves, _ = jax.tree.flatten_with_path(stacked)
     group = {}
-    dimensions = {}
-    for path, particles in path_leaves:
+    gather = jax.vmap(jax.vmap(getitem)) if timed else jax.vmap(getitem)
+    for name, particles in zip(plan.names, leaves, strict=True):
         particles = cast(Array, particles)
-        gather = jax.vmap(jax.vmap(getitem)) if timed else jax.vmap(getitem)
         selected = gather(particles, indices)
         selected = jnp.swapaxes(selected, 1, 2) if timed else selected
-        path_name = keystr(path, simple=True, separator=".") or "theta"
-        name = (var_names or {}).get(path_name, path_name)
-        event_rank = particles.ndim - (3 if timed else 2)
-        default = [f"{name}_dim_{axis}" for axis in range(event_rank)]
-        event_dims = list((dims or {}).get(name, default))
-        if len(event_dims) != event_rank:
-            raise ValueError(f"dims[{name!r}] needs {event_rank} event axes")
         group[name] = _host(selected)
-        dimensions[name] = ["time", *event_dims] if timed else event_dims
-    return group, dimensions
+    return group
 
 
 def _construct_arviz(
     groups: dict[str, dict[str, np.ndarray]],
-    dimensions: dict[str, list[str]],
+    dimensions: dict[str, dict[str, list[str]]],
     attrs: dict[str, dict[str, Any]],
     diagnostics: dict[str, np.ndarray],
     diagnostic_dimensions: dict[str, list[str]],
@@ -123,19 +190,38 @@ def _construct_arviz(
     })
     if not arviz.__version__.startswith("0."):
         arviz_base: Any = importlib.import_module("arviz_base")
-        result = arviz_base.from_dict(groups, dims=dimensions, attrs=attrs)
+        result = arviz_base.from_dict(
+            {"posterior": groups["posterior"]},
+            dims=dimensions["posterior"],
+            attrs={"posterior": attrs["posterior"]},
+        )
+        for name, group in groups.items():
+            if name == "posterior":
+                continue
+            isolated = arviz_base.from_dict(
+                {name: group},
+                dims=dimensions.get(name, {}),
+            )
+            result[name] = isolated[name].to_dataset()
         result["particle_diagnostics"] = diagnostic_group
         return result
 
-    supported = dict(groups)
-    u_group = supported.pop("unconstrained_posterior", None)
     result = arviz.from_dict(
-        **supported,
-        dims=dimensions,
-        **{f"{name}_attrs": values for name, values in attrs.items()},
+        posterior=groups["posterior"],
+        dims=dimensions["posterior"],
+        posterior_attrs=attrs["posterior"],
     )
-    if u_group is not None:
-        result.add_groups({"unconstrained_posterior": u_group}, dims=dimensions)
+    for name, group in groups.items():
+        if name == "posterior":
+            continue
+        constructor_name = (
+            "posterior" if name == "unconstrained_posterior" else name
+        )
+        isolated = arviz.from_dict(
+            **{constructor_name: group},
+            dims=dimensions.get(name, {}),
+        )
+        result.add_groups({name: getattr(isolated, constructor_name)})
     result.add_groups({"particle_diagnostics": diagnostic_group})
     return result
 
@@ -158,8 +244,9 @@ def to_arviz(
         posteriors: One supported posterior or independent runs.
         key: Explicit key for equal-weight resampling.
         num_draws: Output draws per chain. Defaults to the particle count.
-        var_names: Optional tree-path to output-variable mapping.
-        dims: Optional output-variable to event-dimension mapping.
+        var_names: Optional aliases for unique, unambiguous tree paths.
+        dims: Optional variable-to-event-dimensions mapping. Each output group
+            is validated independently for consistent names and sizes.
         emissions: Optional shared observations.
         unconstrained: Optional aligned u-space particle values.
 
@@ -175,7 +262,8 @@ def to_arviz(
         TypeError: The input is empty, contains mixed posterior types, or
             contains an unsupported posterior type.
         ValueError: Draw count, particle axes, diagnostic histories,
-            unconstrained values, or named event dimensions are not aligned.
+            unconstrained values, variable names, or named event dimensions
+            are ambiguous, collide, or are not aligned.
     """
     if isinstance(posteriors, (ParticleFilterPosterior, TemperedPosterior)):
         runs = (posteriors,)
@@ -199,17 +287,40 @@ def to_arviz(
                 "to_arviz requires full particle history; rerun the filter "
                 "with store_history=True"
             )
-        log_weights = _stack(filter_runs, "filtered_log_weights")
+        ntime, num_particles = filter_runs[0].filtered_log_weights.shape
+        values = [run.filtered_particles for run in filter_runs]
+        particle_shape = (ntime, num_particles)
+        timed = True
     else:
         tempered_runs = cast(tuple[TemperedPosterior, ...], runs)
-        log_weights = _stack(tempered_runs, "log_weights")
-    num_particles = log_weights.shape[-1]
+        num_particles = tempered_runs[0].log_weights.shape[-1]
+        values = [run.particles for run in tempered_runs]
+        particle_shape = (num_particles,)
+        timed = False
     draws = num_particles if num_draws is None else num_draws
     if draws <= 0:
         raise ValueError("num_draws must be positive")
 
+    u_values = None
+    if unconstrained is not None:
+        u_values = (
+            (unconstrained,)
+            if num_chains == 1
+            else tuple(cast(Any, unconstrained))
+        )
+        if len(u_values) != num_chains:
+            raise ValueError("unconstrained must provide one value per run")
+    posterior_plan = _plan_group(
+        values, particle_shape, var_names, dims, timed=timed
+    )
+    u_plan = (
+        _plan_group(u_values, particle_shape, var_names, dims, timed=timed)
+        if u_values is not None
+        else None
+    )
+
     if isinstance(runs[0], ParticleFilterPosterior):
-        ntime = log_weights.shape[1]
+        log_weights = _stack(filter_runs, "filtered_log_weights")
         indices = jax.vmap(systematic, in_axes=(0, 0, None))(
             jr.split(key, num_chains * ntime),
             jnp.exp(log_weights.reshape(-1, num_particles)),
@@ -228,8 +339,8 @@ def to_arviz(
         }
         stat_dims = {name: ["time"] for name in stats}
         stat_dims["log_weights"] = ["time", "particle"]
-        timed = True
     else:
+        log_weights = _stack(tempered_runs, "log_weights")
         if draws == num_particles:
             indices = jnp.broadcast_to(
                 jnp.arange(num_particles), (num_chains, draws)
@@ -245,26 +356,19 @@ def to_arviz(
         }
         stat_dims = {name: ["stage"] for name in stats}
         stat_dims["log_weights"] = ["particle"]
-        timed = False
 
-    posterior_group, dimensions = _resampled_group(
-        values, indices, num_particles, var_names, dims, timed=timed
+    posterior_group = _resampled_group(
+        values, indices, posterior_plan, timed=timed
     )
     groups = {
         "posterior": posterior_group,
     }
-    if unconstrained is not None:
-        u_values = (
-            (unconstrained,)
-            if num_chains == 1
-            else tuple(cast(Any, unconstrained))
+    dimensions = {"posterior": posterior_plan.dimensions}
+    if u_values is not None and u_plan is not None:
+        groups["unconstrained_posterior"] = _resampled_group(
+            u_values, indices, u_plan, timed=timed
         )
-        if len(u_values) != num_chains:
-            raise ValueError("unconstrained must provide one value per run")
-        groups["unconstrained_posterior"], u_dims = _resampled_group(
-            u_values, indices, num_particles, var_names, dims, timed=timed
-        )
-        dimensions.update(u_dims)
+        dimensions["unconstrained_posterior"] = u_plan.dimensions
     if emissions is not None:
         groups["observed_data"] = {"emissions": _host(emissions)}
     evidence = _host(jnp.stack([run.marginal_loglik for run in runs])).tolist()

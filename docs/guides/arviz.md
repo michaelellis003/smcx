@@ -59,7 +59,12 @@ than repeated across `draw`.
 Structured particle states use their PyTree paths as variable names. Supply
 `var_names` to rename them and `dims` to label event dimensions. Values passed
 through `unconstrained=` follow the same resampling indices as the constrained
-particles.
+particles. Raw dotted paths must be unambiguous before aliases are applied,
+and aliases must resolve to unique names within each group. Variable names
+cannot shadow sample or event dimensions. Event labels must be unique within
+a variable and one size when shared in a group. Posterior and unconstrained
+schemas may differ in rank or extent; particle labels do not affect
+`observed_data`.
 
 ArviZ 0.x returns `InferenceData`; ArviZ 1.x returns `DataTree`. smcx dispatches
 to the constructor available in the installed generation:
