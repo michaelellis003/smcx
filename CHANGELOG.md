@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.17 (2026-07-27)
+
+### Bug Fixes
+
+- **reporting**: Validate ArviZ group schemas
+  ([#235](https://github.com/michaelellis003/smcx/pull/235),
+  [`b64fb62`](https://github.com/michaelellis003/smcx/commit/b64fb625e6bcfc25533b099cb2c84f2cc3558c46))
+
+
 ## v1.14.16 (2026-07-27)
 
 ### Bug Fixes
