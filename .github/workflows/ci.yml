@@ -302,6 +302,21 @@ jobs:
             exit 0
           fi
 
+          if [[ "$RUNNER_KIND" == "github-hosted" && -f "$METAL_LOG" ]] \
+            && grep -Eq \
+              'kIOGPUCommandBufferCallbackError(Hang|SubmissionsIgnored)' \
+              "$METAL_LOG"; then
+            MESSAGE="jax-mps ${JAX_MPS_VERSION} reproduced the hosted-Metal "
+            MESSAGE+='command-buffer failure quarantined only for 0.10.10. '
+            MESSAGE+='Re-evaluate under smcx#38: run its fresh-process '
+            MESSAGE+='reproducer on a physical M-series device. If upstream '
+            MESSAGE+='MLX#3880 is fixed in this release, remove the Metal '
+            MESSAGE+="containment per #38's removal gate; otherwise extend "
+            MESSAGE+='the quarantine version pin after the physical-M3 '
+            MESSAGE+='suite passes on the new lock.'
+            echo "::error title=Unquarantined jax-mps Metal failure::$MESSAGE"
+            exit 1
+          fi
           echo "Metal suite failed outside the quarantined hosted-runner case."
           exit 1
 
