@@ -122,7 +122,7 @@ def _var_reference(log_weights, ancestors):
 
 
 class TestLogMlVariance:
-    """Single-run variance estimator against reference and replicates."""
+    """Single-run variance estimator against formula and calibration."""
 
     def test_matches_reference_formula(self, key):
         """Agree with the restated reference formula on filter output."""
@@ -181,38 +181,78 @@ class TestLogMlVariance:
         with pytest.raises(ValueError, match="lag must be nonnegative"):
             log_ml_variance(post, lag=-1)
 
-    def test_calibrates_against_replicates(self, lgssm_params, lgssm_data):
-        """The multinomial single-run estimate agrees with replicated variance.
-
-        Averaged over independent runs, the final-time single-run
-        estimate must land within a factor of the empirical variance
-        of the log-ML across those runs. The factor-of-three gate is
-        loose because both sides are noisy at R=40; the point is
-        catching order-of-magnitude wrongness, not decimals.
-        """
+    def test_multinomial_calibration_uses_five_se(
+        self,
+        lgssm_data,
+    ):
+        """The single-run estimate matches replicated log-ML variance."""
         _, emissions = lgssm_data
         init, trans, log_obs = _lgssm_fns()
 
         def run(k):
-            return smcx.bootstrap_filter(
+            posterior = smcx.bootstrap_filter(
                 k,
                 init,
                 trans,
                 log_obs,
                 emissions,
-                num_particles=300,
+                num_particles=600,
                 resampling_fn=multinomial,
             )
+            return (
+                log_ml_variance(posterior)[-1],
+                posterior.marginal_loglik,
+            )
 
-        keys = jr.split(jr.PRNGKey(11), 40)
-        posts = [run(k) for k in keys]
-        singles = np.array([float(log_ml_variance(p)[-1]) for p in posts])
-        logmls = np.array([float(p.marginal_loglik) for p in posts])
+        num_replicates = 256
+        keys = jr.split(jr.PRNGKey(11), num_replicates)
+        estimates, log_mls = jax.jit(jax.vmap(run))(keys)
+        source_dtype = np.asarray(estimates).dtype
+        estimates = np.asarray(estimates, dtype=np.float64)
+        log_mls = np.asarray(log_mls, dtype=np.float64)
+        assert np.isfinite(estimates).all()
+        assert np.isfinite(log_mls).all()
+        assert (estimates > 0.0).all()
 
-        empirical = logmls.var(ddof=1)
-        mean_single = singles[np.isfinite(singles)].mean()
-        ratio = mean_single / empirical
-        assert 1 / 3 < ratio < 3, (
-            f"single-run {mean_single:.4g} vs empirical "
-            f"{empirical:.4g} (ratio {ratio:.2f})"
+        mean_estimate = estimates.mean()
+        empirical_variance = log_mls.var(ddof=1)
+        assert empirical_variance > 0.0
+        log_ratio = np.log(mean_estimate) - np.log(empirical_variance)
+
+        # For theta = log(mean(V_hat)) - log(var(log Z_hat)), the
+        # delete-one jackknife standard error is
+        # sqrt((R - 1) / R * sum((theta_i - mean(theta_i)) ** 2)).
+        sum_estimates = estimates.sum()
+        sum_log_mls = log_mls.sum()
+        sum_sq_log_mls = np.square(log_mls).sum()
+        reduced_count = num_replicates - 1
+        reduced_means = (sum_estimates - estimates) / reduced_count
+        reduced_log_ml_sums = sum_log_mls - log_mls
+        reduced_variances = (
+            sum_sq_log_mls
+            - np.square(log_mls)
+            - np.square(reduced_log_ml_sums) / reduced_count
+        ) / (reduced_count - 1)
+        assert (reduced_variances > 0.0).all()
+        delete_one = np.log(reduced_means) - np.log(reduced_variances)
+        jackknife_se = np.sqrt(
+            reduced_count
+            / num_replicates
+            * np.sum(np.square(delete_one - delete_one.mean()))
+        )
+
+        five_se = 5.0 * jackknife_se
+        assert five_se < np.log(2.0), (
+            f"calibration study cannot resolve a factor-two error: "
+            f"five SE is {five_se:.4g}"
+        )
+        # 2e-5 is the package's explicit f32/Metal arithmetic budget.
+        arithmetic_atol = (
+            2e-5
+            if source_dtype == np.dtype(np.float32)
+            else 32 * np.finfo(source_dtype).eps
+        )
+        assert abs(log_ratio) <= five_se + arithmetic_atol, (
+            f"log ratio {log_ratio:.4g} exceeds five jackknife SE "
+            f"({five_se:.4g})"
         )
