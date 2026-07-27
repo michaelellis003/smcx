@@ -39,7 +39,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 from jax import jit, lax, vmap
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float
 
 from smcx._covariance import _weighted_covariance_factor
 from smcx._numerics import _neumaier_add
@@ -117,6 +117,34 @@ def _mutation_acceptance_rate(info: object) -> Array:
     return rate
 
 
+def _is_valid_acceptance_rate(
+    rate: Float[Array, ""],
+) -> Bool[Array, ""]:
+    """Return whether a traced mutation acceptance rate is a probability."""
+    bit_width = jnp.finfo(rate.dtype).bits
+    if bit_width < 16:
+        widened_rate = rate.astype(jnp.float32)
+        return (
+            jnp.isfinite(widened_rate)
+            & (widened_rate >= 0.0)
+            & (widened_rate <= 1.0)
+        )
+    unsigned_dtype = {
+        16: jnp.uint16,
+        32: jnp.uint32,
+        64: jnp.uint64,
+    }[bit_width]
+    bits = lax.bitcast_convert_type(rate, unsigned_dtype)
+    sign_mask = jnp.asarray(
+        1 << (bit_width - 1),
+        dtype=unsigned_dtype,
+    )
+    # Arithmetic comparisons can flush a negative subnormal to zero. Inspect
+    # its sign bit while admitting the sign-only negative-zero encoding.
+    nonnegative = ((bits & sign_mask) == 0) | (bits == sign_mask)
+    return jnp.isfinite(rate) & nonnegative & (rate <= 1.0)
+
+
 def temper(
     key: PRNGKeyT,
     initial_sampler: DenseInitialSampler,
@@ -161,7 +189,9 @@ def temper(
         mutation_step_fn: Optional
             ``(key, state, tempered_logdensity_fn) -> (state, info)``
             callback. Info must expose a scalar floating
-            ``acceptance_rate``. Supply both mutation callbacks or neither.
+            ``acceptance_rate`` that is finite and in ``[0, 1]``. Stage
+            means retain that scalar's dtype. Supply both mutation callbacks
+            or neither.
         max_stages: Safety cap on the number of stages. Near-unit
             ``target_ess`` values may need a larger budget.
 
@@ -173,7 +203,8 @@ def temper(
     Raises:
         ValueError: Particle or mutation counts are invalid, ``target_ess``
             is outside its numerically viable interval, callback pairing is
-            incomplete, or a mutation state or diagnostic is malformed.
+            incomplete, or a mutation state or diagnostic is malformed or
+            outside its documented domain.
         DegenerateWeightsError: A tempering reweight stage cannot be
             normalized.
         RuntimeError: ``max_stages`` exceeded before reaching
@@ -286,6 +317,7 @@ def temper(
         ) -> tuple[
             Float[Array, "num_particles state_dim"],
             Float[Array, ""],
+            Bool[Array, ""],
         ]:
             """Run a caller-owned fixed-count mutation sweep."""
 
@@ -320,13 +352,33 @@ def temper(
                         particles.dtype,
                         source="mutation_step_fn",
                     )
-                    return next_state, _mutation_acceptance_rate(info)
+                    rate = _mutation_acceptance_rate(info)
+                    return next_state, (
+                        rate,
+                        _is_valid_acceptance_rate(rate),
+                    )
 
                 return vmap(apply_one)(particle_keys, states)
 
-            states, acceptance_rates = lax.scan(apply_sweep, states, sweep_keys)
+            states, (acceptance_rates, valid_rates) = lax.scan(
+                apply_sweep,
+                states,
+                sweep_keys,
+            )
             positions = cast(TemperingMutationState, states).position
-            return positions, jnp.mean(acceptance_rates)
+            mean_dtype = (
+                jnp.float32
+                if jnp.finfo(acceptance_rates.dtype).bits < 32
+                else acceptance_rates.dtype
+            )
+            mean_acceptance_rate = jnp.mean(
+                acceptance_rates.astype(mean_dtype)
+            ).astype(acceptance_rates.dtype)
+            return (
+                positions,
+                mean_acceptance_rate,
+                jnp.all(valid_rates),
+            )
 
     def ess_at(phi_new: float, phi: float) -> float:
         return float(compute_ess(log_w + (phi_new - phi) * loglik))
@@ -402,7 +454,16 @@ def temper(
                 l_prop,
             )
         else:
-            particles, acc = mutation_sweep(km, particles, jnp.asarray(phi_new))
+            particles, acc, valid_rates = mutation_sweep(
+                km,
+                particles,
+                jnp.asarray(phi_new),
+            )
+            if not bool(valid_rates):
+                raise ValueError(
+                    "mutation_step_fn acceptance_rate must be finite "
+                    "and in [0, 1]"
+                )
             loglik = jnp.asarray(batch_lik(particles))
             logprior = jnp.asarray(batch_prior(particles))
             _validate_log_density_batch(

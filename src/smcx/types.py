@@ -183,7 +183,7 @@ class TemperingMutationState(Protocol):
 
 @runtime_checkable
 class TemperingMutationInfo(Protocol):
-    """Expose one tempering mutation step's acceptance probability."""
+    """Expose one finite acceptance probability in the interval [0, 1]."""
 
     @property
     def acceptance_rate(self) -> Scalar: ...
