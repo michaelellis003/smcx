@@ -245,7 +245,8 @@ def to_arviz(
         key: Explicit key for equal-weight resampling.
         num_draws: Output draws per chain. Defaults to the particle count.
         var_names: Optional aliases for unique, unambiguous tree paths.
-        dims: Optional per-group dimensions with consistent names and sizes.
+        dims: Optional variable-to-event-dimensions mapping. Each output group
+            is validated independently for consistent names and sizes.
         emissions: Optional shared observations.
         unconstrained: Optional aligned u-space particle values.
 
@@ -261,7 +262,8 @@ def to_arviz(
         TypeError: The input is empty, contains mixed posterior types, or
             contains an unsupported posterior type.
         ValueError: Draw count, particle axes, diagnostic histories,
-            unconstrained values, or named event dimensions are not aligned.
+            unconstrained values, variable names, or named event dimensions
+            are ambiguous, collide, or are not aligned.
     """
     if isinstance(posteriors, (ParticleFilterPosterior, TemperedPosterior)):
         runs = (posteriors,)
