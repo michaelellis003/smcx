@@ -85,6 +85,75 @@ def test_one_shot_equals_init_then_repeated_step():
     assert forced.resampled
 
 
+def test_incremental_boundaries_canonicalize_scalar_discrete_emissions():
+    def initial(key, num_particles):
+        del key
+        return jnp.zeros((num_particles, 1))
+
+    def transition(key, state):
+        del key
+        return state
+
+    def log_observation(emission, state):
+        assert emission.shape == (1,)
+        assert emission.dtype == jnp.int32
+        return 0.0 * state[0]
+
+    checkpoint, _ = smcx.bootstrap_init(
+        jr.key(152),
+        initial,
+        log_observation,
+        jnp.asarray(0, dtype=jnp.int32),
+        4,
+    )
+    checkpoint, _ = smcx.bootstrap_step(
+        jr.key(153),
+        checkpoint,
+        transition,
+        log_observation,
+        jnp.asarray(1, dtype=jnp.int32),
+    )
+    _, posterior = smcx.bootstrap_update(
+        jr.split(jr.key(154), 2),
+        checkpoint,
+        transition,
+        log_observation,
+        jnp.array([2, 3], dtype=jnp.int32),
+    )
+
+    assert posterior.log_evidence_increments.shape == (2,)
+
+
+@pytest.mark.parametrize(
+    ("boundary", "emissions", "message"),
+    [
+        ("init", 0.0, "must be a JAX array"),
+        ("step", 0.0, "must be a JAX array"),
+        ("update", [0.0], "must be a JAX array"),
+        ("init", jnp.empty((0,)), "emission_dim >= 1"),
+        ("step", jnp.empty((1, 1)), r"shape \(\) or \(emission_dim,\)"),
+        ("update", jnp.empty((1, 1, 1)), r"shape \(T,\) or"),
+    ],
+)
+def test_incremental_boundaries_validate_emissions(
+    boundary, emissions, message
+):
+    checkpoint = _checkpoint()
+    with pytest.raises(ValueError, match=message):
+        if boundary == "init":
+            smcx.bootstrap_init(
+                jr.key(152),
+                _initial,
+                _log_observation,
+                emissions,
+                NUM_PARTICLES,
+            )
+        elif boundary == "step":
+            _advance(jr.key(153), checkpoint, emissions)
+        else:
+            _update(jr.key(154)[None], checkpoint, emissions)
+
+
 def _update(keys, checkpoint, emissions, **kwargs):
     return smcx.bootstrap_update(
         keys, checkpoint, _transition, _log_observation, emissions, **kwargs

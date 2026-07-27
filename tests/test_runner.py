@@ -258,6 +258,36 @@ def test_runner_executes_a_custom_kernel_with_time_aligned_inputs():
     assert "min_ess" in smcx.diagnose(posterior)
 
 
+def test_runner_canonicalizes_scalar_discrete_emissions():
+    num_particles = 4
+    identity = jnp.arange(num_particles, dtype=jnp.int32)
+
+    def record(emission):
+        assert emission.shape == (1,)
+        assert emission.dtype == jnp.int32
+        return smcx.ParticleFilterRecord(
+            jnp.zeros((num_particles, 1)),
+            jnp.full(num_particles, -jnp.log(num_particles)),
+            identity,
+            jnp.asarray(0.0),
+        )
+
+    def initialize(_time_index, emission, _key):
+        return jnp.asarray(0), record(emission)
+
+    def step(carry, _time_index, emission, _key):
+        return carry, record(emission)
+
+    posterior = smcx.run_particle_filter(
+        jr.key(152),
+        initialize,
+        step,
+        jnp.array([2, 3], dtype=jnp.int32),
+    )
+
+    assert posterior.log_evidence_increments.shape == (2,)
+
+
 @pytest.mark.parametrize("num_timesteps", [1, 3])
 def test_runner_final_only_matches_full_custom_history(num_timesteps):
     initialize, step = _transport_callbacks(16)
@@ -363,7 +393,9 @@ def test_runner_preserves_mps_history_and_compensated_evidence():
     ("emissions", "message"),
     [
         (jnp.empty((0, 1)), "emissions must contain at least one row"),
-        (jnp.zeros(3), "emissions must have shape"),
+        (jnp.empty((3, 0)), "emission_dim >= 1"),
+        (jnp.zeros((3, 1, 1)), "emissions must have shape"),
+        ([0.0, 1.0], "must be a JAX array"),
     ],
 )
 def test_runner_rejects_malformed_emissions(emissions, message):

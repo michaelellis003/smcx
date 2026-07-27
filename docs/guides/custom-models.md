@@ -139,6 +139,16 @@ record evidence increments must have at least float32 precision. smcx rejects
 float16 and bfloat16 at these boundaries instead of silently changing the
 arithmetic or fixed-key draws.
 
+### Observation arrays
+
+Callback-driven particle filters and the caller-owned runner accept JAX
+observation arrays with shape `(T,)` for scalar events or `(T, emission_dim)`
+for vector events. The event dimension must be nonempty. Scalar sequences
+become `(T, 1)`, so callbacks always receive `emission_t` as a vector.
+Observation dtype is model-owned and preserved; integer and Boolean data are
+supported for discrete likelihoods. Incremental bootstrap calls accept either
+a scalar or vector observation and apply the same canonicalization.
+
 Log-weight normalization and ESS are invariant to a finite constant offset
 whenever the relative differences remain representable in the input dtype.
 The absolute log normalizer remains in that dtype, so a correction smaller

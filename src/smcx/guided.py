@@ -46,6 +46,8 @@ from smcx._utils import (
 from smcx.containers import ParticleFilterPosterior, ParticleState
 from smcx.resampling import systematic
 from smcx.types import (
+    Emission,
+    EmissionSequence,
     InitialSampler,
     InitialSamplerWithInput,
     InputSequence,
@@ -76,7 +78,7 @@ class _GuidedCarry(NamedTuple):
 
 
 class _GuidedStepInput(NamedTuple):
-    emission: Float[Array, " emission_dim"]
+    emission: Emission
     model_input: Float[Array, " input_dim"] | None
     time_index: Int[Array, ""]
 
@@ -213,7 +215,7 @@ def guided_filter(
     log_proposal_fn: LogProposalFn | LogProposalFnWithInput,
     log_transition_fn: LogTransitionFn | LogTransitionFnWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
-    emissions: Float[Array, "ntime emission_dim"],
+    emissions: EmissionSequence,
     num_particles: int,
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float | ResamplingCriterion = 0.5,
@@ -243,7 +245,8 @@ def guided_filter(
         log_observation_fn: Per-particle
             ``(y_t, z_t[, input_t]) -> scalar`` log observation density
             $\log g$ with at least float32 precision.
-        emissions: Observations with leading time dimension.
+        emissions: Scalar ``(T,)`` or vector ``(T, D)`` observations.
+            Rank-one data become ``(T, 1)``; dtype is preserved.
         num_particles: Number of particles $N$.
         resampling_fn: Resampler with signature
             ``(key, weights, num_samples) -> indices``.
@@ -270,13 +273,16 @@ def guided_filter(
         DegenerateWeightsError: A particle-weight stage cannot be normalized
             (eager execution only; under ``jax.jit`` its nonfinite signal
             propagates).
-        ValueError: Inputs or the numeric threshold are malformed, a
+        ValueError: Observations, inputs, or the threshold are malformed, a
             criterion result is not a scalar Boolean, the initial state tree
             is empty or has a wrong leading axis, a proposal changes its
             state contract, or a log-density callback output is malformed.
     """
     _validate_resampling_threshold(resampling_threshold)
-    num_timesteps = _validate_filter_inputs(emissions, num_particles)
+    emissions, num_timesteps = _validate_filter_inputs(
+        emissions,
+        num_particles,
+    )
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
     )

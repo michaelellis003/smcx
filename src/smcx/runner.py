@@ -12,6 +12,7 @@ from jaxtyping import Array
 
 from smcx._numerics import _neumaier_add, _validate_minimum_float_precision
 from smcx._utils import (
+    _canonicalize_emissions,
     _canonicalize_inputs,
     _filter_scan,
     _particle_time_axis,
@@ -171,8 +172,9 @@ def run_particle_filter(
         step: Pure scan-shaped kernel, with the same input convention as
             ``initialize``. Its carry may be any JAX-compatible PyTree whose
             structure, leaf shapes, and dtypes remain fixed.
-        emissions: Observation array with shape ``(T, emission_dim)`` and
-            at least one row.
+        emissions: Scalar ``(T,)`` or vector ``(T, emission_dim)``
+            observations. Rank-one data become ``(T, 1)``; dtype is
+            preserved.
         inputs: Optional inputs with shape ``(T, input_dim)`` or ``(T,)``.
             Rank-one inputs become ``(T, 1)``.
         store_history: If False, retain only the final particle, weight, and
@@ -188,14 +190,8 @@ def run_particle_filter(
             invalid, or a later record changes its particle or dtype contract.
         DegenerateWeightsError: Eager evidence accumulation is nonfinite.
     """
-    if emissions.ndim != 2:
-        raise ValueError(
-            "emissions must have shape (T, emission_dim); "
-            f"got ndim={emissions.ndim}"
-        )
+    emissions = _canonicalize_emissions(emissions)
     num_timesteps = emissions.shape[0]
-    if num_timesteps == 0:
-        raise ValueError("emissions must contain at least one row")
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
     )
