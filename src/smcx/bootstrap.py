@@ -187,7 +187,7 @@ def bootstrap_init(
         first_emission: Scalar or vector observation ``y[0]``. Scalars
             reach callbacks as length-one vectors; dtype is preserved.
         num_particles: Number of particles.
-        input_t: Optional scalar/vector ``inputs[0]`` passed to both callbacks.
+        input_t: Optional scalar/vector ``inputs[0]``; callbacks get a vector.
 
     Returns:
         Normalized checkpoint plus identity, non-resampled time-zero details.
@@ -372,7 +372,7 @@ def bootstrap_step(
         resampling_fn: Particle resampling algorithm.
         resampling_threshold: Finite, nonnegative ESS fraction. Zero disables
             resampling; values above one force it at every update.
-        input_t: Optional scalar/vector ``inputs[t]`` reaching both callbacks.
+        input_t: Optional scalar/vector ``inputs[t]``; callbacks get a vector.
 
     Returns:
         Updated normalized checkpoint and current-step diagnostics.
