@@ -4,8 +4,23 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Never adopt an action release in its first week: automerge is
+    # enabled below semver-major and merged main auto-publishes, so a
+    # freshly compromised upstream tag must not reach the release
+    # pipeline unattended.
+    cooldown:
+      default-days: 7
+    # One grouped PR per week instead of one CI run per action bump.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
-  - package-ecosystem: "pip"
+  # The uv ecosystem manages uv.lock (the pip ecosystem only ever
+  # bumped pyproject ranges and left locked transitives untouched).
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
