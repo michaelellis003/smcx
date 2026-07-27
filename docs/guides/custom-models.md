@@ -491,6 +491,16 @@ Choose `make_bootstrap_callbacks` or
 forms visible prevents an ambiguous runtime dispatch and makes input alignment
 part of the model code.
 
+## Align posterior predictions
+
+`posterior_predictive_sample` draws one step beyond every retained filtering
+row. For an input-aware model, pass `future_inputs` with the same number of
+rows as the retained particle history. `future_inputs[t]` reaches both the
+transition out of filtered row `t` and the resulting emission, so it denotes
+$u_{t+1}$ rather than the input that produced row `t`. A final-only posterior
+therefore needs one future input even though its evidence trace still covers
+the complete observed series.
+
 ## Keep the two PyTree roles separate
 
 There are two useful, different PyTrees at this boundary.
