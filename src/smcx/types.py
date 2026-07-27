@@ -524,7 +524,7 @@ class ParamTransitionSamplerWithInput(Protocol):
 class ParamEmissionSampler(Protocol):
     """Draw one emission conditional on a state and static parameters."""
 
-    def __call__(
+    def __call__(  # pragma: no cover
         self,
         key: PRNGKeyT,
         state: Float[Array, " state_dim"],
@@ -537,7 +537,7 @@ class ParamEmissionSampler(Protocol):
 class ParamEmissionSamplerWithInput(Protocol):
     """Draw one parameter- and input-conditioned emission."""
 
-    def __call__(
+    def __call__(  # pragma: no cover
         self,
         key: PRNGKeyT,
         state: Float[Array, " state_dim"],
