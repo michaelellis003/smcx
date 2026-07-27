@@ -1,10 +1,10 @@
 name: Release
 
+# Releases are deliberate: a maintainer dispatches this workflow and
+# semantic-release batches every unreleased fix/feat commit on main
+# into one aggregate version. Nothing publishes on merge.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,10 +16,7 @@ concurrency:
 
 jobs:
   release:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # The release environment requires an authorized reviewer. Approval
@@ -31,20 +28,30 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha }}
-          token: ${{ secrets.RELEASE_TOKEN }}
+          # The push token must never persist into .git/config where
+          # later steps and lockfile build backends could read it.
+          persist-credentials: false
 
-      - name: Verify release revision
+      - name: Verify green CI on the release revision
         env:
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           git fetch --no-tags origin \
             '+refs/heads/main:refs/remotes/origin/main'
-          CHECKED_OUT_SHA=$(git rev-parse HEAD)
+          RELEASE_SHA=$(git rev-parse HEAD)
           CURRENT_MAIN_SHA=$(git rev-parse refs/remotes/origin/main)
-          if [[ "$CHECKED_OUT_SHA" != "$RELEASE_SHA" ]] \
-            || [[ "$CURRENT_MAIN_SHA" != "$RELEASE_SHA" ]]; then
-            echo '::error::Successful CI revision is no longer current on main.'
+          if [[ "$CURRENT_MAIN_SHA" != "$RELEASE_SHA" ]]; then
+            echo '::error::Checked-out revision is no longer current on main.'
+            exit 1
+          fi
+          CONCLUSION=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_SHA}/check-runs" \
+            --paginate \
+            --jq '[.check_runs[] | select(.name == "ci-pass")]
+                  | sort_by(.completed_at) | last | .conclusion // empty')
+          if [[ "$CONCLUSION" != "success" ]]; then
+            echo "::error::ci-pass has not succeeded on ${RELEASE_SHA}" \
+              "(conclusion: ${CONCLUSION:-absent})."
             exit 1
           fi
           git switch --force-create main "$RELEASE_SHA"
@@ -62,6 +69,8 @@ jobs:
 
       - name: Update lockfile and push release
         if: steps.semver.outputs.released == 'true'
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           VERSION="${{ steps.semver.outputs.version }}"
           PACKAGE_NAME=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['name'])")
@@ -72,7 +81,9 @@ jobs:
           git tag -d "v${VERSION}"
           git commit --amend --no-edit
           git tag "v${VERSION}"
-          git push origin main "v${VERSION}"
+          git push \
+            "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            main "v${VERSION}"
 
       - name: Build package
         if: steps.semver.outputs.released == 'true'
