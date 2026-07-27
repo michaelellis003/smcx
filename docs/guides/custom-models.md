@@ -501,6 +501,18 @@ $u_{t+1}$ rather than the input that produced row `t`. A final-only posterior
 therefore needs one future input even though its evidence trace still covers
 the complete observed series.
 
+For `LiuWestPosterior`, use `param_posterior_predictive_sample`. Its callbacks
+are `(key, state, params[, input_t])`; smcx resamples each aligned state and
+parameter pair with one index, retains that static parameter for the forecast,
+and passes it to both callbacks. Calling the state-only helper with a Liu-West
+result remains numerically unchanged for compatibility but emits
+`FutureWarning`; that ambiguous path becomes an error in smcx 2.0.
+
+This is an additive input API and a new parameter-aware API. Following
+[NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html), existing
+state-only calls and their fixed-key output are preserved during the 1.x
+series while the warning makes the formerly silent parameter omission visible.
+
 ## Keep the two PyTree roles separate
 
 There are two useful, different PyTrees at this boundary.

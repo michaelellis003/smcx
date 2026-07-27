@@ -37,6 +37,8 @@ Model comparison:
 Posterior predictive checks:
 
 - `smcx.posterior_predictive_sample` — one-step-ahead predictions
+- `smcx.param_posterior_predictive_sample` — joint state-parameter
+  predictions
 
 Scoring rules:
 
@@ -57,6 +59,7 @@ require full history.
 
 import math
 import operator
+import warnings
 from numbers import Real
 from typing import TYPE_CHECKING, Any, SupportsFloat, TypeAlias, cast
 
@@ -80,14 +83,20 @@ from smcx._utils import (
 )
 from smcx.containers import (
     LiuWestPosterior,
+    ParticleFilterPosterior,
     ParticleFilterResult,
     SMC2Posterior,
 )
 from smcx.types import (
     EmissionSampler,
     EmissionSamplerWithInput,
+    EmissionValue,
     InputSequence,
     ModelInput,
+    ParamEmissionSampler,
+    ParamEmissionSamplerWithInput,
+    ParamTransitionSampler,
+    ParamTransitionSamplerWithInput,
     ParticleCloud,
     ParticleHistory,
     PRNGKeyT,
@@ -1075,6 +1084,12 @@ def posterior_predictive_sample(
             state is malformed, future inputs are misaligned, the transition
             changes its PyTree contract, or the emission is not a scalar or
             nonempty vector.
+
+    Warns:
+        FutureWarning: Passing a ``LiuWestPosterior`` ignores
+            ``filtered_params``. Replace this call with
+            ``param_posterior_predictive_sample`` before smcx 2.0, when
+            parameter-ignoring calls become errors.
     """
     if num_samples is not None:
         num_samples = _require_integer(
@@ -1088,6 +1103,14 @@ def posterior_predictive_sample(
         "posterior_predictive_sample",
         particles=True,
     )
+    if isinstance(posterior, LiuWestPosterior):
+        warnings.warn(
+            "Passing LiuWestPosterior to posterior_predictive_sample ignores "
+            "filtered_params and will be an error in smcx 2.0; use "
+            "param_posterior_predictive_sample for joint prediction",
+            FutureWarning,
+            stacklevel=2,
+        )
     ntime, n_particles = axes
     num_samples = n_particles if num_samples is None else num_samples
     future_inputs_arr = (
@@ -1578,6 +1601,154 @@ def _crps_exact_float32_score(
     )
     numerator = _crps_subtract_accumulators(positive, negative)
     return _crps_round_accumulator_to_float32(numerator, sample_count)
+
+
+def param_posterior_predictive_sample(
+    key: PRNGKeyT,
+    posterior: LiuWestPosterior,
+    transition_sampler: ParamTransitionSampler
+    | ParamTransitionSamplerWithInput,
+    emission_sampler: ParamEmissionSampler | ParamEmissionSamplerWithInput,
+    num_samples: _IntegerArgument | None = None,
+    *,
+    future_inputs: InputSequence | None = None,
+) -> Shaped[Array, "ntime num_samples emission_dim"]:
+    r"""Draw joint state-parameter one-step posterior predictions.
+
+    Each state and parameter pair is resampled with one shared ancestor.
+    The selected static parameter is passed to both model callbacks:
+
+    $$
+    (x_t, \phi) \sim p(x_t, \phi \mid y_{1:t}),\qquad
+    x_{t+1} \sim p(x_{t+1} \mid x_t, \phi, u_{t+1}),\qquad
+    y_{t+1} \sim p(y_{t+1} \mid x_{t+1}, \phi, u_{t+1}).
+    $$
+
+    Args:
+        key: JAX PRNG key.
+        posterior: Liu-West posterior with aligned dense state and parameter
+            particle histories.
+        transition_sampler: Function
+            ``(key, state, params[, input_t]) -> state``.
+        emission_sampler: Function
+            ``(key, state, params[, input_t]) -> emission`` returning a
+            scalar or nonempty vector. Scalars become length-one vectors.
+        num_samples: Number of predictive draws per retained row.
+            Defaults to the number of particles.
+        future_inputs: Optional rank-one or rank-two input array with one
+            row per retained posterior row. Row ``t`` is $u_{t+1}$ and
+            reaches both callbacks after ``params``.
+
+    Returns:
+        Predictive samples with shape
+        ``(ntime, num_samples, emission_dim)``.
+
+    Raises:
+        TypeError: The state history is not a dense floating array.
+        ValueError: The sample count, posterior histories, future inputs,
+            transition output, or emission output violate their contracts.
+
+    References:
+        Liu, J., and West, M. (2001). Combined parameter and state
+        estimation in simulation-based filtering.
+        https://doi.org/10.1007/978-1-4757-3437-9_10
+
+        Carvalho, C. M., Johannes, M. S., Lopes, H. F., and Polson, N. G.
+        (2010). Particle learning and smoothing.
+        https://doi.org/10.1214/10-STS325
+    """
+    diagnostic = "param_posterior_predictive_sample"
+    particles = _require_dense_particle_history(
+        posterior,
+        diagnostic=diagnostic,
+    )
+    params = _require_parameter_history(posterior, diagnostic)
+    paired_posterior = ParticleFilterPosterior(
+        marginal_loglik=posterior.marginal_loglik,
+        filtered_particles=(particles, params),
+        filtered_log_weights=posterior.filtered_log_weights,
+        ancestors=posterior.ancestors,
+        ess=posterior.ess,
+        log_evidence_increments=posterior.log_evidence_increments,
+    )
+
+    if future_inputs is None:
+        transition_fn = cast(ParamTransitionSampler, transition_sampler)
+        emission_fn = cast(ParamEmissionSampler, emission_sampler)
+
+        def paired_transition(
+            key_i: PRNGKeyT,
+            pair: tuple[
+                Float[Array, " state_dim"],
+                Float[Array, " param_dim"],
+            ],
+        ) -> tuple[
+            Float[Array, " state_dim"],
+            Float[Array, " param_dim"],
+        ]:
+            state_i, params_i = pair
+            return transition_fn(key_i, state_i, params_i), params_i
+
+        def paired_emission(
+            key_i: PRNGKeyT,
+            pair: tuple[
+                Float[Array, " state_dim"],
+                Float[Array, " param_dim"],
+            ],
+        ) -> EmissionValue:
+            state_i, params_i = pair
+            return emission_fn(key_i, state_i, params_i)
+
+        return posterior_predictive_sample(
+            key,
+            paired_posterior,
+            paired_transition,
+            paired_emission,
+            num_samples,
+        )
+
+    transition_fn_u = cast(
+        ParamTransitionSamplerWithInput,
+        transition_sampler,
+    )
+    emission_fn_u = cast(ParamEmissionSamplerWithInput, emission_sampler)
+
+    def paired_transition_u(
+        key_i: PRNGKeyT,
+        pair: tuple[
+            Float[Array, " state_dim"],
+            Float[Array, " param_dim"],
+        ],
+        input_t: ModelInput,
+    ) -> tuple[
+        Float[Array, " state_dim"],
+        Float[Array, " param_dim"],
+    ]:
+        state_i, params_i = pair
+        return (
+            transition_fn_u(key_i, state_i, params_i, input_t),
+            params_i,
+        )
+
+    def paired_emission_u(
+        key_i: PRNGKeyT,
+        pair: tuple[
+            Float[Array, " state_dim"],
+            Float[Array, " param_dim"],
+        ],
+        input_t: ModelInput,
+    ) -> EmissionValue:
+        state_i, params_i = pair
+        return emission_fn_u(key_i, state_i, params_i, input_t)
+
+    return posterior_predictive_sample(
+        key,
+        paired_posterior,
+        paired_transition_u,
+        paired_emission_u,
+        num_samples,
+        future_inputs=future_inputs,
+    )
 
 
 def crps(

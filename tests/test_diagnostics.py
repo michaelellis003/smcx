@@ -3,6 +3,7 @@
 
 """Tests for smcx.diagnostics against frozen exact references."""
 
+import warnings
 from fractions import Fraction
 
 import jax
@@ -23,6 +24,7 @@ from smcx.diagnostics import (
     diagnose,
     log_bayes_factor,
     log_ml_increments,
+    param_posterior_predictive_sample,
     pareto_k_diagnostic,
     particle_diversity,
     posterior_predictive_sample,
@@ -1772,6 +1774,164 @@ class TestPosteriorPredictiveSample:
         )
 
         assert jnp.array_equal(result, jnp.full((1, 2, 1), 4.0))
+
+    def test_liu_west_params_are_not_ignored_silently(self):
+        """The legacy state-only path warns without changing its draws."""
+        posterior = _make_liu_west_posterior()
+        state_only = ParticleFilterPosterior(*posterior[:-1])
+        expected = posterior_predictive_sample(
+            jr.key(179),
+            state_only,
+            lambda _key, state: state,
+            lambda _key, state: state,
+            num_samples=5,
+        )
+
+        with pytest.warns(
+            FutureWarning,
+            match="error in smcx 2.0.*param_posterior_predictive_sample",
+        ):
+            result = posterior_predictive_sample(
+                jr.key(179),
+                posterior,
+                lambda _key, state: state,
+                lambda _key, state: state,
+                num_samples=5,
+            )
+
+        assert jnp.array_equal(result, expected)
+
+
+class TestParamPosteriorPredictiveSample:
+    """Tests for joint state-parameter posterior prediction."""
+
+    def test_preserves_state_parameter_pairs_without_legacy_warning(self):
+        """One ancestor selects each state and its static parameter."""
+        posterior = _make_liu_west_posterior()
+        particles = posterior.filtered_particles
+        posterior = posterior._replace(filtered_params=particles + 1_000.0)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            result = param_posterior_predictive_sample(
+                jr.key(180),
+                posterior,
+                lambda _key, x, theta: 2.0 * x + theta,
+                lambda _key, x, theta: x - 3.0 * theta + 2_000.0,
+                num_samples=20,
+            )
+
+        assert jnp.array_equal(result, jnp.zeros((3, 20, 1)))
+
+    @pytest.mark.parametrize("compiled", [False, True], ids=["eager", "jit"])
+    def test_passes_aligned_future_inputs_after_params(self, compiled):
+        """Both callbacks receive ordered state, params, and next input."""
+        posterior = _make_liu_west_posterior()
+        particles = posterior.filtered_particles
+        posterior = posterior._replace(filtered_params=particles + 1_000.0)
+
+        def draw(future_inputs):
+            return param_posterior_predictive_sample(
+                jr.key(181),
+                posterior,
+                lambda _key, x, theta, u: 2.0 * x + theta + u,
+                lambda _key, x, theta, u: x - 3.0 * theta + 2_000.0 + 99.0 * u,
+                num_samples=20,
+                future_inputs=future_inputs,
+            )
+
+        draw_fn = jax.jit(draw) if compiled else draw
+        result = draw_fn(jnp.array([2.0, 5.0, 7.0]))
+        expected = jnp.array([200.0, 500.0, 700.0])[:, None, None]
+        assert jnp.array_equal(result, jnp.broadcast_to(expected, result.shape))
+
+    @pytest.mark.parametrize(
+        ("field", "value", "exception", "message"),
+        [
+            (
+                "filtered_particles",
+                {"state": _make_posterior().filtered_particles},
+                TypeError,
+                "dense array",
+            ),
+            (
+                "filtered_params",
+                jnp.empty((3, 32, 0)),
+                ValueError,
+                "param_dim >= 1",
+            ),
+            (
+                "filtered_params",
+                jnp.zeros((2, 32, 1)),
+                ValueError,
+                "time and particle axes",
+            ),
+            (
+                "filtered_params",
+                jnp.zeros((3, 32, 1), dtype=jnp.int32),
+                ValueError,
+                "floating",
+            ),
+        ],
+    )
+    def test_rejects_malformed_histories(
+        self,
+        field,
+        value,
+        exception,
+        message,
+    ):
+        """State and parameter histories retain the dense Liu-West contract."""
+        posterior = _make_liu_west_posterior()._replace(**{field: value})
+
+        with pytest.raises(exception, match=message):
+            param_posterior_predictive_sample(
+                jr.key(182),
+                posterior,
+                lambda *_args: pytest.fail("transition called"),
+                lambda *_args: pytest.fail("emission called"),
+            )
+
+    def test_canonicalizes_discrete_scalar_emissions(self):
+        """Parameter-aware emissions follow the model-owned event contract."""
+        result = param_posterior_predictive_sample(
+            jr.key(183),
+            _make_liu_west_posterior(),
+            lambda _key, state, _params: state,
+            lambda _key, _state, _params: jnp.asarray(1, dtype=jnp.int32),
+            num_samples=2,
+        )
+
+        assert result.shape == (3, 2, 1)
+        assert result.dtype == jnp.int32
+
+    def test_rejects_malformed_emissions(self):
+        """The parameter-aware wrapper preserves emission validation."""
+        with pytest.raises(ValueError, match="emission_dim >= 1"):
+            param_posterior_predictive_sample(
+                jr.key(184),
+                _make_liu_west_posterior(),
+                lambda _key, state, _params: state,
+                lambda _key, _state, _params: jnp.empty((0,)),
+                num_samples=2,
+            )
+
+    def test_final_only_posterior_returns_one_predictive_row(self):
+        """Joint prediction accepts one retained state-parameter cloud."""
+        ordinary = _posterior_for_increment_contract(jnp.array([1.0, 2.0, 3.0]))
+        posterior = LiuWestPosterior(
+            *ordinary,
+            filtered_params=jnp.full((1, 1, 1), 2.0),
+        )
+        result = param_posterior_predictive_sample(
+            jr.key(185),
+            posterior,
+            lambda _key, state, params: state + params,
+            lambda _key, state, _params: state[0],
+            num_samples=2,
+        )
+
+        assert jnp.array_equal(result, jnp.full((1, 2, 1), 2.0))
 
 
 class TestParetoKDiagnostic:

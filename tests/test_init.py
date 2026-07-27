@@ -51,6 +51,7 @@ def test_public_api_exports_all_expected_names(package):
         "log_normalize",
         "multinomial",
         "normalize",
+        "param_posterior_predictive_sample",
         "param_weighted_mean",
         "param_weighted_quantile",
         "pareto_k_diagnostic",

@@ -145,6 +145,28 @@ fixed-key totals produced by older smcx releases.
 For the fixed seed above, the filtered RMSE is about 0.369, compared with
 an observation-noise scale of 0.7.
 
+## Draw one-step predictions
+
+Posterior prediction resamples each filtered particle cloud, advances it
+once, and samples the corresponding observation:
+
+```python
+predictions = smcx.posterior_predictive_sample(
+    jr.key(2),
+    posterior,
+    transition_sampler,
+    emission_sampler,
+    num_samples=1_000,
+)
+
+predictions.shape
+```
+
+The result has shape `(100, 1_000, 1)`: one predictive distribution after
+each retained filtering row. Models with exogenous inputs or learned
+parameters use the explicit callback contracts described in
+[Custom models](custom-models.md#align-posterior-predictions).
+
 ## Diagnose
 
 `diagnose` returns a dictionary of health summaries and a list of
