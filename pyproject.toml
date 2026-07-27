@@ -125,7 +125,10 @@ docstring-code-format = true
 # "0.0.0" that semantic-release must never rewrite (it did once,
 # breaking test_version_fallback_when_package_not_found on CI).
 version_toml = ["pyproject.toml:project.version"]
-commit_message = "chore(release): {version}"
+# [skip ci]: the bump commit is pushed after CI already gated the
+# released revision and after publication; its own CI run gates
+# nothing and previously cost a full five-suite matrix per release.
+commit_message = "chore(release): {version} [skip ci]"
 
 [tool.semantic_release.changelog.default_templates]
 changelog_file = "CHANGELOG.md"
