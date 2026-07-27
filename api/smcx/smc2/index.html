@@ -1550,12 +1550,12 @@ scalar with at least float32 precision.</p>
                 <code>emissions</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; ntime&#39;] | <span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]</code>
+                  <code><span title="smcx.types.EmissionSequence">EmissionSequence</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observations <code>(T, D)</code> (or <code>(T,)</code>,
-canonicalized).</p>
+                <p>Scalar <code>(T,)</code> or vector <code>(T, D)</code> observations.
+Rank-one data become <code>(T, 1)</code>; dtype is preserved.</p>
               </div>
             </td>
             <td>

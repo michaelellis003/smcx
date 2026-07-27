@@ -5904,11 +5904,13 @@ array with leading length <code>ntime</code>.</p>
                 <code>emissions</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;*emissions_shape&#39;]</code>
+                  <code><span title="smcx.types.GaussianEmissionSequence">GaussianEmissionSequence</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observations with shape <code>(ntime, observation_dim)</code>.</p>
+                <p>Observations with shape <code>(ntime,)</code> or
+<code>(ntime, observation_dim)</code>. Scalar observations become
+<code>(ntime, 1)</code>.</p>
               </div>
             </td>
             <td>
@@ -5920,7 +5922,7 @@ array with leading length <code>ntime</code>.</p>
                 <code>inputs</code>
             </td>
             <td>
-                  <code><span title="smcx.types.InputSequence">InputSequence</span> | None</code>
+                  <code><span title="smcx.types.GaussianInputSequence">GaussianInputSequence</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -6501,11 +6503,13 @@ covariance.</p>
                 <code>emissions</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;*emissions_shape&#39;]</code>
+                  <code><span title="smcx.types.GaussianEmissionSequence">GaussianEmissionSequence</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observations with shape <code>(ntime, observation_dim)</code>.</p>
+                <p>Observations with shape <code>(ntime,)</code> or
+<code>(ntime, observation_dim)</code>. Scalar observations become
+<code>(ntime, 1)</code>.</p>
               </div>
             </td>
             <td>
@@ -6585,7 +6589,7 @@ observation control matrix.</p>
                 <code>inputs</code>
             </td>
             <td>
-                  <code><span title="smcx.types.InputSequence">InputSequence</span> | None</code>
+                  <code><span title="smcx.types.GaussianInputSequence">GaussianInputSequence</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -10510,11 +10514,13 @@ array with leading length <code>ntime</code>.</p>
                 <code>emissions</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;*emissions_shape&#39;]</code>
+                  <code><span title="smcx.types.GaussianEmissionSequence">GaussianEmissionSequence</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Observations with shape <code>(ntime, observation_dim)</code>.</p>
+                <p>Observations with shape <code>(ntime,)</code> or
+<code>(ntime, observation_dim)</code>. Scalar observations become
+<code>(ntime, 1)</code>.</p>
               </div>
             </td>
             <td>
@@ -10574,7 +10580,7 @@ array with leading length <code>ntime</code>.</p>
                 <code>inputs</code>
             </td>
             <td>
-                  <code><span title="smcx.types.InputSequence">InputSequence</span> | None</code>
+                  <code><span title="smcx.types.GaussianInputSequence">GaussianInputSequence</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">

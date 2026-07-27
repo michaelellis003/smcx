@@ -1709,13 +1709,15 @@ record evidence increments must have at least float32 precision. smcx rejects
 float16 and bfloat16 at these boundaries instead of silently changing the
 arithmetic or fixed-key draws.</p>
 <h3 id="observation-arrays">Observation arrays</h3>
-<p>Callback-driven particle filters and the caller-owned runner accept JAX
-observation arrays with shape <code>(T,)</code> for scalar events or <code>(T, emission_dim)</code>
-for vector events. The event dimension must be nonempty. Scalar sequences
-become <code>(T, 1)</code>, so callbacks always receive <code>emission_t</code> as a vector.
-Observation dtype is model-owned and preserved; integer and Boolean data are
-supported for discrete likelihoods. Incremental bootstrap calls accept either
-a scalar or vector observation and apply the same canonicalization.</p>
+<p>Callback-driven particle filters, SMC², and the caller-owned runner accept
+JAX observation arrays with shape <code>(T,)</code> for scalar events or
+<code>(T, emission_dim)</code> for vector events. The event dimension must be nonempty.
+Scalar sequences become <code>(T, 1)</code>, so callbacks always receive <code>emission_t</code> as
+a vector. Observation dtype is model-owned and preserved; integer and Boolean
+data are supported for discrete likelihoods. Incremental bootstrap calls
+accept either a scalar or vector observation and apply the same
+canonicalization. Gaussian filters also accept scalar observation sequences,
+but retain their documented float32/float64 requirements.</p>
 <p>Log-weight normalization and ESS are invariant to a finite constant offset
 whenever the relative differences remain representable in the input dtype.
 The absolute log normalizer remains in that dtype, so a correction smaller
