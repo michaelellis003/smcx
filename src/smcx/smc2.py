@@ -35,6 +35,7 @@ from jaxtyping import Array, Float
 from smcx._covariance import _weighted_covariance_factor
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
+    _canonicalize_emissions,
     _raise_invalid_ancestors,
     _validate_ancestors,
     _validate_initial_state,
@@ -47,6 +48,8 @@ from smcx.containers import SMC2Posterior
 from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import _TINY, _below_one, _monotone_cdf, systematic
 from smcx.types import (
+    Emission,
+    EmissionSequence,
     ParamInitialSampler,
     ParamInitialStateSampler,
     ParamLogObservationFn,
@@ -162,7 +165,7 @@ def smc2(
     initial_sampler: ParamInitialStateSampler,
     transition_sampler: ParamTransitionSampler,
     log_observation_fn: ParamLogObservationFn,
-    emissions: Float[Array, " ntime"] | Float[Array, "ntime emission_dim"],
+    emissions: EmissionSequence,
     num_theta: int,
     num_x: int,
     *,
@@ -188,8 +191,8 @@ def smc2(
         log_observation_fn: inner ``(emission, state, theta) ->
             scalar``, per-particle; vmapped internally. Must return a
             scalar with at least float32 precision.
-        emissions: Observations ``(T, D)`` (or ``(T,)``,
-            canonicalized).
+        emissions: Scalar ``(T,)`` or vector ``(T, D)`` observations.
+            Rank-one data become ``(T, 1)``; dtype is preserved.
         num_theta: Number of outer parameter particles.
         num_x: Fixed number of inner particles.
         ess_threshold: Rejuvenate the parameter cloud when the outer
@@ -213,21 +216,13 @@ def smc2(
             normalized.
     """
     _validate_numeric_ess_threshold(ess_threshold, name="ess_threshold")
-    if emissions.ndim not in (1, 2):
-        raise ValueError(
-            "emissions must have shape (T,) or (T, emission_dim); "
-            f"got ndim={emissions.ndim}"
-        )
-    if emissions.shape[0] == 0:
-        raise ValueError("emissions must contain at least one row")
+    emissions = _canonicalize_emissions(emissions)
     if num_theta < 1:
         raise ValueError(f"num_theta must be >= 1; got {num_theta}")
     if num_x < 1:
         raise ValueError(f"num_x must be >= 1; got {num_x}")
     if num_pmmh_steps < 0:
         raise ValueError(f"num_pmmh_steps must be >= 0; got {num_pmmh_steps}")
-    if emissions.ndim == 1:
-        emissions = emissions[:, None]
     n_time = emissions.shape[0]
     log_n_theta = math.log(num_theta)
 
@@ -263,7 +258,7 @@ def smc2(
     def inner_init(
         k0: PRNGKeyT,
         th: Float[Array, "num_theta param_dim"],
-        y0: Float[Array, " emission_dim"],
+        y0: Emission,
     ) -> tuple[
         Float[Array, "num_theta num_x state_dim"],
         Float[Array, "num_theta num_x"],
@@ -313,7 +308,7 @@ def smc2(
         inner: Float[Array, "num_theta num_x state_dim"],
         inner_log_w: Float[Array, "num_theta num_x"],
         th: Float[Array, "num_theta param_dim"],
-        y_t: Float[Array, " emission_dim"],
+        y_t: Emission,
     ) -> tuple[
         Float[Array, "num_theta num_x state_dim"],
         Float[Array, "num_theta num_x"],

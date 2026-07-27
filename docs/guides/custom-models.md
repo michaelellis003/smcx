@@ -141,13 +141,15 @@ arithmetic or fixed-key draws.
 
 ### Observation arrays
 
-Callback-driven particle filters and the caller-owned runner accept JAX
-observation arrays with shape `(T,)` for scalar events or `(T, emission_dim)`
-for vector events. The event dimension must be nonempty. Scalar sequences
-become `(T, 1)`, so callbacks always receive `emission_t` as a vector.
-Observation dtype is model-owned and preserved; integer and Boolean data are
-supported for discrete likelihoods. Incremental bootstrap calls accept either
-a scalar or vector observation and apply the same canonicalization.
+Callback-driven particle filters, SMC², and the caller-owned runner accept
+JAX observation arrays with shape `(T,)` for scalar events or
+`(T, emission_dim)` for vector events. The event dimension must be nonempty.
+Scalar sequences become `(T, 1)`, so callbacks always receive `emission_t` as
+a vector. Observation dtype is model-owned and preserved; integer and Boolean
+data are supported for discrete likelihoods. Incremental bootstrap calls
+accept either a scalar or vector observation and apply the same
+canonicalization. Gaussian filters also accept scalar observation sequences,
+but retain their documented float32/float64 requirements.
 
 Log-weight normalization and ESS are invariant to a finite constant offset
 whenever the relative differences remain representable in the input dtype.

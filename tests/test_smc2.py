@@ -118,6 +118,90 @@ def _small_model():
 class TestStructure:
     """Shapes, invariants, determinism, degeneracy."""
 
+    def test_scalar_discrete_emissions_are_canonicalized(self):
+        """SMC2 preserves model-owned dtype after scalar canonicalization."""
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            _,
+        ) = _model()
+
+        def log_observation(emission, state, theta):
+            del theta
+            assert emission.shape == (1,)
+            assert emission.dtype == jnp.int32
+            return 0.0 * state[0]
+
+        post = smcx.smc2(
+            jr.key(152),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            log_observation,
+            jnp.array([0, 1], dtype=jnp.int32),
+            4,
+            4,
+            ess_threshold=0.0,
+        )
+
+        assert post.log_evidence_increments.shape == (2,)
+
+    @pytest.mark.parametrize(
+        ("emissions", "message"),
+        [
+            (jnp.empty((2, 0)), "emission_dim >= 1"),
+            (jnp.zeros((2, 1, 1)), "emissions must have shape"),
+        ],
+    )
+    def test_rejects_malformed_emission_events(self, emissions, message):
+        """Empty or higher-rank observation events fail at entry."""
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            log_observation,
+        ) = _model()
+
+        with pytest.raises(ValueError, match=message):
+            smcx.smc2(
+                jr.key(152),
+                param_init,
+                log_prior,
+                inner_init,
+                inner_trans,
+                log_observation,
+                emissions,
+                4,
+                4,
+            )
+
+    def test_rejects_numpy_emissions_with_value_error(self):
+        """The public validator owns the non-JAX observation error."""
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            log_observation,
+        ) = _model()
+
+        with pytest.raises(ValueError, match="emissions must be a JAX array"):
+            smcx.smc2(
+                jr.key(152),
+                param_init,
+                log_prior,
+                inner_init,
+                inner_trans,
+                log_observation,
+                np.zeros((2, 1)),  # ty: ignore[invalid-argument-type]
+                4,
+                4,
+            )
+
     @pytest.mark.parametrize("num_param_particles", [1, 2])
     def test_rejuvenation_handles_identical_float32_parameters(
         self, num_param_particles

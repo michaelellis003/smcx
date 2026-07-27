@@ -66,6 +66,14 @@ if TYPE_CHECKING:
     EmissionSequence: TypeAlias = (
         Shaped[Array, " ntime"] | Shaped[Array, "ntime emission_dim"]
     )
+    GaussianEmission: TypeAlias = Float[Array, " observation_dim"]
+    GaussianEmissionSequence: TypeAlias = (
+        Float[Array, " ntime"] | Float[Array, "ntime observation_dim"]
+    )
+    GaussianInput: TypeAlias = Float[Array, " input_dim"]
+    GaussianInputSequence: TypeAlias = (
+        Float[Array, " ntime"] | Float[Array, "ntime input_dim"]
+    )
     InputSequence: TypeAlias = (
         Float[Array, " ntime"] | Float[Array, "ntime input_dim"]
     )
@@ -73,6 +81,10 @@ else:
     Emission: TypeAlias = Shaped[Array, " emission_dim"]
     EmissionValue: TypeAlias = Any
     EmissionSequence: TypeAlias = Any
+    GaussianEmission: TypeAlias = Shaped[Array, " observation_dim"]
+    GaussianEmissionSequence: TypeAlias = Any
+    GaussianInput: TypeAlias = Shaped[Array, " input_dim"]
+    GaussianInputSequence: TypeAlias = Shaped[Array, "*gaussian_input_shape"]
     InputSequence: TypeAlias = Float[Array, "*input_shape"]
 
 
@@ -404,7 +416,7 @@ class TransitionMeanFnWithInput(Protocol):
     def __call__(
         self,
         state: Float[Array, " state_dim"],
-        input_t: Float[Array, " input_dim"],
+        input_t: GaussianInput,
         /,
     ) -> Float[Array, " state_dim"]: ...
 
@@ -427,7 +439,7 @@ class TransitionJacobianFnWithInput(Protocol):
     def __call__(
         self,
         state: Float[Array, " state_dim"],
-        input_t: Float[Array, " input_dim"],
+        input_t: GaussianInput,
         /,
     ) -> Float[Array, "state_dim state_dim"]: ...
 
@@ -450,7 +462,7 @@ class ObservationMeanFnWithInput(Protocol):
     def __call__(
         self,
         state: Float[Array, " state_dim"],
-        input_t: Float[Array, " input_dim"],
+        input_t: GaussianInput,
         /,
     ) -> Float[Array, " observation_dim"]: ...
 
@@ -473,7 +485,7 @@ class ObservationJacobianFnWithInput(Protocol):
     def __call__(
         self,
         state: Float[Array, " state_dim"],
-        input_t: Float[Array, " input_dim"],
+        input_t: GaussianInput,
         /,
     ) -> Float[Array, "observation_dim state_dim"]: ...
 
