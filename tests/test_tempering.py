@@ -295,9 +295,16 @@ class TestSchedule:
         assert np.all(np.diff(np.concatenate(([0.0], temperatures))) > 0.0)
         np.testing.assert_array_equal(temperatures[-1], 1.0)
 
-    def test_float32_upper_target_honors_stage_budget(self):
-        with pytest.raises(RuntimeError, match="within 3 stages"):
-            _upper_target_run(0.002, max_stages=3)
+    def test_float32_upper_target_honors_raised_stage_budget(self):
+        with pytest.raises(RuntimeError, match="within 4 stages"):
+            _upper_target_run(0.02, max_stages=4)
+
+        posterior = _upper_target_run(0.02, max_stages=64)
+        temperatures = np.asarray(posterior.temperatures, dtype=np.float64)
+
+        assert temperatures.shape[0] > 4
+        assert np.all(np.diff(np.concatenate(([0.0], temperatures))) > 0.0)
+        np.testing.assert_array_equal(temperatures[-1], 1.0)
 
     def test_temperatures_increase_and_end_at_one(self):
         post = _run(1)
