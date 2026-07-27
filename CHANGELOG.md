@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.14.20 (2026-07-27)
+
+### Bug Fixes
+
+- **api**: Align input and sampled emission arrays
+  ([#238](https://github.com/michaelellis003/smcx/pull/238),
+  [`e9c5993`](https://github.com/michaelellis003/smcx/commit/e9c5993ba62176729dd2a3373a94af31f1bf5436))
+
+
 ## v1.14.19 (2026-07-27)
 
 ### Bug Fixes
