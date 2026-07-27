@@ -1483,7 +1483,7 @@
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional tree-path to output-variable mapping.</p>
+                <p>Optional aliases for unique, unambiguous tree paths.</p>
               </div>
             </td>
             <td>
@@ -1499,7 +1499,8 @@
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional output-variable to event-dimension mapping.</p>
+                <p>Optional variable-to-event-dimensions mapping. Each output group
+is validated independently for consistent names and sizes.</p>
               </div>
             </td>
             <td>
@@ -1632,7 +1633,8 @@ contains an unsupported posterior type.</p>
             <td>
               <div class="doc-md-description">
                 <p>Draw count, particle axes, diagnostic histories,
-unconstrained values, or named event dimensions are not aligned.</p>
+unconstrained values, variable names, or named event dimensions
+are ambiguous, collide, or are not aligned.</p>
               </div>
             </td>
           </tr>
