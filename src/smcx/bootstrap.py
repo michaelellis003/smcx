@@ -36,12 +36,9 @@ from smcx._utils import (
     _canonicalize_input,
     _canonicalize_inputs,
     _conditional_resample,
-    _filter_scan,
     _gather_particles,
     _init_standard,
     _particle_time_axis,
-    _prepend,
-    _prepend_particle_history,
     _raise_if_degenerate,
     _raise_invalid_ancestors,
     _TreeSignature,
@@ -58,6 +55,7 @@ from smcx.containers import (
     ParticleFilterPosterior,
     ParticleState,
 )
+from smcx.fk import CallbackNames, FeynmanKac, run_smc
 from smcx.resampling import systematic
 from smcx.types import (
     Emission,
@@ -686,146 +684,80 @@ def bootstrap_filter(
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
     )
-    key, init_key = jr.split(key)
-    log_n = jnp.asarray(math.log(num_particles))
-
-    # --- Initialise at t=0 -------------------------------------------------
-    (
-        particles_0,
-        log_w_0,
-        log_ev_0,
-        ess_0,
-        identity_ancestors,
-        init_state,
-        state_signature,
-    ) = (
-        _init_standard(
-            init_key,
-            initial_sampler,
-            log_observation_fn,
-            emissions[0],
-            num_particles,
-            log_n,
-        )
-        if inputs_arr is None
-        else _init_standard(
-            init_key,
-            initial_sampler,
-            log_observation_fn,
-            emissions[0],
-            num_particles,
-            log_n,
-            inputs_arr[0],
-        )
+    fk = _bootstrap_fk(
+        initial_sampler,
+        transition_sampler,
+        log_observation_fn,
+        emissions,
+        inputs_arr,
+    )
+    return run_smc(
+        key,
+        fk,
+        num_particles,
+        resampling_fn=resampling_fn,
+        resampling_threshold=resampling_threshold,
+        store_history=store_history,
     )
 
-    # --- Scan body for t = 1, ..., T-1 -------------------------------------
-    def _step(
-        carry: tuple[ParticleState, Array, Array, Array, Array],
-        args: tuple[Array, ...],
-    ):
-        state, current_ess, correction, _prev_ancestors, invalid_seen = carry
-        if inputs_arr is None:
-            step_key, y_t, time_index = args
-            input_t = None
-        else:
-            step_key, y_t, input_t, time_index = args
-        result = _bootstrap_particle_step(
-            step_key,
-            state,
-            current_ess,
-            transition_sampler,
-            log_observation_fn,
-            y_t,
-            resampling_fn,
-            resampling_threshold,
-            input_t,
-            state_signature,
-            time_index,
-        )
-        info = result.info
-        log_evidence, correction = _neumaier_add(
-            jnp.asarray(state.log_marginal_likelihood),
-            correction,
-            info.log_evidence_increment,
-        )
-        new_state = ParticleState(
-            particles=result.particles,
-            log_weights=result.log_weights,
-            log_marginal_likelihood=log_evidence,
-        )
-        next_carry = (
-            new_state,
-            info.ess,
-            correction,
-            info.ancestors,
-            invalid_seen | result.invalid_resampling,
-        )
-        if store_history:
-            return next_carry, (
-                result.particles,
-                result.log_weights,
-                info.ancestors,
-                info.ess,
-                info.log_evidence_increment,
-            )
-        # Final-only mode: ancestors ride the carry (O(N)), the scan
-        # stacks just the scalar traces.
-        return next_carry, (
-            info.ess,
-            info.log_evidence_increment,
-        )
 
-    # Run the scan over t = 1 ... T-1
-    step_keys = jr.split(key, num_timesteps - 1)
-    time_indices = jnp.arange(1, num_timesteps, dtype=jnp.int32)
-    scan_inputs = (
-        (step_keys, emissions[1:], time_indices)
-        if inputs_arr is None
-        else (step_keys, emissions[1:], inputs_arr[1:], time_indices)
+def _bootstrap_fk(
+    initial_sampler: InitialSampler | InitialSamplerWithInput,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    log_observation_fn: LogObservationFn | LogObservationFnWithInput,
+    emissions: Float[Array, "ntime emission_dim"],
+    inputs_arr: Float[Array, "ntime input_dim"] | None,
+) -> FeynmanKac:
+    """Derive the bootstrap Feynman-Kac model from its callbacks.
+
+    The mutation kernel is the transition prior and the potential is
+    the observation density, ignoring the parent state. The input
+    arity is resolved here, once, so the generic loop stays fork-free.
+    """
+    names = CallbackNames(
+        m0="initial_sampler output",
+        m="transition_sampler output",
+        log_g="log_observation_fn",
     )
-    init_carry = (
-        init_state,
-        ess_0,
-        jnp.zeros_like(log_ev_0),
-        identity_ancestors,
-        jnp.asarray(False),
-    )
-    if store_history:
-        (
-            (final_state, _, final_correction, _, invalid),
-            (
-                particles_rest,
-                log_w_rest,
-                ancestors_rest,
-                ess_rest,
-                log_ev_inc_rest,
-            ),
-        ) = _filter_scan(_step, init_carry, scan_inputs)
-        all_particles = _prepend_particle_history(particles_0, particles_rest)
-        all_log_w = _prepend(log_w_0, log_w_rest)
-        all_ancestors = _prepend(identity_ancestors, ancestors_rest)
-    else:
-        (
-            (final_state, _, final_correction, final_ancestors, invalid),
-            (ess_rest, log_ev_inc_rest),
-        ) = _filter_scan(_step, init_carry, scan_inputs)
-        all_particles = _particle_time_axis(final_state.particles)
-        all_log_w = final_state.log_weights[None]
-        all_ancestors = final_ancestors[None]
-    ess_0_arr: Array = jnp.asarray(ess_0)
-    all_ess = _prepend(ess_0_arr, ess_rest)
-    all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
-    final_log_evidence = final_state.log_marginal_likelihood + final_correction
+    if inputs_arr is None:
+        init_fn = cast(InitialSampler, initial_sampler)
+        transition_fn = cast(TransitionSampler, transition_sampler)
+        observation_fn = cast(LogObservationFn, log_observation_fn)
 
-    _raise_invalid_ancestors(invalid, num_particles)
-    _raise_if_degenerate(final_log_evidence)
+        def m0(key, num_particles, context_t):
+            del context_t
+            return init_fn(key, num_particles)
 
-    return ParticleFilterPosterior(
-        marginal_loglik=final_log_evidence,
-        filtered_particles=all_particles,
-        filtered_log_weights=all_log_w,
-        ancestors=all_ancestors,
-        ess=all_ess,
-        log_evidence_increments=all_log_ev_inc,
+        def m(key, parent, context_t):
+            del context_t
+            return transition_fn(key, parent)
+
+        def log_g(parent, state, context_t):
+            del parent
+            return observation_fn(context_t[0], state)
+
+        return FeynmanKac(
+            m0=m0, m=m, log_g=log_g, contexts=(emissions,), names=names
+        )
+
+    init_fn_u = cast(InitialSamplerWithInput, initial_sampler)
+    transition_fn_u = cast(TransitionSamplerWithInput, transition_sampler)
+    observation_fn_u = cast(LogObservationFnWithInput, log_observation_fn)
+
+    def m0_u(key, num_particles, context_t):
+        return init_fn_u(key, num_particles, context_t[1])
+
+    def m_u(key, parent, context_t):
+        return transition_fn_u(key, parent, context_t[1])
+
+    def log_g_u(parent, state, context_t):
+        del parent
+        return observation_fn_u(context_t[0], state, context_t[1])
+
+    return FeynmanKac(
+        m0=m0_u,
+        m=m_u,
+        log_g=log_g_u,
+        contexts=(emissions, inputs_arr),
+        names=names,
     )
