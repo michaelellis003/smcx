@@ -1788,6 +1788,14 @@ def crps(
         subnormal or top-bin float32 inputs and whenever the conservative
         largest-error-over-:math:`N^2` bound can enter the subnormal range.
 
+        Under ``jax.vmap`` the float32 exact-rounding branch runs for
+        every element: batching turns the data-dependent branch into a
+        select, so both sides execute regardless of the classifier
+        (roughly an order of magnitude per-element overhead). Eager and
+        scalar-jitted calls execute only the branch they need. When
+        scoring many forecasts with concrete inputs, prefer an eager
+        Python loop over ``jax.vmap``.
+
     References:
         Matheson, J. E., and Winkler, R. L. (1976). Scoring rules for
         continuous probability distributions.
