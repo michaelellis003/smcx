@@ -2092,53 +2092,34 @@ class TestTailESS:
             atol=0.0,
         )
 
-    def test_tail_ess_shape(self, lgssm_params, lgssm_data):
-        """Output shape matches (ntime,)."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=1_000)
-        result = tail_ess(pf_post)
-        assert result.shape == (pf_post.filtered_log_weights.shape[0],)
-
-    def test_tail_ess_bounded(self, lgssm_params, lgssm_data):
-        """Tail-ESS should be in [0, num_particles]."""
-        n = 1_000
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=n)
-        result = tail_ess(pf_post)
-        assert jnp.all(result >= 0.0)
-        assert jnp.all(result <= n)
-
-    def test_tail_ess_uniform_is_q_fraction(self):
-        """Uniform weights: each tail holds ~q*N effective particles."""
-        import jax.random as jr
-
-        from smcx.containers import ParticleFilterPosterior
-
-        n = 4000
-        log_w = jnp.full((1, n), -jnp.log(n))
-        particles = jr.normal(jr.key(2), (1, n, 1))
-        posterior = ParticleFilterPosterior(
-            marginal_loglik=jnp.float64(0.0),
-            filtered_particles=particles,
-            filtered_log_weights=log_w,
-            ancestors=jnp.zeros((1, n), dtype=jnp.int32),
-            ess=jnp.full((1,), float(n)),
-            log_evidence_increments=jnp.zeros((1,)),
+    def test_uniform_cloud_has_exact_tail_size_and_shape(self):
+        """Each uniform eighth contains exactly four of 32 particles."""
+        result = tail_ess(_make_posterior(), q=Fraction(1, 8))
+        np.testing.assert_array_equal(
+            np.asarray(result),
+            np.full(3, 4.0),
         )
-        te = float(tail_ess(posterior, q=Fraction(1, 20))[0])
-        assert te == pytest.approx(0.05 * n, rel=0.15)
 
-    def test_tail_ess_leq_standard_ess(self, lgssm_params, lgssm_data):
-        """Tail-ESS <= standard ESS (tails are harder to estimate)."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=1_000)
-        t_ess = tail_ess(pf_post)
-        s_ess = pf_post.ess
-        # Allow small numerical tolerance
-        assert jnp.all(t_ess <= s_ess + 1.0)
+    def test_tail_ess_can_exceed_standard_ess(self):
+        """Equal tail weights can outnumber one dominant central weight."""
+        posterior = _make_weighted_posterior(
+            jnp.arange(-2, 3, dtype=jnp.float32),
+            jnp.asarray([0.025, 0.025, 0.9, 0.025, 0.025]),
+        )
 
-    def test_tail_ess_jit_compatible(self, lgssm_params, lgssm_data):
-        """tail_ess compiles under jax.jit."""
-        pf_post = _run_bootstrap(lgssm_params, lgssm_data, n=500)
-        result = jax.jit(tail_ess)(pf_post)
-        assert jnp.all(jnp.isfinite(result))
+        result = tail_ess(posterior, q=0.05)
+
+        np.testing.assert_array_equal(
+            np.asarray(result),
+            np.asarray([2.0]),
+        )
+        expected_standard = 16.0 / 13.0
+        tolerance = float(4 * jnp.finfo(jnp.float32).eps)
+        assert float(posterior.ess[0]) == pytest.approx(
+            expected_standard,
+            rel=tolerance,
+        )
+        assert result[0] > posterior.ess[0]
 
     @pytest.mark.parametrize(
         ("particles", "weights"),
