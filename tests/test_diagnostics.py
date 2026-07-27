@@ -1808,42 +1808,40 @@ class TestParamPosteriorPredictiveSample:
     def test_preserves_state_parameter_pairs_without_legacy_warning(self):
         """One ancestor selects each state and its static parameter."""
         posterior = _make_liu_west_posterior()
-        posterior = posterior._replace(
-            filtered_params=posterior.filtered_particles
-        )
+        particles = posterior.filtered_particles
+        posterior = posterior._replace(filtered_params=particles + 1_000.0)
 
         with warnings.catch_warnings():
             warnings.simplefilter("error", FutureWarning)
             result = param_posterior_predictive_sample(
                 jr.key(180),
                 posterior,
-                lambda _key, state, params: state + params,
-                lambda _key, next_state, params: next_state - params - params,
+                lambda _key, x, theta: 2.0 * x + theta,
+                lambda _key, x, theta: x - 3.0 * theta + 2_000.0,
                 num_samples=20,
             )
 
         assert jnp.array_equal(result, jnp.zeros((3, 20, 1)))
 
-    def test_passes_aligned_future_inputs_after_params_under_jit(self):
-        """Both joint model callbacks receive the same next input."""
+    @pytest.mark.parametrize("compiled", [False, True], ids=["eager", "jit"])
+    def test_passes_aligned_future_inputs_after_params(self, compiled):
+        """Both callbacks receive ordered state, params, and next input."""
         posterior = _make_liu_west_posterior()
-        posterior = posterior._replace(
-            filtered_params=posterior.filtered_particles
-        )
+        particles = posterior.filtered_particles
+        posterior = posterior._replace(filtered_params=particles + 1_000.0)
 
         def draw(future_inputs):
             return param_posterior_predictive_sample(
                 jr.key(181),
                 posterior,
-                lambda _key, state, params, input_t: state + params + input_t,
-                lambda _key, state, params, input_t: (
-                    state - input_t - params - params + 100.0 * input_t
-                ),
+                lambda _key, x, theta, u: 2.0 * x + theta + u,
+                lambda _key, x, theta, u: x - 3.0 * theta + 2_000.0 + 99.0 * u,
                 num_samples=20,
                 future_inputs=future_inputs,
             )
 
-        result = jax.jit(draw)(jnp.array([2.0, 5.0, 7.0]))
+        draw_fn = jax.jit(draw) if compiled else draw
+        result = draw_fn(jnp.array([2.0, 5.0, 7.0]))
         expected = jnp.array([200.0, 500.0, 700.0])[:, None, None]
         assert jnp.array_equal(result, jnp.broadcast_to(expected, result.shape))
 
