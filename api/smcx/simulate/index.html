@@ -1494,8 +1494,8 @@ state's PyTree structure, leaf shapes, and dtypes.</p>
               <div class="doc-md-description">
                 <p>Function <code>(key, state[, input_t]) -&gt; emission</code> that
 draws from the emission distribution <span class="arithmatex">\(p(y_t \mid z_t)\)</span>. It
-returns a nonempty floating vector
-with shape and dtype fixed across time.</p>
+returns a scalar or nonempty vector with dtype fixed across
+time. Scalars become length-one vectors.</p>
               </div>
             </td>
             <td>
@@ -1528,7 +1528,8 @@ with shape and dtype fixed across time.</p>
             <td>
               <div class="doc-md-description">
                 <p>Optional exogenous inputs with shape <code>(T, input_dim)</code>
-or <code>(T,)</code>. Input zero reaches initialization and the first
+or <code>(T,)</code> and a nonempty event. Input zero reaches
+initialization and the first
 emission; each later input reaches its aligned transition and
 emission.</p>
               </div>
@@ -1566,7 +1567,7 @@ emission.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]</code>
+                  <code><span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1580,7 +1581,7 @@ emission.</p>
 
   
       module-attribute
-   (smcx.types.StateHistory)" href="../types/#smcx.types.StateHistory">StateHistory</a>, <span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]]</code>
+   (smcx.types.StateHistory)" href="../types/#smcx.types.StateHistory">StateHistory</a>, <span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]]</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1594,7 +1595,7 @@ emission.</p>
 
   
       module-attribute
-   (smcx.types.StateHistory)" href="../types/#smcx.types.StateHistory">StateHistory</a>, <span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]]</code>
+   (smcx.types.StateHistory)" href="../types/#smcx.types.StateHistory">StateHistory</a>, <span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime emission_dim&#39;]]</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1623,7 +1624,7 @@ emission.</p>
               <div class="doc-md-description">
                 <p><code>num_timesteps</code> is less than one, inputs are malformed,
 the initial state tree is empty, a transition changes the state
-structure, or an emission has an invalid shape or dtype.</p>
+structure, or an emission has an invalid shape or changes dtype.</p>
               </div>
             </td>
           </tr>

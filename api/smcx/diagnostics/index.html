@@ -3279,7 +3279,8 @@ may be a latent-state PyTree.</p>
             <td>
               <div class="doc-md-description">
                 <p>Function <code>(key, state) -&gt; emission</code> accepting
-the same state PyTree and returning a nonempty floating vector.</p>
+the same state PyTree and returning a scalar or nonempty vector.
+Scalars become length-one vectors; dtype is preserved.</p>
               </div>
             </td>
             <td>
@@ -3318,7 +3319,7 @@ Defaults to the number of particles.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
+                  <code><span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -3328,7 +3329,7 @@ Defaults to the number of particles.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
+                  <code><span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -3357,7 +3358,7 @@ Defaults to the number of particles.</p>
               <div class="doc-md-description">
                 <p><code>num_samples</code> is not a positive integer, the posterior
 state is malformed, the transition changes its PyTree contract,
-or the emission is not a nonempty floating vector.</p>
+or the emission is not a scalar or nonempty vector.</p>
               </div>
             </td>
           </tr>

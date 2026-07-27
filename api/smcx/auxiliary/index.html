@@ -1623,7 +1623,8 @@ zero-based emission indices 1 through T - 1.</p>
             <td>
               <div class="doc-md-description">
                 <p>Optional exogenous inputs with shape <code>(T, input_dim)</code>
-or <code>(T,)</code>. Input zero reaches initialization; each later
+or <code>(T,)</code> and a nonempty event. Input zero reaches
+initialization; each later
 input reaches the transition, observation, and auxiliary
 callbacks aligned at the same time step.</p>
               </div>

@@ -3970,7 +3970,8 @@ zero-based emission indices 1 through T - 1.</p>
             <td>
               <div class="doc-md-description">
                 <p>Optional exogenous inputs with shape <code>(T, input_dim)</code>
-or <code>(T,)</code>. Input zero reaches initialization; each later
+or <code>(T,)</code> and a nonempty event. Input zero reaches
+initialization; each later
 input reaches the transition, observation, and auxiliary
 callbacks aligned at the same time step.</p>
               </div>
@@ -4292,9 +4293,10 @@ Time is the zero-based emission index from 1 through T - 1.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional exogenous inputs with shape <code>(T, input_dim)</code>
-or <code>(T,)</code>. The latter becomes <code>(T, 1)</code>. <code>inputs[0]</code>
-reaches the initial sampler and observation callback;
+                <p>Optional nonempty inputs shaped <code>(T,)</code> or <code>(T, input_dim)</code>.
+Rank-one inputs become <code>(T, 1)</code>; <code>inputs[0]</code> reaches the
+initial sampler and
+observation callback;
 <code>inputs[t]</code> then reaches the transition into t and the
 observation at t.</p>
               </div>
@@ -4548,11 +4550,11 @@ reach callbacks as length-one vectors; dtype is preserved.</p>
                 <code>input_t</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; input_dim&#39;] | None</code>
+                  <code><span title="smcx.types.InputValue">InputValue</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional <code>inputs[0]</code> passed to both callbacks.</p>
+                <p>Optional scalar/vector <code>inputs[0]</code>; callbacks get a vector.</p>
               </div>
             </td>
             <td>
@@ -4601,7 +4603,7 @@ reach callbacks as length-one vectors; dtype is preserved.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The observation, particle count, or sampled particle
+                <p>The observation, input, particle count, or sampled particle
 cloud is invalid.</p>
               </div>
             </td>
@@ -4775,11 +4777,11 @@ resampling; values above one force it at every update.</p>
                 <code>input_t</code>
             </td>
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39; input_dim&#39;] | None</code>
+                  <code><span title="smcx.types.InputValue">InputValue</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional <code>inputs[t]</code> reaching the transition and density.</p>
+                <p>Optional scalar/vector <code>inputs[t]</code>; callbacks get a vector.</p>
               </div>
             </td>
             <td>
@@ -4828,7 +4830,7 @@ resampling; values above one force it at every update.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The observation, threshold, checkpoint, or propagated
+                <p>The observation, input, threshold, checkpoint, or propagated
 state is malformed.</p>
               </div>
             </td>
@@ -6251,7 +6253,8 @@ emission indices 1 through T - 1.</p>
             <td>
               <div class="doc-md-description">
                 <p>Optional exogenous inputs with shape <code>(T, input_dim)</code>
-or <code>(T,)</code>. Input zero reaches initialization; each later
+or <code>(T,)</code> and a nonempty event. Input zero reaches
+initialization; each later
 input reaches every guided callback at that time step.</p>
               </div>
             </td>
@@ -6922,7 +6925,8 @@ zero-based emission indices 1 through T - 1.</p>
             <td>
               <div class="doc-md-description">
                 <p>Optional exogenous inputs with shape <code>(T, input_dim)</code>
-or <code>(T,)</code>. Inputs follow <code>params</code> in every callback;
+or <code>(T,)</code> and a nonempty event. Inputs follow <code>params</code> in
+every callback;
 the parameter initializer remains input-independent.</p>
               </div>
             </td>
@@ -8499,7 +8503,8 @@ may be a latent-state PyTree.</p>
             <td>
               <div class="doc-md-description">
                 <p>Function <code>(key, state) -&gt; emission</code> accepting
-the same state PyTree and returning a nonempty floating vector.</p>
+the same state PyTree and returning a scalar or nonempty vector.
+Scalars become length-one vectors; dtype is preserved.</p>
               </div>
             </td>
             <td>
@@ -8538,7 +8543,7 @@ Defaults to the number of particles.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
+                  <code><span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -8548,7 +8553,7 @@ Defaults to the number of particles.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="jaxtyping.Float">Float</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
+                  <code><span title="jaxtyping.Shaped">Shaped</span>[<span title="jaxtyping.Array">Array</span>, &#39;ntime num_samples emission_dim&#39;]</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -8577,7 +8582,7 @@ Defaults to the number of particles.</p>
               <div class="doc-md-description">
                 <p><code>num_samples</code> is not a positive integer, the posterior
 state is malformed, the transition changes its PyTree contract,
-or the emission is not a nonempty floating vector.</p>
+or the emission is not a scalar or nonempty vector.</p>
               </div>
             </td>
           </tr>
@@ -9263,8 +9268,8 @@ preserved.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional inputs with shape <code>(T, input_dim)</code> or <code>(T,)</code>.
-Rank-one inputs become <code>(T, 1)</code>.</p>
+                <p>Optional inputs with shape <code>(T, input_dim)</code> or <code>(T,)</code>
+and a nonempty event. Rank-one inputs become <code>(T, 1)</code>.</p>
               </div>
             </td>
             <td>
