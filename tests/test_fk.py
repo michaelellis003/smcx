@@ -9,9 +9,11 @@ at v1.16.0 (commit 8aa3ac8, before the loop was extracted into
 key schedule, weight rule, or evidence accumulation fails here.
 """
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
+import pytest
 
 import smcx
 from smcx.fk import FeynmanKac, run_smc
@@ -56,8 +58,12 @@ def _every_second(log_weights, current_ess, time_index):
     return time_index % 2 == 0
 
 
+@pytest.mark.skipif(
+    jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
+    reason="frozen CPU/x64 arithmetic contract",
+)
 class TestFixedKeyCharacterization:
-    """The FK rewiring reproduces v1.16.0 outputs bitwise on CPU."""
+    """The FK rewiring reproduces v1.16.0 outputs bitwise on CPU/x64."""
 
     def test_plain_filter_matches_pre_rewiring_values(self):
         initial, transition, log_obs = _scalar_model()

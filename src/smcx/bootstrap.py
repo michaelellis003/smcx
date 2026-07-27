@@ -705,8 +705,11 @@ def _bootstrap_fk(
     initial_sampler: InitialSampler | InitialSamplerWithInput,
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
-    emissions: Float[Array, "ntime emission_dim"],
-    inputs_arr: Float[Array, "ntime input_dim"] | None,
+    # Canonicalized (T, D) arrays; model-owned dtypes (integer and
+    # Boolean emissions and inputs are supported), so the runtime-lax
+    # sequence aliases apply, never Float.
+    emissions: EmissionSequence,
+    inputs_arr: InputSequence | None,
 ) -> FeynmanKac:
     """Derive the bootstrap Feynman-Kac model from its callbacks.
 
