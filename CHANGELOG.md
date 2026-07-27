@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.16.0 (2026-07-27)
+
+### Features
+
+- **diagnostics**: Add parameter-aware prediction
+  ([#240](https://github.com/michaelellis003/smcx/pull/240),
+  [`0821662`](https://github.com/michaelellis003/smcx/commit/0821662a3793763d198b06ffb4f5af3a50cc3b32))
+
+
 ## v1.15.0 (2026-07-27)
 
 ### Features
