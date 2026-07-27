@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.14.14 (2026-07-27)
+
+### Bug Fixes
+
+- **kalman**: Enforce covariance domains ([#229](https://github.com/michaelellis003/smcx/pull/229),
+  [`716239f`](https://github.com/michaelellis003/smcx/commit/716239f9277581b4ad42d624efab9e7e03a79da5))
+
+### Chores
+
+- **ci**: Raise Metal suite timeout ([#230](https://github.com/michaelellis003/smcx/pull/230),
+  [`93f442c`](https://github.com/michaelellis003/smcx/commit/93f442c5c73ba36d80907dcaad937495667f41a2))
+
+
 ## v1.14.13 (2026-07-26)
 
 ### Bug Fixes
