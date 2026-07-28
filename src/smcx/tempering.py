@@ -61,6 +61,7 @@ from smcx.types import (
     TemperingMutationInitFn,
     TemperingMutationState,
     TemperingMutationStepFn,
+    TemperingScheduleFn,
 )
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
@@ -157,6 +158,7 @@ def temper(
     *,
     mutation_init_fn: TemperingMutationInitFn | None = None,
     mutation_step_fn: TemperingMutationStepFn | None = None,
+    schedule_fn: TemperingScheduleFn | None = None,
     max_stages: int = 1000,
 ) -> TemperedPosterior:
     r"""Sample a static target by adaptive tempered SMC.
@@ -186,6 +188,12 @@ def temper(
         mutation_init_fn: Optional
             ``(position, tempered_logdensity_fn) -> state`` callback.
             State must be a JAX PyTree with a dense ``position`` field.
+        schedule_fn: Optional host callback
+            ``(phi, normalized_log_weights, log_likelihoods) -> float``
+            choosing the next temperature; it must return a finite
+            value in ``(phi, 1]``. When omitted, the adaptive ESS
+            bisection above applies. The callback runs host-side once
+            per stage; ``target_ess`` is ignored when it is supplied.
         mutation_step_fn: Optional
             ``(key, state, tempered_logdensity_fn) -> (state, info)``
             callback. Info must expose a scalar floating
@@ -394,8 +402,6 @@ def temper(
         # --- adaptive schedule: bisect ESS(phi') = target ----------
         # Match ess_at's promotion by constructing the zero increment with
         # loglik's dtype before adding it to log_w.
-        represented_uniform = log_w + jnp.zeros_like(loglik)
-        target = target_ess * float(compute_ess(represented_uniform))
         probe_delta = min(1e-6, 1.0 - phi)
         _, probe_log_sum = log_normalize(log_w + probe_delta * loglik)
         _raise_if_degenerate(probe_log_sum)
@@ -405,27 +411,38 @@ def temper(
                 "particle weights cannot be normalized at the next "
                 "tempering stage"
             )
-        if e_full >= target:
-            phi_new = 1.0
+        if schedule_fn is not None:
+            phi_new = float(schedule_fn(phi, log_w, loglik))
+            if not math.isfinite(phi_new) or not phi < phi_new <= 1.0:
+                raise ValueError(
+                    "schedule_fn must return a finite temperature in "
+                    f"(phi, 1]; got {phi_new} at phi={phi}"
+                )
         else:
-            lo, hi = phi, 1.0
-            for _ in range(_BISECT_ITERS):
-                mid = 0.5 * (lo + hi)
-                # Once the midpoint rounds onto an endpoint, every later
-                # iteration recomputes the same midpoint and, ess_at
-                # being deterministic, takes the same branch — so after
-                # applying this update the pair is at its fixed point
-                # and breaking is bitwise-identical to finishing the
-                # loop. Each avoided probe is a host sync.
-                converged = mid in (lo, hi)
-                e_mid = ess_at(mid, phi)
-                if math.isnan(e_mid) or e_mid < target:
-                    hi = mid
-                else:
-                    lo = mid
-                if converged:
-                    break
-            phi_new = lo if lo > phi else 0.5 * (phi + hi)
+            represented_uniform = log_w + jnp.zeros_like(loglik)
+            target = target_ess * float(compute_ess(represented_uniform))
+            if e_full >= target:
+                phi_new = 1.0
+            else:
+                lo, hi = phi, 1.0
+                for _ in range(_BISECT_ITERS):
+                    mid = 0.5 * (lo + hi)
+                    # Once the midpoint rounds onto an endpoint, every
+                    # later iteration recomputes the same midpoint and,
+                    # ess_at being deterministic, takes the same branch
+                    # — so after applying this update the pair is at
+                    # its fixed point and breaking is bitwise-identical
+                    # to finishing the loop. Each avoided probe is a
+                    # host sync.
+                    converged = mid in (lo, hi)
+                    e_mid = ess_at(mid, phi)
+                    if math.isnan(e_mid) or e_mid < target:
+                        hi = mid
+                    else:
+                        lo = mid
+                    if converged:
+                        break
+                phi_new = lo if lo > phi else 0.5 * (phi + hi)
         delta = phi_new - phi
 
         # --- reweight; increment at the reweight stage --------------
