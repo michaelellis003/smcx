@@ -3,8 +3,6 @@
 
 """Tests for :func:`smcx.guided_filter` against an exact LGSSM oracle."""
 
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -13,7 +11,9 @@ import pytest
 
 import smcx
 import smcx.guided as guided_module
+from smcx import fk as fk_module
 from smcx._utils import _validate_particle_cloud
+from smcx.containers import ParticleState
 from tests._kalman import kalman_1d
 
 A, Q, R = 0.9, 0.25, 1.0
@@ -109,32 +109,30 @@ def test_uncompiled_guided_step_matches_public_two_step_run():
     callbacks = (_init, sample, log_q, _log_trans, _logobs)
     full = smcx.guided_filter(root_key, *callbacks, Y[:2], 8)
     step_key = jr.split(jr.split(root_key)[0], 1)[0]
-    state = guided_module.ParticleState(
+    state = ParticleState(
         full.filtered_particles[0],
         full.filtered_log_weights[0],
         full.log_evidence_increments[0],
     )
-    carry = guided_module._GuidedCarry(
-        state,
-        full.ess[0],
-        jnp.zeros_like(state.log_marginal_likelihood),
-        full.ancestors[0],
-        jnp.asarray(False),
-    )
-    step_input = guided_module._GuidedStepInput(Y[1], None, jnp.int32(1))
     signature = _validate_particle_cloud(state.particles, 8, name="particles")
-    step = partial(
-        guided_module._guided_step,
-        proposal_sampler=sample,
-        log_proposal_fn=log_q,
-        log_transition_fn=_log_trans,
-        log_observation_fn=_logobs,
-        resampling_fn=guided_module.systematic,
-        resampling_threshold=0.5,
-        state_signature=signature,
-        log_num_particles=jnp.asarray(np.log(8)),
+    fk = guided_module._guided_fk(
+        _init, sample, log_q, _log_trans, _logobs, Y[:2], None
     )
-    next_carry, output = step(carry, step_input, step_key)
+
+    def step(current_state, current_ess, current_key):
+        return fk_module._fk_step(
+            current_key,
+            current_state,
+            current_ess,
+            fk,
+            (Y[1],),
+            guided_module.systematic,
+            0.5,
+            signature,
+            jnp.int32(1),
+        )
+
+    result = step(state, jnp.asarray(full.ess[0]), step_key)
     expected_output = (
         full.filtered_particles[1],
         full.filtered_log_weights[1],
@@ -142,16 +140,19 @@ def test_uncompiled_guided_step_matches_public_two_step_run():
         full.ess[1],
         full.log_evidence_increments[1],
     )
-    jax.tree.map(_assert_compiled_close, tuple(output), expected_output)
-    _assert_compiled_close(
-        next_carry.state.log_marginal_likelihood, full.marginal_loglik
-    )
-    compiled = jax.jit(step)(carry, step_input, step_key)
     jax.tree.map(
         _assert_compiled_close,
-        (next_carry, output),
-        compiled,
+        (
+            result.particles,
+            result.log_weights,
+            result.ancestors,
+            result.ess,
+            result.log_evidence_increment,
+        ),
+        expected_output,
     )
+    compiled = jax.jit(step)(state, jnp.asarray(full.ess[0]), step_key)
+    jax.tree.map(_assert_compiled_close, tuple(result), tuple(compiled))
 
 
 class TestGuidedReducesToBootstrap:
