@@ -110,8 +110,11 @@ filter, close the callbacks over in a `jax.jit` wrapper rather
 than passing them as dynamic array arguments.
 
 Use the EKF to supply a local linearization; use the UKF to apply the fixed
-scaled sigma-point rule. Shared means let research code compare them without
-a model hierarchy or general sigma-point plug-in layer.
+scaled sigma-point rule. `smcx.gaussian_filter` makes the rule an
+exchangeable strategy on one model: pass
+`method=smcx.taylor_order1(transition_jacobian, observation_jacobian)`
+for first-order linearization or `method=smcx.unscented(alpha, beta,
+kappa)` for sigma points, with results identical to the named filters.
 
 ## Choose particle callbacks for the algorithm
 
@@ -165,83 +168,99 @@ fixed-key weights, ESS values, and SMC² or tempering paths. Following
 [NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html), smcx
 treats this as a bug fix; public signatures, shapes, and dtypes are unchanged.
 
-## Bind a plain JAX model
+## Bind a model record
 
-The following user-owned classes are one possible model representation. The
-method names are a convention for this recipe; smcx never imports the classes
-or inspects the methods.
+A `smcx.StateSpaceModel` groups the per-particle callables that define
+one model. Parameters stay an explicit PyTree argument that smcx
+threads to every callable, so there is no binding factory to write,
+gradients with respect to parameters flow through filters, and
+changing parameters cannot retrace. Every callable takes a trailing
+`input_t`, which is `None` when the run has no exogenous inputs; a
+model that ignores inputs simply ignores the argument.
 
 ```python
-import math
-from typing import NamedTuple
-
-import jax
 import jax.numpy as jnp
 import jax.random as jr
+
 import smcx
 
 
-class AR1Params(NamedTuple):
-    rho: jax.Array
-    process_scale: jax.Array
-    observation_scale: jax.Array
+def sample_initial(key, params, input_0):
+    scale = params["process_scale"] / jnp.sqrt(1.0 - params["rho"] ** 2)
+    return scale * jr.normal(key, (1,))
 
 
-class GaussianAR1:
-    def sample_initial(self, key, num_particles, params):
-        scale = params.process_scale / jnp.sqrt(1.0 - params.rho**2)
-        return scale * jr.normal(key, (num_particles, 1))
-
-    def sample_transition(self, key, state, params):
-        noise = params.process_scale * jr.normal(key, state.shape)
-        return params.rho * state + noise
-
-    def log_observation(self, emission, state, params):
-        scale = params.observation_scale
-        residual = (emission[0] - state[0]) / scale
-        return (
-            -0.5 * residual**2 - jnp.log(scale) - 0.5 * math.log(2.0 * math.pi)
-        )
-```
-
-A small factory binds the model representation and its parameters into the
-three callback signatures expected by `smcx.bootstrap_filter`:
-
-```python
-def make_bootstrap_callbacks(model, params):
-    def initial(key, num_particles):
-        return model.sample_initial(key, num_particles, params)
-
-    def transition(key, state):
-        return model.sample_transition(key, state, params)
-
-    def log_observation(emission, state):
-        return model.log_observation(emission, state, params)
-
-    return initial, transition, log_observation
+def sample_transition(key, state, params, input_t):
+    noise = params["process_scale"] * jr.normal(key, state.shape)
+    return params["rho"] * state + noise
 
 
-model = GaussianAR1()
-params = AR1Params(
-    rho=jnp.asarray(0.95),
-    process_scale=jnp.asarray(0.3),
-    observation_scale=jnp.asarray(0.7),
+def log_observation(emission, state, params, input_t):
+    residual = (emission[0] - state[0]) / params["observation_scale"]
+    return -0.5 * residual**2 - jnp.log(params["observation_scale"])
+
+
+model = smcx.StateSpaceModel(
+    sample_initial=sample_initial,
+    sample_transition=sample_transition,
+    log_observation=log_observation,
 )
-initial, transition, log_observation = make_bootstrap_callbacks(model, params)
+params = {
+    "rho": jnp.asarray(0.95),
+    "process_scale": jnp.asarray(0.3),
+    "observation_scale": jnp.asarray(0.7),
+}
 
 emissions = jnp.asarray([[0.2], [-0.1], [0.4]])
-posterior = smcx.bootstrap_filter(
+posterior = smcx.run_smc(
     jr.key(0),
-    initial,
-    transition,
-    log_observation,
-    emissions,
+    smcx.bootstrap_fk(model, params, emissions),
     num_particles=4_096,
 )
 ```
 
-The factory belongs to the application. An auxiliary or guided factory can
-return the extra callbacks required by that algorithm.
+`smcx.bootstrap_fk`, `smcx.guided_fk`, and `smcx.auxiliary_fk` derive
+the algorithm object — a `smcx.FeynmanKac` — from the same record; an
+algorithm that needs an optional capability (`sample_proposal`,
+`log_proposal`, `log_transition`, or `log_lookahead`) raises a named
+error when the field is `None`. The record is data, not a base class:
+smcx never inspects it beyond reading its fields (a Dynamax or other
+model-library adapter is just a function returning one).
+
+The positional-callback filters (`smcx.bootstrap_filter` and
+friends) remain supported with their original signatures; the model
+record supersedes the per-algorithm binding factories this guide
+previously recommended.
+
+## Write a custom Feynman-Kac model
+
+A researcher's algorithm that is not in the catalog is usually still
+one `smcx.FeynmanKac`: an initial law ``m0``, a per-particle mutation
+kernel ``m``, and a per-particle log-potential ``log_g``, over a
+context PyTree whose leading axis is time. `smcx.run_smc` then
+supplies the conditional-resampling loop, the branch weight rule, the
+evidence accounting, and the posterior container. Annealing the
+potential is a two-line change to the derived record:
+
+```python
+fk = smcx.bootstrap_fk(model, params, emissions)
+
+
+def annealed_log_g(parent, state, context_t):
+    return 0.5 * fk.log_g(parent, state, context_t)
+
+
+annealed = fk._replace(log_g=annealed_log_g)
+posterior = smcx.run_smc(jr.key(0), annealed, num_particles=4_096)
+```
+
+An optional ``log_eta`` field adds an auxiliary-filter look-ahead
+twist (first-stage selection, ancestor correction, and the two-factor
+evidence increment are loop-owned), and ``log_g_batch`` lets a
+composite potential own its per-callback validation, as the guided
+derivation does. For algorithms whose step does not fit the
+resample-mutate-reweight shape at all, `smcx.run_particle_filter`
+below hands the whole step to your code.
 
 ## Choose when to resample
 
@@ -463,33 +482,25 @@ first-stage normalizer into the runner's eager evidence check even when
 resampling is skipped. In an input-aware step, pass the aligned `input_t` to
 the look-ahead, proposal, and all three density callbacks.
 
-## Write input-aware callbacks explicitly
+## Thread time-varying inputs
 
-Time-varying inputs use distinct callback signatures. At time zero,
-`input_0` reaches the initial sampler and observation callback. At later
-times, `input_t` reaches the transition into that time and its observation.
-The smcx-facing input is always the final callback argument.
-
-Use a separate factory for an input-aware model:
+At time zero, `inputs[0]` reaches the initial sampler and observation
+callback. At later times, `inputs[t]` reaches the transition into
+that time and its observation. With the model record there is nothing
+else to write: pass `inputs=...` to the derivation and every callable
+receives the aligned `input_t` as its final argument (a rank-one
+input sequence arrives as a length-one vector):
 
 ```python
-def make_input_aware_bootstrap_callbacks(model, params):
-    def initial(key, num_particles, input_0):
-        return model.sample_initial(key, num_particles, input_0, params)
-
-    def transition(key, state, input_t):
-        return model.sample_transition(key, state, input_t, params)
-
-    def log_observation(emission, state, input_t):
-        return model.log_observation(emission, state, input_t, params)
-
-    return initial, transition, log_observation
+posterior = smcx.run_smc(
+    jr.key(0),
+    smcx.bootstrap_fk(model, params, emissions, inputs=inputs),
+    num_particles=4_096,
+)
 ```
 
-Choose `make_bootstrap_callbacks` or
-`make_input_aware_bootstrap_callbacks` when configuring the run. Keeping both
-forms visible prevents an ambiguous runtime dispatch and makes input alignment
-part of the model code.
+For the positional-callback filters, input-aware runs instead use the
+`WithInput` callback arities documented on each filter.
 
 ## Align posterior predictions
 
@@ -562,7 +573,11 @@ posterior = smcx.temper(
 ```
 
 smcx batches independent states across particles and compiles the fixed-count
-sweep; `temper` itself remains host-driven. Mutation state is reinitialized
+sweep; `temper` itself remains host-driven. The temperature ladder is
+also caller-replaceable: a keyword-only ``schedule_fn(phi,
+normalized_log_weights, log_likelihoods)`` host callback returns the
+next temperature in ``(phi, 1]``, and omitting it keeps the adaptive
+ESS bisection. Mutation state is reinitialized
 after each resampling stage. Every acceptance rate is checked when the sweep
 returns to that host-driven stage boundary. Stage means accumulate in at
 least float32 precision and round once to the callback rate dtype. The caller
@@ -598,18 +613,19 @@ finite likelihood scale. Targets near the cap can require a larger
 
 ## Optional Equinox representation
 
-If an application already uses Equinox, a callable module can be captured by
-the same closures. This example targets `equinox==0.13.8`; Equinox is not an
-smcx dependency. See the Equinox [Module documentation][equinox-module] for
-its PyTree behavior.
+If an application already uses Equinox, a callable module slots into
+the model record directly — its parameters can live in ``params`` or
+inside the module, whichever the application prefers. This example
+targets `equinox==0.13.8`; Equinox is not an smcx dependency. See the
+Equinox [Module documentation][equinox-module] for its PyTree
+behavior.
 
 ```python
-import math
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+
 import smcx
 
 
@@ -622,49 +638,29 @@ class LinearGaussianTransition(eqx.Module):
         return self.rho * state + noise
 
 
-def make_equinox_bootstrap_callbacks(
-    transition_model,
-    initial_scale,
-    observation_scale,
-):
-    def initial(key, num_particles):
-        return initial_scale * jr.normal(key, (num_particles, 1))
-
-    def transition(key, state):
-        return transition_model(key, state)
-
-    def log_observation(emission, state):
-        residual = (emission[0] - state[0]) / observation_scale
-        return (
-            -0.5 * residual**2
-            - jnp.log(observation_scale)
-            - 0.5 * math.log(2.0 * math.pi)
-        )
-
-    return initial, transition, log_observation
-
-
-transition_model = LinearGaussianTransition(
+transition_module = LinearGaussianTransition(
     rho=jnp.asarray(0.95),
     process_scale=jnp.asarray(0.3),
 )
-initial, transition, log_observation = make_equinox_bootstrap_callbacks(
-    transition_model,
-    initial_scale=jnp.asarray(1.0),
-    observation_scale=jnp.asarray(0.7),
+model = smcx.StateSpaceModel(
+    sample_initial=lambda key, params, input_0: jr.normal(key, (1,)),
+    sample_transition=lambda key, state, params, input_t: params(key, state),
+    log_observation=lambda emission, state, params, input_t: (
+        -0.5 * ((emission[0] - state[0]) / 0.7) ** 2
+    ),
 )
+
 emissions = jnp.asarray([[0.2], [-0.1], [0.4]])
-posterior = smcx.bootstrap_filter(
+posterior = smcx.run_smc(
     jr.key(0),
-    initial,
-    transition,
-    log_observation,
-    emissions,
+    smcx.bootstrap_fk(model, transition_module, emissions),
     num_particles=4_096,
 )
 ```
 
-The factory exposes the same three callback signatures as the plain JAX
-version. No Equinox-specific adapter is needed.
+Here the Equinox module itself is the ``params`` PyTree, so smcx
+threads it explicitly and `jax.grad` with respect to the module's
+arrays works through the filter. No Equinox-specific adapter exists
+or is needed.
 
 [equinox-module]: https://docs.kidger.site/equinox/api/module/module/
