@@ -350,9 +350,9 @@ def bootstrap_step(
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
     emission_t: EmissionValue,
+    *,
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float = 0.5,
-    *,
     input_t: InputValue | None = None,
 ) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
     """Advance a resumable bootstrap filter by one observation.
@@ -424,9 +424,9 @@ def bootstrap_update(
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
     emissions_chunk: EmissionSequence,
+    *,
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float = 0.5,
-    *,
     inputs: InputSequence | None = None,
     store_history: bool = True,
 ) -> tuple[BootstrapCheckpoint, ParticleFilterPosterior]:
@@ -560,8 +560,8 @@ def bootstrap_update(
                 transition_sampler,
                 log_observation_fn,
                 emissions_chunk[index],
-                resampling_fn,
-                resampling_threshold,
+                resampling_fn=resampling_fn,
+                resampling_threshold=resampling_threshold,
                 input_t=input_t,
             )
             if isinstance(current.state.log_weights, core.Tracer):
@@ -612,9 +612,9 @@ def bootstrap_filter(
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
     emissions: EmissionSequence,
     num_particles: int,
+    *,
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float | ResamplingCriterion = 0.5,
-    *,
     inputs: InputSequence | None = None,
     store_history: bool = True,
 ) -> ParticleFilterPosterior:

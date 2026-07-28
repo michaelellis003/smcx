@@ -142,9 +142,9 @@ def auxiliary_filter(
     log_auxiliary_fn: LogObservationFn | LogObservationFnWithInput,
     emissions: EmissionSequence,
     num_particles: int,
+    *,
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float | ResamplingCriterion = 0.5,
-    *,
     inputs: InputSequence | None = None,
     store_history: bool = True,
 ) -> ParticleFilterPosterior:

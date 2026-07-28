@@ -59,7 +59,6 @@ require full history.
 
 import math
 import operator
-import warnings
 from numbers import Real
 from typing import TYPE_CHECKING, Any, SupportsFloat, TypeAlias, cast
 
@@ -1104,12 +1103,11 @@ def posterior_predictive_sample(
         particles=True,
     )
     if isinstance(posterior, LiuWestPosterior):
-        warnings.warn(
-            "Passing LiuWestPosterior to posterior_predictive_sample ignores "
-            "filtered_params and will be an error in smcx 2.0; use "
-            "param_posterior_predictive_sample for joint prediction",
-            FutureWarning,
-            stacklevel=2,
+        raise ValueError(
+            "posterior_predictive_sample cannot represent a fitted "
+            "Liu-West model: it would ignore filtered_params. Use "
+            "param_posterior_predictive_sample for joint state and "
+            "parameter prediction"
         )
     ntime, n_particles = axes
     num_samples = n_particles if num_samples is None else num_samples

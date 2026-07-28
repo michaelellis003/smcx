@@ -265,7 +265,8 @@ class TemperedPosterior(NamedTuple):
     uniform. The field is kept for interface symmetry and as a reminder to
     compute summaries from weighted clouds when they are available.
     ``marginal_loglik`` is the Neumaier-compensated log-evidence
-    estimate.
+    estimate, and ``log_evidence_increments`` holds the per-stage
+    reweighting normalizers whose compensated sum it is.
     """
 
     particles: Float[Array, "num_particles dim"]
@@ -274,6 +275,7 @@ class TemperedPosterior(NamedTuple):
     temperatures: Float[Array, " num_stages"]
     ess: Float[Array, " num_stages"]
     acceptance_rates: Float[Array, " num_stages"]
+    log_evidence_increments: Float[Array, " num_stages"]
 
 
 class SMC2Posterior(NamedTuple):
