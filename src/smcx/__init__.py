@@ -16,6 +16,7 @@ from smcx.bootstrap import (
 from smcx.containers import (
     BootstrapCheckpoint,
     BootstrapStepInfo,
+    DGLMFilterPosterior,
     DLMFilterPosterior,
     GaussianFilterPosterior,
     GaussianSmootherPosterior,
@@ -27,6 +28,7 @@ from smcx.containers import (
     SMC2Posterior,
     TemperedPosterior,
 )
+from smcx.dglm import DGLMFamily, dglm_filter, poisson
 from smcx.diagnostics import (
     crps,
     cumulative_log_score,
@@ -89,6 +91,8 @@ __all__ = [
     "BootstrapCheckpoint",
     "BootstrapStepInfo",
     "CallbackNames",
+    "DGLMFamily",
+    "DGLMFilterPosterior",
     "DLMFilterPosterior",
     "DegenerateWeightsError",
     "FeynmanKac",
@@ -112,6 +116,7 @@ __all__ = [
     "bootstrap_update",
     "crps",
     "cumulative_log_score",
+    "dglm_filter",
     "diagnose",
     "dlm_filter",
     "ess",
@@ -133,6 +138,7 @@ __all__ = [
     "param_weighted_quantile",
     "pareto_k_diagnostic",
     "particle_diversity",
+    "poisson",
     "posterior_predictive_sample",
     "reconstruct_trajectories",
     "replicated_log_ml",
