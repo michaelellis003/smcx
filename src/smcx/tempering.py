@@ -152,10 +152,10 @@ def temper(
     log_prior_fn: StaticLogDensity,
     log_likelihood_fn: StaticLogDensity,
     num_particles: int,
+    *,
     num_mcmc_steps: int = 5,
     target_ess: float = 0.5,
     resampling_fn: ResamplingFn = systematic,
-    *,
     mutation_init_fn: TemperingMutationInitFn | None = None,
     mutation_step_fn: TemperingMutationStepFn | None = None,
     schedule_fn: TemperingScheduleFn | None = None,
@@ -395,6 +395,7 @@ def temper(
     temps: list[float] = []
     ess_trace: list[float] = []
     acc_trace: list[Array] = []
+    increment_trace: list[Array] = []
     total = jnp.zeros(())
     comp = jnp.zeros(())
 
@@ -507,6 +508,7 @@ def temper(
         temps.append(phi_new)
         ess_trace.append(stage_ess)
         acc_trace.append(acc)
+        increment_trace.append(jnp.asarray(log_sum))
         phi = phi_new
         if phi >= 1.0:
             break
@@ -528,4 +530,5 @@ def temper(
         temperatures=jnp.asarray(temps),
         ess=jnp.asarray(ess_trace),
         acceptance_rates=jnp.stack(acc_trace),
+        log_evidence_increments=jnp.stack(increment_trace),
     )

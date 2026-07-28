@@ -1776,30 +1776,34 @@ class TestPosteriorPredictiveSample:
         assert jnp.array_equal(result, jnp.full((1, 2, 1), 4.0))
 
     def test_liu_west_params_are_not_ignored_silently(self):
-        """The legacy state-only path warns without changing its draws."""
+        """The legacy state-only path is now an error (2.0 contract).
+
+        The explicit state-only projection remains supported; only the
+        silent-parameter-dropping call is rejected, completing #174's
+        FutureWarning schedule.
+        """
         posterior = _make_liu_west_posterior()
         state_only = ParticleFilterPosterior(*posterior[:-1])
-        expected = posterior_predictive_sample(
+        result = posterior_predictive_sample(
             jr.key(179),
             state_only,
             lambda _key, state: state,
             lambda _key, state: state,
             num_samples=5,
         )
+        assert result.shape == (3, 5, 1)
 
-        with pytest.warns(
-            FutureWarning,
-            match="error in smcx 2.0.*param_posterior_predictive_sample",
+        with pytest.raises(
+            ValueError,
+            match="param_posterior_predictive_sample",
         ):
-            result = posterior_predictive_sample(
+            posterior_predictive_sample(
                 jr.key(179),
                 posterior,
                 lambda _key, state: state,
                 lambda _key, state: state,
                 num_samples=5,
             )
-
-        assert jnp.array_equal(result, expected)
 
 
 class TestParamPosteriorPredictiveSample:

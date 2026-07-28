@@ -41,6 +41,7 @@ def _tempered(particles: ParticleCloud) -> TemperedPosterior:
         temperatures=jnp.array([0.0, 1.0]),
         ess=jnp.array([4.0, 4.0]),
         acceptance_rates=jnp.array([0.0, 0.8]),
+        log_evidence_increments=jnp.zeros_like(jnp.array([0.0, 0.8])),
     )
 
 
@@ -281,6 +282,7 @@ def test_adaptive_tempered_runs_pad_stage_diagnostics_with_validity_mask():
         temperatures=jnp.array([0.0, 1.0]),
         ess=jnp.array([4.0, 3.0]),
         acceptance_rates=jnp.array([0.0, 0.8]),
+        log_evidence_increments=jnp.zeros_like(jnp.array([0.0, 0.8])),
     )
     long = TemperedPosterior(
         particles=particles + 10.0,
@@ -289,6 +291,7 @@ def test_adaptive_tempered_runs_pad_stage_diagnostics_with_validity_mask():
         temperatures=jnp.array([0.0, 0.4, 1.0]),
         ess=jnp.array([4.0, 3.5, 3.0]),
         acceptance_rates=jnp.array([0.0, 0.7, 0.8]),
+        log_evidence_increments=jnp.zeros_like(jnp.array([0.0, 0.7, 0.8])),
     )
 
     result = to_arviz([short, long], key=jr.key(8))
@@ -319,6 +322,7 @@ def test_tempered_stage_diagnostics_require_aligned_lengths():
         temperatures=jnp.array([0.0, 1.0]),
         ess=jnp.array([4.0]),
         acceptance_rates=jnp.array([0.0, 0.8]),
+        log_evidence_increments=jnp.zeros_like(jnp.array([0.0, 0.8])),
     )
 
     with pytest.raises(ValueError, match="matching stage lengths"):

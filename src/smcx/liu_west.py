@@ -463,10 +463,10 @@ def liu_west_filter(
     param_initial_sampler: ParamInitialSampler,
     emissions: EmissionSequence,
     num_particles: int,
+    *,
     shrinkage: float = 0.95,
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float | ResamplingCriterion = 0.5,
-    *,
     inputs: InputSequence | None = None,
     param_initial_state_sampler: ParamCloudInitialStateSampler
     | ParamCloudInitialStateSamplerWithInput

@@ -671,3 +671,47 @@ def test_smc2_rejects_low_precision_log_observation():
             2,
             2,
         )
+
+
+class TestKeywordOnlyConfiguration:
+    """Filter configuration is keyword-only in 2.0.
+
+    Positionally passing a resampler where a float threshold or the
+    shrinkage parameter once sat produced silent misbinding; the
+    signatures now reject positional configuration outright.
+    """
+
+    def test_bootstrap_filter_rejects_positional_resampler(self):
+        def initial(key, n):
+            return jr.normal(key, (n, 1))
+
+        def transition(key, state):
+            return state + jr.normal(key, state.shape)
+
+        def log_obs(emission, state):
+            return -0.5 * (emission[0] - state[0]) ** 2
+
+        with pytest.raises(TypeError, match="positional"):
+            smcx.bootstrap_filter(
+                jr.key(0),
+                initial,
+                transition,
+                log_obs,
+                jnp.zeros((3, 1)),
+                8,
+                smcx.systematic,  # ty: ignore[too-many-positional-arguments]
+            )
+
+    def test_liu_west_filter_rejects_positional_shrinkage(self):
+        with pytest.raises(TypeError, match="positional"):
+            smcx.liu_west_filter(
+                jr.key(0),
+                lambda key, n, p: jr.normal(key, (n, 1)),
+                lambda key, s, p: s,
+                lambda e, s, p: jnp.asarray(0.0),
+                lambda e, s, p: jnp.asarray(0.0),
+                lambda key, n: jr.normal(key, (n, 1)),
+                jnp.zeros((3, 1)),
+                8,
+                0.9,  # ty: ignore[too-many-positional-arguments]
+            )

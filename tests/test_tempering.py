@@ -389,12 +389,13 @@ class TestMutationCallback:
                     dtype=acceptance_rates.dtype,
                 ),
             )
-            for expected, actual in zip(
-                baseline[:-1],
-                posterior[:-1],
-                strict=True,
-            ):
-                np.testing.assert_array_equal(actual, expected)
+            for field_name in type(baseline)._fields:
+                if field_name == "acceptance_rates":
+                    continue
+                np.testing.assert_array_equal(
+                    getattr(posterior, field_name),
+                    getattr(baseline, field_name),
+                )
 
     @pytest.mark.skipif(
         jax.default_backend() != "cpu",
@@ -912,3 +913,18 @@ class TestScheduleCallback:
                 num_mcmc_steps=1,
                 schedule_fn=stuck,
             )
+
+
+def test_stage_increments_sum_to_the_marginal():
+    """Per-stage evidence increments compose the compensated total."""
+    posterior = _run(3, n=256)
+
+    np.testing.assert_allclose(
+        float(jnp.sum(posterior.log_evidence_increments)),
+        float(posterior.marginal_loglik),
+        rtol=1e-10,
+        atol=1e-10,
+    )
+    assert posterior.log_evidence_increments.shape == (
+        posterior.temperatures.shape[0],
+    )
