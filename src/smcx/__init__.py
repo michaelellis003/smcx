@@ -16,6 +16,7 @@ from smcx.bootstrap import (
 from smcx.containers import (
     BootstrapCheckpoint,
     BootstrapStepInfo,
+    DLMFilterPosterior,
     GaussianFilterPosterior,
     GaussianSmootherPosterior,
     LiuWestPosterior,
@@ -46,6 +47,7 @@ from smcx.diagnostics import (
     weighted_quantile,
     weighted_variance,
 )
+from smcx.dlm import dlm_filter
 from smcx.exceptions import DegenerateWeightsError
 from smcx.fk import CallbackNames, FeynmanKac, run_smc
 from smcx.guided import guided_filter
@@ -87,6 +89,7 @@ __all__ = [
     "BootstrapCheckpoint",
     "BootstrapStepInfo",
     "CallbackNames",
+    "DLMFilterPosterior",
     "DegenerateWeightsError",
     "FeynmanKac",
     "GaussianFilterPosterior",
@@ -110,6 +113,7 @@ __all__ = [
     "crps",
     "cumulative_log_score",
     "diagnose",
+    "dlm_filter",
     "ess",
     "extended_kalman_filter",
     "gaussian_filter",

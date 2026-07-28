@@ -278,6 +278,26 @@ class TemperedPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " num_stages"]
 
 
+class DLMFilterPosterior(NamedTuple):
+    """Conjugate unknown-variance DLM filtering output.
+
+    Scale-free moments: the scaled filtered covariance is
+    ``scale_estimates[:, None, None] *
+    filtered_scale_free_covariances``. ``scale_shapes`` and
+    ``scale_estimates`` are the Inverse-Gamma posterior degrees of
+    freedom and point estimate of the unknown observational variance;
+    ``marginal_loglik`` is the exact sum of Student-t one-step
+    forecast log densities.
+    """
+
+    filtered_means: Float[Array, "ntime state_dim"]
+    filtered_scale_free_covariances: Float[Array, "ntime state_dim state_dim"]
+    scale_shapes: Float[Array, " ntime"]
+    scale_estimates: Float[Array, " ntime"]
+    marginal_loglik: Float[Array, ""]
+    log_evidence_increments: Float[Array, " ntime"]
+
+
 class SMC2Posterior(NamedTuple):
     """SMC² posterior over static parameters.
 
