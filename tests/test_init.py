@@ -38,6 +38,8 @@ def test_public_api_exports_all_expected_names(package):
         "TemperedPosterior",
         "__version__",
         "auxiliary_fk",
+        "bernoulli",
+        "binomial",
         "auxiliary_filter",
         "bootstrap_fk",
         "bootstrap_filter",
