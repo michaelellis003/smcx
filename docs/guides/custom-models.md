@@ -168,6 +168,39 @@ fixed-key weights, ESS values, and SMC² or tempering paths. Following
 [NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html), smcx
 treats this as a bug fix; public signatures, shapes, and dtypes are unchanged.
 
+## Learn the observational variance exactly
+
+One special structure admits exact sequential learning of a static
+parameter: the linear-Gaussian model whose single unknown
+observational variance scales every covariance (West and Harrison
+1997, ch. 4). `smcx.dlm_filter` carries its Normal-Inverse-Gamma
+posterior in closed form and returns the exact Student-t marginal
+likelihood. Covariances are supplied scale-free (divided by the
+unknown variance), and the evolution covariance may instead be stated
+by a discount factor — a modeling device, not an estimator:
+
+```python
+posterior = smcx.dlm_filter(
+    jnp.zeros(1),
+    jnp.eye(1),          # prior covariance / V
+    jnp.eye(1),
+    jnp.ones(1),
+    emissions,
+    discount=0.95,
+    prior_shape=4.0,     # Inverse-Gamma degrees of freedom
+    prior_scale=1.0,     # prior point estimate of V
+)
+scaled_covariances = (
+    posterior.scale_estimates[:, None, None]
+    * posterior.filtered_scale_free_covariances
+)
+```
+
+A `variance_discount` below one instead tracks a slowly changing
+variance (exact under the implied beta-gamma random walk on the
+precision). Learning several free covariances breaks the conjugacy;
+that is where the particle methods below take over.
+
 ## Bind a model record
 
 A `smcx.StateSpaceModel` groups the per-particle callables that define

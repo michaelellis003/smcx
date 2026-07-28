@@ -20,26 +20,29 @@ import pytest
 import smcx
 
 
-def _rational_reference(m0, c0, w, n0, s0, observations):
+def _rational_reference(m0, c0, w, n0, s0, observations, delta_v=None):
     """Run the scalar NIG recursion exactly (G = F = 1, V-tilde = 1).
 
     All inputs are Fractions; returns per-step exact
     (m_t, c_t, n_t, s_t, f_t, q_t, big_q_t) where big_q_t is the
-    Student-t forecast scale S_{t-1} * q_t.
+    Student-t forecast scale S_{t-1} * q_t. ``delta_v`` applies the
+    W&H variance discount, n_t = delta_v * n_{t-1} + 1, at every
+    evolution (never before the first observation).
     """
     m, c, n, s = m0, c0, n0, s0
     steps = []
     for t, y in enumerate(observations):
         if t == 0:
             a, r = m, c
+            n_minus = n
         else:
             a, r = m, c + w
+            n_minus = n if delta_v is None else delta_v * n
         q = r + 1
         f = a
         e = y - f
         gain = r / q
         big_q = s * q
-        n_minus = n
         m = a + gain * e
         c = r - gain * gain * q
         n = n_minus + 1
@@ -65,14 +68,19 @@ def _student_t_logpdf(e, big_q, dof):
 class TestExactRecursion:
     """The implementation reproduces the exact NIG recursion."""
 
-    def test_matches_rational_reference(self):
+    @pytest.mark.parametrize(
+        "delta_v", [None, Fraction(9, 10)], ids=["constant-V", "discounted-V"]
+    )
+    def test_matches_rational_reference(self, delta_v):
         m0 = Fraction(1, 2)
         c0 = Fraction(3)
         w = Fraction(1, 4)
         n0 = Fraction(5)
         s0 = Fraction(2)
         observations = [Fraction(1), Fraction(-1, 2), Fraction(3, 4)]
-        expected = _rational_reference(m0, c0, w, n0, s0, observations)
+        expected = _rational_reference(
+            m0, c0, w, n0, s0, observations, delta_v=delta_v
+        )
 
         posterior = smcx.dlm_filter(
             jnp.asarray([float(m0)]),
@@ -83,6 +91,7 @@ class TestExactRecursion:
             scale_free_transition_covariance=jnp.asarray([[float(w)]]),
             prior_shape=float(n0),
             prior_scale=float(s0),
+            variance_discount=1.0 if delta_v is None else float(delta_v),
         )
 
         for t, step in enumerate(expected):
@@ -95,8 +104,10 @@ class TestExactRecursion:
                 float(c),
                 rtol=1e-13,
             )
+            # Discounted shapes are non-integer: one rounding of the
+            # exact rational versus sequential float arithmetic.
             np.testing.assert_allclose(
-                float(posterior.scale_shapes[t]), float(n), rtol=0
+                float(posterior.scale_shapes[t]), float(n), rtol=1e-14
             )
             np.testing.assert_allclose(
                 float(posterior.scale_estimates[t]), float(s), rtol=1e-13
@@ -272,6 +283,8 @@ class TestBoundaries:
             ("discount", 1.5, "discount"),
             ("prior_shape", 0.0, "prior_shape"),
             ("prior_scale", -1.0, "prior_scale"),
+            ("variance_discount", 0.0, "variance_discount"),
+            ("variance_discount", 1.2, "variance_discount"),
         ],
     )
     def test_rejects_invalid_scalars(self, name, value, message):
@@ -352,3 +365,54 @@ class TestBoundaries:
             jnp.ones(1),
             jnp.asarray([0.2, -0.1, 0.3]),
         )
+
+
+@pytest.mark.skipif(
+    jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
+    reason="frozen CPU/x64 arithmetic contract",
+)
+def test_matches_pinned_pybats_reference():
+    """dlm_filter reproduces PyBATS 0.0.5 (Apache-2.0, West's group).
+
+    Frozen from pybats==0.0.5 under numpy 2.5.1 with a local-level DLM
+    (a0=0.5, R0=3.0, n0=4, s0=1.5, deltrend=0.95, delVar=1): PyBATS
+    carries the scaled covariance, so C0-tilde = R0/s0 and the scaled
+    comparison is S_t * C_t-tilde. Agreement is asserted only at unit
+    variance discount, where PyBATS's n-update ordering coincides with
+    West and Harrison's (ADR-0024).
+    """
+    observations = jnp.asarray([0.8, -0.2, 1.1, 0.4, -0.6, 0.9])
+    posterior = smcx.dlm_filter(
+        jnp.asarray([0.5]),
+        jnp.asarray([[2.0]]),  # R0 / s0
+        jnp.eye(1),
+        jnp.asarray([1.0]),
+        observations,
+        discount=0.95,
+        prior_shape=4.0,
+        prior_scale=1.5,
+    )
+
+    frozen = np.array([
+        [0.7, 0.8039999999999999, 5.0, 1.206],
+        [0.32886597938144324, 0.4471463492400892, 6.0, 1.0843298969072164],
+        [0.5622777147181234, 0.2992545410202221, 7.0, 0.9886621898955587],
+        [0.5230665841098208, 0.20963215770259658, 8.0, 0.8675757866620523],
+        [0.29533952676692504, 0.17902859586406952, 9.0, 0.882903577471228],
+        [0.4016992229376064, 0.1450722707351706, 10.0, 0.8247434980912007],
+    ])
+    scaled_c = (
+        posterior.scale_estimates
+        * posterior.filtered_scale_free_covariances[:, 0, 0]
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(posterior.filtered_means[:, 0]), frozen[:, 0], rtol=1e-10
+    )
+    np.testing.assert_allclose(np.asarray(scaled_c), frozen[:, 1], rtol=1e-10)
+    np.testing.assert_allclose(
+        np.asarray(posterior.scale_shapes), frozen[:, 2], rtol=0
+    )
+    np.testing.assert_allclose(
+        np.asarray(posterior.scale_estimates), frozen[:, 3], rtol=1e-10
+    )
