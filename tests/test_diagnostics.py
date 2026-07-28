@@ -2439,3 +2439,59 @@ class TestDiagnose:
         result = diagnose(posterior)
         assert len(result["warnings"]) > 0
         assert result["ess_below_threshold"] > 0
+
+
+def test_tail_edges_share_the_weighted_quantile_convention():
+    """tail_ess and weighted_quantile use one weighted-CDF convention.
+
+    Reconstructing the tail masks from the public weighted quantiles at
+    q and 1 - q must reproduce tail_ess exactly: both paths coalesce
+    positive support and interpolate on directional midpoint axes with
+    the same median splice, so this equality pins the shared
+    convention (the pre-#169 dual-convention state is retired).
+    """
+    key = jr.key(37)
+    num_particles, ntime, dim = 24, 3, 2
+    particles = jr.normal(key, (ntime, num_particles, dim))
+    raw = jr.uniform(jr.key(41), (ntime, num_particles), minval=0.1)
+    log_w = jnp.log(raw / jnp.sum(raw, axis=1, keepdims=True))
+    ntime_, n_ = log_w.shape
+    posterior = ParticleFilterPosterior(
+        marginal_loglik=jnp.asarray(0.0),
+        filtered_particles=particles,
+        filtered_log_weights=log_w,
+        ancestors=jnp.broadcast_to(jnp.arange(n_), (ntime_, n_)),
+        ess=jnp.full((ntime_,), float(n_)),
+        log_evidence_increments=jnp.zeros(ntime_),
+    )
+    q = 0.2
+
+    expected = tail_ess(posterior, q)
+
+    quantiles = weighted_quantile(posterior, jnp.asarray([q, 1.0 - q]))
+    reconstructed = []
+    for t in range(ntime):
+        weights = jnp.exp(log_w[t])
+        weights = weights / jnp.sum(weights)
+        per_dim = []
+        for d in range(dim):
+            lower_edge = quantiles[t, 0, d]
+            upper_edge = quantiles[t, 1, d]
+            lo = jnp.where(particles[t, :, d] <= lower_edge, weights, 0.0)
+            hi = jnp.where(particles[t, :, d] >= upper_edge, weights, 0.0)
+
+            def n_eff(tail_weights):
+                scale = jnp.max(tail_weights)
+                scaled = tail_weights / scale
+                total = jnp.sum(scaled)
+                return total * (total / jnp.sum(scaled * scaled))
+
+            per_dim.append(jnp.minimum(n_eff(lo), n_eff(hi)))
+        reconstructed.append(jnp.min(jnp.stack(per_dim)))
+
+    np.testing.assert_allclose(
+        np.asarray(expected),
+        np.asarray(jnp.stack(reconstructed)),
+        rtol=5e-7,
+        atol=0.0,
+    )
