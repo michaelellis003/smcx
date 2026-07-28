@@ -785,12 +785,15 @@ class TestFixedKeyRegression:
                 -0.6632440790978373,
             ]),
         )
+        # Exact f64 stage means: acceptance accumulation now honors
+        # x64 (the #168 policy) instead of hardcoding float32, so the
+        # frozen values are the exact 5/6, 1, and 2/3.
         np.testing.assert_array_equal(
             np.asarray(posterior.acceptance_rates),
             np.array([
-                0.8333333432674408,
+                0.8333333333333333,
                 1.0,
-                0.6666666865348816,
+                0.6666666666666666,
             ]),
         )
         # A threshold above one forces rejuvenation at every time, while

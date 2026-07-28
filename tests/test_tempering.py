@@ -865,3 +865,50 @@ def test_rejects_out_of_range_custom_resampler():
 
     with pytest.raises(ValueError, match=r"entries must be in \[0, 4\)"):
         _run(159, n=4, resampling_fn=invalid_resampler)
+
+
+class TestScheduleCallback:
+    """Caller-owned tempering schedules replace the ESS bisection."""
+
+    def test_fixed_linear_schedule_is_honored_exactly(self):
+        init, log_prior, log_lik = _small_tempering_model()
+
+        def quarter_steps(phi, normalized_log_weights, log_likelihoods):
+            del normalized_log_weights, log_likelihoods
+            return min(1.0, phi + 0.25)
+
+        posterior = smcx.temper(
+            jr.key(17),
+            init,
+            log_prior,
+            log_lik,
+            8,
+            num_mcmc_steps=1,
+            schedule_fn=quarter_steps,
+        )
+
+        np.testing.assert_allclose(
+            np.asarray(posterior.temperatures, dtype=np.float64),
+            [0.25, 0.5, 0.75, 1.0],
+            rtol=0.0,
+            atol=0.0,
+        )
+
+    @pytest.mark.parametrize("bad", [0.0, 1.5, float("nan")])
+    def test_invalid_schedule_return_raises(self, bad):
+        init, log_prior, log_lik = _small_tempering_model()
+
+        def stuck(phi, normalized_log_weights, log_likelihoods):
+            del normalized_log_weights, log_likelihoods
+            return bad
+
+        with pytest.raises(ValueError, match="schedule_fn must return"):
+            smcx.temper(
+                jr.key(19),
+                init,
+                log_prior,
+                log_lik,
+                8,
+                num_mcmc_steps=1,
+                schedule_fn=stuck,
+            )

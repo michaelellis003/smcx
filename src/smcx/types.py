@@ -214,6 +214,19 @@ class TemperingMutationInfo(Protocol):
 
 
 @runtime_checkable
+class TemperingScheduleFn(Protocol):
+    """Choose the next temperature for one tempering stage."""
+
+    def __call__(
+        self,
+        phi: float,
+        normalized_log_weights: Float[Array, " num_particles"],
+        log_likelihoods: Float[Array, " num_particles"],
+        /,
+    ) -> float: ...
+
+
+@runtime_checkable
 class TemperingMutationInitFn(Protocol):
     """Initialize caller-owned mutation state at the current target."""
 

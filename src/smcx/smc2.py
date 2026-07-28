@@ -412,7 +412,11 @@ def smc2(
                 log_z_s.correction - log_z.correction,
             )
             u = jr.uniform(k_u, (num_theta,))
-            accept = jnp.log(jnp.maximum(u, _TINY)) < log_alpha
+            # The uniform floor guards log(0) with the dtype tiny, matching
+            # the tempering acceptance draw.
+            accept = (
+                jnp.log(jnp.maximum(u, jnp.finfo(u.dtype).tiny)) < log_alpha
+            )
             th = jnp.where(accept[:, None], th_star, th)
             logprior = jnp.where(accept, logprior_star, logprior)
             log_z = _LogExpansion(
@@ -425,7 +429,9 @@ def smc2(
             )
             inner = jnp.where(accept[:, None, None], inner_s, inner)
             inner_log_w = jnp.where(accept[:, None], inner_log_w_s, inner_log_w)
-            acc_sum = acc_sum + jnp.mean(accept.astype(jnp.float32))
+            acc_sum = acc_sum + jnp.mean(
+                accept.astype(jnp.promote_types(jnp.float32, log_alpha.dtype))
+            )
         rate = acc_sum / max(num_pmmh_steps, 1)
         log_omega = jnp.full((num_theta,), -log_n_theta)
         return th, log_omega, inner, inner_log_w, log_z, rate
