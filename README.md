@@ -1,31 +1,131 @@
 # smcx
 
-smcx is a [JAX](https://github.com/jax-ml/jax) library for state-space
-inference: exact linear-Gaussian filtering and smoothing, extended and
-unscented nonlinear Gaussian filtering, particle filters, adaptive
-tempered SMC, and SMC² with a small, function-oriented API. It runs on
-CPU, CUDA, and TPU through JAX, and on Apple-silicon GPUs through the optional
-[jax-mps](https://github.com/tillahoffmann/jax-mps) backend.
+Sequential inference in JAX: Kalman filters, particle filters, and
+sequential Monte Carlo, with model code decoupled from inference code.
 
-Features include:
+## A short tour of sequential inference
+
+Start where everything is exact. A linear-Gaussian state-space model
+moves a latent state $x_t$ by a matrix and measures it through noise:
+
+$$
+x_0 \sim \mathcal{N}(m_0, P_0), \qquad
+x_t = A x_{t-1} + q_t, \qquad y_t = H x_t + r_t,
+\qquad q_t \sim \mathcal{N}(0, Q), \quad r_t \sim \mathcal{N}(0, R),
+$$
+
+with independent noises. As observations arrive, the posterior
+distribution of interest is the filtering distribution
+$p(x_t \mid y_{1:t})$ — the current state given every observation so
+far. Here it is Gaussian
+([Durbin and Koopman, 2012](https://doi.org/10.1093/acprof:oso/9780199641178.001.0001)),
+and it updates by a cycle in which each posterior becomes the prior
+for the next observation: predict the state one step ahead through
+$A$, then update on $y_t$. Both steps are a handful of matrix
+operations: the Kalman filter
+([Kalman, 1960](https://doi.org/10.1115/1.3662552)). Exact, and cheap
+in any moderate state dimension.
+
+Now relax the maps. Let the state move and be measured through
+nonlinear functions,
+
+$$
+x_t = f(x_{t-1}) + q_t, \qquad y_t = h(x_t) + r_t,
+$$
+
+and the filtering distribution, in general, stops being Gaussian. A
+Gaussian approximation of the same cycle survives: linearize $f$ and
+$h$ locally (the extended Kalman filter), or propagate a handful of
+sigma points through them (the unscented Kalman filter)
+([Särkkä and Svensson, 2023](https://doi.org/10.1017/9781108917407)).
+
+Now relax the distributions themselves. Discrete counts, bounded or
+heavy-tailed measurements, multiplicative noise: in general the model
+is a Markov state with conditionally independent observations,
+specified by a state density and an observation density,
+
+$$
+x_t \mid x_{t-1} \sim p(\,\cdot \mid x_{t-1}), \qquad
+y_t \mid x_t \sim p(\,\cdot \mid x_t),
+$$
+
+and sequential Bayesian inference rests on two relations — the
+one-step-ahead forecast density, then Bayes' theorem turning it into
+the next filtering distribution:
+
+$$
+p(x_t \mid y_{1:t-1}) = \int p(x_t \mid x_{t-1})\,
+p(x_{t-1} \mid y_{1:t-1})\,dx_{t-1},
+\qquad
+p(x_t \mid y_{1:t}) \propto p(y_t \mid x_t)\,
+p(x_t \mid y_{1:t-1}).
+$$
+
+Beyond the linear-Gaussian and finite-state cases, no closed form
+computes that integral. A particle filter maintains a Monte Carlo
+approximation instead: the filtering distribution is represented by
+$N$ particles and their importance weights,
+
+$$
+p(dx_t \mid y_{1:t}) \approx \sum_{i=1}^{N} w_t^{(i)}\,
+\delta_{x_t^{(i)}}(dx_t),
+\qquad \sum_{i=1}^{N} w_t^{(i)} = 1,
+$$
+
+with each particle propagated through the state density, the update
+paid in weight, and resampling curbing weight degeneracy
+([Gordon, Salmond, and Smith, 1993](https://doi.org/10.1049/ip-f-2.1993.0015)),
+while auxiliary resampling that looks one observation ahead
+([Pitt and Shephard, 1999](https://doi.org/10.1080/01621459.1999.10474153))
+and observation-informed proposals sharpen the approximation.
+
+One relaxation remains. Suppose the parameters — the transition
+coefficient, or the covariances $Q$ and $R$ themselves — are unknown,
+so the model gains a prior:
+
+$$
+\theta \sim p(\theta), \qquad
+x_t \mid x_{t-1} \sim p_\theta(\,\cdot \mid x_{t-1}), \qquad
+y_t \mid x_t \sim p_\theta(\,\cdot \mid x_t).
+$$
+
+A static $\theta$ couples every time step to every other. In special
+cases the exact posterior can still be updated by conjugate Bayesian
+inference — a linear-Gaussian model whose one unknown variance scales
+the evolution noise as well as the observation noise updates exactly
+on two summary statistics
+([West and Harrison, 1997](https://doi.org/10.1007/b98971), ch. 4) —
+but for the general state-space model no fixed set of summary
+statistics carries $p(x_t, \theta \mid y_{1:t})$ forward
+([Kantas et al., 2015](https://doi.org/10.1214/14-STS511)). Nor does
+the augmented state $(x_t, \theta)$ rescue the particle filter: the
+recursion itself still holds, yet a static $\theta$ is never
+refreshed by the state density, so the cloud's $\theta$-support only
+ever shrinks. Sequential Monte Carlo answers with the same
+weighted-particle machinery, aimed at any sequence of distributions
+([Chopin and Papaspiliopoulos, 2020](https://doi.org/10.1007/978-3-030-47845-2)):
+rejuvenate $\theta$ online beside the states
+([Liu and West, 2001](https://doi.org/10.1007/978-1-4757-3437-9_10)),
+run a filter for every parameter particle
+(SMC²: [Chopin, Jacob, and Papaspiliopoulos, 2013](https://doi.org/10.1111/j.1467-9868.2012.01046.x)),
+or leave time behind entirely and anneal from prior to posterior
+through a ladder of temperatures
+([Del Moral, Doucet, and Jasra, 2006](https://doi.org/10.1111/j.1467-9868.2006.00553.x)).
+
+smcx implements this ladder end to end:
 
 - exact linear-Gaussian Kalman filtering and RTS smoothing;
-- extended and scaled unscented Kalman filtering with shared mean callbacks;
+- extended and unscented Kalman filtering, unified by
+  `gaussian_filter` over exchangeable linearization strategies;
 - bootstrap, auxiliary, guided, and Liu–West particle filters;
-- a public runner for caller-owned particle-filter kernels;
-- adaptive tempered SMC and nested SMC² parameter inference;
+- adaptive tempered SMC and SMC² for static-parameter inference;
 - systematic, stratified, multinomial, and residual resampling;
-- filtering diagnostics, scoring rules, trajectory reconstruction, and
-  ArviZ export; and
-- structured latent-state PyTrees and explicit time-varying inputs.
+- filtering diagnostics, scoring rules, trajectory reconstruction,
+  and ArviZ export.
 
-smcx supplies inference algorithms, not model or distribution classes.
-Its catalog covers core families rather than every named variant; additions
-need concrete user or research demand and an independent validator.
-Linear-Gaussian models use dense arrays. The EKF and UKF share mean callbacks;
-the EKF alone adds explicit Jacobians. Particle models use JAX callbacks,
-and `run_particle_filter` lets research code own the filter kernel. Typed
-posteriors keep filtering and smoothing composable without a class hierarchy.
+It runs on CPU, CUDA, and TPU through JAX, and on Apple-silicon GPUs
+through the optional [jax-mps](https://github.com/tillahoffmann/jax-mps)
+backend.
 
 ## Installation
 
@@ -35,80 +135,113 @@ smcx requires Python 3.11 or later.
 pip install smcx
 ```
 
-Install the optional extras for Apple-silicon GPU execution or ArviZ
-reporting with:
+Optional extras add Apple-silicon GPU execution or ArviZ reporting:
 
 ```bash
 pip install "smcx[metal]"
 pip install "smcx[arviz]"
 ```
 
-The `metal` extra uses jax-mps and is available on macOS 14 or later on
-arm64. Metal is float32-only; releases are tested on a physical M-series
-GPU as well as on CPU.
-
 ## Documentation
 
-The [documentation](https://michaelellis003.github.io/smcx/) includes a
-[quickstart](https://michaelellis003.github.io/smcx/guides/quickstart/),
-guides for [custom models and custom particle filters][custom-models]
-and [ArviZ reporting](https://michaelellis003.github.io/smcx/guides/arviz/),
-and the complete
-[API reference](https://michaelellis003.github.io/smcx/api/smcx/).
-
-[custom-models]:
-  https://michaelellis003.github.io/smcx/guides/custom-models/
+Available at
+[michaelellis003.github.io/smcx](https://michaelellis003.github.io/smcx/).
 
 ## Quick example
 
+The tour ends at non-Gaussian observations and unknown parameters, so
+here is a model with both: a latent log-intensity driving Poisson
+counts. No Kalman variant can run it. A model is a record of pure
+functions; its parameters are an ordinary PyTree that smcx threads
+through every call.
+
 ```python
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 
 import smcx
 
-a, q, r = 0.9, 0.5, 0.3
-
-
-def initial_sampler(key, num_particles):
-    return jr.normal(key, (num_particles, 1))
-
-
-def transition_sampler(key, state):
-    return a * state + jnp.sqrt(q) * jr.normal(key, state.shape)
-
-
-def log_observation(y, state):
-    error = y[0] - state[0]
-    return -0.5 * (jnp.log(2 * jnp.pi * r) + error**2 / r)
-
-
-observations = jnp.array([0.2, -0.1, 0.4, 0.7, 0.3])[:, None]
-posterior = smcx.bootstrap_filter(
-    jr.key(0),
-    initial_sampler,
-    transition_sampler,
-    log_observation,
-    observations,
-    num_particles=10_000,
+model = smcx.StateSpaceModel(
+    sample_initial=lambda key, params, input_0: jr.normal(key, (1,)),
+    sample_transition=lambda key, state, params, input_t: (
+        params["rho"] * state + params["sigma"] * jr.normal(key, state.shape)
+    ),
+    log_observation=lambda emission, state, params, input_t: (
+        emission[0] * state[0] - jnp.exp(state[0])
+    ),
 )
+params = {"rho": jnp.asarray(0.9), "sigma": jnp.asarray(0.4)}
+counts = jnp.asarray([[1], [0], [2], [1], [3]], dtype=jnp.int32)
 
-posterior.marginal_loglik
-smcx.weighted_mean(posterior)
-smcx.diagnose(posterior)
+
+def log_marginal(params):
+    fk = smcx.bootstrap_fk(model, params, counts)
+    return smcx.run_smc(jr.key(0), fk, num_particles=4_096).marginal_loglik
+
+
+score = jax.grad(log_marginal)(params)
 ```
 
-Callbacks describe one particle; smcx vectorizes them over the cloud.
-Every stochastic operation takes an explicit PRNG key, and posterior
-containers are JAX PyTrees.
+Here `bootstrap_fk` derives a Feynman–Kac model — the algorithm-facing
+object — from the state-space model, and `run_smc` runs the one
+generic resample–mutate–reweight loop underneath every particle filter
+in the library. Because the parameters are an explicit argument rather
+than something baked into the model, `jax.grad` differentiates the
+marginal likelihood estimate with respect to $\rho$ and $\sigma$ in
+one call. (The estimator's gradient is biased by the
+non-differentiable resampling step — often tolerable for
+optimization, and worth knowing about.)
+
+## Design: model code is decoupled from inference code
+
+A goal smcx shares with
+[dynestyx](https://github.com/BasisResearch/dynestyx): modellers write
+a model once and get every applicable inference method for free, while
+methods researchers get a platform where a new algorithm slots in
+beside established, independently validated ones. In smcx the boundary is concrete:
+
+- a model is a `StateSpaceModel` — a record of pure JAX callables,
+  with no base class, no distribution objects, and no framework;
+- every particle algorithm is a `FeynmanKac` derivation over one
+  `run_smc` loop, so a custom method reuses the resampling machinery,
+  evidence accounting, diagnostics, and export;
+- the components a researcher wants to swap are all arguments:
+  resamplers, resampling criteria, proposals, potentials, look-ahead
+  twists, mutation kernels, temperature schedules, and Gaussian
+  linearization strategies.
 
 ## Citation
 
-If smcx contributes to academic work, cite the release used. The
-repository's **Cite this repository** menu uses the base metadata in
+If smcx contributes to academic work, please cite the release used.
+The repository's **Cite this repository** menu uses
 [`CITATION.cff`](https://github.com/michaelellis003/smcx/blob/main/CITATION.cff)
-to provide BibTeX and APA entries. Include the release tag or version and
-release date in the final citation.
+to provide BibTeX and APA entries; include the version and release
+date in the final citation.
+
+## See also
+
+**State-space models and SMC**
+
+[dynamax](https://github.com/probml/dynamax): probabilistic state-space
+models with learning via EM and SGD.
+[dynestyx](https://github.com/BasisResearch/dynestyx): NumPyro-based
+inference for dynamical systems.
+[particles](https://github.com/nchopin/particles): the reference
+Python companion to Chopin and Papaspiliopoulos (2020).
+[BlackJAX](https://github.com/blackjax-devs/blackjax): MCMC and SMC
+samplers for JAX.
+
+**The JAX ecosystem**
+
+[Equinox](https://github.com/patrick-kidger/equinox): neural networks
+and PyTree modules.
+[Diffrax](https://github.com/patrick-kidger/diffrax): numerical
+differential equation solvers.
+[jaxtyping](https://github.com/patrick-kidger/jaxtyping): shape and
+dtype annotations for arrays.
+[ArviZ](https://github.com/arviz-devs/arviz): exploratory analysis of
+Bayesian models.
 
 ## Sources and attribution
 
