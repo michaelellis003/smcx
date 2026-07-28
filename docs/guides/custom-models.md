@@ -182,13 +182,13 @@ by a discount factor — a modeling device, not an estimator:
 ```python
 posterior = smcx.dlm_filter(
     jnp.zeros(1),
-    jnp.eye(1),          # prior covariance / V
+    jnp.eye(1),  # prior covariance / V
     jnp.eye(1),
     jnp.ones(1),
     emissions,
     discount=0.95,
-    prior_shape=4.0,     # Inverse-Gamma degrees of freedom
-    prior_scale=1.0,     # prior point estimate of V
+    prior_shape=4.0,  # Inverse-Gamma degrees of freedom
+    prior_scale=1.0,  # prior point estimate of V
 )
 scaled_covariances = (
     posterior.scale_estimates[:, None, None]
