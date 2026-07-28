@@ -51,8 +51,11 @@ from smcx.fk import CallbackNames, FeynmanKac, run_smc
 from smcx.guided import guided_filter
 from smcx.kalman import (
     extended_kalman_filter,
+    gaussian_filter,
     kalman_filter,
     rts_smoother,
+    taylor_order1,
+    unscented,
     unscented_kalman_filter,
 )
 from smcx.liu_west import liu_west_filter
@@ -109,6 +112,7 @@ __all__ = [
     "diagnose",
     "ess",
     "extended_kalman_filter",
+    "gaussian_filter",
     "guided_filter",
     "guided_fk",
     "kalman_filter",
@@ -137,8 +141,10 @@ __all__ = [
     "stratified",
     "systematic",
     "tail_ess",
+    "taylor_order1",
     "temper",
     "to_arviz",
+    "unscented",
     "unscented_kalman_filter",
     "weighted_mean",
     "weighted_quantile",

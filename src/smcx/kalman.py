@@ -31,7 +31,7 @@ References:
 """
 
 import math
-from typing import NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, TypeAlias, cast
 
 import jax.numpy as jnp
 import numpy as np
@@ -1763,4 +1763,164 @@ def rts_smoother(
         *filtered_posterior,
         smoothed_means,
         smoothed_covariances,
+    )
+
+
+class TaylorOrder1(NamedTuple):
+    """First-order Taylor linearization strategy (the extended filter).
+
+    Attributes:
+        transition_jacobian_fn: ``state[, input_t] -> (state_dim,
+            state_dim)`` Jacobian of the transition mean.
+        observation_jacobian_fn: ``state[, input_t] ->
+            (observation_dim, state_dim)`` Jacobian of the observation
+            mean.
+    """
+
+    transition_jacobian_fn: TransitionJacobianFn | TransitionJacobianFnWithInput
+    observation_jacobian_fn: (
+        ObservationJacobianFn | ObservationJacobianFnWithInput
+    )
+
+
+class Unscented(NamedTuple):
+    """Scaled sigma-point linearization strategy (the unscented filter).
+
+    Attributes:
+        alpha: Positive sigma-point spread parameter.
+        beta: Covariance correction parameter.
+        kappa: Secondary scaling parameter.
+    """
+
+    alpha: float = 1.0
+    beta: float = 2.0
+    kappa: float = 0.0
+
+
+def taylor_order1(
+    transition_jacobian_fn: (
+        TransitionJacobianFn | TransitionJacobianFnWithInput
+    ),
+    observation_jacobian_fn: (
+        ObservationJacobianFn | ObservationJacobianFnWithInput
+    ),
+) -> TaylorOrder1:
+    """Build the first-order Taylor linearization strategy.
+
+    Jacobians may be analytic or produced by the caller with
+    ``jax.jacfwd``; smcx does not choose a differentiation policy.
+
+    Args:
+        transition_jacobian_fn: Transition-mean Jacobian callback.
+        observation_jacobian_fn: Observation-mean Jacobian callback.
+
+    Returns:
+        A strategy record for `gaussian_filter`.
+    """
+    return TaylorOrder1(transition_jacobian_fn, observation_jacobian_fn)
+
+
+def unscented(
+    alpha: float = 1.0,
+    beta: float = 2.0,
+    kappa: float = 0.0,
+) -> Unscented:
+    """Build the scaled sigma-point linearization strategy.
+
+    Args:
+        alpha: Positive sigma-point spread parameter.
+        beta: Covariance correction parameter.
+        kappa: Secondary scaling parameter; ``state_dim + kappa`` must
+            be positive.
+
+    Returns:
+        A strategy record for `gaussian_filter`.
+    """
+    return Unscented(alpha, beta, kappa)
+
+
+# Static checkers see the strategy union. At runtime, beartype must
+# admit any value so the documented ValueError below reports a wrong
+# method instead of a wrapper-specific type-check error.
+if TYPE_CHECKING:
+    _GaussianLinearization: TypeAlias = TaylorOrder1 | Unscented
+else:
+    _GaussianLinearization: TypeAlias = object
+
+
+def gaussian_filter(
+    initial_mean: Shaped[Array, "*initial_mean_shape"],
+    initial_covariance: Shaped[Array, "*initial_covariance_shape"],
+    transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
+    transition_covariance: Shaped[Array, "*transition_covariance_shape"],
+    observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
+    observation_covariance: Shaped[Array, "*observation_covariance_shape"],
+    emissions: GaussianEmissionSequence,
+    *,
+    method: _GaussianLinearization,
+    inputs: GaussianInputSequence | None = None,
+) -> GaussianFilterPosterior:
+    r"""Run a general Gaussian filter under a linearization strategy.
+
+    One nonlinear additive-Gaussian model, one predict/update
+    recursion, and an exchangeable rule for approximating the
+    transition and observation moments [Särkkä and Svensson, 2023,
+    ch. 8]: `taylor_order1` selects first-order linearization (the
+    extended filter) and `unscented` selects the scaled sigma-point
+    rule (the unscented filter). Model arguments, domains, and results
+    match `extended_kalman_filter` and `unscented_kalman_filter`
+    exactly; the strategy record is the only moving part.
+
+    Args:
+        initial_mean: Prior mean for ``x[0]``, shape ``(state_dim,)``.
+        initial_covariance: Prior covariance for ``x[0]``.
+        transition_mean_fn: ``state[, input_t] -> state_mean``.
+        transition_covariance: Static or timed transition covariance.
+        observation_mean_fn: ``state[, input_t] -> observation_mean``.
+        observation_covariance: Static or timed observation covariance.
+        emissions: Observations shaped ``(ntime,)`` or
+            ``(ntime, observation_dim)``.
+        method: Linearization strategy from `taylor_order1` or
+            `unscented`.
+        inputs: Optional exogenous inputs.
+
+    Returns:
+        Approximate Gaussian filtering moments; see the selected
+        filter's documentation for the exact contract.
+
+    Raises:
+        ValueError: ``method`` is not a linearization strategy record,
+            or the selected filter rejects an argument.
+    """
+    if isinstance(method, TaylorOrder1):
+        return extended_kalman_filter(
+            initial_mean,
+            initial_covariance,
+            transition_mean_fn,
+            method.transition_jacobian_fn,
+            transition_covariance,
+            observation_mean_fn,
+            method.observation_jacobian_fn,
+            observation_covariance,
+            emissions,
+            inputs=inputs,
+        )
+    if isinstance(method, Unscented):
+        return unscented_kalman_filter(
+            initial_mean,
+            initial_covariance,
+            transition_mean_fn,
+            transition_covariance,
+            observation_mean_fn,
+            observation_covariance,
+            emissions,
+            alpha=method.alpha,
+            beta=method.beta,
+            kappa=method.kappa,
+            inputs=inputs,
+        )
+    raise ValueError(
+        "method must be a linearization strategy built by "
+        "smcx.taylor_order1(...) or smcx.unscented(...); got "
+        f"{type(method).__name__}"
     )
