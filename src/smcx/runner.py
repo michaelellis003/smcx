@@ -224,12 +224,16 @@ def run_particle_filter(
     def advance(
         runner_carry: tuple[
             FilterCarry,
-            ParticleFilterRecord,
+            ParticleFilterRecord | tuple[()],
             Array,
             Array,
         ],
         args: tuple[Array, ...],
     ):
+        # The previous record rides the carry only in final-only mode,
+        # where the last record becomes the returned single-row
+        # history; with full history it would double peak carry memory
+        # for nothing, so an empty PyTree stands in.
         carry, _previous_record, total, correction = runner_carry
         if inputs_arr is None:
             time_index, emission_t, key_t = args
@@ -259,23 +263,23 @@ def run_particle_filter(
             )
         else:
             output = traces
-        return (next_carry, record, total, correction), output
+        carried_record = () if store_history else record
+        return (next_carry, carried_record, total, correction), output
 
     initial_runner_carry = (
         carry_0,
-        record_0,
+        () if store_history else record_0,
         increment_0,
         correction_0,
     )
     (
-        (final_carry, final_record, total, correction),
+        (_final_carry, final_record, total, correction),
         outputs,
     ) = _filter_scan(
         advance,
         initial_runner_carry,
         scan_inputs,
     )
-    del final_carry
     if store_history:
         particles, log_weights, ancestors, ess_rest, increments_rest = outputs
         all_particles = _prepend_particle_history(record_0.particles, particles)
