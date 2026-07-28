@@ -298,6 +298,26 @@ class DLMFilterPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " ntime"]
 
 
+class DGLMFilterPosterior(NamedTuple):
+    """WHM dynamic generalized linear model filtering output.
+
+    ``filtered_means`` and ``filtered_covariances`` are linear-Bayes
+    moment summaries of the state, not parameters of a posterior
+    distribution (the DGLM specifies the state by moments only).
+    ``conjugate_alphas`` and ``conjugate_betas`` are the exact
+    per-step posterior conjugate parameters of the observation
+    family; ``marginal_loglik`` is the sum of the closed-form
+    one-step forecast log densities.
+    """
+
+    filtered_means: Float[Array, "ntime state_dim"]
+    filtered_covariances: Float[Array, "ntime state_dim state_dim"]
+    conjugate_alphas: Float[Array, " ntime"]
+    conjugate_betas: Float[Array, " ntime"]
+    marginal_loglik: Float[Array, ""]
+    log_evidence_increments: Float[Array, " ntime"]
+
+
 class SMC2Posterior(NamedTuple):
     """SMC² posterior over static parameters.
 
