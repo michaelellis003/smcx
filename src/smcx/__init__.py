@@ -47,6 +47,7 @@ from smcx.diagnostics import (
     weighted_variance,
 )
 from smcx.exceptions import DegenerateWeightsError
+from smcx.fk import CallbackNames, FeynmanKac, run_smc
 from smcx.guided import guided_filter
 from smcx.kalman import (
     extended_kalman_filter,
@@ -55,6 +56,12 @@ from smcx.kalman import (
     unscented_kalman_filter,
 )
 from smcx.liu_west import liu_west_filter
+from smcx.model import (
+    StateSpaceModel,
+    auxiliary_fk,
+    bootstrap_fk,
+    guided_fk,
+)
 from smcx.reporting import to_arviz
 from smcx.resampling import (
     multinomial,
@@ -76,7 +83,9 @@ except _PackageNotFoundError:
 __all__ = [
     "BootstrapCheckpoint",
     "BootstrapStepInfo",
+    "CallbackNames",
     "DegenerateWeightsError",
+    "FeynmanKac",
     "GaussianFilterPosterior",
     "GaussianSmootherPosterior",
     "LiuWestPosterior",
@@ -85,10 +94,13 @@ __all__ = [
     "ParticleFilterResult",
     "ParticleState",
     "SMC2Posterior",
+    "StateSpaceModel",
     "TemperedPosterior",
     "__version__",
     "auxiliary_filter",
+    "auxiliary_fk",
     "bootstrap_filter",
+    "bootstrap_fk",
     "bootstrap_init",
     "bootstrap_step",
     "bootstrap_update",
@@ -98,6 +110,7 @@ __all__ = [
     "ess",
     "extended_kalman_filter",
     "guided_filter",
+    "guided_fk",
     "kalman_filter",
     "liu_west_filter",
     "log_bayes_factor",
@@ -118,6 +131,7 @@ __all__ = [
     "residual",
     "rts_smoother",
     "run_particle_filter",
+    "run_smc",
     "simulate",
     "smc2",
     "stratified",
