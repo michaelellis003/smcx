@@ -201,6 +201,42 @@ variance (exact under the implied beta-gamma random walk on the
 precision). Learning several free covariances breaks the conjugacy;
 that is where the particle methods below take over.
 
+## Filter counts and binary outcomes by conjugate steps
+
+Between the exact conjugate case and the particle methods sits the
+dynamic generalized linear model (West, Harrison, and Migon 1985).
+`smcx.dglm_filter` runs exponential-family emissions — Poisson
+counts, Bernoulli or binomial outcomes — over a linear state
+evolution carried by moments only. Each step matches a conjugate
+prior to the linear predictor's two moments, updates it exactly on
+the observation, and feeds the posterior moments back to the state by
+linear Bayes estimation. The recursion is deterministic and
+closed-form, and it is approximate: the docstring states the three
+approximation points, and the particle filters below are the natural
+accuracy check.
+
+```python
+posterior = smcx.dglm_filter(
+    jnp.zeros(1),
+    jnp.eye(1),
+    jnp.eye(1),
+    jnp.ones(1),
+    counts,
+    family=smcx.poisson(),
+    discount=0.95,
+)
+posterior.marginal_loglik  # sum of exact negative-binomial forecasts
+```
+
+The observation family is a `smcx.DGLMFamily` record of four pure
+callables (moment matching, forecast log density, conjugate update,
+posterior moments), so a new family is user-definable without
+touching the filter; the library's own tests build a normal family
+through this record to prove the recursion reduces exactly to the
+Kalman filter. `smcx.bernoulli()` and `smcx.binomial(trials=n)`
+cover binary and bounded counts, and `dispersion_discount` adds
+Berry and West's random-effects extra-dispersion.
+
 ## Bind a model record
 
 A `smcx.StateSpaceModel` groups the per-particle callables that define

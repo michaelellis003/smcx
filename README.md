@@ -17,6 +17,9 @@ Apple-silicon GPUs through the optional
 Features include:
 
 - exact linear-Gaussian Kalman filtering and RTS smoothing;
+- conjugate dynamic linear and generalized linear model filtering —
+  exact unknown-variance learning (`dlm_filter`) and linear-Bayes
+  count and binary emissions (`dglm_filter`);
 - extended and scaled unscented Kalman filtering with shared mean
   callbacks, unified by `gaussian_filter` over exchangeable
   linearization strategies;
@@ -138,6 +141,9 @@ The implemented methods draw on these primary sources:
 - Exact linear-Gaussian state estimation:
   [Kalman (1960)](https://doi.org/10.1115/1.3662552) and
   [Rauch, Tung, and Striebel (1965)](https://doi.org/10.2514/3.3166).
+- Conjugate dynamic models:
+  [West and Harrison (1997)](https://doi.org/10.1007/b98971) and
+  [West, Harrison, and Migon (1985)](https://doi.org/10.1080/01621459.1985.10477131).
 - Nonlinear Gaussian filtering:
   [Schmidt (1966)](https://doi.org/10.1016/B978-1-4831-6716-9.50011-4) and
   [Julier (2002)](https://doi.org/10.1109/ACC.2002.1025369).
@@ -188,6 +194,14 @@ and frozen outputs of
 [PyBATS 0.0.5](https://github.com/lavinei/pybats) (Apache-2.0) at
 unit variance discount, where its degrees-of-freedom update ordering
 coincides with the book's.
+
+The DGLM filter is validated against an exact reduction to the
+library's own Kalman filter for a normal observation family, frozen
+50-digit mpmath references of the Poisson and Bernoulli recursions,
+frozen exact-solver traces of
+[PyBATS 0.0.5](https://github.com/lavinei/pybats) (Apache-2.0) with
+its spline interpolation and clamps bypassed, and a derived-band
+comparison against the library's own bootstrap particle filter.
 
 The auxiliary-guided runner recipe is distributionally cross-checked against
 particles 0.4's pinned
