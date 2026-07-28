@@ -65,6 +65,7 @@ class CallbackNames(NamedTuple):
     m0: str = "m0 output"
     m: str = "mutation output"
     log_g: str = "log_g"
+    log_eta: str = "log_eta"
 
 
 class FeynmanKac(NamedTuple):
@@ -81,9 +82,22 @@ class FeynmanKac(NamedTuple):
             the loop. At time zero the parent is the state itself.
         contexts: PyTree of arrays with a shared leading time axis;
             entry ``t`` is passed to every callback at time ``t``.
-        names: Error-message names for the three callbacks, so a
-            derivation reports contract violations in the vocabulary
-            of the API the user actually called.
+        names: Error-message names for the callbacks, so a derivation
+            reports contract violations in the vocabulary of the API
+            the user actually called.
+        log_eta: Optional per-particle look-ahead twist
+            ``(state, context_t) -> scalar`` (auxiliary filters).
+            First-stage weights ``W * eta`` drive the resampling
+            decision and draw; on resampled steps the potential is
+            corrected by ``-log_eta[ancestor]`` and the evidence
+            increment gains the first-stage normalizer; on skipped
+            steps eta is not applied anywhere.
+        log_g_batch: Optional cloud-level potential
+            ``(parents, particles, context_t) -> (num_particles,)``
+            that owns its own log-density validation, for composite
+            potentials whose parts carry distinct error names. When
+            set it replaces the vmapped ``log_g`` at every step after
+            time zero; ``log_g`` still weights initialization.
     """
 
     m0: Callable[[PRNGKeyT, int, Any], ParticleCloud]
@@ -91,6 +105,10 @@ class FeynmanKac(NamedTuple):
     log_g: Callable[[StateTree, StateTree, Any], Float[Array, ""]]
     contexts: Any
     names: CallbackNames = CallbackNames()
+    log_eta: Callable[[StateTree, Any], Float[Array, ""]] | None = None
+    log_g_batch: Callable[[ParticleCloud, ParticleCloud, Any], Array] | None = (
+        None
+    )
 
 
 class _StepResult(NamedTuple):
@@ -103,6 +121,7 @@ class _StepResult(NamedTuple):
     log_evidence_increment: Float[Array, ""]
     do_resample: Bool[Array, ""]
     invalid_resampling: Bool[Array, ""]
+    normalizers_finite: Bool[Array, ""]
 
 
 def _fk_step(
@@ -116,14 +135,34 @@ def _fk_step(
     state_signature: Any,
     time_index: Int[Array, ""] | None,
 ) -> _StepResult:
-    """Resample conditionally, mutate, and reweight one cloud."""
+    """Resample conditionally, mutate, and reweight one cloud.
+
+    With a look-ahead twist, first-stage weights ``W * eta`` drive the
+    resampling decision and draw; the decision otherwise reads the
+    carried weights and ESS. Both branches are resolved statically at
+    trace time from the derivation, never per step.
+    """
     num_particles = state.log_weights.shape[0]
     identity = jnp.arange(num_particles, dtype=jnp.int32)
     resample_key, mutation_key = jr.split(step_key)
+    log_eta_fn = fk.log_eta
+    if log_eta_fn is None:
+        decision_weights = state.log_weights
+        decision_ess = current_ess
+        log_aux = None
+        log_first_sum = None
+    else:
+        log_aux = vmap(lambda z: log_eta_fn(z, context_t))(state.particles)
+        _validate_log_density_batch(
+            log_aux, num_particles, name=fk.names.log_eta
+        )
+        log_first_stage = state.log_weights + log_aux
+        decision_weights, log_first_sum = log_normalize(log_first_stage)
+        decision_ess = jnp.asarray(compute_ess(decision_weights))
     do_resample, ancestors, invalid_resampling = _conditional_resample(
         resample_key,
-        state.log_weights,
-        current_ess,
+        decision_weights,
+        decision_ess,
         resampling_fn,
         resampling_threshold,
         num_particles,
@@ -135,24 +174,37 @@ def _fk_step(
     propagated = vmap(lambda key, parent: fk.m(key, parent, context_t))(
         particle_keys, parents
     )
-    log_g = vmap(lambda parent, moved: fk.log_g(parent, moved, context_t))(
-        parents, propagated
-    )
+    # Validate the mutated state before any potential consumes it, so a
+    # contract drift reports the mutation kernel by name instead of
+    # surfacing as a PyTree mismatch inside a density callback.
     sample = tree.map(lambda leaf: leaf[0], propagated)
     _validate_state_tree(sample, state_signature, name=fk.names.m)
-    _validate_log_density_batch(log_g, num_particles, name=fk.names.log_g)
+    if fk.log_g_batch is None:
+        log_g = vmap(lambda parent, moved: fk.log_g(parent, moved, context_t))(
+            parents, propagated
+        )
+        _validate_log_density_batch(log_g, num_particles, name=fk.names.log_g)
+    else:
+        log_g = fk.log_g_batch(parents, propagated, context_t)
 
+    log_n = jnp.asarray(math.log(num_particles))
+    resampled_weights = log_g if log_aux is None else log_g - log_aux[ancestors]
     log_w_unnorm = jnp.where(
         do_resample,
-        log_g,
+        resampled_weights,
         state.log_weights + log_g,
     )
     log_w_norm, log_sum = log_normalize(log_w_unnorm)
-    log_ev_inc = jnp.where(
-        do_resample,
-        log_sum - jnp.asarray(math.log(num_particles)),
-        log_sum,
-    )
+    if log_first_sum is None:
+        log_ev_inc = jnp.where(do_resample, log_sum - log_n, log_sum)
+        normalizers_finite = jnp.isfinite(log_sum)
+    else:
+        log_ev_inc = jnp.where(
+            do_resample,
+            log_first_sum + log_sum - log_n,
+            log_sum,
+        )
+        normalizers_finite = jnp.isfinite(log_first_sum) & jnp.isfinite(log_sum)
     ess_t = jnp.asarray(compute_ess(log_w_norm))
     return _StepResult(
         propagated,
@@ -162,6 +214,7 @@ def _fk_step(
         log_ev_inc,
         do_resample,
         invalid_resampling,
+        normalizers_finite,
     )
 
 
@@ -173,6 +226,7 @@ def run_smc(
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float | ResamplingCriterion = 0.5,
     store_history: bool = True,
+    gate_stage_normalizers: bool = False,
 ) -> ParticleFilterPosterior:
     """Run the generic conditional-resample/mutate/reweight loop.
 
@@ -188,6 +242,10 @@ def run_smc(
         store_history: When False, particle, weight, and ancestor
             histories keep only the final step while ESS and evidence
             traces stay full.
+        gate_stage_normalizers: When True, a nonfinite stage normalizer
+            at any time step turns the returned marginal into NaN (and
+            an eager raise), matching the auxiliary filter's historical
+            degeneracy policy. The 2.0 cut decides one uniform policy.
 
     Returns:
         `smcx.containers.ParticleFilterPosterior` for the full sweep.
@@ -260,12 +318,14 @@ def run_smc(
                 result.ancestors,
                 result.ess,
                 result.log_evidence_increment,
+                result.normalizers_finite,
             )
         # Final-only mode: ancestors ride the carry (O(N)); the scan
         # stacks just the scalar traces.
         return next_carry, (
             result.ess,
             result.log_evidence_increment,
+            result.normalizers_finite,
         )
 
     step_keys = jr.split(key, num_timesteps - 1)
@@ -288,6 +348,7 @@ def run_smc(
                 ancestors_rest,
                 ess_rest,
                 log_ev_inc_rest,
+                normalizers_rest,
             ),
         ) = _filter_scan(_step, init_carry, scan_inputs)
         all_particles = _prepend_particle_history(particles_0, particles_rest)
@@ -296,7 +357,7 @@ def run_smc(
     else:
         (
             (final_state, _, final_correction, final_ancestors, invalid),
-            (ess_rest, log_ev_inc_rest),
+            (ess_rest, log_ev_inc_rest, normalizers_rest),
         ) = _filter_scan(_step, init_carry, scan_inputs)
         all_particles = _particle_time_axis(final_state.particles)
         all_log_w = final_state.log_weights[None]
@@ -304,6 +365,15 @@ def run_smc(
     all_ess = _prepend(ess_0, ess_rest)
     all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
     final_log_evidence = final_state.log_marginal_likelihood + final_correction
+    if gate_stage_normalizers:
+        # Every stage normalizer must be finite for the marginal to be
+        # meaningful; otherwise report NaN (raised eagerly below).
+        all_finite = jnp.isfinite(log_ev_0) & jnp.all(normalizers_rest)
+        final_log_evidence = jnp.where(
+            all_finite,
+            final_log_evidence,
+            jnp.nan,
+        )
 
     _raise_invalid_ancestors(invalid, num_particles)
     _raise_if_degenerate(final_log_evidence)

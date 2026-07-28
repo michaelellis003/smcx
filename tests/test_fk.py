@@ -213,3 +213,123 @@ class TestFeynmanKacDerivation:
             np.asarray(plain.marginal_loglik),
         )
         assert np.all(np.isfinite(np.asarray(tempered.marginal_loglik)))
+
+
+def _aux_model():
+    initial, transition, log_obs = _scalar_model()
+
+    def log_aux(emission, state):
+        residual = (emission[0] - 0.9 * state[0]) / 0.85
+        return -0.5 * residual**2
+
+    return initial, transition, log_obs, log_aux
+
+
+def _guided_model():
+    initial, _transition, log_obs = _scalar_model()
+
+    def proposal(key, state, emission):
+        center = 0.5 * (0.9 * state + emission)
+        return center + 0.25 * jr.normal(key, state.shape)
+
+    def log_prop(emission, new_state, old_state):
+        center = 0.5 * (0.9 * old_state[0] + emission[0])
+        return -0.5 * ((new_state[0] - center) / 0.25) ** 2
+
+    def log_trans(new_state, old_state):
+        return -0.5 * ((new_state[0] - 0.9 * old_state[0]) / 0.3) ** 2
+
+    return initial, proposal, log_prop, log_trans, log_obs
+
+
+@pytest.mark.skipif(
+    jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
+    reason="frozen CPU/x64 arithmetic contract",
+)
+class TestTwistAndCompositeCharacterization:
+    """Auxiliary and guided reproduce v1.16.0 outputs bitwise on CPU/x64."""
+
+    def test_auxiliary_matches_pre_rewiring_values(self):
+        initial, transition, log_obs, log_aux = _aux_model()
+        posterior = smcx.auxiliary_filter(
+            jr.key(21), initial, transition, log_obs, log_aux, EMISSIONS, 8
+        )
+
+        np.testing.assert_array_equal(
+            np.asarray(posterior.marginal_loglik, dtype=np.float64),
+            -1.7394860684888238,
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.ess, dtype=np.float64),
+            [
+                6.396713581473555,
+                5.413767405195838,
+                4.1083772585095115,
+                7.554944040058368,
+                6.495867893564241,
+            ],
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.log_evidence_increments, dtype=np.float64),
+            [
+                -0.5857624411535574,
+                -0.3119479763077553,
+                -0.33298988525153717,
+                -0.3143980307753711,
+                -0.1943877350006029,
+            ],
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.filtered_log_weights, dtype=np.float64)[-1],
+            [
+                -2.094168130848879,
+                -1.8044431602557178,
+                -1.6525589410444594,
+                -3.8327280922543805,
+                -3.395475561798124,
+                -1.7005531971111998,
+                -1.9868640550953853,
+                -1.9253834093068876,
+            ],
+        )
+
+    def test_guided_matches_pre_rewiring_values(self):
+        initial, proposal, log_prop, log_trans, log_obs = _guided_model()
+        posterior = smcx.guided_filter(
+            jr.key(29),
+            initial,
+            proposal,
+            log_prop,
+            log_trans,
+            log_obs,
+            EMISSIONS,
+            8,
+        )
+
+        np.testing.assert_array_equal(
+            np.asarray(posterior.marginal_loglik, dtype=np.float64),
+            -0.7156180161338206,
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.log_evidence_increments, dtype=np.float64),
+            [
+                -0.2837211288005148,
+                0.06362456791643978,
+                -0.17111978682049145,
+                0.07081450868941652,
+                -0.39521617711867063,
+            ],
+        )
+        np.testing.assert_array_equal(
+            np.asarray(posterior.filtered_log_weights, dtype=np.float64)[-1],
+            [
+                -2.33427073096525,
+                -3.0271064963558034,
+                -3.149824119353661,
+                -1.3051532796418333,
+                -11.259551063951383,
+                -1.0724108278470375,
+                -2.6230329472833596,
+                -2.072308969364232,
+            ],
+        )

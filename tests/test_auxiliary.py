@@ -174,12 +174,9 @@ def test_uncompiled_step_matches_public_and_compiled_scan(
 ):
     """The pure APF step preserves the fixed-key public scan contract."""
     from smcx._utils import _validate_particle_cloud
-    from smcx.auxiliary import (
-        _auxiliary_step,
-        _AuxiliaryStepCarry,
-        _AuxiliaryStepInput,
-    )
+    from smcx.auxiliary import _auxiliary_fk
     from smcx.containers import ParticleState
+    from smcx.fk import _fk_step
     from smcx.resampling import systematic
 
     _, emissions = lgssm_data
@@ -201,61 +198,65 @@ def test_uncompiled_step_matches_public_and_compiled_scan(
         expected.filtered_log_weights[0],
         expected.log_evidence_increments[0],
     )
-    carry = _AuxiliaryStepCarry(
-        state,
-        jnp.zeros_like(state.log_marginal_likelihood),
-        expected.ancestors[0],
-        jnp.asarray(False),
-    )
-    step_input = _AuxiliaryStepInput(
-        emissions[1], None, jnp.asarray(1, dtype=jnp.int32)
-    )
     signature = _validate_particle_cloud(
         state.particles, num_particles, name="initial_sampler output"
     )
+    fk = _auxiliary_fk(
+        initial, transition, observation, auxiliary, emissions, None
+    )
 
-    def advance(current, current_input, current_key):
-        return _auxiliary_step(
-            current,
-            current_input,
+    def advance(current_state, current_ess, current_key):
+        return _fk_step(
             current_key,
-            transition_sampler=transition,
-            log_observation_fn=observation,
-            log_auxiliary_fn=auxiliary,
-            resampling_fn=systematic,
-            resampling_threshold=1.1,
-            log_num_particles=jnp.asarray(math.log(num_particles)),
-            state_signature=signature,
+            current_state,
+            current_ess,
+            fk,
+            (emissions[1],),
+            systematic,
+            1.1,
+            signature,
+            jnp.asarray(1, dtype=jnp.int32),
         )
 
     step_key = jr.split(jr.split(key)[0], 1)[0]
+    ess_0 = jnp.asarray(expected.ess[0])
     with jax.disable_jit():
-        eager = advance(carry, step_input, step_key)
-    compiled = jax.jit(advance)(carry, step_input, step_key)
-    record = tuple(field[1] for field in expected[1:])
-    expected_total, expected_correction = _neumaier_add(
+        eager = advance(state, ess_0, step_key)
+    compiled = jax.jit(advance)(state, ess_0, step_key)
+    expected_total, _ = _neumaier_add(
         expected.log_evidence_increments[0],
         jnp.zeros_like(expected.log_evidence_increments[0]),
         expected.log_evidence_increments[1],
     )
-    expected_leaves = (
-        *record[:2],
-        expected_total,
-        expected_correction,
-        record[2],
-        jnp.asarray(False),
-        *record,
-        jnp.asarray(True),
-    )
     # Fixed keys remove MC error; five f32 eps covers compiler rounding.
     tolerance = float(5 * np.finfo(np.float32).eps)
     for actual in (eager, compiled):
-        for value, target in zip(
-            jax.tree.leaves(actual), expected_leaves, strict=True
-        ):
-            np.testing.assert_allclose(
-                value, target, rtol=tolerance, atol=tolerance
-            )
+        np.testing.assert_allclose(
+            actual.particles,
+            expected.filtered_particles[1],
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        np.testing.assert_allclose(
+            actual.log_weights,
+            expected.filtered_log_weights[1],
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        np.testing.assert_array_equal(actual.ancestors, expected.ancestors[1])
+        np.testing.assert_allclose(
+            actual.ess, expected.ess[1], rtol=tolerance, atol=tolerance
+        )
+        np.testing.assert_allclose(
+            actual.log_evidence_increment,
+            expected.log_evidence_increments[1],
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        assert bool(actual.normalizers_finite)
+    np.testing.assert_allclose(
+        expected_total, expected.marginal_loglik, rtol=tolerance, atol=tolerance
+    )
 
 
 @pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
