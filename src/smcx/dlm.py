@@ -83,6 +83,7 @@ def dlm_filter(
     discount: Scalar | None = None,
     prior_shape: Scalar = 1.0,
     prior_scale: Scalar = 1.0,
+    variance_discount: Scalar = 1.0,
 ) -> DLMFilterPosterior:
     r"""Run the conjugate unknown-variance DLM filter.
 
@@ -109,6 +110,13 @@ def dlm_filter(
         prior_shape: Inverse-Gamma prior degrees of freedom $n_0 > 0$.
         prior_scale: Inverse-Gamma prior point estimate $S_0 > 0$ of
             the unknown variance.
+        variance_discount: Variance discount $\delta_V \in (0, 1]$.
+            One keeps the variance constant and learns it exactly;
+            below one, each evolution discounts the accumulated
+            degrees of freedom, $n_t = \delta_V n_{t-1} + 1$ — the
+            book's ordering — which is exact inference under the
+            implied beta-gamma multiplicative random walk on the
+            precision [West and Harrison, 1997, sec. 10.8].
 
     Returns:
         `smcx.containers.DLMFilterPosterior` with the scale-free
@@ -137,6 +145,16 @@ def dlm_filter(
             )
     shape_0 = _validate_positive_scalar(prior_shape, "prior_shape")
     scale_0 = _validate_positive_scalar(prior_scale, "prior_scale")
+    variance_discount_value = _validate_positive_scalar(
+        variance_discount, "variance_discount"
+    )
+    if not isinstance(variance_discount_value, core.Tracer) and (
+        float(variance_discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+    ):
+        raise ValueError(
+            f"variance_discount must be in (0, 1]; got "
+            f"{variance_discount_value}"
+        )
 
     emissions = _canonicalize_emissions(emissions)
     if emissions.ndim != 2 or emissions.shape[1] != 1:
@@ -200,6 +218,7 @@ def dlm_filter(
         )
 
     log_pi = jnp.asarray(math.log(math.pi), dtype=dtype)
+    variance_discount_array = jnp.asarray(variance_discount_value, dtype=dtype)
     use_discount = discount is not None
     inverse_discount = (
         1.0 / jnp.asarray(discount_value, dtype=dtype)
@@ -207,7 +226,7 @@ def dlm_filter(
         else jnp.asarray(1.0, dtype=dtype)
     )
 
-    def _update(carry: _DLMCarry, prior_mean, prior_cov, emission_t):
+    def _update(carry: _DLMCarry, prior_mean, prior_cov, emission_t, dof):
         forecast = observation_vector @ prior_mean
         forecast_scale_free = (
             observation_vector @ prior_cov @ observation_vector + 1.0
@@ -215,7 +234,6 @@ def dlm_filter(
         residual = emission_t[0] - forecast
         gain = prior_cov @ observation_vector / forecast_scale_free
         forecast_scale = carry.scale * forecast_scale_free
-        dof = carry.shape
         log_density = (
             gammaln((dof + 1.0) / 2.0)
             - gammaln(dof / 2.0)
@@ -258,7 +276,11 @@ def dlm_filter(
             prior_cov = propagated * inverse_discount
         else:
             prior_cov = propagated + evolution_t
-        return _update(carry, prior_mean, prior_cov, emission_t)
+        # Variance discounting acts at the evolution, before the new
+        # observation raises the degrees of freedom by one (W&H's
+        # ordering, n_t = delta_V n_{t-1} + 1).
+        dof = variance_discount_array * carry.shape
+        return _update(carry, prior_mean, prior_cov, emission_t, dof)
 
     init = _DLMCarry(
         initial_mean.astype(dtype),
@@ -271,7 +293,7 @@ def dlm_filter(
     # Library convention: emissions[0] conditions the prior directly;
     # evolution (or discounting) applies between observations.
     carry_0, first = _update(
-        init, init.mean, init.scale_free_covariance, emissions[0]
+        init, init.mean, init.scale_free_covariance, emissions[0], init.shape
     )
     final, rest = lax.scan(_step, carry_0, (emissions[1:], timed_evolution))
     outputs = tuple(

@@ -180,6 +180,15 @@ and
 [unscented](https://github.com/michaelellis003/smcx/blob/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/tests/_unscented_kalman_reference.py)
 fixtures.
 
+The conjugate DLM filter is validated against an exact
+rational-arithmetic reference of the Normal-Inverse-Gamma recursion,
+West and Harrison's printed first-order polynomial table
+([independently reproduced](https://www.math.unm.edu/~ghuerta/tseries/dlmch2.pdf)),
+and frozen outputs of
+[PyBATS 0.0.5](https://github.com/lavinei/pybats) (Apache-2.0) at
+unit variance discount, where its degrees-of-freedom update ordering
+coincides with the book's.
+
 The auxiliary-guided runner recipe is distributionally cross-checked against
 particles 0.4's pinned
 [`AuxiliaryPF` composition](https://github.com/nchopin/particles/blob/c5fcb0b6d34b3c8efea6f6dc21d73e0e91287d9f/particles/state_space_models.py#L352-L428)
