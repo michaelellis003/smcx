@@ -1,0 +1,318 @@
+# Copyright 2026 Michael Ellis
+# SPDX-License-Identifier: Apache-2.0
+
+r"""Feynman-Kac core: one generic sequential Monte Carlo loop.
+
+A `FeynmanKac` record describes one particle algorithm over one
+observation sequence: an initial law, a per-particle mutation kernel,
+and a per-particle log-potential, with the per-step data (emissions,
+inputs, or anything else) carried as a context PyTree. `run_smc` is
+the single loop beneath the named filters: conditional resample,
+mutate, reweight, with the evidence increment taken at the reweight
+stage and the branch weight rule
+
+``log_w = where(resampled, log_g, log_w + log_g)``,
+
+Neumaier-compensated evidence, and init-as-if-resampled at time zero
+[Chopin and Papaspiliopoulos, 2020]. Encoding the loop once makes the
+classic auxiliary-filter weight and increment bugs structurally
+impossible (ADR-0002, reaffirmed for the workbench identity by
+ADR-0023).
+
+This module is internal while the named filters migrate onto it; the
+public model-record derivations arrive with the model layer.
+"""
+
+import math
+from collections.abc import Callable
+from typing import Any, NamedTuple
+
+import jax.numpy as jnp
+import jax.random as jr
+from jax import tree, vmap
+from jaxtyping import Array, Bool, Float, Int
+
+from smcx._numerics import _neumaier_add
+from smcx._utils import (
+    _conditional_resample,
+    _filter_scan,
+    _gather_particles,
+    _particle_time_axis,
+    _prepend,
+    _prepend_particle_history,
+    _raise_if_degenerate,
+    _raise_invalid_ancestors,
+    _validate_log_density_batch,
+    _validate_particle_cloud,
+    _validate_state_tree,
+)
+from smcx.containers import ParticleFilterPosterior, ParticleState
+from smcx.resampling import systematic
+from smcx.types import (
+    ParticleCloud,
+    PRNGKeyT,
+    ResamplingCriterion,
+    ResamplingFn,
+    StateTree,
+)
+from smcx.weights import ess as compute_ess
+from smcx.weights import log_normalize
+
+
+class CallbackNames(NamedTuple):
+    """Names used in structural error messages for one derivation."""
+
+    m0: str = "m0 output"
+    m: str = "mutation output"
+    log_g: str = "log_g"
+
+
+class FeynmanKac(NamedTuple):
+    """One particle algorithm bound to one observation sequence.
+
+    Attributes:
+        m0: Whole-cloud initial sampler
+            ``(key, num_particles, context_0) -> particles``.
+        m: Per-particle mutation kernel
+            ``(key, parent_state, context_t) -> state``; vmapped by the
+            loop and required to preserve the state PyTree contract.
+        log_g: Per-particle log-potential
+            ``(parent_state, state, context_t) -> scalar``; vmapped by
+            the loop. At time zero the parent is the state itself.
+        contexts: PyTree of arrays with a shared leading time axis;
+            entry ``t`` is passed to every callback at time ``t``.
+        names: Error-message names for the three callbacks, so a
+            derivation reports contract violations in the vocabulary
+            of the API the user actually called.
+    """
+
+    m0: Callable[[PRNGKeyT, int, Any], ParticleCloud]
+    m: Callable[[PRNGKeyT, StateTree, Any], StateTree]
+    log_g: Callable[[StateTree, StateTree, Any], Float[Array, ""]]
+    contexts: Any
+    names: CallbackNames = CallbackNames()
+
+
+class _StepResult(NamedTuple):
+    """Normalized particle update emitted by one generic step."""
+
+    particles: ParticleCloud
+    log_weights: Float[Array, " num_particles"]
+    ancestors: Int[Array, " num_particles"]
+    ess: Float[Array, ""]
+    log_evidence_increment: Float[Array, ""]
+    do_resample: Bool[Array, ""]
+    invalid_resampling: Bool[Array, ""]
+
+
+def _fk_step(
+    step_key: PRNGKeyT,
+    state: ParticleState,
+    current_ess: Float[Array, ""],
+    fk: FeynmanKac,
+    context_t: Any,
+    resampling_fn: ResamplingFn,
+    resampling_threshold: float | ResamplingCriterion,
+    state_signature: Any,
+    time_index: Int[Array, ""] | None,
+) -> _StepResult:
+    """Resample conditionally, mutate, and reweight one cloud."""
+    num_particles = state.log_weights.shape[0]
+    identity = jnp.arange(num_particles, dtype=jnp.int32)
+    resample_key, mutation_key = jr.split(step_key)
+    do_resample, ancestors, invalid_resampling = _conditional_resample(
+        resample_key,
+        state.log_weights,
+        current_ess,
+        resampling_fn,
+        resampling_threshold,
+        num_particles,
+        identity,
+        time_index,
+    )
+    parents = _gather_particles(state.particles, ancestors)
+    particle_keys = jr.split(mutation_key, num_particles)
+    propagated = vmap(lambda key, parent: fk.m(key, parent, context_t))(
+        particle_keys, parents
+    )
+    log_g = vmap(lambda parent, moved: fk.log_g(parent, moved, context_t))(
+        parents, propagated
+    )
+    sample = tree.map(lambda leaf: leaf[0], propagated)
+    _validate_state_tree(sample, state_signature, name=fk.names.m)
+    _validate_log_density_batch(log_g, num_particles, name=fk.names.log_g)
+
+    log_w_unnorm = jnp.where(
+        do_resample,
+        log_g,
+        state.log_weights + log_g,
+    )
+    log_w_norm, log_sum = log_normalize(log_w_unnorm)
+    log_ev_inc = jnp.where(
+        do_resample,
+        log_sum - jnp.asarray(math.log(num_particles)),
+        log_sum,
+    )
+    ess_t = jnp.asarray(compute_ess(log_w_norm))
+    return _StepResult(
+        propagated,
+        log_w_norm,
+        ancestors,
+        ess_t,
+        log_ev_inc,
+        do_resample,
+        invalid_resampling,
+    )
+
+
+def run_smc(
+    key: PRNGKeyT,
+    fk: FeynmanKac,
+    num_particles: int,
+    *,
+    resampling_fn: ResamplingFn = systematic,
+    resampling_threshold: float | ResamplingCriterion = 0.5,
+    store_history: bool = True,
+) -> ParticleFilterPosterior:
+    """Run the generic conditional-resample/mutate/reweight loop.
+
+    Args:
+        key: JAX PRNG key; split once for initialization, then per step.
+        fk: Feynman-Kac record; its context PyTree's leading axis sets
+            the number of time steps.
+        num_particles: Number of particles.
+        resampling_fn: Resampling algorithm
+            ``(key, weights, num_samples) -> indices``.
+        resampling_threshold: ESS fraction or JAX-traceable criterion
+            ``(normalized_log_weights, absolute_ess, time_index) -> bool``.
+        store_history: When False, particle, weight, and ancestor
+            histories keep only the final step while ESS and evidence
+            traces stay full.
+
+    Returns:
+        `smcx.containers.ParticleFilterPosterior` for the full sweep.
+
+    Raises:
+        DegenerateWeightsError: A weight stage cannot be normalized
+            (eager only; under ``jax.jit`` the nonfinite marginal
+            propagates).
+        ValueError: A callback output or resampler output violates its
+            structural contract.
+    """
+    num_timesteps = tree.leaves(fk.contexts)[0].shape[0]
+    key, init_key = jr.split(key)
+    log_n = jnp.asarray(math.log(num_particles))
+    context_0 = tree.map(lambda leaf: leaf[0], fk.contexts)
+
+    particles_0 = fk.m0(init_key, num_particles, context_0)
+    state_signature = _validate_particle_cloud(
+        particles_0,
+        num_particles,
+        name=fk.names.m0,
+    )
+    log_g_0 = vmap(lambda state: fk.log_g(state, state, context_0))(particles_0)
+    _validate_log_density_batch(log_g_0, num_particles, name=fk.names.log_g)
+    log_w_0, log_sum_0 = log_normalize(log_g_0)
+    log_ev_0 = log_sum_0 - log_n
+    ess_0: Array = jnp.asarray(compute_ess(log_w_0))
+    identity_ancestors = jnp.arange(num_particles, dtype=jnp.int32)
+    init_state = ParticleState(
+        particles=particles_0,
+        log_weights=log_w_0,
+        log_marginal_likelihood=log_ev_0,
+    )
+
+    def _step(carry, args):
+        state, current_ess, correction, _prev_ancestors, invalid_seen = carry
+        step_key, context_t, time_index = args
+        result = _fk_step(
+            step_key,
+            state,
+            current_ess,
+            fk,
+            context_t,
+            resampling_fn,
+            resampling_threshold,
+            state_signature,
+            time_index,
+        )
+        log_evidence, correction = _neumaier_add(
+            jnp.asarray(state.log_marginal_likelihood),
+            correction,
+            result.log_evidence_increment,
+        )
+        new_state = ParticleState(
+            particles=result.particles,
+            log_weights=result.log_weights,
+            log_marginal_likelihood=log_evidence,
+        )
+        next_carry = (
+            new_state,
+            result.ess,
+            correction,
+            result.ancestors,
+            invalid_seen | result.invalid_resampling,
+        )
+        if store_history:
+            return next_carry, (
+                result.particles,
+                result.log_weights,
+                result.ancestors,
+                result.ess,
+                result.log_evidence_increment,
+            )
+        # Final-only mode: ancestors ride the carry (O(N)); the scan
+        # stacks just the scalar traces.
+        return next_carry, (
+            result.ess,
+            result.log_evidence_increment,
+        )
+
+    step_keys = jr.split(key, num_timesteps - 1)
+    time_indices = jnp.arange(1, num_timesteps, dtype=jnp.int32)
+    later_contexts = tree.map(lambda leaf: leaf[1:], fk.contexts)
+    scan_inputs = (step_keys, later_contexts, time_indices)
+    init_carry = (
+        init_state,
+        ess_0,
+        jnp.zeros_like(log_ev_0),
+        identity_ancestors,
+        jnp.asarray(False),
+    )
+    if store_history:
+        (
+            (final_state, _, final_correction, _, invalid),
+            (
+                particles_rest,
+                log_w_rest,
+                ancestors_rest,
+                ess_rest,
+                log_ev_inc_rest,
+            ),
+        ) = _filter_scan(_step, init_carry, scan_inputs)
+        all_particles = _prepend_particle_history(particles_0, particles_rest)
+        all_log_w = _prepend(log_w_0, log_w_rest)
+        all_ancestors = _prepend(identity_ancestors, ancestors_rest)
+    else:
+        (
+            (final_state, _, final_correction, final_ancestors, invalid),
+            (ess_rest, log_ev_inc_rest),
+        ) = _filter_scan(_step, init_carry, scan_inputs)
+        all_particles = _particle_time_axis(final_state.particles)
+        all_log_w = final_state.log_weights[None]
+        all_ancestors = final_ancestors[None]
+    all_ess = _prepend(ess_0, ess_rest)
+    all_log_ev_inc = _prepend(jnp.asarray(log_ev_0), log_ev_inc_rest)
+    final_log_evidence = final_state.log_marginal_likelihood + final_correction
+
+    _raise_invalid_ancestors(invalid, num_particles)
+    _raise_if_degenerate(final_log_evidence)
+
+    return ParticleFilterPosterior(
+        marginal_loglik=final_log_evidence,
+        filtered_particles=all_particles,
+        filtered_log_weights=all_log_w,
+        ancestors=all_ancestors,
+        ess=all_ess,
+        log_evidence_increments=all_log_ev_inc,
+    )
