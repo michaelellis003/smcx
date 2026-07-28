@@ -740,6 +740,65 @@ class TestTransforms:
         np.testing.assert_allclose(batched[1], run(batches[1]), rtol=32 * eps)
 
 
+class TestParticleCorroboration:
+    """The linear-Bayes moments agree with a bootstrap filter.
+
+    Closing the DGLM's moments-only evolution with a Gaussian gives a
+    fully specified model that a particle filter targets exactly (up
+    to Monte Carlo error). The DGLM filtered means must then sit
+    within the Monte Carlo band plus a small linear-Bayes allowance.
+    Tier-2 stochastic contract: fixed key, band derived below.
+    """
+
+    def test_poisson_means_within_particle_band(self):
+        import jax.random as jr
+        from jax.scipy.special import gammaln
+
+        counts = jnp.array([1, 0, 2, 1, 3])
+        mean_0, cov_0, evolution = 0.0, 0.3, 0.05
+
+        def sample_initial(key, num_particles):
+            noise = jr.normal(key, (num_particles, 1))
+            return mean_0 + jnp.sqrt(cov_0) * noise
+
+        def sample_transition(key, state):
+            return state + jnp.sqrt(evolution) * jr.normal(key, state.shape)
+
+        def log_observation(count, state):
+            log_rate = state[0]
+            return (
+                count[0] * log_rate
+                - jnp.exp(log_rate)
+                - gammaln(count[0] + 1.0)
+            )
+
+        particle = smcx.bootstrap_filter(
+            jr.key(7),
+            sample_initial,
+            sample_transition,
+            log_observation,
+            counts[:, None].astype(jnp.float32),
+            num_particles=16_384,
+        )
+        dglm = dglm_filter(
+            jnp.array([mean_0]),
+            jnp.array([[cov_0]]),
+            jnp.eye(1),
+            jnp.ones(1),
+            counts,
+            family=poisson(),
+            transition_covariance=jnp.array([[evolution]]),
+        )
+        particle_means = np.asarray(smcx.weighted_mean(particle))[:, 0]
+        dglm_means = np.asarray(dglm.filtered_means)[:, 0]
+        # Band, calibrated 2026-07-28: the linear-Bayes discrepancy
+        # against a 10^6-particle run is at most 0.048 across steps,
+        # and the Monte Carlo standard error at N = 16384 (std over
+        # 20 keys) is at most 0.004. Bias plus five standard errors
+        # is 0.068; rounded up to 0.08.
+        np.testing.assert_allclose(dglm_means, particle_means, atol=0.08)
+
+
 def test_family_record_is_exported():
     assert smcx.DGLMFamily is DGLMFamily
     assert isinstance(poisson(), DGLMFamily)
