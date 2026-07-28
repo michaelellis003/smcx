@@ -45,7 +45,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 from jax import core, lax
 from jax.scipy.special import digamma, polygamma
-from jax.scipy.stats import nbinom
+from jax.scipy.stats import betabinom, nbinom
 from jaxtyping import Array, Shaped
 
 from smcx._numerics import _neumaier_add
@@ -56,6 +56,7 @@ from smcx.kalman import _check_covariance, _check_float_array
 from smcx.types import EmissionSequence, Scalar
 
 _NEWTON_ITERATIONS = 12
+_NEWTON_ITERATIONS_2D = 25
 
 
 class DGLMFamily(NamedTuple):
@@ -138,6 +139,87 @@ def poisson() -> DGLMFamily:
     )
 
 
+def _match_beta_moments(
+    mean: Scalar, variance: Scalar
+) -> tuple[Scalar, Scalar]:
+    r"""Solve the beta moment-matching equations for the logit link.
+
+    The system is $\psi(\alpha) - \psi(\beta) = f$ with
+    $\psi'(\alpha) + \psi'(\beta) = q$.
+
+    Two-dimensional log-space Newton with a fixed iteration count,
+    initialized at WHM's mode/curvature closed forms
+    $\alpha_0 = (1 + e^{f})/q$, $\beta_0 = (1 + e^{-f})/q$ — the
+    $q \to 0$ asymptote of the exact system.
+    """
+    log_alpha = jnp.log((1.0 + jnp.exp(mean)) / variance)
+    log_beta = jnp.log((1.0 + jnp.exp(-mean)) / variance)
+    for _ in range(_NEWTON_ITERATIONS_2D):
+        alpha, beta = jnp.exp(log_alpha), jnp.exp(log_beta)
+        residual_mean = digamma(alpha) - digamma(beta) - mean
+        residual_var = polygamma(1, alpha) + polygamma(1, beta) - variance
+        j11 = polygamma(1, alpha) * alpha
+        j12 = -polygamma(1, beta) * beta
+        j21 = polygamma(2, alpha) * alpha
+        j22 = polygamma(2, beta) * beta
+        determinant = j11 * j22 - j12 * j21
+        log_alpha = (
+            log_alpha - (j22 * residual_mean - j12 * residual_var) / determinant
+        )
+        log_beta = (
+            log_beta - (-j21 * residual_mean + j11 * residual_var) / determinant
+        )
+    return jnp.exp(log_alpha), jnp.exp(log_beta)
+
+
+def binomial(*, trials: int) -> DGLMFamily:
+    r"""Binomial observations with a logit link and known trials.
+
+    Conjugate beta on the success probability: the exact moment match
+    solves $f = \psi(\alpha) - \psi(\beta)$,
+    $q = \psi'(\alpha) + \psi'(\beta)$ (2-D Newton), the one-step
+    forecast is the exact beta-binomial, and the conjugate update is
+    $(\alpha + y, \beta + n - y)$ [West, Harrison & Migon, 1985,
+    sec. 5]. Emissions are counts in $\{0, \dots, n\}$; ``trials``
+    is a static known $n \ge 1$ shared across steps.
+    """
+    if int(trials) < 1:
+        raise ValueError(f"trials must be a positive integer; got {trials}")
+
+    def match_moments(forecast_mean, forecast_variance):
+        return _match_beta_moments(forecast_mean, forecast_variance)
+
+    def log_forecast(emission, alpha, beta):
+        return betabinom.logpmf(emission, trials, alpha, beta)
+
+    def update(emission, alpha, beta):
+        return alpha + emission, beta + trials - emission
+
+    def posterior_moments(alpha, beta):
+        return (
+            digamma(alpha) - digamma(beta),
+            polygamma(1, alpha) + polygamma(1, beta),
+        )
+
+    return DGLMFamily(
+        match_moments=match_moments,
+        log_forecast=log_forecast,
+        update=update,
+        posterior_moments=posterior_moments,
+    )
+
+
+def bernoulli() -> DGLMFamily:
+    r"""Bernoulli observations with a logit link.
+
+    The single-trial case of `smcx.binomial`; the one-step forecast
+    is the exact beta-Bernoulli,
+    $\Pr[y_t = 1] = \alpha_t/(\alpha_t + \beta_t)$. Emissions are in
+    $\{0, 1\}$.
+    """
+    return binomial(trials=1)
+
+
 class _DGLMCarry(NamedTuple):
     """Moment state carried through the scan."""
 
@@ -157,6 +239,7 @@ def dglm_filter(
     family: DGLMFamily,
     transition_covariance: Shaped[Array, "*evolution_shape"] | None = None,
     discount: Scalar | None = None,
+    dispersion_discount: Scalar = 1.0,
 ) -> DGLMFilterPosterior:
     r"""Run the WHM dynamic generalized linear model filter.
 
@@ -180,6 +263,11 @@ def dglm_filter(
             of this and ``discount``.
         discount: Discount factor $\delta \in (0, 1]$ specifying
             $R_t = G C_{t-1} G' / \delta$.
+        dispersion_discount: Berry and West's random-effects discount
+            $\rho \in (0, 1]$: the linear-predictor variance is
+            inflated to $q_t/\rho$ before moment matching, adding
+            unpredictable extra-dispersion each step. The default 1
+            recovers the plain DGLM.
 
     Returns:
         `smcx.containers.DGLMFilterPosterior`. ``filtered_means`` and
@@ -207,6 +295,15 @@ def dglm_filter(
             raise ValueError(
                 f"discount must be in (0, 1]; got {discount_value}"
             )
+    dispersion_value = _validate_positive_scalar(
+        dispersion_discount, "dispersion_discount"
+    )
+    if not isinstance(dispersion_value, core.Tracer) and (
+        float(dispersion_value) > 1.0  # ty: ignore[invalid-argument-type]
+    ):
+        raise ValueError(
+            f"dispersion_discount must be in (0, 1]; got {dispersion_value}"
+        )
 
     _check_float_array(initial_mean, "initial_mean")
     dtype = initial_mean.dtype
@@ -270,9 +367,13 @@ def dglm_filter(
         else jnp.asarray(1.0, dtype=dtype)
     )
 
+    inverse_dispersion = 1.0 / jnp.asarray(dispersion_value, dtype=dtype)
+
     def _update(carry: _DGLMCarry, prior_mean, prior_cov, emission_t):
         forecast_mean = observation_vector @ prior_mean
-        forecast_variance = observation_vector @ prior_cov @ observation_vector
+        forecast_variance = (
+            observation_vector @ prior_cov @ observation_vector
+        ) * inverse_dispersion
         alpha, beta = family.match_moments(forecast_mean, forecast_variance)
         log_density = jnp.asarray(
             family.log_forecast(emission_t[0], alpha, beta), dtype=dtype

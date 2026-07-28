@@ -28,7 +28,7 @@ from smcx.containers import (
     SMC2Posterior,
     TemperedPosterior,
 )
-from smcx.dglm import DGLMFamily, dglm_filter, poisson
+from smcx.dglm import DGLMFamily, bernoulli, binomial, dglm_filter, poisson
 from smcx.diagnostics import (
     crps,
     cumulative_log_score,
@@ -109,6 +109,8 @@ __all__ = [
     "__version__",
     "auxiliary_filter",
     "auxiliary_fk",
+    "bernoulli",
+    "binomial",
     "bootstrap_filter",
     "bootstrap_fk",
     "bootstrap_init",
