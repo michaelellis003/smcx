@@ -1,17 +1,28 @@
 # smcx
 
-smcx is a [JAX](https://github.com/jax-ml/jax) library for state-space
-inference: exact linear-Gaussian filtering and smoothing, extended and
-unscented nonlinear Gaussian filtering, particle filters, adaptive
-tempered SMC, and SMC² with a small, function-oriented API. It runs on
-CPU, CUDA, and TPU through JAX, and on Apple-silicon GPUs through the optional
+smcx is a [JAX](https://github.com/jax-ml/jax) workbench for
+state-space inference: exact linear-Gaussian filtering and smoothing,
+extended and unscented nonlinear Gaussian filtering, particle
+filters, adaptive tempered SMC, and SMC², built from exchangeable
+components with a small, function-oriented API. Run a named algorithm
+in a line, or open the hood: models are records of pure callables,
+every particle filter is a `FeynmanKac` derivation over one generic
+`run_smc` loop, and resamplers, resampling criteria, proposals,
+potentials, look-ahead twists, mutation kernels, temperature
+schedules, and Gaussian linearization strategies are all
+caller-replaceable. It runs on CPU, CUDA, and TPU through JAX, and on
+Apple-silicon GPUs through the optional
 [jax-mps](https://github.com/tillahoffmann/jax-mps) backend.
 
 Features include:
 
 - exact linear-Gaussian Kalman filtering and RTS smoothing;
-- extended and scaled unscented Kalman filtering with shared mean callbacks;
+- extended and scaled unscented Kalman filtering with shared mean
+  callbacks, unified by `gaussian_filter` over exchangeable
+  linearization strategies;
 - bootstrap, auxiliary, guided, and Liu–West particle filters;
+- `StateSpaceModel` records with explicit parameter threading, and
+  `FeynmanKac`/`run_smc` for custom particle algorithms;
 - a public runner for caller-owned particle-filter kernels;
 - adaptive tempered SMC and nested SMC² parameter inference;
 - systematic, stratified, multinomial, and residual resampling;
