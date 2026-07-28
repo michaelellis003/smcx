@@ -244,10 +244,13 @@ potential is a two-line change to the derived record:
 
 ```python
 fk = smcx.bootstrap_fk(model, params, emissions)
-annealed = fk._replace(
-    log_g=lambda parent, state, context_t: 0.5
-    * fk.log_g(parent, state, context_t)
-)
+
+
+def annealed_log_g(parent, state, context_t):
+    return 0.5 * fk.log_g(parent, state, context_t)
+
+
+annealed = fk._replace(log_g=annealed_log_g)
 posterior = smcx.run_smc(jr.key(0), annealed, num_particles=4_096)
 ```
 
@@ -642,8 +645,9 @@ transition_module = LinearGaussianTransition(
 model = smcx.StateSpaceModel(
     sample_initial=lambda key, params, input_0: jr.normal(key, (1,)),
     sample_transition=lambda key, state, params, input_t: params(key, state),
-    log_observation=lambda emission, state, params, input_t: -0.5
-    * ((emission[0] - state[0]) / 0.7) ** 2,
+    log_observation=lambda emission, state, params, input_t: (
+        -0.5 * ((emission[0] - state[0]) / 0.7) ** 2
+    ),
 )
 
 emissions = jnp.asarray([[0.2], [-0.1], [0.4]])
