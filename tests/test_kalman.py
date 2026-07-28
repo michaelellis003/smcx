@@ -797,3 +797,139 @@ def test_float32_evidence_avoids_long_horizon_accumulation_drift():
     # two ulps admits backend variation. Naive accumulation misses by >123.
     tolerance = 2 * abs(np.spacing(np.float32(accurate)))
     assert abs(float(posterior.marginal_loglik) - accurate) <= tolerance
+
+
+class TestGaussianFilterStrategies:
+    """gaussian_filter dispatches exactly to the named filters."""
+
+    @staticmethod
+    def _nonlinear_model():
+        def transition_mean(state):
+            return jnp.array([
+                0.9 * state[0] + 0.1 * jnp.sin(state[1]),
+                0.8 * state[1],
+            ])
+
+        def observation_mean(state):
+            return jnp.array([state[0] + 0.05 * state[1] ** 2])
+
+        arrays = dict(
+            initial_mean=jnp.zeros(2),
+            initial_covariance=jnp.eye(2),
+            transition_covariance=0.1 * jnp.eye(2),
+            observation_covariance=jnp.array([[0.3]]),
+            emissions=jnp.array([[0.2], [-0.1], [0.4]]),
+        )
+        return transition_mean, observation_mean, arrays
+
+    def test_taylor_order1_equals_extended_filter(self):
+        transition_mean, observation_mean, arrays = self._nonlinear_model()
+        transition_jacobian = jax.jacfwd(transition_mean)
+        observation_jacobian = jax.jacfwd(observation_mean)
+
+        via_strategy = smcx.gaussian_filter(
+            arrays["initial_mean"],
+            arrays["initial_covariance"],
+            transition_mean,
+            arrays["transition_covariance"],
+            observation_mean,
+            arrays["observation_covariance"],
+            arrays["emissions"],
+            method=smcx.taylor_order1(
+                transition_jacobian, observation_jacobian
+            ),
+        )
+        direct = smcx.extended_kalman_filter(
+            arrays["initial_mean"],
+            arrays["initial_covariance"],
+            transition_mean,
+            transition_jacobian,
+            arrays["transition_covariance"],
+            observation_mean,
+            observation_jacobian,
+            arrays["observation_covariance"],
+            arrays["emissions"],
+        )
+
+        for strategy_field, direct_field in zip(
+            via_strategy, direct, strict=True
+        ):
+            np.testing.assert_array_equal(
+                np.asarray(strategy_field), np.asarray(direct_field)
+            )
+
+    def test_unscented_equals_unscented_filter(self):
+        transition_mean, observation_mean, arrays = self._nonlinear_model()
+
+        via_strategy = smcx.gaussian_filter(
+            arrays["initial_mean"],
+            arrays["initial_covariance"],
+            transition_mean,
+            arrays["transition_covariance"],
+            observation_mean,
+            arrays["observation_covariance"],
+            arrays["emissions"],
+            method=smcx.unscented(0.9, 2.0, 0.5),
+        )
+        direct = smcx.unscented_kalman_filter(
+            arrays["initial_mean"],
+            arrays["initial_covariance"],
+            transition_mean,
+            arrays["transition_covariance"],
+            observation_mean,
+            arrays["observation_covariance"],
+            arrays["emissions"],
+            alpha=0.9,
+            beta=2.0,
+            kappa=0.5,
+        )
+
+        for strategy_field, direct_field in zip(
+            via_strategy, direct, strict=True
+        ):
+            np.testing.assert_array_equal(
+                np.asarray(strategy_field), np.asarray(direct_field)
+            )
+
+    def test_strategies_are_exchangeable_on_one_model(self):
+        """The swap point works: same model, two rules, finite results."""
+        transition_mean, observation_mean, arrays = self._nonlinear_model()
+        taylor = smcx.gaussian_filter(
+            arrays["initial_mean"],
+            arrays["initial_covariance"],
+            transition_mean,
+            arrays["transition_covariance"],
+            observation_mean,
+            arrays["observation_covariance"],
+            arrays["emissions"],
+            method=smcx.taylor_order1(
+                jax.jacfwd(transition_mean), jax.jacfwd(observation_mean)
+            ),
+        )
+        sigma = smcx.gaussian_filter(
+            arrays["initial_mean"],
+            arrays["initial_covariance"],
+            transition_mean,
+            arrays["transition_covariance"],
+            observation_mean,
+            arrays["observation_covariance"],
+            arrays["emissions"],
+            method=smcx.unscented(),
+        )
+
+        assert np.all(np.isfinite(np.asarray(taylor.filtered_means)))
+        assert np.all(np.isfinite(np.asarray(sigma.filtered_means)))
+
+    def test_rejects_non_strategy_method(self):
+        transition_mean, observation_mean, arrays = self._nonlinear_model()
+        with pytest.raises(ValueError, match="linearization strategy"):
+            smcx.gaussian_filter(
+                arrays["initial_mean"],
+                arrays["initial_covariance"],
+                transition_mean,
+                arrays["transition_covariance"],
+                observation_mean,
+                arrays["observation_covariance"],
+                arrays["emissions"],
+                method="ekf",  # ty: ignore[invalid-argument-type]
+            )
