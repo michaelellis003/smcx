@@ -342,6 +342,7 @@ def _liu_west_step(
     shrinkage: Float[Array, ""],
     kernel_variance: Float[Array, ""],
     state_signature: _TreeSignature,
+    move_only_on_selection: bool,
 ) -> tuple[_LiuWestStepCarry, _LiuWestStepOutput]:
     particles, params, log_weights, log_ml, correction, _, invalid_seen = carry
     emission_t, input_t, time_index = inputs_t
@@ -393,10 +394,19 @@ def _liu_west_step(
         (num_particles, param_dim),
         dtype=covariance_factor.dtype,
     )
-    new_params = (
+    moved_params = (
         shrunk[ancestors].astype(covariance_factor.dtype)
         + eps @ covariance_factor.T
     ).astype(params.dtype)
+    # Under the 'on_selection' policy the shrink-and-jitter move is
+    # confined to selected steps, where the auxiliary weights account
+    # for it; unselected steps leave the parameter cloud untouched.
+    # The jitter key is consumed either way so both policies share one
+    # key schedule.
+    if move_only_on_selection:
+        new_params = jnp.where(do_resample, moved_params, params[ancestors])
+    else:
+        new_params = moved_params
     particle_keys = jr.split(transition_key, num_particles)
     if input_t is None:
         transition_fn = cast(ParamTransitionSampler, transition_sampler)
@@ -466,7 +476,8 @@ def liu_west_filter(
     *,
     shrinkage: float = 0.95,
     resampling_fn: ResamplingFn = systematic,
-    resampling_threshold: float | ResamplingCriterion = 0.5,
+    resampling_threshold: float | ResamplingCriterion = 2.0,
+    parameter_moves: str = "on_selection",
     inputs: InputSequence | None = None,
     param_initial_state_sampler: ParamCloudInitialStateSampler
     | ParamCloudInitialStateSamplerWithInput
@@ -514,24 +525,31 @@ def liu_west_filter(
                 The shrinkage parameter has no generative interpretation:
                 it introduces artificial dynamics into the parameter
                 evolution that do not correspond to any probabilistic
-                model. The shrink-and-jitter move applies at every
-                observation, whether or not that step resamples. Each
-                move preserves the weighted cloud's mean and covariance
-                (the kernel is variance-matched), but on non-resampled
-                steps it acts outside the auxiliary-selection derivation
-                of Liu and West (2001), and with
-                ``resampling_threshold=0`` the parameter cloud evolves
-                by these uncorrected artificial dynamics for the whole
-                series. Results can be sensitive to this choice. Run the
-                filter under several values (e.g. 0.95, 0.975, 0.99) and
-                report the range of posterior and evidence estimates.
+                model. Each move preserves the weighted cloud's mean and
+                covariance (the kernel is variance-matched). Results can
+                be sensitive to this choice. Run the filter under several
+                values (e.g. 0.95, 0.975, 0.99) and report the range of
+                posterior and evidence estimates.
         resampling_fn: Resampling algorithm.  Defaults to systematic.
         resampling_threshold: ESS fraction, or a JAX-traceable criterion
             ``(normalized_log_weights, absolute_ess, time_index) -> bool``.
             Numeric values must be finite and nonnegative; zero disables
             resampling and values above one force it at every update.
-            The callback receives the first-stage weights and ESS at the
-            zero-based emission indices 1 through T - 1.
+            The default (2.0) selects at every update — the algorithm of
+            Liu and West (2001). Fractions below one make selection
+            conditional; see ``parameter_moves`` for what happens to the
+            parameter cloud on unselected steps. The callback receives
+            the first-stage weights and ESS at the zero-based emission
+            indices 1 through T - 1.
+        parameter_moves: When ``"on_selection"`` (the default), the
+            shrink-and-jitter parameter move applies only on steps where
+            selection occurs, so every move is accounted for by the
+            auxiliary weights and the run stays inside the derivation of
+            Liu and West (2001) at any threshold. ``"always"`` moves the
+            parameters at every observation; on unselected steps the
+            importance weights carry no correction for that move, so the
+            run is an explicitly approximate extension. The two coincide
+            at the default threshold.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)`` and a nonempty event. Inputs follow ``params`` in
             every callback;
@@ -560,6 +578,12 @@ def liu_west_filter(
             is structurally invalid.
     """
     _validate_resampling_threshold(resampling_threshold)
+    if parameter_moves not in ("on_selection", "always"):
+        raise ValueError(
+            "parameter_moves must be 'on_selection' or 'always'; "
+            f"got {parameter_moves!r}"
+        )
+    move_only_on_selection = parameter_moves == "on_selection"
     emissions, num_timesteps = _validate_filter_inputs(
         emissions,
         num_particles,
@@ -632,6 +656,7 @@ def liu_west_filter(
             shrinkage=a,
             kernel_variance=h_sq,
             state_signature=state_signature,
+            move_only_on_selection=move_only_on_selection,
         )
         if store_history:
             return next_carry, output

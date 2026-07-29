@@ -185,6 +185,9 @@ def _run_covariance_case(
         num_particles=num_particles,
         shrinkage=shrinkage,
         resampling_threshold=0.0,
+        # The kernel tests measure the shrink-and-jitter move itself
+        # with selection disabled, which requires the 'always' policy.
+        parameter_moves="always",
     )
 
 
@@ -402,6 +405,7 @@ def test_uncompiled_step_matches_compiled_scan():
             shrinkage=shrinkage,
             kernel_variance=1.0 - shrinkage**2,
             state_signature=signature,
+            move_only_on_selection=True,
         )
 
     with jax.disable_jit():
@@ -986,3 +990,58 @@ class TestLiuWestInitialJointLaw:
                 num_particles=4,
                 param_initial_state_sampler=param_initial_state_sampler,
             )
+
+
+class TestParameterMovePolicy:
+    """The parameter_moves knob defaults to Liu and West (2001) (#288)."""
+
+    @staticmethod
+    def _run(parameter_moves="on_selection", resampling_threshold=2.0):
+        def initial_sampler(key, n):
+            return jr.normal(key, (n, 1))
+
+        def transition_sampler(key, state, params):
+            return state + 0.1 * jr.normal(key, (1,))
+
+        def log_density(emission, state, params):
+            return -0.5 * (emission[0] - state[0]) ** 2
+
+        def param_initial_sampler(key, n):
+            return jr.normal(key, (n, 1))
+
+        return liu_west_filter(
+            jr.key(7),
+            initial_sampler,
+            transition_sampler,
+            log_density,
+            log_density,
+            param_initial_sampler,
+            jnp.zeros((4, 1)),
+            64,
+            resampling_threshold=resampling_threshold,
+            parameter_moves=parameter_moves,
+        )
+
+    def test_rejects_unknown_policy(self):
+        with pytest.raises(ValueError, match="parameter_moves"):
+            self._run(parameter_moves="sometimes")
+
+    def test_no_selection_means_no_parameter_moves(self):
+        posterior = self._run(resampling_threshold=0.0)
+        np.testing.assert_array_equal(
+            posterior.filtered_params[0], posterior.filtered_params[-1]
+        )
+
+    def test_always_policy_moves_without_selection(self):
+        posterior = self._run(
+            parameter_moves="always", resampling_threshold=0.0
+        )
+        assert not np.array_equal(
+            posterior.filtered_params[0], posterior.filtered_params[-1]
+        )
+
+    def test_policies_coincide_at_full_selection(self):
+        selected = self._run(parameter_moves="on_selection")
+        always = self._run(parameter_moves="always")
+        for kept_leaf, moved_leaf in zip(selected, always, strict=True):
+            np.testing.assert_array_equal(kept_leaf, moved_leaf)
