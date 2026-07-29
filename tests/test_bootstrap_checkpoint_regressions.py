@@ -32,7 +32,7 @@ def _assert_tree_equal(actual, expected):
 
 
 @pytest.mark.skipif(
-    jax.default_backend() != "cpu",
+    jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
     reason="frozen CPU/x64 arithmetic contract",
 )
 def test_bootstrap_filter_preserves_frozen_fixed_key_output():
