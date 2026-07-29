@@ -39,7 +39,6 @@ References:
     https://doi.org/10.1007/b98971
 """
 
-from collections.abc import Callable
 from typing import NamedTuple
 
 import jax.numpy as jnp
@@ -55,7 +54,15 @@ from smcx._utils import _canonicalize_emissions
 from smcx.containers import DGLMFilterPosterior
 from smcx.dlm import _validate_positive_scalar
 from smcx.kalman import _check_covariance, _check_float_array
-from smcx.types import EmissionSequence, Scalar
+from smcx.types import (
+    EmissionSequence,
+    FamilyConjugateUpdate,
+    FamilyEmissionValidator,
+    FamilyLogForecast,
+    FamilyMomentMatch,
+    FamilyPosteriorMoments,
+    Scalar,
+)
 
 _NEWTON_ITERATIONS = 12
 _NEWTON_ITERATIONS_2D = 25
@@ -88,11 +95,11 @@ class DGLMFamily(NamedTuple):
             (#283).
     """
 
-    match_moments: Callable[..., tuple[Scalar, Scalar]]
-    log_forecast: Callable[..., Scalar]
-    update: Callable[..., tuple[Scalar, Scalar]]
-    posterior_moments: Callable[..., tuple[Scalar, Scalar]]
-    validate_emissions: Callable[..., None] | None = None
+    match_moments: FamilyMomentMatch
+    log_forecast: FamilyLogForecast
+    update: FamilyConjugateUpdate
+    posterior_moments: FamilyPosteriorMoments
+    validate_emissions: FamilyEmissionValidator | None = None
 
 
 _ASYMPTOTIC_CUTOFF = 1e8
