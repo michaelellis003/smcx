@@ -118,19 +118,30 @@ def test_factorized_covariance_matches_active_backend(kind, timed):
 
 
 def test_factorized_covariance_accepts_backend_factorable_roundoff():
-    """A roundoff-negative host eigenvalue cannot mask a finite factor."""
+    """A roundoff-negative host eigenvalue cannot mask a finite factor.
+
+    Whether the near-singular correlation factors at all is a backend
+    property (float32 LAPACK implementations disagree), so the
+    expectation follows the represented factor operation, matching the
+    sibling boundary tests (#290).
+    """
     dtype = jnp.asarray(0.0).dtype
     host_dtype = np.dtype(dtype)
     one = host_dtype.type(1.0)
     rho = np.nextafter(one, host_dtype.type(0.0))
     covariance = np.full((4, 4), rho, dtype=host_dtype)
     np.fill_diagonal(covariance, one)
+    model = _observation_model(jnp.asarray(covariance))
 
-    posterior = smcx.kalman_filter(
-        **_observation_model(jnp.asarray(covariance))
-    )
-
-    assert all(jnp.all(jnp.isfinite(field)) for field in posterior)
+    if _backend_factorable(model["observation_covariance"]):
+        posterior = smcx.kalman_filter(**model)
+        assert all(jnp.all(jnp.isfinite(field)) for field in posterior)
+    else:
+        with pytest.raises(
+            ValueError,
+            match="observation_covariance must be positive definite",
+        ):
+            smcx.kalman_filter(**model)
 
 
 @pytest.mark.parametrize("timed", [False, True])
