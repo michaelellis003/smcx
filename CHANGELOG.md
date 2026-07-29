@@ -2,6 +2,144 @@
 
 <!-- version list -->
 
+## v2.0.0 (2026-07-29)
+
+### Bug Fixes
+
+- **diagnostics**: Vectorize tail_ess and stop carrying runner records
+  ([#263](https://github.com/michaelellis003/smcx/pull/263),
+  [`f6957d7`](https://github.com/michaelellis003/smcx/commit/f6957d7d3371ad8dff7f63bd7d3b43d2b8fb9458))
+
+- **kalman**: Accept semidefinite process noise in the unscented filter
+  ([#245](https://github.com/michaelellis003/smcx/pull/245),
+  [`ecbdfca`](https://github.com/michaelellis003/smcx/commit/ecbdfcafac26b5fc31d78f0311fcd5293c28cbd0))
+
+- **tempering**: Report stall context and stop redundant bisection probes
+  ([#254](https://github.com/michaelellis003/smcx/pull/254),
+  [`7c8a3ec`](https://github.com/michaelellis003/smcx/commit/7c8a3ec4dabaf808923888d88a3e36bafd4014b3))
+
+### Build System
+
+- **deps-dev**: Bump matplotlib from 3.11.0 to 3.11.1
+  ([#251](https://github.com/michaelellis003/smcx/pull/251),
+  [`7001c4b`](https://github.com/michaelellis003/smcx/commit/7001c4b9e491922a5812e871545b66ef962d8640))
+
+- **deps-dev**: Bump mkdocs-material from 9.7.6 to 9.7.7
+  ([#250](https://github.com/michaelellis003/smcx/pull/250),
+  [`0f8e9b2`](https://github.com/michaelellis003/smcx/commit/0f8e9b2494543c5ed0bea149e96009c8342ff121))
+
+- **deps-dev**: Bump ty from 0.0.59 to 0.0.61
+  ([#253](https://github.com/michaelellis003/smcx/pull/253),
+  [`22f75a1`](https://github.com/michaelellis003/smcx/commit/22f75a18ad48edcdbd999b4614edb578fb97cd19))
+
+### Chores
+
+- Keep design documents local ([#279](https://github.com/michaelellis003/smcx/pull/279),
+  [`2227c2c`](https://github.com/michaelellis003/smcx/commit/2227c2c09624ed3c4de439d21e427746fc7ed5be))
+
+- Remove code of conduct and security policy
+  ([#280](https://github.com/michaelellis003/smcx/pull/280),
+  [`67ddb79`](https://github.com/michaelellis003/smcx/commit/67ddb79926a7fc9db5769c90d9198bda6af196c9))
+
+### Continuous Integration
+
+- Cancel superseded runs only on pull requests
+  ([#247](https://github.com/michaelellis003/smcx/pull/247),
+  [`ddd5893`](https://github.com/michaelellis003/smcx/commit/ddd58935ca4425f78242a396f8f9f39bd8ea5e20))
+
+- Name the re-evaluation path when a new jax-mps hits the Metal quarantine signature
+  ([#256](https://github.com/michaelellis003/smcx/pull/256),
+  [`8aa3ac8`](https://github.com/michaelellis003/smcx/commit/8aa3ac83298d96f3935b69ef7282874c80ffcd4c))
+
+- Raise the macos suite timeout to thirty minutes
+  ([#274](https://github.com/michaelellis003/smcx/pull/274),
+  [`dac812a`](https://github.com/michaelellis003/smcx/commit/dac812a4dcab682a5648007ef7112165a7dd3c5d))
+
+- **dependabot**: Add cooldown, uv ecosystem, and action grouping
+  ([#246](https://github.com/michaelellis003/smcx/pull/246),
+  [`0936b6d`](https://github.com/michaelellis003/smcx/commit/0936b6d4ae633b994d701595471126bfbb297901))
+
+- **release**: Dispatch-only releases with hardened token handling
+  ([#249](https://github.com/michaelellis003/smcx/pull/249),
+  [`4021887`](https://github.com/michaelellis003/smcx/commit/40218877862f71bae37e702f9093a7cb1e700ae5))
+
+### Documentation
+
+- Open with a sequential-inference narrative
+  ([#275](https://github.com/michaelellis003/smcx/pull/275),
+  [`2190b32`](https://github.com/michaelellis003/smcx/commit/2190b3248dc05804ea4a80f766a2dea0573a5ca3))
+
+- Reposition the guides around the workbench model record
+  ([#264](https://github.com/michaelellis003/smcx/pull/264),
+  [`e556295`](https://github.com/michaelellis003/smcx/commit/e556295672ab741f08d5decbb73986cbac2d414d))
+
+- **dglm**: Document the DGLM filter and corroborate it against the bootstrap filter
+  ([#273](https://github.com/michaelellis003/smcx/pull/273),
+  [`6f0181e`](https://github.com/michaelellis003/smcx/commit/6f0181e1320a11baad110cd426a4067d1fa4c148))
+
+- **diagnostics**: Document vmapped crps branch cost
+  ([#248](https://github.com/michaelellis003/smcx/pull/248),
+  [`f94664d`](https://github.com/michaelellis003/smcx/commit/f94664d67dd19bee109b1343b56df8a5c5002856))
+
+- **liu_west**: State the kernel-move cadence and its derivation boundary
+  ([#255](https://github.com/michaelellis003/smcx/pull/255),
+  [`a0a6659`](https://github.com/michaelellis003/smcx/commit/a0a665983b6df5cb2764f4d003661aec13994951))
+
+### Features
+
+- Make filter configuration keyword-only and complete 2.0 contracts
+  ([#265](https://github.com/michaelellis003/smcx/pull/265),
+  [`ead8fa8`](https://github.com/michaelellis003/smcx/commit/ead8fa85f5b53675b7f5b0e419de6e84f111c5c8))
+
+- **dglm**: Add Bernoulli and binomial families with dispersion discounting
+  ([#272](https://github.com/michaelellis003/smcx/pull/272),
+  [`34f6a86`](https://github.com/michaelellis003/smcx/commit/34f6a86f081f9953f47c656c6bfc4ea634e3bac0))
+
+- **dglm**: Add the WHM dynamic generalized linear model filter
+  ([#271](https://github.com/michaelellis003/smcx/pull/271),
+  [`c186192`](https://github.com/michaelellis003/smcx/commit/c186192ce86d128a11207aab556256b21de01d66))
+
+- **dlm**: Add the conjugate unknown-variance filter with discounting
+  ([#268](https://github.com/michaelellis003/smcx/pull/268),
+  [`049bd0a`](https://github.com/michaelellis003/smcx/commit/049bd0a251a4c30c7e9b2d9af471c2927f708ffd))
+
+- **dlm**: Add variance discounting with pinned external validation
+  ([#269](https://github.com/michaelellis003/smcx/pull/269),
+  [`e59998a`](https://github.com/michaelellis003/smcx/commit/e59998afd180b271b1c2622b326ea6ab412e6356))
+
+- **kalman**: Add linearization strategies and the general gaussian filter
+  ([#261](https://github.com/michaelellis003/smcx/pull/261),
+  [`0e61450`](https://github.com/michaelellis003/smcx/commit/0e61450d629c8e66e3b40bb1d8dddbbd3e3c6ac0))
+
+- **model**: Add the StateSpaceModel record and public Feynman-Kac layer
+  ([#260](https://github.com/michaelellis003/smcx/pull/260),
+  [`3dc98ea`](https://github.com/michaelellis003/smcx/commit/3dc98eaa5fedfe40b945bd365b4990b01aefc5ef))
+
+- **tempering**: Accept a caller-owned temperature schedule
+  ([#262](https://github.com/michaelellis003/smcx/pull/262),
+  [`14af954`](https://github.com/michaelellis003/smcx/commit/14af9540e5b2ba14680e77e9bce9ade29e917c29))
+
+### Refactoring
+
+- **fk**: Extract the Feynman-Kac loop beneath the bootstrap filter
+  ([#258](https://github.com/michaelellis003/smcx/pull/258),
+  [`5ca245d`](https://github.com/michaelellis003/smcx/commit/5ca245dcafe9be2f0092e20c7c30a02cf73207c9))
+
+- **fk**: Rewire guided and auxiliary filters through run_smc
+  ([#259](https://github.com/michaelellis003/smcx/pull/259),
+  [`7a9d706`](https://github.com/michaelellis003/smcx/commit/7a9d70602949755aa49dcad566b617403d146571))
+
+### Testing
+
+- **diagnostics**: Calibrate retained ownership
+  ([#244](https://github.com/michaelellis003/smcx/pull/244),
+  [`faa500a`](https://github.com/michaelellis003/smcx/commit/faa500a8f9156277ab1409880948babfd1c68935))
+
+- **filters**: Minimize evidence regression
+  ([#243](https://github.com/michaelellis003/smcx/pull/243),
+  [`8fbe6f7`](https://github.com/michaelellis003/smcx/commit/8fbe6f73be32e5f173059c101856126ccc28b638))
+
+
 ## v1.16.0 (2026-07-27)
 
 ### Features
