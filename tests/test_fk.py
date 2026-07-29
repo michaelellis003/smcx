@@ -333,3 +333,58 @@ class TestTwistAndCompositeCharacterization:
                 -2.072308969364232,
             ],
         )
+
+
+class TestRunSmcBoundary:
+    """run_smc validates its boundary like the named filters (#285)."""
+
+    def _model(self, log_lookahead=None):
+        return smcx.StateSpaceModel(
+            sample_initial=lambda key, params, i0: jr.normal(key, (1,)),
+            sample_transition=lambda key, state, params, it: (
+                state + 0.1 * jr.normal(key, (1,))
+            ),
+            log_observation=lambda emission, state, params, it: (
+                -0.5 * (emission[0] - state[0]) ** 2
+            ),
+            log_lookahead=log_lookahead,
+        )
+
+    def _degenerate_fk(self):
+        model = self._model(
+            log_lookahead=lambda emission, state, params, it: jnp.asarray(
+                -jnp.inf
+            )
+        )
+        return smcx.auxiliary_fk(model, {}, jnp.zeros((5, 1)))
+
+    def test_degenerate_lookahead_raises_like_auxiliary_filter(self):
+        with pytest.raises(smcx.DegenerateWeightsError):
+            run_smc(jr.key(0), self._degenerate_fk(), 64)
+
+    def test_stage_gate_escape_hatch_still_returns(self):
+        posterior = run_smc(
+            jr.key(0),
+            self._degenerate_fk(),
+            64,
+            gate_stage_normalizers=False,
+        )
+        assert np.isfinite(float(posterior.marginal_loglik))
+
+    @pytest.mark.parametrize("threshold", [-1.0, float("nan"), float("inf")])
+    def test_rejects_invalid_numeric_threshold(self, threshold):
+        fk = smcx.bootstrap_fk(self._model(), {}, jnp.zeros((3, 1)))
+        with pytest.raises(ValueError, match="resampling_threshold"):
+            run_smc(jr.key(0), fk, 8, resampling_threshold=threshold)
+
+    @pytest.mark.parametrize("num_particles", [0, -4])
+    def test_rejects_nonpositive_particle_count(self, num_particles):
+        fk = smcx.bootstrap_fk(self._model(), {}, jnp.zeros((3, 1)))
+        with pytest.raises(ValueError, match="num_particles"):
+            run_smc(jr.key(0), fk, num_particles)
+
+    def test_rejects_mismatched_context_leaf_lengths(self):
+        fk = smcx.bootstrap_fk(self._model(), {}, jnp.zeros((3, 1)))
+        broken = fk._replace(contexts=(fk.contexts, jnp.zeros(2)))
+        with pytest.raises(ValueError, match="context"):
+            run_smc(jr.key(0), broken, 8)
