@@ -205,14 +205,38 @@ def _condition_from_residual(
         residual,
         lower=True,
     )
-    observation_dim = residual.shape[0]
-    log_two_pi = jnp.asarray(math.log(2.0 * math.pi), dtype=residual.dtype)
-    log_evidence_increment = -0.5 * (
-        observation_dim * log_two_pi
-        + 2.0 * jnp.log(jnp.diag(innovation_cholesky)).sum()
-        + whitened_residual @ whitened_residual
+    log_evidence_increment = _gaussian_log_evidence(
+        innovation_cholesky, whitened_residual
     )
     return filtered_mean, filtered_covariance, log_evidence_increment
+
+
+def _gaussian_log_evidence(
+    innovation_cholesky: Shaped[Array, "observation_dim observation_dim"],
+    whitened_residual: Shaped[Array, " observation_dim"],
+) -> Shaped[Array, ""]:
+    """Return the Gaussian log-evidence increment without overflow.
+
+    The halved quadratic form is accumulated from the residual scaled
+    by sqrt(1/2), so it overflows only when the log density itself
+    falls below the dtype's most negative finite value, where -inf is
+    the correct rounding.
+    """
+    dtype = whitened_residual.dtype
+    observation_dim = whitened_residual.shape[0]
+    log_two_pi = jnp.asarray(math.log(2.0 * math.pi), dtype=dtype)
+    half_root = jnp.asarray(math.sqrt(0.5), dtype=dtype)
+    # The barrier stops XLA's algebraic simplifier from rewriting
+    # (c*w)@(c*w) back into c**2*(w@w), which resurrects the overflow.
+    scaled_residual = lax.optimization_barrier(half_root * whitened_residual)
+    return -(
+        0.5
+        * (
+            observation_dim * log_two_pi
+            + 2.0 * jnp.log(jnp.diag(innovation_cholesky)).sum()
+        )
+        + scaled_residual @ scaled_residual
+    )
 
 
 def _filter_step(
@@ -707,12 +731,8 @@ def _unscented_condition(
         residual,
         lower=True,
     )
-    observation_dim = residual.shape[0]
-    log_two_pi = jnp.asarray(math.log(2.0 * math.pi), dtype=residual.dtype)
-    log_evidence_increment = -0.5 * (
-        observation_dim * log_two_pi
-        + 2.0 * jnp.log(jnp.diag(innovation_cholesky)).sum()
-        + whitened_residual @ whitened_residual
+    log_evidence_increment = _gaussian_log_evidence(
+        innovation_cholesky, whitened_residual
     )
     return filtered_mean, filtered_covariance, log_evidence_increment
 

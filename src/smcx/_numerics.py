@@ -32,10 +32,13 @@ def _neumaier_add(
         Summation endlicher Summen. https://doi.org/10.1002/zamm.19740540106
     """
     updated = total + value
-    correction = correction + jnp.where(
+    residual = jnp.where(
         jnp.abs(total) >= jnp.abs(value),
         (total - updated) + value,
         (value - updated) + total,
+    )
+    correction = correction + jnp.where(
+        jnp.isfinite(updated), residual, jnp.zeros_like(residual)
     )
     return updated, correction
 

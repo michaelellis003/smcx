@@ -258,3 +258,104 @@ def test_ordinary_unscented_moments_retain_legacy_bits():
     expected = 0.5 * (expected + expected.T)
 
     np.testing.assert_array_equal(actual, expected)
+
+
+def _huge_residual_linear_model(dtype):
+    """Return identity LGSSM arrays whose t=1 residual is near 2e19."""
+    eye = jnp.eye(1, dtype=dtype)
+    return {
+        "initial_mean": jnp.zeros(1, dtype=dtype),
+        "initial_covariance": eye,
+        "transition_matrix": eye,
+        "transition_covariance": eye,
+        "observation_matrix": eye,
+        "observation_covariance": eye,
+        "emissions": jnp.asarray([[0.0], [3e19], [0.0]], dtype=dtype),
+    }
+
+
+def test_float32_kalman_evidence_survives_representable_residual():
+    """A representable log density never becomes -inf or NaN (#281)."""
+
+    def run(dtype):
+        arrays = _huge_residual_linear_model(dtype)
+        return smcx.kalman_filter(
+            arrays["initial_mean"],
+            arrays["initial_covariance"],
+            arrays["transition_matrix"],
+            arrays["transition_covariance"],
+            arrays["observation_matrix"],
+            arrays["observation_covariance"],
+            arrays["emissions"],
+        )
+
+    reference = run(jnp.float64)
+    posterior = run(jnp.float32)
+    np.testing.assert_allclose(
+        np.asarray(posterior.log_evidence_increments),
+        np.asarray(reference.log_evidence_increments),
+        rtol=1e-5,
+    )
+    np.testing.assert_allclose(
+        float(posterior.marginal_loglik),
+        float(reference.marginal_loglik),
+        rtol=1e-5,
+    )
+
+
+def test_float32_kalman_true_underflow_is_minus_inf_not_nan():
+    """Below the float32 range the marginal is -inf, never NaN (#281)."""
+    arrays = _huge_residual_linear_model(jnp.float32)
+    posterior = smcx.kalman_filter(
+        arrays["initial_mean"],
+        arrays["initial_covariance"],
+        arrays["transition_matrix"],
+        arrays["transition_covariance"],
+        arrays["observation_matrix"],
+        arrays["observation_covariance"],
+        jnp.asarray([[0.0], [1e20], [0.0]], dtype=jnp.float32),
+    )
+    assert np.isneginf(float(posterior.marginal_loglik))
+
+
+@pytest.mark.parametrize("filter_name", ["extended", "unscented"])
+def test_float32_gaussian_evidence_survives_representable_residual(
+    filter_name,
+):
+    """EKF and UKF share the overflow-safe evidence kernel (#281)."""
+
+    def run(dtype):
+        arrays = _huge_residual_linear_model(dtype)
+        # 3e19 pushes the unscented marginal just past the float32
+        # range, where -inf is exact; 2.2e19 keeps it representable.
+        arrays["emissions"] = jnp.asarray([[0.0], [2.2e19], [0.0]], dtype=dtype)
+        args = (
+            arrays["initial_mean"],
+            arrays["initial_covariance"],
+            _identity,
+            arrays["transition_covariance"],
+            _identity,
+            arrays["observation_covariance"],
+            arrays["emissions"],
+        )
+        if filter_name == "extended":
+            return smcx.extended_kalman_filter(
+                args[0],
+                args[1],
+                args[2],
+                lambda state: jnp.eye(1, dtype=state.dtype),
+                args[3],
+                args[4],
+                lambda state: jnp.eye(1, dtype=state.dtype),
+                args[5],
+                args[6],
+            )
+        return smcx.unscented_kalman_filter(*args)
+
+    reference = run(jnp.float64)
+    posterior = run(jnp.float32)
+    np.testing.assert_allclose(
+        float(posterior.marginal_loglik),
+        float(reference.marginal_loglik),
+        rtol=1e-5,
+    )

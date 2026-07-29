@@ -234,22 +234,34 @@ def dlm_filter(
         residual = emission_t[0] - forecast
         gain = prior_cov @ observation_vector / forecast_scale_free
         forecast_scale = carry.scale * forecast_scale_free
+        # Whiten before squaring: the raw square overflows float32 for
+        # residuals past ~1.8e19 while the Student-t log density (heavy
+        # tails) and the updated scale stay representable (#281).
+        # Barriers stop XLA from rewriting (r/s)**2 into r**2/s**2,
+        # which would resurrect the overflow inside the compiled scan.
+        whitened = lax.optimization_barrier(
+            residual / jnp.sqrt(dof * forecast_scale)
+        )
+        squared = whitened * whitened
+        abs_whitened = jnp.abs(whitened)
+        large = abs_whitened > 1e15
+        safe_abs = jnp.where(large, abs_whitened, jnp.ones_like(abs_whitened))
+        log1p_term = jnp.where(
+            large, 2.0 * jnp.log(safe_abs), jnp.log1p(squared)
+        )
         log_density = (
             gammaln((dof + 1.0) / 2.0)
             - gammaln(dof / 2.0)
             - 0.5 * (jnp.log(dof) + log_pi + jnp.log(forecast_scale))
-            - (dof + 1.0)
-            / 2.0
-            * jnp.log1p(residual * residual / (dof * forecast_scale))
+            - (dof + 1.0) / 2.0 * log1p_term
         )
         new_mean = prior_mean + gain * residual
         new_cov = prior_cov - jnp.outer(gain, gain) * forecast_scale_free
         new_shape = dof + 1.0
-        new_scale = (
-            carry.scale
-            * (dof + residual * residual / (forecast_scale_free * carry.scale))
-            / new_shape
+        half_width = lax.optimization_barrier(
+            residual / jnp.sqrt(dof * forecast_scale_free)
         )
+        new_scale = dof * (carry.scale + half_width * half_width) / new_shape
         loglik, compensation = _neumaier_add(
             carry.marginal_loglik,
             carry.log_evidence_compensation,
