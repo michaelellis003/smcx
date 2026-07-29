@@ -671,3 +671,173 @@ class ParticleFilterStepFnWithInput(Protocol):
         key_t: PRNGKeyT,
         /,
     ) -> "tuple[FilterCarry, ParticleFilterRecord]": ...
+
+
+@runtime_checkable
+class ModelInitialSampler(Protocol):
+    """Draw one initial state of a `smcx.model.StateSpaceModel`."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        params: Any,
+        input_0: ModelInput | None,
+        /,
+    ) -> StateTree: ...
+
+
+@runtime_checkable
+class ModelTransitionSampler(Protocol):
+    """Draw one transition of a model record."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        state: StateTree,
+        params: Any,
+        input_t: ModelInput | None,
+        /,
+    ) -> StateTree: ...
+
+
+@runtime_checkable
+class ModelLogObservation(Protocol):
+    """Observation log-density of a model record."""
+
+    def __call__(
+        self,
+        emission: Emission,
+        state: StateTree,
+        params: Any,
+        input_t: ModelInput | None,
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
+class ModelLogTransition(Protocol):
+    """Transition log-density of a model record."""
+
+    def __call__(
+        self,
+        state: StateTree,
+        prev_state: StateTree,
+        params: Any,
+        input_t: ModelInput | None,
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
+class ModelProposalSampler(Protocol):
+    """Draw one guided proposal, which sees the current emission."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        prev_state: StateTree,
+        emission: Emission,
+        params: Any,
+        input_t: ModelInput | None,
+        /,
+    ) -> StateTree: ...
+
+
+@runtime_checkable
+class ModelLogProposal(Protocol):
+    """Proposal log-density of a model record."""
+
+    def __call__(
+        self,
+        emission: Emission,
+        state: StateTree,
+        prev_state: StateTree,
+        params: Any,
+        input_t: ModelInput | None,
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
+class ModelLogLookahead(Protocol):
+    """Auxiliary look-ahead evaluated at the pre-propagation state."""
+
+    def __call__(
+        self,
+        emission: Emission,
+        state: StateTree,
+        params: Any,
+        input_t: ModelInput | None,
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
+class ModelEmissionSampler(Protocol):
+    """Draw one emission for simulation and posterior prediction."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        state: StateTree,
+        params: Any,
+        input_t: ModelInput | None,
+        /,
+    ) -> Emission: ...
+
+
+@runtime_checkable
+class FamilyMomentMatch(Protocol):
+    """Match conjugate prior parameters to two predictor moments."""
+
+    def __call__(
+        self,
+        forecast_mean: Scalar,
+        forecast_variance: Scalar,
+        /,
+    ) -> tuple[Scalar, Scalar]: ...
+
+
+@runtime_checkable
+class FamilyLogForecast(Protocol):
+    """Exact one-step forecast log density of a conjugate family."""
+
+    def __call__(
+        self,
+        emission: Scalar,
+        alpha: Scalar,
+        beta: Scalar,
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
+class FamilyConjugateUpdate(Protocol):
+    """Exact conjugate posterior parameters of a family."""
+
+    def __call__(
+        self,
+        emission: Scalar,
+        alpha: Scalar,
+        beta: Scalar,
+        /,
+    ) -> tuple[Scalar, Scalar]: ...
+
+
+@runtime_checkable
+class FamilyPosteriorMoments(Protocol):
+    """Posterior predictor moments fed back by linear Bayes."""
+
+    def __call__(
+        self,
+        alpha: Scalar,
+        beta: Scalar,
+        /,
+    ) -> tuple[Scalar, Scalar]: ...
+
+
+@runtime_checkable
+class FamilyEmissionValidator(Protocol):
+    """Eager support check of concrete canonicalized emissions."""
+
+    def __call__(self, emissions: Shaped[Array, "..."], /) -> None: ...

@@ -28,6 +28,7 @@ construction. smcx never inspects a model object's signatures.
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
+import jax.numpy as jnp
 import jax.random as jr
 from jax import vmap
 
@@ -37,7 +38,18 @@ from smcx._utils import (
     _validate_log_density_batch,
 )
 from smcx.fk import CallbackNames, FeynmanKac
-from smcx.types import EmissionSequence, InputSequence
+from smcx.types import (
+    EmissionSequence,
+    InputSequence,
+    ModelEmissionSampler,
+    ModelInitialSampler,
+    ModelLogLookahead,
+    ModelLogObservation,
+    ModelLogProposal,
+    ModelLogTransition,
+    ModelProposalSampler,
+    ModelTransitionSampler,
+)
 
 
 class StateSpaceModel(NamedTuple):
@@ -70,14 +82,14 @@ class StateSpaceModel(NamedTuple):
             emission`` for simulation and posterior prediction.
     """
 
-    sample_initial: Callable[..., Any]
-    sample_transition: Callable[..., Any]
-    log_observation: Callable[..., Any]
-    log_transition: Callable[..., Any] | None = None
-    sample_proposal: Callable[..., Any] | None = None
-    log_proposal: Callable[..., Any] | None = None
-    log_lookahead: Callable[..., Any] | None = None
-    sample_emission: Callable[..., Any] | None = None
+    sample_initial: ModelInitialSampler
+    sample_transition: ModelTransitionSampler
+    log_observation: ModelLogObservation
+    log_transition: ModelLogTransition | None = None
+    sample_proposal: ModelProposalSampler | None = None
+    log_proposal: ModelLogProposal | None = None
+    log_lookahead: ModelLogLookahead | None = None
+    sample_emission: ModelEmissionSampler | None = None
 
 
 def _prepare_sequences(
@@ -241,19 +253,25 @@ def guided_fk(
     def log_g_batch(parents, propagated, context_t):
         emission_t = context_t[0]
         input_t = get_input(context_t)
-        log_obs = vmap(
-            lambda state: model.log_observation(
-                emission_t, state, params, input_t
-            )
-        )(propagated)
-        log_f = vmap(
-            lambda state, prev: log_transition(state, prev, params, input_t)
-        )(propagated, parents)
-        log_q = vmap(
-            lambda state, prev: log_proposal(
-                emission_t, state, prev, params, input_t
-            )
-        )(propagated, parents)
+        log_obs = jnp.asarray(
+            vmap(
+                lambda state: model.log_observation(
+                    emission_t, state, params, input_t
+                )
+            )(propagated)
+        )
+        log_f = jnp.asarray(
+            vmap(
+                lambda state, prev: log_transition(state, prev, params, input_t)
+            )(propagated, parents)
+        )
+        log_q = jnp.asarray(
+            vmap(
+                lambda state, prev: log_proposal(
+                    emission_t, state, prev, params, input_t
+                )
+            )(propagated, parents)
+        )
         num_particles = log_obs.shape[0]
         for name, values in (
             ("model.log_observation", log_obs),
