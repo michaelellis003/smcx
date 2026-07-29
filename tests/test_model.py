@@ -214,3 +214,58 @@ def test_discrete_emissions_keep_model_dtype():
 
     assert np.isfinite(float(posterior.marginal_loglik))
     assert seen["dtype"] == jnp.int32
+
+
+def test_gradient_without_resampling_estimates_the_score():
+    """With resampling off, the mean gradient over keys is the score.
+
+    Tier-2 stochastic gate for the sequential-inference guide's
+    gradient-semantics passage (#284): on a linear-Gaussian model the
+    exact score is the gradient of the Kalman marginal log-likelihood,
+    and the pathwise SMC gradient with ``resampling_threshold=0.0``
+    is an unbiased estimator of it. The tolerance is a z-band on the
+    Monte Carlo standard error of the replicate mean.
+    """
+    emissions = jnp.asarray([[0.5], [-0.3], [0.8]])
+    rho, transition_sd, observation_sd = 0.7, 1.0, 0.5
+
+    exact_score = jax.grad(
+        lambda value: (
+            smcx.kalman_filter(
+                jnp.zeros(1),
+                jnp.eye(1),
+                value * jnp.eye(1),
+                transition_sd**2 * jnp.eye(1),
+                jnp.eye(1),
+                observation_sd**2 * jnp.eye(1),
+                emissions,
+            ).marginal_loglik
+        )
+    )(rho)
+
+    model = smcx.StateSpaceModel(
+        sample_initial=lambda key, params, input_0: jr.normal(key, (1,)),
+        sample_transition=lambda key, state, params, input_t: (
+            params["rho"] * state + transition_sd * jr.normal(key, (1,))
+        ),
+        log_observation=lambda emission, state, params, input_t: (
+            -0.5 * ((emission[0] - state[0]) / observation_sd) ** 2
+            - jnp.log(observation_sd)
+            - 0.5 * jnp.log(2.0 * jnp.pi)
+        ),
+    )
+
+    def replicate(key):
+        def objective(value):
+            fk = smcx.bootstrap_fk(model, {"rho": value}, emissions)
+            return smcx.run_smc(
+                key, fk, 512, resampling_threshold=0.0
+            ).marginal_loglik
+
+        return jax.grad(objective)(rho)
+
+    gradients = jax.jit(jax.vmap(replicate))(jr.split(jr.key(7), 200))
+    mean = float(jnp.mean(gradients))
+    standard_error = float(jnp.std(gradients) / jnp.sqrt(200))
+
+    assert abs(mean - float(exact_score)) < 4.0 * standard_error
