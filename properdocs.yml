@@ -78,6 +78,7 @@ exclude_docs: |
 # Page Navigation Hierarchy
 nav:
   - Home: index.md
+  - Introduction: guides/sequential-inference.md
   - Getting started: guides/quickstart.md
   - Tutorial: tutorials/filtering.md
   - Guides:

@@ -1,45 +1,127 @@
 # smcx
 
-smcx is a [JAX](https://github.com/jax-ml/jax) workbench for
-state-space inference: exact linear-Gaussian filtering and smoothing,
-extended and unscented nonlinear Gaussian filtering, particle
-filters, adaptive tempered SMC, and SMC², built from exchangeable
-components with a small, function-oriented API. Run a named algorithm
-in a line, or open the hood: models are records of pure callables,
-every particle filter is a `FeynmanKac` derivation over one generic
-`run_smc` loop, and resamplers, resampling criteria, proposals,
-potentials, look-ahead twists, mutation kernels, temperature
-schedules, and Gaussian linearization strategies are all
-caller-replaceable. It runs on CPU, CUDA, and TPU through JAX, and on
-Apple-silicon GPUs through the optional
+Sequential inference for state-space models (SSMs) in JAX:
+Kalman-family filters, particle filters, and sequential Monte Carlo
+(SMC) samplers. Following a theme of some modern probabilistic
+programming languages like [NumPyro](https://num.pyro.ai/en/stable/)
+and other projects in the JAX ecosystem like
+[dynestyx](https://github.com/BasisResearch/dynestyx), I aimed to
+decouple the inference code from the model code. smcx goes one step
+further and has no modeling language of its own. Users define their
+models as plain JAX functions. This also lets them wrap models built
+in other SSM libraries like
+[dynamax](https://github.com/probml/dynamax).
+
+An introduction to the Kalman and SMC methods is developed in
+[the documentation](https://michaelellis003.github.io/smcx/guides/sequential-inference/).
+Below is a quick start and a map of the methods.
+
+```bash
+pip install smcx
+```
+
+## Quick start
+
+A simple model to start with is a linear-Gaussian model
+
+$$
+\begin{aligned}
+y_t &\sim \mathcal{N}(\theta_t,\ 0.3), \\
+\theta_t &\sim \mathcal{N}(0.8\,\theta_{t-1},\ 0.2), \qquad
+\theta_0 \sim \mathcal{N}(0, 1).
+\end{aligned}
+$$
+
+In this case we can calculate the exact filtering distribution in
+closed form using the Kalman filter. The Kalman filter assumes the
+model is linear and Gaussian, so all you need to provide are the
+model parameters.
+
+```python
+import jax.numpy as jnp
+import jax.random as jr
+
+import smcx
+
+# fmt: off
+y = jnp.array([
+    -0.54, -1.09, -0.77, -0.03, 0.92, -0.45, 1.19, 0.24, 1.13,
+    -0.42, 0.63, 1.18, 1.13, 0.64, 1.35, 2.25, 1.98, 1.65, 2.01,
+    1.63, 0.80, 0.39, -0.68, -0.87, -0.96,
+])[:, None]
+# fmt: on
+
+m0 = jnp.zeros(1)
+C0 = jnp.eye(1)
+G = 0.8 * jnp.eye(1)
+W = 0.2 * jnp.eye(1)
+F = jnp.eye(1)
+V = 0.3 * jnp.eye(1)
+
+kalman = smcx.kalman_filter(m0, C0, G, W, F, V, y)
+print(kalman.marginal_loglik)  # -29.26, exact
+```
+
+If you want to define your own model, of any form, you instead
+write functions for the initial distribution, the transition
+distribution, and the observation distribution, and pass them to a
+particle filter. Here is the same model through the bootstrap
+particle filter:
+
+```python
+def sample_initial(key, num_particles):
+    return jr.normal(key, (num_particles, 1))
+
+
+def sample_transition(key, state):
+    return 0.8 * state + jnp.sqrt(0.2) * jr.normal(key, state.shape)
+
+
+def log_observation(obs, state):
+    residual = obs[0] - state[0]
+    return -0.5 * (jnp.log(2 * jnp.pi * 0.3) + residual**2 / 0.3)
+
+
+particle = smcx.bootstrap_filter(
+    jr.key(0),
+    sample_initial,
+    sample_transition,
+    log_observation,
+    y,
+    num_particles=10_000,
+)
+print(particle.marginal_loglik)  # -29.16, N = 10,000
+```
+
+The two estimates agree because the model is the same. If our model
+leaves the linear-Gaussian family, we can no longer use the Kalman
+filter. We only change the three functions of the bootstrap call to
+the new densities. The table below maps each model class to its
+methods, and the
+[introduction in the documentation](https://michaelellis003.github.io/smcx/guides/sequential-inference/)
+develops the theory with four worked examples, relaxing one
+assumption at a time.
+
+## Methods
+
+smcx implements the standard sequential inference methods:
+
+| Setting | Methods | Functions |
+| --- | --- | --- |
+| Linear-Gaussian, fully known | Kalman filter and RTS smoother, exact | `kalman_filter`, `rts_smoother` |
+| Known nonlinear functions | Extended and unscented Kalman filters, approximate; the linearization strategy is an argument | `extended_kalman_filter`, `unscented_kalman_filter`, `gaussian_filter` |
+| Observation variance unknown, variance-scaled | Conjugate DLM, exact | `dlm_filter` |
+| Count and binary observations | Conjugate/linear-Bayes DGLM, approximate; the observation family is an argument | `dglm_filter` with `poisson()`, `bernoulli()`, or `binomial(trials=n)` |
+| General densities | Bootstrap, auxiliary, and guided particle filters | `bootstrap_filter`, `auxiliary_filter`, `guided_filter` |
+| Custom particle algorithms | Feynman–Kac derivations over one generic loop | `StateSpaceModel`, `FeynmanKac`, `run_smc`, `run_particle_filter` |
+| Static parameters | Adaptive tempered SMC, SMC², and the joint Liu-West filter | `temper`, `smc2`, `liu_west_filter` |
+| Simulation and prediction | Model simulation and posterior predictive draws | `simulate`, `posterior_predictive_sample` |
+| Resampling | Systematic, stratified, multinomial, residual | `systematic`, `stratified`, `multinomial`, `residual` |
+| Diagnostics and reporting | ESS, scoring rules, trajectory reconstruction, ArviZ export | `diagnose`, `crps`, `reconstruct_trajectories`, `to_arviz` |
+
+smcx runs on CPU, CUDA, and TPU through JAX, and on Apple-silicon
+GPUs through the optional
 [jax-mps](https://github.com/tillahoffmann/jax-mps) backend.
-
-Features include:
-
-- exact linear-Gaussian Kalman filtering and RTS smoothing;
-- conjugate dynamic linear and generalized linear model filtering —
-  exact unknown-variance learning (`dlm_filter`) and linear-Bayes
-  count and binary emissions (`dglm_filter`);
-- extended and scaled unscented Kalman filtering with shared mean
-  callbacks, unified by `gaussian_filter` over exchangeable
-  linearization strategies;
-- bootstrap, auxiliary, guided, and Liu–West particle filters;
-- `StateSpaceModel` records with explicit parameter threading, and
-  `FeynmanKac`/`run_smc` for custom particle algorithms;
-- a public runner for caller-owned particle-filter kernels;
-- adaptive tempered SMC and nested SMC² parameter inference;
-- systematic, stratified, multinomial, and residual resampling;
-- filtering diagnostics, scoring rules, trajectory reconstruction, and
-  ArviZ export; and
-- structured latent-state PyTrees and explicit time-varying inputs.
-
-smcx supplies inference algorithms, not model or distribution classes.
-Its catalog covers core families rather than every named variant; additions
-need concrete user or research demand and an independent validator.
-Linear-Gaussian models use dense arrays. The EKF and UKF share mean callbacks;
-the EKF alone adds explicit Jacobians. Particle models use JAX callbacks,
-and `run_particle_filter` lets research code own the filter kernel. Typed
-posteriors keep filtering and smoothing composable without a class hierarchy.
 
 ## Installation
 
@@ -49,80 +131,49 @@ smcx requires Python 3.11 or later.
 pip install smcx
 ```
 
-Install the optional extras for Apple-silicon GPU execution or ArviZ
-reporting with:
+Optional extras add Apple-silicon GPU execution or ArviZ reporting:
 
 ```bash
 pip install "smcx[metal]"
 pip install "smcx[arviz]"
 ```
 
-The `metal` extra uses jax-mps and is available on macOS 14 or later on
-arm64. Metal is float32-only; releases are tested on a physical M-series
-GPU as well as on CPU.
-
 ## Documentation
 
-The [documentation](https://michaelellis003.github.io/smcx/) includes a
-[quickstart](https://michaelellis003.github.io/smcx/guides/quickstart/),
-guides for [custom models and custom particle filters][custom-models]
-and [ArviZ reporting](https://michaelellis003.github.io/smcx/guides/arviz/),
-and the complete
-[API reference](https://michaelellis003.github.io/smcx/api/smcx/).
-
-[custom-models]:
-  https://michaelellis003.github.io/smcx/guides/custom-models/
-
-## Quick example
-
-```python
-import jax.numpy as jnp
-import jax.random as jr
-
-import smcx
-
-a, q, r = 0.9, 0.5, 0.3
-
-
-def initial_sampler(key, num_particles):
-    return jr.normal(key, (num_particles, 1))
-
-
-def transition_sampler(key, state):
-    return a * state + jnp.sqrt(q) * jr.normal(key, state.shape)
-
-
-def log_observation(y, state):
-    error = y[0] - state[0]
-    return -0.5 * (jnp.log(2 * jnp.pi * r) + error**2 / r)
-
-
-observations = jnp.array([0.2, -0.1, 0.4, 0.7, 0.3])[:, None]
-posterior = smcx.bootstrap_filter(
-    jr.key(0),
-    initial_sampler,
-    transition_sampler,
-    log_observation,
-    observations,
-    num_particles=10_000,
-)
-
-posterior.marginal_loglik
-smcx.weighted_mean(posterior)
-smcx.diagnose(posterior)
-```
-
-Callbacks describe one particle; smcx vectorizes them over the cloud.
-Every stochastic operation takes an explicit PRNG key, and posterior
-containers are JAX PyTrees.
+Available at
+[michaelellis003.github.io/smcx](https://michaelellis003.github.io/smcx/).
 
 ## Citation
 
-If smcx contributes to academic work, cite the release used. The
-repository's **Cite this repository** menu uses the base metadata in
+If smcx contributes to academic work, please cite the release used.
+The repository's **Cite this repository** menu uses
 [`CITATION.cff`](https://github.com/michaelellis003/smcx/blob/main/CITATION.cff)
-to provide BibTeX and APA entries. Include the release tag or version and
-release date in the final citation.
+to provide BibTeX and APA entries; include the version and release
+date in the final citation.
+
+## See also
+
+**State-space models and SMC**
+
+- [dynamax](https://github.com/probml/dynamax): probabilistic state-space
+models with learning via EM and SGD.
+- [dynestyx](https://github.com/BasisResearch/dynestyx): NumPyro-based
+inference for dynamical systems.
+- [particles](https://github.com/nchopin/particles): the reference
+Python companion to Chopin and Papaspiliopoulos (2020).
+- [BlackJAX](https://github.com/blackjax-devs/blackjax): MCMC and SMC
+samplers for JAX.
+
+**The JAX ecosystem**
+
+- [Equinox](https://github.com/patrick-kidger/equinox): neural networks
+and PyTree modules.
+- [Diffrax](https://github.com/patrick-kidger/diffrax): numerical
+differential equation solvers.
+- [jaxtyping](https://github.com/patrick-kidger/jaxtyping): shape and
+dtype annotations for arrays.
+- [ArviZ](https://github.com/arviz-devs/arviz): exploratory analysis of
+Bayesian models.
 
 ## Sources and attribution
 
@@ -163,53 +214,6 @@ The implemented methods draw on these primary sources:
   [Matheson and Winkler (1976)](https://doi.org/10.1287/mnsc.22.10.1087)
   and [Gneiting and Raftery (2007)](https://doi.org/10.1198/016214506000001437).
 - Reporting: [ArviZ](https://doi.org/10.21105/joss.01143).
-
-### Numerical validation references
-
-The linear Kalman and RTS outputs are independently validated against
-[Dynamax 1.0.2](https://github.com/probml/dynamax/releases/tag/1.0.2)
-and
-[statsmodels 0.14.6](https://github.com/statsmodels/statsmodels/releases/tag/v0.14.6);
-the details are recorded with the
-[frozen linear fixture](https://github.com/michaelellis003/smcx/blob/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/tests/_kalman_reference.py).
-
-The extended and unscented Kalman outputs are independently validated against
-[Stone Soup 1.9.1](https://github.com/dstl/Stone-Soup/releases/tag/v1.9.1),
-cross-checked with
-[Dynamax 1.0.2](https://github.com/probml/dynamax/releases/tag/1.0.2),
-and checked against
-[SciPy 1.18.0](https://github.com/scipy/scipy/releases/tag/v1.18.0)
-innovation log densities. Exact commits, environments, licenses, and
-observed differences are recorded with the frozen
-[extended](https://github.com/michaelellis003/smcx/blob/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/tests/_extended_kalman_reference.py)
-and
-[unscented](https://github.com/michaelellis003/smcx/blob/ac9572da46dad4c3829ccde99d1bc7fc05ead0dd/tests/_unscented_kalman_reference.py)
-fixtures.
-
-The conjugate DLM filter is validated against an exact
-rational-arithmetic reference of the Normal-Inverse-Gamma recursion,
-West and Harrison's printed first-order polynomial table
-([independently reproduced](https://www.math.unm.edu/~ghuerta/tseries/dlmch2.pdf)),
-and frozen outputs of
-[PyBATS 0.0.5](https://github.com/lavinei/pybats) (Apache-2.0) at
-unit variance discount, where its degrees-of-freedom update ordering
-coincides with the book's.
-
-The DGLM filter is validated against an exact reduction to the
-library's own Kalman filter for a normal observation family, frozen
-50-digit mpmath references of the Poisson and Bernoulli recursions,
-frozen exact-solver traces of
-[PyBATS 0.0.5](https://github.com/lavinei/pybats) (Apache-2.0) with
-its spline interpolation and clamps bypassed, and a derived-band
-comparison against the library's own bootstrap particle filter.
-
-The auxiliary-guided runner recipe is distributionally cross-checked against
-particles 0.4's pinned
-[`AuxiliaryPF` composition](https://github.com/nchopin/particles/blob/c5fcb0b6d34b3c8efea6f6dc21d73e0e91287d9f/particles/state_space_models.py#L352-L428)
-and [SMC bookkeeping](https://github.com/nchopin/particles/blob/c5fcb0b6d34b3c8efea6f6dc21d73e0e91287d9f/particles/core.py#L299-L359).
-
-These projects are numerical comparison implementations, not code
-lineage; no implementation code was copied or translated.
 
 ## Contributing
 
