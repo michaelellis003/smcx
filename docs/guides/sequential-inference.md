@@ -396,7 +396,7 @@ the densities of the display as three ordinary functions: a sampler
 for the initial density, a sampler for the state density, and the
 log observation density. Its parameters are a PyTree that smcx
 threads through every call, so `jax.grad` differentiates the
-marginal likelihood estimate in one call:
+estimator in one call:
 
 ```python
 def sample_initial(key, params, input_0):
@@ -427,8 +427,26 @@ def log_marginal(params):
     return smcx.run_smc(jr.key(0), fk, num_particles=4_096).marginal_loglik
 
 
-score = jax.grad(log_marginal)(params)
+gradient = jax.grad(log_marginal)(params)
 ```
+
+Be precise about what this gradient is. It is the pathwise
+derivative of the realized program for a fixed key: the resampling
+step selects integer ancestors, and those selections are constants
+to `jax.grad`, so the derivative ignores how resampling
+probabilities change with the parameters. When no resampling
+triggers (`resampling_threshold=0.0`), the average of this gradient
+over keys is the likelihood score. When resampling is active — as it
+is here at the default threshold — it is not: on a linear-Gaussian
+test model where the exact score is available from `kalman_filter`,
+the resampling-on average sits many standard errors from the truth.
+The gradient remains useful as an optimization signal, and the
+transform itself is fully supported; treating it as an unbiased
+score estimate is what requires care. Corrected estimators
+(stop-gradient resampling, [Ścibior and Wood,
+2021](https://arxiv.org/abs/2106.10314); differentiable resampling,
+[Corenflos et al., 2021](https://proceedings.mlr.press/v139/corenflos21a.html))
+are out of smcx's current scope.
 
 On a longer series from this model, the filtered intensity tracks
 the counts and the band widens where the data are sparse. The band
