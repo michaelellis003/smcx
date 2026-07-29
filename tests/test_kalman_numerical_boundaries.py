@@ -364,6 +364,10 @@ def test_float32_gaussian_evidence_survives_representable_residual(
     )
 
 
+@pytest.mark.skipif(
+    jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
+    reason="the float32-vs-float64 comparison needs a float64 backend",
+)
 def test_float32_rts_smoothed_variances_stay_nonnegative():
     """The Joseph-form backward update cannot cancel negative (#286)."""
 
