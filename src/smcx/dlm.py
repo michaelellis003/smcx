@@ -121,9 +121,12 @@ def dlm_filter(
     Returns:
         `smcx.containers.DLMFilterPosterior` with the scale-free
         filtered moments, the $(n_t, S_t)$ traces, and the exact
-        Student-$t$ marginal likelihood. The scaled covariance is
+        Student-$t$ marginal likelihood.
         ``scale_estimates[:, None, None] *
-        filtered_scale_free_covariances``.
+        filtered_scale_free_covariances`` is the Student-$t$ scale
+        matrix $S_t \tilde C_t$ of the filtered state marginal; the
+        filtered covariance is $n_t / (n_t - 2)\, S_t \tilde C_t$
+        and exists only for $n_t > 2$.
 
     Raises:
         ValueError: Malformed arrays or domains, multivariate
