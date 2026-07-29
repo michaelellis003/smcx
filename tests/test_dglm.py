@@ -807,6 +807,11 @@ def test_family_record_is_exported():
     assert isinstance(poisson(), DGLMFamily)
 
 
+def _dtype_rtol(double: float, single: float) -> float:
+    """Pick a tolerance for the working dtype (#290 float32 leg)."""
+    return double if jnp.asarray(0.0).dtype == jnp.float64 else single
+
+
 class TestMomentMatchingDomain:
     """The moment matches hold across the full input domain (#282)."""
 
@@ -817,19 +822,21 @@ class TestMomentMatchingDomain:
     def test_inverse_trigamma_inverts_trigamma(self, variance):
         alpha = dglm_module._inverse_trigamma(jnp.asarray(variance))
         recovered = float(dglm_module._trigamma_safe(alpha))
-        np.testing.assert_allclose(recovered, variance, rtol=1e-8)
+        np.testing.assert_allclose(
+            recovered, variance, rtol=_dtype_rtol(1e-8, 1e-5)
+        )
 
     def test_safe_polygammas_match_asymptotic_closed_forms(self):
         argument = jnp.asarray(1e12)
         np.testing.assert_allclose(
             float(dglm_module._digamma_safe(argument)),
             math.log(1e12) - 5e-13,
-            rtol=1e-12,
+            rtol=_dtype_rtol(1e-12, 1e-7),
         )
         np.testing.assert_allclose(
             float(dglm_module._trigamma_safe(argument)),
             1e-12 + 5e-25,
-            rtol=1e-10,
+            rtol=_dtype_rtol(1e-10, 1e-6),
         )
 
     def test_safe_polygammas_are_continuous_at_the_switch(self):
@@ -838,12 +845,12 @@ class TestMomentMatchingDomain:
             np.testing.assert_allclose(
                 float(dglm_module._digamma_safe(argument)),
                 float(digamma(argument)),
-                rtol=1e-10,
+                rtol=_dtype_rtol(1e-10, 1e-6),
             )
             np.testing.assert_allclose(
                 float(dglm_module._trigamma_safe(argument)),
                 float(polygamma(1, argument)),
-                rtol=1e-10,
+                rtol=_dtype_rtol(1e-10, 1e-6),
             )
 
     def test_beta_match_holds_for_large_predictor(self):
@@ -856,8 +863,8 @@ class TestMomentMatchingDomain:
         variance = float(
             dglm_module._trigamma_safe(alpha) + dglm_module._trigamma_safe(beta)
         )
-        np.testing.assert_allclose(mean, 50.0, rtol=1e-8)
-        np.testing.assert_allclose(variance, 0.5, rtol=1e-6)
+        np.testing.assert_allclose(mean, 50.0, rtol=_dtype_rtol(1e-8, 1e-5))
+        np.testing.assert_allclose(variance, 0.5, rtol=_dtype_rtol(1e-6, 1e-4))
 
     def test_float32_bernoulli_large_predictor_is_finite(self):
         posterior = smcx.dglm_filter(
@@ -886,7 +893,9 @@ class TestMomentMatchingDomain:
         # variance is F' C0 F = 100 with no evolution contribution.
         prior_alpha = float(posterior.conjugate_alphas[0]) - 1.0
         recovered = float(dglm_module._trigamma_safe(jnp.asarray(prior_alpha)))
-        np.testing.assert_allclose(recovered, 100.0, rtol=1e-6)
+        np.testing.assert_allclose(
+            recovered, 100.0, rtol=_dtype_rtol(1e-6, 1e-4)
+        )
 
 
 class TestZeroPredictorVariance:
