@@ -43,6 +43,7 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 import jax.numpy as jnp
+import numpy as np
 from jax import core, lax
 from jax.nn import softplus
 from jax.scipy.special import digamma, polygamma
@@ -79,12 +80,19 @@ class DGLMFamily(NamedTuple):
         posterior_moments: ``(alpha_star, beta_star) -> (f_star,
             q_star)`` — posterior mean and variance of the linear
             predictor, fed back to the state by linear Bayes.
+        validate_emissions: Optional ``(emissions,) -> None`` support
+            check, run once, eagerly, on the concrete canonicalized
+            emissions at the `dglm_filter` boundary; it raises
+            ``ValueError`` on out-of-support values and is skipped for
+            traced emissions. ``None`` states no checkable support
+            (#283).
     """
 
     match_moments: Callable[..., tuple[Scalar, Scalar]]
     log_forecast: Callable[..., Scalar]
     update: Callable[..., tuple[Scalar, Scalar]]
     posterior_moments: Callable[..., tuple[Scalar, Scalar]]
+    validate_emissions: Callable[..., None] | None = None
 
 
 _ASYMPTOTIC_CUTOFF = 1e8
@@ -172,11 +180,23 @@ def poisson() -> DGLMFamily:
     def posterior_moments(alpha, beta):
         return _digamma_safe(alpha) - jnp.log(beta), _trigamma_safe(alpha)
 
+    def validate_emissions(emissions):
+        values = np.asarray(emissions)
+        if not (
+            np.all(np.isfinite(values))
+            and np.all(values >= 0)
+            and np.all(values == np.floor(values))
+        ):
+            raise ValueError(
+                "poisson emissions must be nonnegative integer counts"
+            )
+
     return DGLMFamily(
         match_moments=match_moments,
         log_forecast=log_forecast,
         update=update,
         posterior_moments=posterior_moments,
+        validate_emissions=validate_emissions,
     )
 
 
@@ -227,8 +247,12 @@ def binomial(*, trials: int) -> DGLMFamily:
     sec. 5]. Emissions are counts in $\{0, \dots, n\}$; ``trials``
     is a static known $n \ge 1$ shared across steps.
     """
-    if int(trials) < 1:
-        raise ValueError(f"trials must be a positive integer; got {trials}")
+    if (
+        isinstance(trials, bool)
+        or not isinstance(trials, (int, np.integer))
+        or trials < 1
+    ):
+        raise ValueError(f"trials must be a positive integer; got {trials!r}")
 
     def match_moments(forecast_mean, forecast_variance):
         return _match_beta_moments(forecast_mean, forecast_variance)
@@ -245,11 +269,24 @@ def binomial(*, trials: int) -> DGLMFamily:
             polygamma(1, alpha) + polygamma(1, beta),
         )
 
+    def validate_emissions(emissions):
+        values = np.asarray(emissions)
+        if not (
+            np.all(np.isfinite(values))
+            and np.all(values >= 0)
+            and np.all(values <= trials)
+            and np.all(values == np.floor(values))
+        ):
+            raise ValueError(
+                f"binomial emissions must be integers in [0, {trials}]"
+            )
+
     return DGLMFamily(
         match_moments=match_moments,
         log_forecast=log_forecast,
         update=update,
         posterior_moments=posterior_moments,
+        validate_emissions=validate_emissions,
     )
 
 
@@ -325,9 +362,11 @@ def dglm_filter(
     Raises:
         ValueError: Malformed arrays or domains, multivariate
             emissions, an evolution specification that is not
-            exactly one of the two forms, or a linear predictor
+            exactly one of the two forms, a linear predictor
             whose prior variance at the first step is zero — the
-            conjugate moment match divides by that variance.
+            conjugate moment match divides by that variance — or
+            concrete emissions outside the family's documented
+            support when the family supplies ``validate_emissions``.
     """
     if (transition_covariance is None) == (discount is None):
         raise ValueError(
@@ -364,6 +403,10 @@ def dglm_filter(
             f"(ntime,) or (ntime, 1); got {emissions.shape}"
         )
     emission_values = emissions.astype(dtype)
+    if family.validate_emissions is not None and not isinstance(
+        emission_values, core.Tracer
+    ):
+        family.validate_emissions(emission_values)
     num_timesteps = emissions.shape[0]
 
     for name, value, expected in (

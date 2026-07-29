@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from jax.scipy import stats as jstats
 from jax.scipy.special import digamma, polygamma
+from jaxtyping import TypeCheckError
 
 import smcx
 import smcx.dglm as dglm_module
@@ -924,3 +925,51 @@ class TestZeroPredictorVariance:
                 family=poisson(),
                 transition_covariance=0.01 * jnp.eye(2),
             )
+
+
+class TestObservationSupport:
+    """Built-in families reject out-of-support emissions eagerly (#283)."""
+
+    def _run(self, family, emissions):
+        return dglm_filter(
+            jnp.array([0.0]),
+            jnp.array([[0.5]]),
+            jnp.eye(1),
+            jnp.array([1.0]),
+            jnp.asarray(emissions),
+            family=family,
+            transition_covariance=jnp.array([[0.01]]),
+        )
+
+    def test_poisson_rejects_fractional_and_negative_counts(self):
+        with pytest.raises(ValueError, match="nonnegative integer"):
+            self._run(poisson(), [0.5, 1.0])
+        with pytest.raises(ValueError, match="nonnegative integer"):
+            self._run(poisson(), [-1.0, 1.0])
+
+    def test_bernoulli_rejects_fractional_outcome(self):
+        with pytest.raises(ValueError, match="integers in"):
+            self._run(bernoulli(), [0.5, 1.0])
+
+    def test_binomial_rejects_out_of_range_count(self):
+        with pytest.raises(ValueError, match="integers in"):
+            self._run(binomial(trials=2), [5.0, 1.0])
+
+    def test_integral_float_emissions_remain_accepted(self):
+        posterior = self._run(poisson(), [1.0, 0.0, 3.0])
+        assert np.isfinite(float(posterior.marginal_loglik))
+        posterior = self._run(binomial(trials=2), [2.0, 0.0])
+        assert np.isfinite(float(posterior.marginal_loglik))
+
+    def test_custom_family_without_validator_is_unchecked(self):
+        family = poisson()._replace(validate_emissions=None)
+        posterior = self._run(family, [0.5, 1.0])
+        assert np.isfinite(float(posterior.marginal_loglik))
+
+    @pytest.mark.parametrize("trials", [1.5, True, "2", 0, -3])
+    def test_binomial_rejects_non_integer_trials(self, trials):
+        # Under the test suite's jaxtyping hook the annotation rejects
+        # 1.5 and '2' as TypeCheckError before the runtime ValueError
+        # that guards default-config users; both name the parameter.
+        with pytest.raises((ValueError, TypeCheckError), match="trials"):
+            binomial(trials=trials)
