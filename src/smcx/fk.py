@@ -24,6 +24,7 @@ public model-record derivations arrive with the model layer.
 """
 
 import math
+import operator
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -44,6 +45,7 @@ from smcx._utils import (
     _raise_invalid_ancestors,
     _validate_log_density_batch,
     _validate_particle_cloud,
+    _validate_resampling_threshold,
     _validate_state_tree,
 )
 from smcx.containers import ParticleFilterPosterior, ParticleState
@@ -226,7 +228,7 @@ def run_smc(
     resampling_fn: ResamplingFn = systematic,
     resampling_threshold: float | ResamplingCriterion = 0.5,
     store_history: bool = True,
-    gate_stage_normalizers: bool = False,
+    gate_stage_normalizers: bool = True,
 ) -> ParticleFilterPosterior:
     """Run the generic conditional-resample/mutate/reweight loop.
 
@@ -242,10 +244,13 @@ def run_smc(
         store_history: When False, particle, weight, and ancestor
             histories keep only the final step while ESS and evidence
             traces stay full.
-        gate_stage_normalizers: When True, a nonfinite stage normalizer
-            at any time step turns the returned marginal into NaN (and
-            an eager raise), matching the auxiliary filter's historical
-            degeneracy policy. The 2.0 cut decides one uniform policy.
+        gate_stage_normalizers: When True (the default), a nonfinite
+            stage normalizer at any time step is degenerate for the
+            whole run — the uniform policy of the named filters: an
+            eager raise, and a NaN marginal under ``jax.jit``. False
+            restores the stage-local view in which only the retained
+            normalizers gate the result; a degenerate intermediate
+            stage then passes silently, so prefer the default.
 
     Returns:
         `smcx.containers.ParticleFilterPosterior` for the full sweep.
@@ -257,7 +262,27 @@ def run_smc(
         ValueError: A callback output or resampler output violates its
             structural contract.
     """
-    num_timesteps = tree.leaves(fk.contexts)[0].shape[0]
+    try:
+        num_particles = operator.index(num_particles)
+    except TypeError as error:
+        raise ValueError(
+            f"num_particles must be a positive integer; got {num_particles!r}"
+        ) from error
+    if num_particles < 1:
+        raise ValueError(
+            f"num_particles must be a positive integer; got {num_particles}"
+        )
+    _validate_resampling_threshold(resampling_threshold)
+    context_leaves = tree.leaves(fk.contexts)
+    if not context_leaves:
+        raise ValueError("fk.contexts must have at least one array leaf")
+    leading_lengths = {jnp.shape(leaf)[:1] for leaf in context_leaves}
+    if len(leading_lengths) != 1 or () in leading_lengths:
+        raise ValueError(
+            "every fk.contexts leaf must share one leading time length; "
+            f"got shapes {sorted(jnp.shape(leaf) for leaf in context_leaves)}"
+        )
+    num_timesteps = context_leaves[0].shape[0]
     key, init_key = jr.split(key)
     log_n = jnp.asarray(math.log(num_particles))
     context_0 = tree.map(lambda leaf: leaf[0], fk.contexts)
