@@ -585,13 +585,9 @@ For `LiuWestPosterior`, use `param_posterior_predictive_sample`. Its callbacks
 are `(key, state, params[, input_t])`; smcx resamples each aligned state and
 parameter pair with one index, retains that static parameter for the forecast,
 and passes it to both callbacks. Calling the state-only helper with a Liu-West
-result remains numerically unchanged for compatibility but emits
-`FutureWarning`; that ambiguous path becomes an error in smcx 2.0.
-
-This is an additive input API and a new parameter-aware API. Following
-[NEP 23](https://numpy.org/neps/nep-0023-backwards-compatibility.html), existing
-state-only calls and their fixed-key output are preserved during the 1.x
-series while the warning makes the formerly silent parameter omission visible.
+result raises `ValueError` since smcx 2.0: it would silently ignore
+`filtered_params`, so the ambiguous path is an error rather than a wrong
+forecast.
 
 ## Keep the two PyTree roles separate
 

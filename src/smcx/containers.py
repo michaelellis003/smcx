@@ -281,13 +281,16 @@ class TemperedPosterior(NamedTuple):
 class DLMFilterPosterior(NamedTuple):
     """Conjugate unknown-variance DLM filtering output.
 
-    Scale-free moments: the scaled filtered covariance is
-    ``scale_estimates[:, None, None] *
-    filtered_scale_free_covariances``. ``scale_shapes`` and
-    ``scale_estimates`` are the Inverse-Gamma posterior degrees of
-    freedom and point estimate of the unknown observational variance;
-    ``marginal_loglik`` is the exact sum of Student-t one-step
-    forecast log densities.
+    Scale-free moments: ``scale_estimates[:, None, None] *
+    filtered_scale_free_covariances`` is the scale matrix of the
+    filtered Student-t state marginal, not its covariance. The
+    filtered covariance is ``n / (n - 2)`` times that matrix, where
+    ``n = scale_shapes[t]``, and exists only for ``n > 2`` — with the
+    default unit prior shape it does not exist at the first step.
+    ``scale_shapes`` and ``scale_estimates`` are the Inverse-Gamma
+    posterior degrees of freedom and point estimate of the unknown
+    observational variance; ``marginal_loglik`` is the exact sum of
+    Student-t one-step forecast log densities.
     """
 
     filtered_means: Float[Array, "ntime state_dim"]
