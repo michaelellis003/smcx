@@ -44,6 +44,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 from jax import core, lax
+from jax.nn import softplus
 from jax.scipy.special import digamma, polygamma
 from jax.scipy.stats import betabinom, nbinom
 from jaxtyping import Array, Shaped
@@ -86,21 +87,61 @@ class DGLMFamily(NamedTuple):
     posterior_moments: Callable[..., tuple[Scalar, Scalar]]
 
 
+_ASYMPTOTIC_CUTOFF = 1e8
+
+
+def _digamma_safe(value: Scalar) -> Scalar:
+    r"""Digamma with the asymptotic series above the cutoff.
+
+    Past $10^8$ the dropped $1/(12x^2)$ term sits below f64 machine
+    precision of $\log x$, and the series avoids the special-function
+    kernel's large-argument failure modes (#282).
+    """
+    large = value > _ASYMPTOTIC_CUTOFF
+    ordinary = jnp.where(large, jnp.ones_like(value), value)
+    big = jnp.where(large, value, jnp.ones_like(value))
+    return jnp.where(large, jnp.log(big) - 0.5 / big, digamma(ordinary))
+
+
+def _trigamma_safe(value: Scalar) -> Scalar:
+    r"""Trigamma with the asymptotic series above the cutoff (#282)."""
+    large = value > _ASYMPTOTIC_CUTOFF
+    ordinary = jnp.where(large, jnp.ones_like(value), value)
+    big = jnp.where(large, value, jnp.ones_like(value))
+    return jnp.where(
+        large, 1.0 / big + 0.5 / (big * big), polygamma(1, ordinary)
+    )
+
+
+def _tetragamma_safe(value: Scalar) -> Scalar:
+    r"""Tetragamma with the asymptotic series above the cutoff (#282)."""
+    large = value > _ASYMPTOTIC_CUTOFF
+    ordinary = jnp.where(large, jnp.ones_like(value), value)
+    big = jnp.where(large, value, jnp.ones_like(value))
+    squared = big * big
+    return jnp.where(
+        large, -1.0 / squared - 1.0 / (squared * big), polygamma(2, ordinary)
+    )
+
+
 def _inverse_trigamma(value: Scalar) -> Scalar:
     r"""Solve $\psi'(\alpha) = q$ for $\alpha > 0$.
 
     Log-space Newton with a fixed iteration count so the solve is
-    jit-, vmap-, and grad-compatible. The initializer
-    $\alpha_0 = 1/q + 1/2$ comes from the expansion
-    $\psi'(\alpha) = 1/\alpha + 1/(2\alpha^2) + O(\alpha^{-3})$ and
-    the iteration converges quadratically; twelve steps reach f64
-    machine precision across the tested domain $q \in [10^{-4}, 20]$.
+    jit-, vmap-, and grad-compatible. The initializer solves the
+    two-term asymptote $1/\alpha + 1/\alpha^2 = q$ exactly,
+    $\alpha_0 = (1 + \sqrt{1 + 4q}) / (2q)$, which is correct in both
+    the $q \to 0$ ($\alpha \approx 1/q$) and $q \to \infty$
+    ($\alpha \approx 1/\sqrt{q}$) limits, so the quadratic iteration
+    reaches f64 machine precision across $q \in [10^{-6}, 10^{6}]$
+    (#282; the previous small-$q$ initializer diverged past
+    $q \approx 40$).
     """
-    log_alpha = jnp.log(1.0 / value + 0.5)
+    log_alpha = jnp.log((1.0 + jnp.sqrt(1.0 + 4.0 * value)) / (2.0 * value))
     for _ in range(_NEWTON_ITERATIONS):
         alpha = jnp.exp(log_alpha)
-        residual = polygamma(1, alpha) - value
-        slope = polygamma(2, alpha) * alpha
+        residual = _trigamma_safe(alpha) - value
+        slope = _tetragamma_safe(alpha) * alpha
         log_alpha = log_alpha - residual / slope
     return jnp.exp(log_alpha)
 
@@ -119,7 +160,7 @@ def poisson() -> DGLMFamily:
 
     def match_moments(forecast_mean, forecast_variance):
         alpha = _inverse_trigamma(forecast_variance)
-        beta = jnp.exp(digamma(alpha) - forecast_mean)
+        beta = jnp.exp(_digamma_safe(alpha) - forecast_mean)
         return alpha, beta
 
     def log_forecast(emission, alpha, beta):
@@ -129,7 +170,7 @@ def poisson() -> DGLMFamily:
         return alpha + emission, beta + 1.0
 
     def posterior_moments(alpha, beta):
-        return digamma(alpha) - jnp.log(beta), polygamma(1, alpha)
+        return _digamma_safe(alpha) - jnp.log(beta), _trigamma_safe(alpha)
 
     return DGLMFamily(
         match_moments=match_moments,
@@ -150,18 +191,21 @@ def _match_beta_moments(
     Two-dimensional log-space Newton with a fixed iteration count,
     initialized at WHM's mode/curvature closed forms
     $\alpha_0 = (1 + e^{f})/q$, $\beta_0 = (1 + e^{-f})/q$ — the
-    $q \to 0$ asymptote of the exact system.
+    $q \to 0$ asymptote of the exact system — evaluated as
+    $\log \alpha_0 = \mathrm{softplus}(f) - \log q$ so a large
+    predictor never overflows the initializer, with the asymptotic
+    polygamma forms carrying the iteration at large arguments (#282).
     """
-    log_alpha = jnp.log((1.0 + jnp.exp(mean)) / variance)
-    log_beta = jnp.log((1.0 + jnp.exp(-mean)) / variance)
+    log_alpha = softplus(mean) - jnp.log(variance)
+    log_beta = softplus(-mean) - jnp.log(variance)
     for _ in range(_NEWTON_ITERATIONS_2D):
         alpha, beta = jnp.exp(log_alpha), jnp.exp(log_beta)
-        residual_mean = digamma(alpha) - digamma(beta) - mean
-        residual_var = polygamma(1, alpha) + polygamma(1, beta) - variance
-        j11 = polygamma(1, alpha) * alpha
-        j12 = -polygamma(1, beta) * beta
-        j21 = polygamma(2, alpha) * alpha
-        j22 = polygamma(2, beta) * beta
+        residual_mean = _digamma_safe(alpha) - _digamma_safe(beta) - mean
+        residual_var = _trigamma_safe(alpha) + _trigamma_safe(beta) - variance
+        j11 = _trigamma_safe(alpha) * alpha
+        j12 = -_trigamma_safe(beta) * beta
+        j21 = _tetragamma_safe(alpha) * alpha
+        j22 = _tetragamma_safe(beta) * beta
         determinant = j11 * j22 - j12 * j21
         log_alpha = (
             log_alpha - (j22 * residual_mean - j12 * residual_var) / determinant
@@ -280,8 +324,10 @@ def dglm_filter(
 
     Raises:
         ValueError: Malformed arrays or domains, multivariate
-            emissions, or an evolution specification that is not
-            exactly one of the two forms.
+            emissions, an evolution specification that is not
+            exactly one of the two forms, or a linear predictor
+            whose prior variance at the first step is zero — the
+            conjugate moment match divides by that variance.
     """
     if (transition_covariance is None) == (discount is None):
         raise ValueError(
@@ -420,7 +466,21 @@ def dglm_filter(
         jnp.zeros((), dtype=dtype),
     )
     # Library convention: emissions[0] conditions the prior directly;
-    # evolution (or discounting) applies between observations.
+    # evolution (or discounting) applies between observations. The
+    # conjugate moment match divides by the predictor's prior
+    # variance, so a direction with zero initial variance is rejected
+    # here rather than surfacing as NaN throughout the run (#282).
+    first_variance = observation_vector @ init.covariance @ observation_vector
+    if not isinstance(first_variance, core.Tracer) and (
+        float(first_variance) <= 0.0
+    ):
+        raise ValueError(
+            "the linear predictor has zero prior variance at the first "
+            "step (observation_vector @ initial_covariance @ "
+            "observation_vector == 0); the conjugate moment match "
+            "divides by this variance. Give the predictor direction "
+            "positive initial covariance"
+        )
     carry_0, first = _update(
         init, init.mean, init.covariance, emission_values[0]
     )

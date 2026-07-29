@@ -3,6 +3,8 @@
 
 """Tests for the WHM dynamic generalized linear model filter."""
 
+import math
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -11,6 +13,7 @@ from jax.scipy import stats as jstats
 from jax.scipy.special import digamma, polygamma
 
 import smcx
+import smcx.dglm as dglm_module
 from smcx import (
     DGLMFamily,
     bernoulli,
@@ -802,3 +805,113 @@ class TestParticleCorroboration:
 def test_family_record_is_exported():
     assert smcx.DGLMFamily is DGLMFamily
     assert isinstance(poisson(), DGLMFamily)
+
+
+class TestMomentMatchingDomain:
+    """The moment matches hold across the full input domain (#282)."""
+
+    @pytest.mark.parametrize(
+        "variance",
+        [1e-6, 1e-4, 1.0, 20.0, 30.0, 60.0, 100.0, 1e3, 1e6],
+    )
+    def test_inverse_trigamma_inverts_trigamma(self, variance):
+        alpha = dglm_module._inverse_trigamma(jnp.asarray(variance))
+        recovered = float(dglm_module._trigamma_safe(alpha))
+        np.testing.assert_allclose(recovered, variance, rtol=1e-8)
+
+    def test_safe_polygammas_match_asymptotic_closed_forms(self):
+        argument = jnp.asarray(1e12)
+        np.testing.assert_allclose(
+            float(dglm_module._digamma_safe(argument)),
+            math.log(1e12) - 5e-13,
+            rtol=1e-12,
+        )
+        np.testing.assert_allclose(
+            float(dglm_module._trigamma_safe(argument)),
+            1e-12 + 5e-25,
+            rtol=1e-10,
+        )
+
+    def test_safe_polygammas_are_continuous_at_the_switch(self):
+        for offset in (-1.0, 1.0):
+            argument = jnp.asarray(dglm_module._ASYMPTOTIC_CUTOFF + offset)
+            np.testing.assert_allclose(
+                float(dglm_module._digamma_safe(argument)),
+                float(digamma(argument)),
+                rtol=1e-10,
+            )
+            np.testing.assert_allclose(
+                float(dglm_module._trigamma_safe(argument)),
+                float(polygamma(1, argument)),
+                rtol=1e-10,
+            )
+
+    def test_beta_match_holds_for_large_predictor(self):
+        alpha, beta = dglm_module._match_beta_moments(
+            jnp.asarray(50.0), jnp.asarray(0.5)
+        )
+        mean = float(
+            dglm_module._digamma_safe(alpha) - dglm_module._digamma_safe(beta)
+        )
+        variance = float(
+            dglm_module._trigamma_safe(alpha) + dglm_module._trigamma_safe(beta)
+        )
+        np.testing.assert_allclose(mean, 50.0, rtol=1e-8)
+        np.testing.assert_allclose(variance, 0.5, rtol=1e-6)
+
+    def test_float32_bernoulli_large_predictor_is_finite(self):
+        posterior = smcx.dglm_filter(
+            jnp.array([50.0], jnp.float32),
+            jnp.array([[0.5]], jnp.float32),
+            jnp.eye(1, dtype=jnp.float32),
+            jnp.array([1.0], jnp.float32),
+            jnp.array([1.0, 0.0, 1.0], jnp.float32),
+            family=bernoulli(),
+            transition_covariance=jnp.array([[0.01]], jnp.float32),
+        )
+        for field in posterior:
+            assert np.all(np.isfinite(np.asarray(field)))
+
+    def test_large_variance_poisson_match_is_used_by_the_filter(self):
+        posterior = smcx.dglm_filter(
+            jnp.array([0.0]),
+            jnp.array([[100.0]]),
+            jnp.eye(1),
+            jnp.array([1.0]),
+            jnp.array([1.0]),
+            family=poisson(),
+            transition_covariance=jnp.array([[0.01]]),
+        )
+        # emissions[0] conditions the prior directly, so the matched
+        # variance is F' C0 F = 100 with no evolution contribution.
+        prior_alpha = float(posterior.conjugate_alphas[0]) - 1.0
+        recovered = float(dglm_module._trigamma_safe(jnp.asarray(prior_alpha)))
+        np.testing.assert_allclose(recovered, 100.0, rtol=1e-6)
+
+
+class TestZeroPredictorVariance:
+    """A zero prior predictor variance is rejected eagerly (#282)."""
+
+    def test_zero_initial_covariance_is_rejected(self):
+        with pytest.raises(ValueError, match="prior variance"):
+            smcx.dglm_filter(
+                jnp.array([0.5]),
+                jnp.array([[0.0]]),
+                jnp.eye(1),
+                jnp.array([1.0]),
+                jnp.array([1.0, 2.0, 0.0]),
+                family=poisson(),
+                transition_covariance=jnp.array([[0.01]]),
+            )
+
+    def test_rank_deficient_direction_is_rejected(self):
+        with pytest.raises(ValueError, match="prior variance"):
+            smcx.dglm_filter(
+                jnp.array([0.0, 0.5]),
+                jnp.diag(jnp.array([1.0, 0.0])),
+                jnp.eye(2),
+                jnp.array([0.0, 1.0]),
+                jnp.array([1.0, 2.0, 0.0]),
+                family=poisson(),
+                transition_covariance=0.01 * jnp.eye(2),
+            )
