@@ -416,3 +416,34 @@ def test_matches_pinned_pybats_reference():
     np.testing.assert_allclose(
         np.asarray(posterior.scale_estimates), frozen[:, 3], rtol=1e-10
     )
+
+
+def test_float32_evidence_survives_large_observation():
+    """One huge observation keeps exact finite evidence and scale (#281)."""
+
+    def run(dtype):
+        eye = jnp.eye(1, dtype=dtype)
+        return smcx.dlm_filter(
+            jnp.zeros(1, dtype=dtype),
+            eye,
+            eye,
+            jnp.ones(1, dtype=dtype),
+            jnp.asarray([[2e19]], dtype=dtype),
+            scale_free_transition_covariance=jnp.zeros((1, 1), dtype=dtype),
+            prior_shape=1.0,
+            prior_scale=1.0,
+        )
+
+    reference = run(jnp.float64)
+    posterior = run(jnp.float32)
+    np.testing.assert_allclose(
+        float(posterior.marginal_loglik),
+        float(reference.marginal_loglik),
+        rtol=1e-5,
+    )
+    np.testing.assert_allclose(
+        float(posterior.scale_estimates[-1]),
+        float(reference.scale_estimates[-1]),
+        rtol=1e-5,
+    )
+    assert np.all(np.isfinite(np.asarray(posterior.filtered_means)))
