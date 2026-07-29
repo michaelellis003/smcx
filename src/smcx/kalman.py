@@ -1701,9 +1701,22 @@ def _rts_step(
     smoothed_mean = filtered_mean + gain @ (
         next_state.mean - next_predicted_mean
     )
+    # Joseph-form update: three positive-semidefinite terms replace the
+    # classic subtractive form, whose cancellation returns negative
+    # variances in float32 when the smoothed and predicted covariances
+    # nearly coincide (#286). The process noise is recovered from the
+    # stored forward pass, reproducing its product order, so it is
+    # exact whenever the forward prediction is reproduced bitwise.
+    identity = jnp.eye(filtered_mean.shape[0], dtype=filtered_mean.dtype)
+    residual_operator = identity - gain @ transition_matrix
+    process_noise = (
+        next_predicted_covariance
+        - (transition_matrix @ filtered_covariance) @ transition_matrix.T
+    )
     smoothed_covariance = _symmetrize(
-        filtered_covariance
-        + gain @ (next_state.covariance - next_predicted_covariance) @ gain.T
+        residual_operator @ filtered_covariance @ residual_operator.T
+        + gain @ next_state.covariance @ gain.T
+        + gain @ process_noise @ gain.T
     )
     state = _SmootherState(smoothed_mean, smoothed_covariance)
     return state, state

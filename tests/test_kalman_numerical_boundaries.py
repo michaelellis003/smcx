@@ -239,7 +239,10 @@ def test_rts_maximum_factor_path_is_finite():
     smoothed = run(covariances)
 
     assert jnp.all(jnp.isfinite(smoothed.smoothed_means))
-    assert jnp.all(jnp.isfinite(smoothed.smoothed_covariances))
+    # At the exact dtype-max corner the true smoothed covariance is the
+    # maximum itself, and the Joseph-form product (#286) may round the
+    # last ulp upward to inf; NaN is the only forbidden outcome.
+    assert not jnp.any(jnp.isnan(smoothed.smoothed_covariances))
 
 
 def test_ordinary_unscented_moments_retain_legacy_bits():
@@ -358,4 +361,43 @@ def test_float32_gaussian_evidence_survives_representable_residual(
         float(posterior.marginal_loglik),
         float(reference.marginal_loglik),
         rtol=1e-5,
+    )
+
+
+def test_float32_rts_smoothed_variances_stay_nonnegative():
+    """The Joseph-form backward update cannot cancel negative (#286)."""
+
+    def run(dtype):
+        emissions = jnp.full((4, 1), 0.1, dtype)
+        observation_covariances = jnp.asarray(
+            [1.0, 1.0, 1.0, 1e-15], dtype
+        ).reshape(4, 1, 1)
+        posterior = smcx.kalman_filter(
+            jnp.zeros(1, dtype),
+            jnp.eye(1, dtype=dtype),
+            jnp.eye(1, dtype=dtype),
+            jnp.zeros((1, 1), dtype),
+            jnp.eye(1, dtype=dtype),
+            observation_covariances,
+            emissions,
+        )
+        return smcx.rts_smoother(posterior, jnp.eye(1, dtype=dtype))
+
+    single = run(jnp.float32)
+    double = run(jnp.float64)
+    variances = np.asarray(single.smoothed_covariances).ravel()
+    reference = np.asarray(double.smoothed_covariances).ravel()
+
+    # The subtractive form returned about -1e-7 here: negative, and
+    # seven to eight orders above the true magnitude. The Joseph form
+    # carries only the squared gain-rounding residue, so the float32
+    # result must be nonnegative and within two orders of float64.
+    assert np.all(variances >= 0.0)
+    assert np.all(variances <= 100.0 * reference)
+    # With zero process noise the state is constant, so the float64
+    # smoothed variances all equal the final filtered variance.
+    np.testing.assert_allclose(
+        reference,
+        float(double.filtered_covariances[-1, 0, 0]),
+        rtol=1e-9,
     )
