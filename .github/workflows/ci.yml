@@ -114,6 +114,25 @@ jobs:
       - name: Run tests
         run: uv run pytest -v --durations=0
 
+  pytest-float32:
+    # The float32 configuration is what a default-config user runs;
+    # frozen x64 contracts skip themselves via their markers (#290).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Setup uv
+        uses: ./.github/actions/setup-uv
+        with:
+          python-version: "3.13"
+
+      - name: Run tests in the float32 default configuration
+        run: uv run pytest -v --durations=0
+        env:
+          SMCX_TEST_X64: "0"
+
   coverage:
     permissions:
       contents: read
@@ -375,6 +394,7 @@ jobs:
       - ty-check
       - license-headers
       - pytest
+      - pytest-float32
       - coverage
       - lock-check
       - release-control

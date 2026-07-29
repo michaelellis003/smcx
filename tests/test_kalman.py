@@ -385,10 +385,14 @@ def test_scan_steps_uncompiled_match_public_two_step_run():
         ),
     )
 
-    np.testing.assert_allclose(output.filtered_mean, full.filtered_means[1])
+    step_rtol = 32 * float(jnp.finfo(full.filtered_means.dtype).eps)
+    np.testing.assert_allclose(
+        output.filtered_mean, full.filtered_means[1], rtol=step_rtol
+    )
     np.testing.assert_allclose(
         output.filtered_covariance,
         full.filtered_covariances[1],
+        rtol=step_rtol,
     )
     np.testing.assert_allclose(
         next_state.marginal_loglik + next_state.log_evidence_compensation,

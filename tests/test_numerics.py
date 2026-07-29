@@ -15,7 +15,13 @@ def test_neumaier_add_matches_plain_sum_on_ordinary_values():
     correction = jnp.asarray(0.0)
     for value in (1.0, 1e-8, -1.0):
         total, correction = _neumaier_add(total, correction, value)
-    np.testing.assert_allclose(float(total + correction), 1e-8, rtol=1e-12)
+    # The recovered value is exact up to one rounding of 1e-8 in the
+    # working dtype (float32 under SMCX_TEST_X64=0).
+    np.testing.assert_allclose(
+        float(total + correction),
+        1e-8,
+        rtol=8 * float(jnp.finfo(total.dtype).eps),
+    )
 
 
 def test_neumaier_add_propagates_minus_inf_without_nan():

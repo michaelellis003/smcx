@@ -112,6 +112,7 @@ def _run_conftest(
             "JAX_ENABLE_X64",
             "JAX_PLATFORMS",
             "SMCX_TEST_PLATFORM",
+            "SMCX_TEST_X64",
         }
     }
     env.update(overrides)
@@ -150,12 +151,27 @@ def _run_conftest(
             {"JAX_ENABLE_X64": "false"},
             "JAX_ENABLE_X64 conflicts with selected test platform",
         ),
+        (
+            {"SMCX_TEST_X64": "maybe"},
+            "Invalid SMCX_TEST_X64",
+        ),
+        (
+            {"SMCX_TEST_X64": "0", "JAX_ENABLE_X64": "true"},
+            "JAX_ENABLE_X64 conflicts with selected test platform",
+        ),
+        (
+            {"SMCX_TEST_PLATFORM": "mps", "SMCX_TEST_X64": "true"},
+            "SMCX_TEST_X64 cannot enable x64 on mps",
+        ),
     ],
     ids=[
         "invalid-selector",
         "platform-conflict",
         "mps-precision-conflict",
         "default-precision-conflict",
+        "invalid-x64-override",
+        "override-precision-conflict",
+        "mps-x64-override",
     ],
 )
 def test_test_platform_rejects_invalid_or_conflicting_environment(
@@ -182,11 +198,21 @@ def test_test_platform_defaults_to_cpu_x64_and_reports_runtime():
     assert "JAX x64: True" in result.stdout
 
 
+def test_x64_override_selects_the_float32_configuration():
+    """SMCX_TEST_X64=0 runs the CPU suite in the public default dtype."""
+    result = _run_conftest({"SMCX_TEST_X64": "0"})
+
+    assert result.returncode == 0, result.stderr
+    assert "backend=cpu" in result.stdout
+    assert "x64=False" in result.stdout
+    assert "JAX x64: False" in result.stdout
+
+
 def test_filters_are_silent_under_default_config():
     env = {
         k: v
         for k, v in os.environ.items()
-        if k not in ("JAX_ENABLE_X64", "SMCX_TEST_PLATFORM")
+        if k not in ("JAX_ENABLE_X64", "SMCX_TEST_PLATFORM", "SMCX_TEST_X64")
     }
     env["JAX_PLATFORMS"] = "cpu"
     result = subprocess.run(

@@ -45,6 +45,13 @@ if (
     )
 
 _expected_x64 = _PLATFORM_X64[_selected_platform]
+# SMCX_TEST_X64=0 runs the CPU suite in the float32 configuration the
+# public API defaults to outside pytest (#290). mps is float32-only.
+_x64_override = os.environ.get("SMCX_TEST_X64")
+if _x64_override is not None:
+    _expected_x64 = _parse_jax_boolean("SMCX_TEST_X64", _x64_override)
+    if _selected_platform == "mps" and _expected_x64:
+        raise RuntimeError("SMCX_TEST_X64 cannot enable x64 on mps")
 _inherited_x64 = os.environ.get("JAX_ENABLE_X64")
 if (
     _inherited_x64 is not None

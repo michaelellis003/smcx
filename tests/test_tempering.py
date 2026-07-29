@@ -773,7 +773,7 @@ class TestMechanics:
             )
 
     @pytest.mark.skipif(
-        jax.default_backend() != "cpu",
+        jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
         reason="frozen CPU/f64 arithmetic contract",
     )
     def test_rwm_sweep_preserves_frozen_fixed_key_output(self):
