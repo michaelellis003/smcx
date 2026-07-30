@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -2922,6 +2922,17 @@ definite because the backward recursion factors them. Value checks
 run eagerly and are skipped for traced arrays. Nonzero subnormal
 covariance entries are rejected; positive-time predictions must yield
 a finite, positive-diagonal factor on the active backend.</p>
+<p>The backward update recovers each step's process noise from the
+stored moments as <code>predicted - symmetrize(A @ filtered @ A.T)</code>,
+so a caller-constructed posterior gets the Joseph-form
+positive-semidefiniteness behavior only when its stored
+predictions are consistent with its filtered moments under that
+expression. Covariance-form smoothing also amplifies float32
+roundoff by roughly the squared condition number of the
+transition per backward step; ill-conditioned transitions with
+near-zero process noise can lose positive semidefiniteness for
+that reason alone, which a square-root smoother would be needed
+to prevent.</p>
 </details>
 
     </div>

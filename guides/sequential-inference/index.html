@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -1576,10 +1576,9 @@
 
 
 <h1 id="a-short-introduction-to-sequential-inference-for-state-space-models">A short introduction to sequential inference for state-space models</h1>
-<p>I want to start with a quick sketch of how these methods developed.
-Which algorithm to use depends largely on the assumptions you are
-willing to make about the form of your state-space model. It also
-depends on which pieces of the model you are willing to assume known.
+<p>Which algorithm to use depends on the assumptions you are willing
+to make about the form of your state-space model. It also depends on
+which pieces of the model you are willing to assume known.
 Let us start with a linear-Gaussian state-space model:</p>
 <div class="arithmatex">\[
 \begin{aligned}
@@ -1746,7 +1745,8 @@ particles to propagate
 (<a href="https://doi.org/10.1080/01621459.1999.10474153">Pitt and Shephard, 1999</a>).
 Observation-informed proposals sharpen the approximation further
 (<a href="https://doi.org/10.1023/A:1008935410038">Doucet, Godsill, and Andrieu, 2000</a>).</p>
-<p>One relaxation remains. It is the one promised at the start. So far
+<p>Finally, let the transition or observation densities depend on an
+unknown static parameter. So far
 every relaxation changed the form of the model. The pieces
 themselves stayed known: first the matrices and covariances, then
 the nonlinear functions, then the densities. Now drop that
@@ -1776,16 +1776,17 @@ statistics carries <span class="arithmatex">\(p(\theta_t, \phi \mid y_{1:t})\)</
 augmented state <span class="arithmatex">\((\theta_t, \phi)\)</span> does not rescue the particle
 filter either. The recursion itself still holds, but a static <span class="arithmatex">\(\phi\)</span>
 is never refreshed by the state density. The particle cloud's <span class="arithmatex">\(\phi\)</span>-support
-can only ever shrink. Sequential Monte Carlo, a name the literature
-often uses interchangeably with particle methods, answers with the
-same weighted-particle machinery aimed at any sequence of
-distributions
+can only ever shrink. Particle filters are sequential Monte Carlo
+methods specialized to sequential state inference. Broader SMC
+methods target other sequences of distributions through mutation,
+weighting, and resampling. Tempered SMC is one example for static
+parameters
 (<a href="https://doi.org/10.1007/978-3-030-47845-2">Chopin and Papaspiliopoulos, 2020</a>).
 We can rejuvenate <span class="arithmatex">\(\phi\)</span> online beside the states
 (<a href="https://doi.org/10.1007/978-1-4757-3437-9_10">Liu and West, 2001</a>).
 We can run a filter for every parameter particle
 (SMC²: <a href="https://doi.org/10.1111/j.1467-9868.2012.01046.x">Chopin, Jacob, and Papaspiliopoulos, 2013</a>).
-Or we can leave time behind entirely and anneal from prior to
+Or we can temper a fixed-data posterior, moving from prior to
 posterior through a ladder of temperatures
 (<a href="https://doi.org/10.1111/j.1467-9868.2006.00553.x">Del Moral, Doucet, and Jasra, 2006</a>).</p>
 <p>Each of these methods is implemented in smcx. The
@@ -1924,7 +1925,7 @@ the densities of the display as three ordinary functions: a sampler
 for the initial density, a sampler for the state density, and the
 log observation density. Its parameters are a PyTree that smcx
 threads through every call, so <code>jax.grad</code> differentiates the
-marginal likelihood estimate in one call:</p>
+estimator in one call:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">sample_initial</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">input_0</span><span class="p">):</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="k">return</span> <span class="n">jr</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="p">(</span><span class="mi">1</span><span class="p">,))</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
@@ -1953,8 +1954,39 @@ marginal likelihood estimate in one call:</p>
 </span><span id="__span-2-26"><a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>    <span class="k">return</span> <span class="n">smcx</span><span class="o">.</span><span class="n">run_smc</span><span class="p">(</span><span class="n">jr</span><span class="o">.</span><span class="n">key</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">fk</span><span class="p">,</span> <span class="n">num_particles</span><span class="o">=</span><span class="mi">4_096</span><span class="p">)</span><span class="o">.</span><span class="n">marginal_loglik</span>
 </span><span id="__span-2-27"><a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>
 </span><span id="__span-2-28"><a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>
-</span><span id="__span-2-29"><a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="n">score</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">log_marginal</span><span class="p">)(</span><span class="n">params</span><span class="p">)</span>
+</span><span id="__span-2-29"><a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="n">gradient</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">log_marginal</span><span class="p">)(</span><span class="n">params</span><span class="p">)</span>
 </span></code></pre></div>
+<p>Be precise about what this gradient is. It is the fixed-key
+pathwise derivative of the realized program — the exact derivative
+of this run's log marginal likelihood estimate, not of the true log
+marginal likelihood. Three gaps separate the two. First, the
+resampling step selects integer ancestors, and those selections are
+constants to <code>jax.grad</code>, so with resampling active — as it is here
+at the default threshold — the derivative ignores how resampling
+probabilities change with the parameters; on a linear-Gaussian test
+model where the exact score is available from <code>kalman_filter</code>, the
+resampling-on average over keys sits many standard errors from the
+truth. Second, even with resampling disabled, the average over keys
+satisfies <span class="arithmatex">\(E[\nabla \log \hat Z_N] = \nabla E[\log \hat Z_N]\)</span>
+under the usual interchange conditions, and
+<span class="arithmatex">\(\nabla E[\log \hat Z_N]\)</span> in general need not equal
+<span class="arithmatex">\(\nabla \log E[\hat Z_N] = \nabla \log Z\)</span>, the score — the log
+of an unbiased estimate is biased, and the same gap defines
+filtering variational objectives
+(<a href="https://arxiv.org/abs/1705.09279">Maddison et al., 2017</a>). Under
+appropriate regularity the gap tends to zero as particles grow, so
+for differentiable models without resampling the estimator is a
+consistent, finite-<span class="arithmatex">\(N\)</span>-biased score approximation
+(<a href="https://arxiv.org/abs/2106.10314">Ścibior and Wood, 2021</a>).
+Third, the pathwise derivative sees only reparameterized
+randomness: a parameter that acts through a discrete draw (a
+regime indicator, a jump count) contributes nothing, and the
+derivative can be exactly zero at any particle count. The gradient
+remains useful as an optimization signal, and the transform itself
+is fully supported; the corrected estimators
+(stop-gradient resampling, Ścibior and Wood, 2021; differentiable
+resampling, <a href="https://proceedings.mlr.press/v139/corenflos21a.html">Corenflos et al., 2021</a>)
+are out of smcx's current scope.</p>
 <p>On a longer series from this model, the filtered intensity tracks
 the counts and the band widens where the data are sparse. The band
 is for the latent intensity <span class="arithmatex">\(e^{\theta_t}\)</span>, not for the counts.</p>

@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -1706,7 +1706,7 @@ simulation value.</p>
 <code>param_initial_state_sampler</code>. Exactly one initial-state callback is
 required; keeping the alternatives explicit preserves the legacy
 callback signature and fixed-key RNG schedule.</p>
-<p>The one knob beyond the model is <code>shrinkage</code>, the Liu-West discount
+<p>The main knob beyond the model is <code>shrinkage</code>, the Liu-West discount
 <span class="arithmatex">\(a \in (0, 1)\)</span>. Resampling the parameter alongside the state would
 collapse the parameter cloud to a few duplicated values within a
 handful of steps; Liu-West counters this by shrinking each resampled

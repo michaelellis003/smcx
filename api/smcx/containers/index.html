@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -2037,13 +2037,16 @@ one-step forecast log densities.</p>
 
 
         <p>Conjugate unknown-variance DLM filtering output.</p>
-<p>Scale-free moments: the scaled filtered covariance is
-<code>scale_estimates[:, None, None] *
-filtered_scale_free_covariances</code>. <code>scale_shapes</code> and
-<code>scale_estimates</code> are the Inverse-Gamma posterior degrees of
-freedom and point estimate of the unknown observational variance;
-<code>marginal_loglik</code> is the exact sum of Student-t one-step
-forecast log densities.</p>
+<p>Scale-free moments: <code>scale_estimates[:, None, None] *
+filtered_scale_free_covariances</code> is the scale matrix of the
+filtered Student-t state marginal, not its covariance. The
+filtered covariance is <code>n / (n - 2)</code> times that matrix, where
+<code>n = scale_shapes[t]</code>, and exists only for <code>n &gt; 2</code> — with the
+default unit prior shape it does not exist at the first step.
+<code>scale_shapes</code> and <code>scale_estimates</code> are the Inverse-Gamma
+posterior degrees of freedom and point estimate of the unknown
+observational variance; <code>marginal_loglik</code> is the exact sum of
+Student-t one-step forecast log densities.</p>
 
 
 

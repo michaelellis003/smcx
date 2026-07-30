@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -3792,34 +3792,10 @@ input-aware callback protocols.</p>
               <div class="doc-md-description">
                 <p><code>num_samples</code> is not a positive integer, the posterior
 state is malformed, future inputs are misaligned, the transition
-changes its PyTree contract, or the emission is not a scalar or
-nonempty vector.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-<p><span class="doc-section-title">Warns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code>FutureWarning</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Passing a <code>LiuWestPosterior</code> ignores
-<code>filtered_params</code>. Replace this call with
-<code>param_posterior_predictive_sample</code> before smcx 2.0, when
-parameter-ignoring calls become errors.</p>
+changes its PyTree contract, the emission is not a scalar or
+nonempty vector, or the posterior is a <code>LiuWestPosterior</code> —
+sampling that ignores <code>filtered_params</code> was removed in 2.0;
+use <code>param_posterior_predictive_sample</code>.</p>
               </div>
             </td>
           </tr>

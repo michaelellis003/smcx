@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -1711,15 +1711,7 @@ to the moments themselves.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.dglm.DGLMFamily.match_moments">match_moments</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
-
-  
-      module-attribute
-   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a>, <a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
-
-  
-      module-attribute
-   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a>]]</code>
+                  <code><a class="autorefs autorefs-internal" title="FamilyMomentMatch (smcx.types.FamilyMomentMatch)" href="../types/#smcx.types.FamilyMomentMatch">FamilyMomentMatch</a></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1732,11 +1724,7 @@ linear predictor.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.dglm.DGLMFamily.log_forecast">log_forecast</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
-
-  
-      module-attribute
-   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a>]</code>
+                  <code><a class="autorefs autorefs-internal" title="FamilyLogForecast (smcx.types.FamilyLogForecast)" href="../types/#smcx.types.FamilyLogForecast">FamilyLogForecast</a></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1748,15 +1736,7 @@ one-step forecast log density under the matched prior.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.dglm.DGLMFamily.update">update</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
-
-  
-      module-attribute
-   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a>, <a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
-
-  
-      module-attribute
-   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a>]]</code>
+                  <code><a class="autorefs autorefs-internal" title="FamilyConjugateUpdate (smcx.types.FamilyConjugateUpdate)" href="../types/#smcx.types.FamilyConjugateUpdate">FamilyConjugateUpdate</a></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1768,15 +1748,7 @@ exact conjugate posterior parameters.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.dglm.DGLMFamily.posterior_moments">posterior_moments</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
-
-  
-      module-attribute
-   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a>, <a class="autorefs autorefs-internal" title="Scalar = float | Float[Array, '']
-
-  
-      module-attribute
-   (smcx.types.Scalar)" href="../types/#smcx.types.Scalar">Scalar</a>]]</code>
+                  <code><a class="autorefs autorefs-internal" title="FamilyPosteriorMoments (smcx.types.FamilyPosteriorMoments)" href="../types/#smcx.types.FamilyPosteriorMoments">FamilyPosteriorMoments</a></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1789,6 +1761,16 @@ predictor, fed back to the state by linear Bayes.</p>
       </tbody>
     </table>
 
+
+<details class="note" open>
+  <summary>Note</summary>
+  <p>The built-in factories additionally attach an eager
+emission-support check that <code>dglm_filter</code> runs once on
+concrete emissions at its boundary (#283). The check lives
+outside the record because the record's released contract is
+this four-field sequence (#317). Emissions of a user-defined
+family are not support-checked.</p>
+</details>
 
 
 
@@ -2161,14 +2143,27 @@ recovers the plain DGLM.</p>
             <td>
               <div class="doc-md-description">
                 <p>Malformed arrays or domains, multivariate
-emissions, or an evolution specification that is not
-exactly one of the two forms.</p>
+emissions, an evolution specification that is not
+exactly one of the two forms, a linear predictor
+whose prior variance at the first step is zero — the
+conjugate moment match divides by that variance — or
+concrete emissions outside a built-in family's
+documented support.</p>
               </div>
             </td>
           </tr>
       </tbody>
     </table>
 
+
+<details class="note" open>
+  <summary>Note</summary>
+  <p>Only the first step's predictor variance is checkable at the
+boundary. A model whose predictor direction loses all variance
+at a later step (for example a nilpotent transition with zero
+evolution covariance) divides by zero there and returns NaN in
+every field from that step onward (follow-up review R3).</p>
+</details>
 
     </div>
 

@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -1998,10 +1998,14 @@ by a discount factor — a modeling device, not an estimator:</p>
 </span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">prior_shape</span><span class="o">=</span><span class="mf">4.0</span><span class="p">,</span>  <span class="c1"># Inverse-Gamma degrees of freedom</span>
 </span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">prior_scale</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>  <span class="c1"># prior point estimate of V</span>
 </span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="p">)</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="n">scaled_covariances</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="n">scale_matrices</span> <span class="o">=</span> <span class="p">(</span>
 </span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">posterior</span><span class="o">.</span><span class="n">scale_estimates</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span>
 </span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="o">*</span> <span class="n">posterior</span><span class="o">.</span><span class="n">filtered_scale_free_covariances</span>
 </span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="p">)</span>
+</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="c1"># These are Student-t scale matrices, not covariances; the filtered</span>
+</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="c1"># covariance carries the tail factor n / (n - 2) and exists for n &gt; 2.</span>
+</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="n">dof</span> <span class="o">=</span> <span class="n">posterior</span><span class="o">.</span><span class="n">scale_shapes</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span>
+</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="n">filtered_covariances</span> <span class="o">=</span> <span class="n">dof</span> <span class="o">/</span> <span class="p">(</span><span class="n">dof</span> <span class="o">-</span> <span class="mf">2.0</span><span class="p">)</span> <span class="o">*</span> <span class="n">scale_matrices</span>
 </span></code></pre></div>
 <p>A <code>variance_discount</code> below one instead tracks a slowly changing
 variance (exact under the implied beta-gamma random walk on the
@@ -2033,11 +2037,14 @@ accuracy check.</p>
 <p>The observation family is a <code>smcx.DGLMFamily</code> record of four pure
 callables (moment matching, forecast log density, conjugate update,
 posterior moments), so a new family is user-definable without
-touching the filter; the library's own tests build a normal family
+touching the filter. The library's own tests build a normal family
 through this record to prove the recursion reduces exactly to the
-Kalman filter. <code>smcx.bernoulli()</code> and <code>smcx.binomial(trials=n)</code>
-cover binary and bounded counts, and <code>dispersion_discount</code> adds
-Berry and West's random-effects extra-dispersion.</p>
+Kalman filter. The built-in factories also check emission support
+eagerly at the filter boundary. A user-defined family's emissions
+pass through unchecked. <code>smcx.bernoulli()</code> and
+<code>smcx.binomial(trials=n)</code> cover binary and bounded counts, and
+<code>dispersion_discount</code> adds Berry and West's random-effects
+extra-dispersion.</p>
 <h2 id="bind-a-model-record">Bind a model record</h2>
 <p>A <code>smcx.StateSpaceModel</code> groups the per-particle callables that define
 one model. Parameters stay an explicit PyTree argument that smcx
@@ -2093,26 +2100,29 @@ error when the field is <code>None</code>. The record is data, not a base class:
 smcx never inspects it beyond reading its fields (a Dynamax or other
 model-library adapter is just a function returning one).</p>
 <p>The positional-callback filters (<code>smcx.bootstrap_filter</code> and
-friends) remain supported with their original signatures; the model
-record supersedes the per-algorithm binding factories this guide
-previously recommended.</p>
+friends) remain supported with their original signatures. A model
+record can be reused across every derivation that consumes its
+fields.</p>
 <h2 id="write-a-custom-feynman-kac-model">Write a custom Feynman-Kac model</h2>
-<p>A researcher's algorithm that is not in the catalog is usually still
-one <code>smcx.FeynmanKac</code>: an initial law <code>m0</code>, a per-particle mutation
+<p>An algorithm of resample-mutate-reweight form fits
+<code>smcx.FeynmanKac</code>: an initial law <code>m0</code>, a per-particle mutation
 kernel <code>m</code>, and a per-particle log-potential <code>log_g</code>, over a
 context PyTree whose leading axis is time. <code>smcx.run_smc</code> then
-supplies the conditional-resampling loop, the branch weight rule, the
-evidence accounting, and the posterior container. Annealing the
-potential is a two-line change to the derived record:</p>
+supplies the conditional-resampling loop, the branch weight rule,
+the evidence accounting, and the posterior container. An algorithm
+that must own its full step belongs on <code>smcx.run_particle_filter</code>
+instead. As one record-level example, scaling the potential by a
+fixed constant replaces <code>log_g</code> on the derived record. This
+defines one likelihood-powered target, not an annealing path:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">fk</span> <span class="o">=</span> <span class="n">smcx</span><span class="o">.</span><span class="n">bootstrap_fk</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">emissions</span><span class="p">)</span>
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
 </span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">annealed_log_g</span><span class="p">(</span><span class="n">parent</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">context_t</span><span class="p">):</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">scaled_log_g</span><span class="p">(</span><span class="n">parent</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">context_t</span><span class="p">):</span>
 </span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="k">return</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">fk</span><span class="o">.</span><span class="n">log_g</span><span class="p">(</span><span class="n">parent</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">context_t</span><span class="p">)</span>
 </span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
 </span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">annealed</span> <span class="o">=</span> <span class="n">fk</span><span class="o">.</span><span class="n">_replace</span><span class="p">(</span><span class="n">log_g</span><span class="o">=</span><span class="n">annealed_log_g</span><span class="p">)</span>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">posterior</span> <span class="o">=</span> <span class="n">smcx</span><span class="o">.</span><span class="n">run_smc</span><span class="p">(</span><span class="n">jr</span><span class="o">.</span><span class="n">key</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">annealed</span><span class="p">,</span> <span class="n">num_particles</span><span class="o">=</span><span class="mi">4_096</span><span class="p">)</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">scaled</span> <span class="o">=</span> <span class="n">fk</span><span class="o">.</span><span class="n">_replace</span><span class="p">(</span><span class="n">log_g</span><span class="o">=</span><span class="n">scaled_log_g</span><span class="p">)</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">posterior</span> <span class="o">=</span> <span class="n">smcx</span><span class="o">.</span><span class="n">run_smc</span><span class="p">(</span><span class="n">jr</span><span class="o">.</span><span class="n">key</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">scaled</span><span class="p">,</span> <span class="n">num_particles</span><span class="o">=</span><span class="mi">4_096</span><span class="p">)</span>
 </span></code></pre></div>
 <p>An optional <code>log_eta</code> field adds an auxiliary-filter look-ahead
 twist (first-stage selection, ancestor correction, and the two-factor
@@ -2149,7 +2159,10 @@ their ESS, because those are the quantities governing ancestor selection.
 Numeric thresholds must be finite and nonnegative. Zero disables resampling;
 because the comparison is strict and ESS cannot exceed N, values above one
 force resampling at every eligible step. The default <code>0.5</code> retains the rule
-<code>ESS &lt; 0.5 * N</code>.</p>
+<code>ESS &lt; 0.5 * N</code>. For <code>liu_west_filter</code> the selection threshold and the
+<code>parameter_moves</code> policy are announced to change in smcx 3.0 (to the
+always-select Liu-West algorithm with moves on selection); omitting
+either argument keeps the 2.x behavior and emits a <code>FutureWarning</code>.</p>
 <p>The separate <code>resampling_fn</code> callback must return a JAX array of exactly
 <code>num_samples</code> ancestor indices with dtype <code>int32</code>. Every index must be in
 <code>[0, num_particles)</code>. Shape and dtype errors are reported while the filter
@@ -2340,14 +2353,43 @@ the complete observed series.</p>
 are <code>(key, state, params[, input_t])</code>; smcx resamples each aligned state and
 parameter pair with one index, retains that static parameter for the forecast,
 and passes it to both callbacks. Calling the state-only helper with a Liu-West
-result remains numerically unchanged for compatibility but emits
-<code>FutureWarning</code>; that ambiguous path becomes an error in smcx 2.0.</p>
-<p>This is an additive input API and a new parameter-aware API. Following
-<a href="https://numpy.org/neps/nep-0023-backwards-compatibility.html">NEP 23</a>, existing
-state-only calls and their fixed-key output are preserved during the 1.x
-series while the warning makes the formerly silent parameter omission visible.</p>
+result raises <code>ValueError</code> since smcx 2.0: it would silently ignore
+<code>filtered_params</code>, so the ambiguous path is an error rather than a wrong
+forecast.</p>
 <h2 id="keep-the-two-pytree-roles-separate">Keep the two PyTree roles separate</h2>
-<p>There are two useful, different PyTrees at this boundary.</p>
+<p>The latent-state PyTree flows through resampling and mutation as
+inference state. The parameter PyTree flows into every callback as
+explicit data.</p>
+<p>The three base fields (<code>sample_initial</code>, <code>sample_transition</code>,
+<code>log_observation</code>) are required by the record's typed contract.
+The optional derivations validate only their additional capabilities
+and raise a named error at construction when one is <code>None</code>. The
+table lists the fields each derivation consumes:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Fields consumed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bootstrap_fk</code></td>
+<td><code>sample_initial</code>, <code>sample_transition</code>, <code>log_observation</code></td>
+</tr>
+<tr>
+<td><code>guided_fk</code></td>
+<td><code>sample_initial</code>, <code>log_observation</code>, plus <code>sample_proposal</code>, <code>log_proposal</code>, <code>log_transition</code></td>
+</tr>
+<tr>
+<td><code>auxiliary_fk</code></td>
+<td>bootstrap fields plus <code>log_lookahead</code></td>
+</tr>
+</tbody>
+</table>
+<p>The callback-first named filters are the short on-ramp. The record
+and Feynman–Kac path is the reusable workbench layer, where one
+model definition serves every derivation that consumes its fields.</p>
 <p>The <strong>latent-state PyTree</strong> is one particle's evolving state. Bootstrap,
 auxiliary, and guided filters accept a nonempty PyTree of arrays. The initial
 sampler adds a leading particle axis to every leaf, and each transition
@@ -2463,8 +2505,8 @@ behavior.</p>
 </span></code></pre></div>
 <p>Here the Equinox module itself is the <code>params</code> PyTree, so smcx
 threads it explicitly and <code>jax.grad</code> with respect to the module's
-arrays works through the filter. No Equinox-specific adapter exists
-or is needed.</p>
+arrays works through the filter. smcx ships no Equinox-specific
+adapter. This example does not need one.</p>
 
 
 

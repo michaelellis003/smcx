@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -1589,7 +1589,7 @@ Chapter 6. https://doi.org/10.1137/1.9780898717778.ch6</p>
 
 
 <h3 id="smcx.liu_west.liu_west_filter" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">liu_west_filter</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">initial_sampler</span><span class="p">,</span> <span class="n">transition_sampler</span><span class="p">,</span> <span class="n">log_observation_fn</span><span class="p">,</span> <span class="n">log_auxiliary_fn</span><span class="p">,</span> <span class="n">param_initial_sampler</span><span class="p">,</span> <span class="n">emissions</span><span class="p">,</span> <span class="n">num_particles</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">shrinkage</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span> <span class="n">resampling_fn</span><span class="o">=</span><span class="n">systematic</span><span class="p">,</span> <span class="n">resampling_threshold</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">inputs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">param_initial_state_sampler</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">store_history</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">liu_west_filter</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">initial_sampler</span><span class="p">,</span> <span class="n">transition_sampler</span><span class="p">,</span> <span class="n">log_observation_fn</span><span class="p">,</span> <span class="n">log_auxiliary_fn</span><span class="p">,</span> <span class="n">param_initial_sampler</span><span class="p">,</span> <span class="n">emissions</span><span class="p">,</span> <span class="n">num_particles</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">shrinkage</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span> <span class="n">resampling_fn</span><span class="o">=</span><span class="n">systematic</span><span class="p">,</span> <span class="n">resampling_threshold</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">parameter_moves</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">inputs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">param_initial_state_sampler</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">store_history</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
 </h3>
 
@@ -1779,17 +1779,11 @@ noise; smaller values apply more of both.</p>
 <p>The shrinkage parameter has no generative interpretation:
 it introduces artificial dynamics into the parameter
 evolution that do not correspond to any probabilistic
-model. The shrink-and-jitter move applies at every
-observation, whether or not that step resamples. Each
-move preserves the weighted cloud's mean and covariance
-(the kernel is variance-matched), but on non-resampled
-steps it acts outside the auxiliary-selection derivation
-of Liu and West (2001), and with
-<code>resampling_threshold=0</code> the parameter cloud evolves
-by these uncorrected artificial dynamics for the whole
-series. Results can be sensitive to this choice. Run the
-filter under several values (e.g. 0.95, 0.975, 0.99) and
-report the range of posterior and evidence estimates.</p>
+model. Each move preserves the weighted cloud's mean and
+covariance (the kernel is variance-matched). Results can
+be sensitive to this choice. Run the filter under several
+values (e.g. 0.95, 0.975, 0.99) and report the range of
+posterior and evidence estimates.</p>
 </div>
               </div>
             </td>
@@ -1818,7 +1812,7 @@ report the range of posterior and evidence estimates.</p>
                 <code>resampling_threshold</code>
             </td>
             <td>
-                  <code><span title="float">float</span> | <a class="autorefs autorefs-internal" title="ResamplingCriterion (smcx.types.ResamplingCriterion)" href="../types/#smcx.types.ResamplingCriterion">ResamplingCriterion</a></code>
+                  <code><span title="float">float</span> | <a class="autorefs autorefs-internal" title="ResamplingCriterion (smcx.types.ResamplingCriterion)" href="../types/#smcx.types.ResamplingCriterion">ResamplingCriterion</a> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1826,12 +1820,48 @@ report the range of posterior and evidence estimates.</p>
 <code>(normalized_log_weights, absolute_ess, time_index) -&gt; bool</code>.
 Numeric values must be finite and nonnegative; zero disables
 resampling and values above one force it at every update.
-The callback receives the first-stage weights and ESS at the
-zero-based emission indices 1 through T - 1.</p>
+Omitting the argument keeps the 2.x default (0.5) and warns:
+in smcx 3.0 the default becomes 2.0 — selection at every
+update, the algorithm of Liu and West (2001). See
+<code>parameter_moves</code> for what happens to the parameter cloud
+on unselected steps. The callback receives the first-stage
+weights and ESS at the zero-based emission indices 1
+through T - 1.</p>
               </div>
             </td>
             <td>
-                  <code>0.5</code>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>parameter_moves</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>"on_selection"</code>, the shrink-and-jitter
+parameter move applies only on steps where selection occurs,
+so every move is accounted for by the auxiliary weights and
+the run stays inside the derivation of Liu and West (2001)
+at any threshold; with a concrete zero threshold the inert
+kernel also stays out of the computation graph, keeping
+gradients defined for degenerate parameter clouds.
+<code>"always"</code> moves the parameters at every observation; on
+unselected steps the importance weights carry no correction
+for that move, so the run is an explicitly approximate
+extension. Omitting the argument keeps the 2.x default
+(<code>"always"</code>) and warns; smcx 3.0 defaults to
+<code>"on_selection"</code>. When the move is active, differentiating
+through the kernel's eigendecomposition is undefined at
+repeated eigenvalues of the weighted parameter covariance
+(a JAX <code>eigh</code> limitation) and can return NaN gradients.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
             </td>
           </tr>
           <tr class="doc-section-item">

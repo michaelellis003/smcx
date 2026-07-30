@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -1863,7 +1863,7 @@ time zero; <code>log_g</code> still weights initialization.</p>
 
 
 <h3 id="smcx.fk.run_smc" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">run_smc</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">fk</span><span class="p">,</span> <span class="n">num_particles</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">resampling_fn</span><span class="o">=</span><span class="n">systematic</span><span class="p">,</span> <span class="n">resampling_threshold</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">store_history</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">gate_stage_normalizers</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">run_smc</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">fk</span><span class="p">,</span> <span class="n">num_particles</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">resampling_fn</span><span class="o">=</span><span class="n">systematic</span><span class="p">,</span> <span class="n">resampling_threshold</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">store_history</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">gate_stage_normalizers</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
 </h3>
 
@@ -1998,14 +1998,18 @@ traces stay full.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>When True, a nonfinite stage normalizer
-at any time step turns the returned marginal into NaN (and
-an eager raise), matching the auxiliary filter's historical
-degeneracy policy. The 2.0 cut decides one uniform policy.</p>
+                <p>When True (the default), a nonfinite
+stage normalizer at any time step is degenerate for the
+whole run — the uniform policy of the named filters: an
+eager raise, and an exactly <code>-inf</code> marginal under
+<code>jax.jit</code>. False
+restores the stage-local view in which only the retained
+normalizers gate the result; a degenerate intermediate
+stage then passes silently, so prefer the default.</p>
               </div>
             </td>
             <td>
-                  <code>False</code>
+                  <code>True</code>
             </td>
           </tr>
       </tbody>

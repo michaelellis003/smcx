@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -1497,6 +1497,50 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#smcx.types.FamilyConjugateUpdate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FamilyConjugateUpdate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.FamilyLogForecast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FamilyLogForecast
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.FamilyMomentMatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FamilyMomentMatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.FamilyPosteriorMoments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FamilyPosteriorMoments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#smcx.types.InitialSampler" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1578,6 +1622,94 @@
     <span class="md-ellipsis">
       
         LogTransitionFnWithInput
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelEmissionSampler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelEmissionSampler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelInitialSampler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelInitialSampler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelLogLookahead" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelLogLookahead
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelLogObservation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelLogObservation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelLogProposal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelLogProposal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelLogTransition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelLogTransition
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelProposalSampler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelProposalSampler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelTransitionSampler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelTransitionSampler
       
     </span>
   </a>
@@ -2197,6 +2329,50 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#smcx.types.FamilyConjugateUpdate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FamilyConjugateUpdate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.FamilyLogForecast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FamilyLogForecast
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.FamilyMomentMatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FamilyMomentMatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.FamilyPosteriorMoments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FamilyPosteriorMoments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#smcx.types.InitialSampler" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2278,6 +2454,94 @@
     <span class="md-ellipsis">
       
         LogTransitionFnWithInput
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelEmissionSampler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelEmissionSampler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelInitialSampler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelInitialSampler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelLogLookahead" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelLogLookahead
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelLogObservation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelLogObservation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelLogProposal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelLogProposal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelLogTransition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelLogTransition
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelProposalSampler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelProposalSampler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smcx.types.ModelTransitionSampler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ModelTransitionSampler
       
     </span>
   </a>
@@ -3093,6 +3357,198 @@
 
 
 
+<h3 id="smcx.types.FamilyConjugateUpdate" class="doc doc-heading">
+            <code>FamilyConjugateUpdate</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Exact conjugate posterior parameters of a family.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.FamilyLogForecast" class="doc doc-heading">
+            <code>FamilyLogForecast</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Exact one-step forecast log density of a conjugate family.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.FamilyMomentMatch" class="doc doc-heading">
+            <code>FamilyMomentMatch</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Match conjugate prior parameters to two predictor moments.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.FamilyPosteriorMoments" class="doc doc-heading">
+            <code>FamilyPosteriorMoments</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Posterior predictor moments fed back by linear Bayes.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="smcx.types.InitialSampler" class="doc doc-heading">
             <code>InitialSampler</code>
 
@@ -3443,6 +3899,390 @@
 
 
         <p>Evaluate an input-conditioned transition log-density.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.ModelEmissionSampler" class="doc doc-heading">
+            <code>ModelEmissionSampler</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Draw one emission for simulation and posterior prediction.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.ModelInitialSampler" class="doc doc-heading">
+            <code>ModelInitialSampler</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Draw one initial state of a <code>smcx.model.StateSpaceModel</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.ModelLogLookahead" class="doc doc-heading">
+            <code>ModelLogLookahead</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Auxiliary look-ahead evaluated at the pre-propagation state.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.ModelLogObservation" class="doc doc-heading">
+            <code>ModelLogObservation</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Observation log-density of a model record.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.ModelLogProposal" class="doc doc-heading">
+            <code>ModelLogProposal</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Proposal log-density of a model record.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.ModelLogTransition" class="doc doc-heading">
+            <code>ModelLogTransition</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Transition log-density of a model record.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.ModelProposalSampler" class="doc doc-heading">
+            <code>ModelProposalSampler</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Draw one guided proposal, which sees the current emission.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="smcx.types.ModelTransitionSampler" class="doc doc-heading">
+            <code>ModelTransitionSampler</code>
+
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Draw one transition of a model record.</p>
 
 
 

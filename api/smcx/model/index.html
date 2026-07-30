@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -1674,7 +1674,7 @@ nonempty JAX PyTrees; emissions keep their model-owned dtype.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.model.StateSpaceModel.sample_initial">sample_initial</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="typing.Any">Any</span>]</code>
+                  <code><a class="autorefs autorefs-internal" title="ModelInitialSampler (smcx.types.ModelInitialSampler)" href="../types/#smcx.types.ModelInitialSampler">ModelInitialSampler</a></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1686,7 +1686,7 @@ initial state; derivations vmap it over per-particle keys.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.model.StateSpaceModel.sample_transition">sample_transition</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="typing.Any">Any</span>]</code>
+                  <code><a class="autorefs autorefs-internal" title="ModelTransitionSampler (smcx.types.ModelTransitionSampler)" href="../types/#smcx.types.ModelTransitionSampler">ModelTransitionSampler</a></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1699,7 +1699,7 @@ structure, leaf shapes, and dtypes.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.model.StateSpaceModel.log_observation">log_observation</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="typing.Any">Any</span>]</code>
+                  <code><a class="autorefs autorefs-internal" title="ModelLogObservation (smcx.types.ModelLogObservation)" href="../types/#smcx.types.ModelLogObservation">ModelLogObservation</a></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1711,7 +1711,7 @@ scalar</code> observation log-density.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.model.StateSpaceModel.log_transition">log_transition</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="typing.Any">Any</span>] | None</code>
+                  <code><a class="autorefs autorefs-internal" title="ModelLogTransition (smcx.types.ModelLogTransition)" href="../types/#smcx.types.ModelLogTransition">ModelLogTransition</a> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1724,7 +1724,7 @@ smoothing).</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.model.StateSpaceModel.sample_proposal">sample_proposal</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="typing.Any">Any</span>] | None</code>
+                  <code><a class="autorefs autorefs-internal" title="ModelProposalSampler (smcx.types.ModelProposalSampler)" href="../types/#smcx.types.ModelProposalSampler">ModelProposalSampler</a> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1737,7 +1737,7 @@ emission.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.model.StateSpaceModel.log_proposal">log_proposal</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="typing.Any">Any</span>] | None</code>
+                  <code><a class="autorefs autorefs-internal" title="ModelLogProposal (smcx.types.ModelLogProposal)" href="../types/#smcx.types.ModelLogProposal">ModelLogProposal</a> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1749,7 +1749,7 @@ input_t) -&gt; scalar</code> proposal log-density.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.model.StateSpaceModel.log_lookahead">log_lookahead</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="typing.Any">Any</span>] | None</code>
+                  <code><a class="autorefs autorefs-internal" title="ModelLogLookahead (smcx.types.ModelLogLookahead)" href="../types/#smcx.types.ModelLogLookahead">ModelLogLookahead</a> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1762,12 +1762,14 @@ pre-propagation state.</p>
           <tr class="doc-section-item">
             <td><code><span title="smcx.model.StateSpaceModel.sample_emission">sample_emission</span></code></td>
             <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[..., <span title="typing.Any">Any</span>] | None</code>
+                  <code><a class="autorefs autorefs-internal" title="ModelEmissionSampler (smcx.types.ModelEmissionSampler)" href="../types/#smcx.types.ModelEmissionSampler">ModelEmissionSampler</a> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
                 <p>Optional <code>(key, state, params, input_t) -&gt;
-emission</code> for simulation and posterior prediction.</p>
+emission</code>. No built-in smcx function consumes this
+field. Simulation and posterior prediction accept
+standalone emission samplers.</p>
               </div>
             </td>
           </tr>

@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -1545,19 +1545,27 @@ sequential Monte Carlo, with model code decoupled from inference code.</p>
 <p>When a state-space model is linear and Gaussian with known
 covariances, the Kalman filter computes the exact posterior by a
 two-step recursion. Relaxing linearity keeps a Gaussian approximation
-alive (the extended and unscented filters); asking to <em>learn</em> a noise
-covariance, or observing through a discrete or heavy-tailed model,
-breaks the recursion outright. Particle filters carry the posterior as
-a weighted sample cloud instead, and sequential Monte Carlo extends
-the same machinery to tempering and joint state-parameter inference.
+alive (the extended and unscented filters). Outside special conjugate
+cases, unknown noise parameters or non-Gaussian observations break
+the Gaussian closed form. smcx implements an exact variance-scaled
+DLM and approximate conjugate/linear-Bayes DGLMs for specific
+observation families. Particle filters carry the posterior as a
+weighted sample cloud and cover general nonlinear or non-Gaussian
+models. Broader sequential Monte Carlo methods target other
+distribution sequences, including tempered paths for static
+parameters and nested state-parameter inference.
 smcx implements all of these methods. The
 <a href="guides/sequential-inference/">introduction</a> develops them one
 assumption at a time, with the equations and references.</p>
-<p>Models enter as records of pure JAX callables with explicitly threaded
-parameters; every particle algorithm is a Feynman–Kac derivation over
-one generic loop; resamplers, criteria, proposals, potentials,
-look-ahead twists, mutation kernels, temperature schedules, and
-Gaussian linearization strategies are all caller-replaceable.</p>
+<p>Models are supplied as plain JAX callbacks. <code>StateSpaceModel</code> groups
+the particle-model callbacks for reuse across the bootstrap, guided,
+and auxiliary Feynman–Kac derivations over one shared loop, while the
+named filters provide the shortest one-call interface; Liu–West,
+tempered SMC, SMC², and the caller-owned runner have their own
+drivers. Resamplers, criteria, proposals, potentials, look-ahead
+twists, mutation kernels, temperature schedules, and Gaussian
+linearization strategies are all caller-replaceable, with parameters
+as explicitly threaded PyTrees on the record path.</p>
 <h2 id="installation">Installation</h2>
 <p>smcx requires Python 3.11 or later.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>smcx

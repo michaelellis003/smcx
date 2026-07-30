@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="State-space inference in JAX — Kalman and particle filters, tempered SMC, and SMC²">
+        <meta name="description" content="Sequential inference for state-space models in JAX — Kalman-family filters and SMC methods, including particle filters, tempered SMC, and SMC²">
       
       
         <meta name="author" content="Michael Ellis">
@@ -1839,7 +1839,7 @@ precision [West and Harrison, 1997, sec. 10.8].</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Student-<span class="arithmatex">\(t\)</span> marginal likelihood. The scaled covariance is</p>
+                <p>Student-<span class="arithmatex">\(t\)</span> marginal likelihood.</p>
               </div>
             </td>
           </tr>
@@ -1859,7 +1859,37 @@ precision [West and Harrison, 1997, sec. 10.8].</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>filtered_scale_free_covariances``.</p>
+                <p>filtered_scale_free_covariances`` is the Student-<span class="arithmatex">\(t\)</span> scale</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="DLMFilterPosterior (smcx.containers.DLMFilterPosterior)" href="../containers/#smcx.containers.DLMFilterPosterior">DLMFilterPosterior</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>matrix <span class="arithmatex">\(S_t \tilde C_t\)</span> of the filtered state marginal; the</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="DLMFilterPosterior (smcx.containers.DLMFilterPosterior)" href="../containers/#smcx.containers.DLMFilterPosterior">DLMFilterPosterior</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>filtered covariance is <span class="arithmatex">\(n_t / (n_t - 2)\, S_t \tilde C_t\)</span></p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="DLMFilterPosterior (smcx.containers.DLMFilterPosterior)" href="../containers/#smcx.containers.DLMFilterPosterior">DLMFilterPosterior</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>and exists only for <span class="arithmatex">\(n_t &gt; 2\)</span>.</p>
               </div>
             </td>
           </tr>
