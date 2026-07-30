@@ -490,3 +490,58 @@ def test_float32_large_prior_scale_matches_jit_and_reference():
         np.testing.assert_allclose(
             np.asarray(compiled_field), np.asarray(eager_field), rtol=1e-6
         )
+
+
+def _one_step_reference(dtype, prior_shape, prior_scale, c0, emission):
+    eye = jnp.eye(1, dtype=dtype)
+    return smcx.dlm_filter(
+        jnp.zeros(1, dtype),
+        c0 * eye,
+        eye,
+        jnp.ones(1, dtype),
+        jnp.asarray([[emission]], dtype),
+        scale_free_transition_covariance=jnp.zeros((1, 1), dtype),
+        prior_shape=prior_shape,
+        prior_scale=prior_scale,
+    )
+
+
+@pytest.mark.parametrize(
+    "prior_shape, prior_scale, c0, emission",
+    [
+        # dof * forecast_scale_free overflows while every result and
+        # the represented per-factor whitening are finite (R2).
+        (10.0, 1.0, 4e37, 2e19),
+        # scale * forecast_scale_free at the representable edge.
+        (10.0, 2e38, 1.0, 0.0),
+    ],
+)
+def test_float32_representable_whitening_survives(
+    prior_shape, prior_scale, c0, emission
+):
+    reference = _one_step_reference(
+        jnp.float64, prior_shape, prior_scale, c0, emission
+    )
+    eager = _one_step_reference(
+        jnp.float32, prior_shape, prior_scale, c0, emission
+    )
+    compiled = jax.jit(
+        lambda: _one_step_reference(
+            jnp.float32, prior_shape, prior_scale, c0, emission
+        )
+    )()
+
+    np.testing.assert_allclose(
+        np.asarray(eager.scale_estimates),
+        np.asarray(reference.scale_estimates),
+        rtol=1e-5,
+    )
+    np.testing.assert_allclose(
+        float(eager.marginal_loglik),
+        float(reference.marginal_loglik),
+        rtol=1e-5,
+    )
+    for eager_field, compiled_field in zip(eager, compiled, strict=True):
+        np.testing.assert_allclose(
+            np.asarray(compiled_field), np.asarray(eager_field), rtol=1e-6
+        )

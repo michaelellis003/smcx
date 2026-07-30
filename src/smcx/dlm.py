@@ -248,9 +248,12 @@ def dlm_filter(
         # into the overflowing product, which would also break the
         # eager/JIT numerical-equivalence contract.
         log_forecast_scale = jnp.log(carry.scale) + jnp.log(forecast_scale_free)
+        # One factor at a time: dof * forecast_scale_free itself can
+        # overflow while every result and each per-factor quotient is
+        # representable (follow-up review R2).
         whitened = lax.optimization_barrier(
-            (residual / jnp.sqrt(carry.scale))
-            / jnp.sqrt(dof * forecast_scale_free)
+            ((residual / jnp.sqrt(forecast_scale_free)) / jnp.sqrt(dof))
+            / jnp.sqrt(carry.scale)
         )
         squared = whitened * whitened
         abs_whitened = jnp.abs(whitened)
@@ -269,7 +272,7 @@ def dlm_filter(
         new_cov = prior_cov - jnp.outer(gain, gain) * forecast_scale_free
         new_shape = dof + 1.0
         half_width = lax.optimization_barrier(
-            residual / jnp.sqrt(dof * forecast_scale_free)
+            (residual / jnp.sqrt(forecast_scale_free)) / jnp.sqrt(dof)
         )
         # Bounded ratio before multiplication: ``dof * (...)`` overflows
         # about ``dof``-fold before the divided result does (R2).
