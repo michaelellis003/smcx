@@ -471,9 +471,11 @@ def _liu_west_step(
         # eigendecomposition, whose derivative is undefined at
         # repeated eigenvalues — lives inside the selected branch, so
         # an ordinary data-dependent false decision keeps it out of
-        # the differentiated graph entirely. The key is split outside
-        # the branch, preserving the key schedule; selected-step
-        # draws are bitwise-identical to the unconditional form.
+        # the differentiated graph. The key is split outside the
+        # branch, so the key schedule is unchanged. Selected results
+        # match the unconditional form at dtype-appropriate tolerance.
+        # Branch lowering can differ from unconditional lowering by
+        # ulp-level rounding on some backends.
         if move_only_on_selection:
 
             def _kept(operand):
