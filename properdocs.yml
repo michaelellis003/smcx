@@ -74,6 +74,8 @@ exclude_docs: |
   adr/
   design/
   research/
+  review/
+  implementation/
 
 # Page Navigation Hierarchy
 nav:

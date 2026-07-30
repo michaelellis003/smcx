@@ -441,14 +441,16 @@ probabilities change with the parameters; on a linear-Gaussian test
 model where the exact score is available from `kalman_filter`, the
 resampling-on average over keys sits many standard errors from the
 truth. Second, even with resampling disabled, the average over keys
-is the gradient of $E[\log \hat Z_N]$, which differs from
-$\log E[\hat Z_N]$ at any finite particle count — the log of an
-unbiased estimate is biased, and the same gap defines filtering
-variational objectives
-([Maddison et al., 2017](https://arxiv.org/abs/1705.09279)). The
-bias shrinks as particles grow, so for differentiable models
-without resampling the estimator is a consistent, finite-$N$-biased
-score approximation
+satisfies $E[\nabla \log \hat Z_N] = \nabla E[\log \hat Z_N]$
+under the usual interchange conditions, and
+$\nabla E[\log \hat Z_N]$ in general need not equal
+$\nabla \log E[\hat Z_N] = \nabla \log Z$, the score — the log
+of an unbiased estimate is biased, and the same gap defines
+filtering variational objectives
+([Maddison et al., 2017](https://arxiv.org/abs/1705.09279)). Under
+appropriate regularity the gap tends to zero as particles grow, so
+for differentiable models without resampling the estimator is a
+consistent, finite-$N$-biased score approximation
 ([Ścibior and Wood, 2021](https://arxiv.org/abs/2106.10314)).
 Third, the pathwise derivative sees only reparameterized
 randomness: a parameter that acts through a discrete draw (a
