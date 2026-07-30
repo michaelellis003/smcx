@@ -1016,3 +1016,72 @@ class TestSolverRobustness:
         wide = jnp.asarray(alpha, jnp.float64)
         recovered = float(dglm_module._trigamma_safe(wide))
         np.testing.assert_allclose(recovered, 1e-20, rtol=1e-4)
+
+
+class TestSmallVarianceStability:
+    """Small predictor variances keep forecast accuracy (R3c).
+
+    Below the per-dtype crossover the families switch to their exact
+    conjugate q -> 0 limits (negative binomial -> Poisson,
+    beta-binomial -> binomial), validated against 50-digit mpmath
+    references; above it the exact special-function algebra applies.
+    """
+
+    #: (f, q, y, exact nbinom log-pmf), mpmath dps=50
+    POISSON_GOLDEN = (
+        (1.0, 1e-06, 0, -2.7182794930766446),
+        (1.0, 1e-06, 1, -1.7182817113549452),
+        (1.0, 1e-06, 5, -2.5057723272701936),
+        (0.0, 1e-08, 0, -1.0),
+        (0.0, 1e-08, 1, -1.000000005),
+        (0.0, 1e-08, 5, -5.7874916677820478),
+        (-2.0, 1e-05, 0, -0.13533586833389527),
+        (-2.0, 1e-05, 1, -2.1353322217024784),
+        (-2.0, 1e-05, 5, -14.922709379958805),
+    )
+
+    @pytest.mark.parametrize(
+        "mean, variance, emission, expected", POISSON_GOLDEN
+    )
+    def test_poisson_forecast_matches_mpmath(
+        self, mean, variance, emission, expected
+    ):
+        family = poisson()
+        alpha, beta = family.match_moments(
+            jnp.asarray(mean), jnp.asarray(variance)
+        )
+        actual = float(
+            family.log_forecast(jnp.asarray(float(emission)), alpha, beta)
+        )
+        # The limit branch truncates at O(q); the band covers it in
+        # both dtypes alongside float32 rounding.
+        np.testing.assert_allclose(
+            actual, expected, atol=_dtype_rtol(2e-4, 2e-3), rtol=1e-5
+        )
+
+    @pytest.mark.parametrize("variance", [1e-4, 1e-6, 1e-8])
+    def test_bernoulli_symmetry_invariant(self, variance):
+        # f = 0 implies equal matched beta parameters and predictive
+        # probability exactly 1/2, regardless of their magnitude.
+        family = bernoulli()
+        alpha, beta = family.match_moments(
+            jnp.asarray(0.0), jnp.asarray(variance)
+        )
+        log_half = float(family.log_forecast(jnp.asarray(1.0), alpha, beta))
+        # Above the crossover the exact branch's cancellation error is
+        # about eps / q * log(1/q) relative; below it the limit branch
+        # is exact for f = 0. The band covers the worst tested q per
+        # dtype.
+        np.testing.assert_allclose(
+            log_half, -math.log(2.0), rtol=_dtype_rtol(1e-7, 1e-6)
+        )
+
+    def test_float32_tiny_variance_poisson_is_finite_and_close(self):
+        family = poisson()
+        alpha, beta = family.match_moments(
+            jnp.asarray(0.0, jnp.float32), jnp.asarray(1e-8, jnp.float32)
+        )
+        actual = float(
+            family.log_forecast(jnp.asarray(1.0, jnp.float32), alpha, beta)
+        )
+        np.testing.assert_allclose(actual, -1.0, rtol=1e-4)

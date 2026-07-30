@@ -45,7 +45,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import core, lax
 from jax.nn import softplus
-from jax.scipy.special import digamma, polygamma
+from jax.scipy.special import digamma, gammaln, polygamma
 from jax.scipy.stats import betabinom, nbinom
 from jaxtyping import Array, Shaped
 
@@ -157,6 +157,18 @@ def _tetragamma_times_arg_safe(value: Scalar) -> Scalar:
     )
 
 
+def _small_variance_cutoff(value: Scalar) -> Scalar:
+    r"""Crossover below which the conjugate limit forms take over.
+
+    Below roughly $\sqrt{\varepsilon}$ the exact special-function
+    differences lose more digits to cancellation than the $O(q)$
+    truncation of the $q \to 0$ conjugate limits; the crossover
+    balances the two error sources per dtype (follow-up review R3c).
+    """
+    eps = jnp.finfo(jnp.result_type(value)).eps
+    return 3.0 * jnp.sqrt(eps)
+
+
 # Log-space Newton steps larger than this are clamped. Far from the
 # root the clamp bounds each multiplicative update (a standard Newton
 # globalization); near the root steps are small, so the quadratic
@@ -207,7 +219,19 @@ def poisson() -> DGLMFamily:
         return alpha, beta
 
     def log_forecast(emission, alpha, beta):
-        return nbinom.logpmf(emission, alpha, beta / (1.0 + beta))
+        exact = nbinom.logpmf(emission, alpha, beta / (1.0 + beta))
+        # Small predictor variance: the gammaln differences above lose
+        # most significant digits to cancellation, while the matched
+        # negative binomial converges to Poisson(e^f); switch to the
+        # limit, whose truncation error is O(q) at the crossover
+        # (validated against 50-digit references; R3c).
+        predictor_variance = _trigamma_safe(alpha)
+        predictor_mean = _digamma_safe(alpha) - jnp.log(beta)
+        rate = jnp.exp(predictor_mean)
+        limit = emission * predictor_mean - rate - gammaln(emission + 1.0)
+        return jnp.where(
+            predictor_variance < _small_variance_cutoff(alpha), limit, exact
+        )
 
     def update(emission, alpha, beta):
         return alpha + emission, beta + 1.0
@@ -299,15 +323,33 @@ def binomial(*, trials: int) -> DGLMFamily:
         return _match_beta_moments(forecast_mean, forecast_variance)
 
     def log_forecast(emission, alpha, beta):
-        return betabinom.logpmf(emission, trials, alpha, beta)
+        exact = betabinom.logpmf(emission, trials, alpha, beta)
+        # Small predictor variance: the matched beta-binomial converges
+        # to Binomial(trials, sigmoid(f)); the exact gammaln algebra
+        # cancels catastrophically there (R3c).
+        predictor_variance = _trigamma_safe(alpha) + _trigamma_safe(beta)
+        predictor_mean = _digamma_safe(alpha) - _digamma_safe(beta)
+        limit = (
+            gammaln(trials + 1.0)
+            - gammaln(emission + 1.0)
+            - gammaln(trials - emission + 1.0)
+            + emission * predictor_mean
+            - trials * softplus(predictor_mean)
+        )
+        return jnp.where(
+            predictor_variance < _small_variance_cutoff(alpha), limit, exact
+        )
 
     def update(emission, alpha, beta):
         return alpha + emission, beta + trials - emission
 
     def posterior_moments(alpha, beta):
+        # The asymptotic-safe forms bound the absolute error of the
+        # digamma difference by the representation error of the linear
+        # predictor itself (follow-up review R3c).
         return (
-            digamma(alpha) - digamma(beta),
-            polygamma(1, alpha) + polygamma(1, beta),
+            _digamma_safe(alpha) - _digamma_safe(beta),
+            _trigamma_safe(alpha) + _trigamma_safe(beta),
         )
 
     def validate_emissions(emissions):
