@@ -43,11 +43,12 @@ References:
 """
 
 import math
+import warnings
 from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import vmap
+from jax import core, vmap
 from jaxtyping import Array, Bool, Float, Int
 
 from smcx._numerics import _neumaier_add
@@ -343,6 +344,7 @@ def _liu_west_step(
     kernel_variance: Float[Array, ""],
     state_signature: _TreeSignature,
     move_only_on_selection: bool,
+    static_never_select: bool,
 ) -> tuple[_LiuWestStepCarry, _LiuWestStepOutput]:
     particles, params, log_weights, log_ml, correction, _, invalid_seen = carry
     emission_t, input_t, time_index = inputs_t
@@ -367,46 +369,63 @@ def _liu_west_step(
             )(values, parameter_values)
         return cast(Array, result)
 
-    weights = normalize(log_weights)
-    shrunk, covariance_factor = _parameter_kernel(
-        params,
-        weights,
-        shrinkage,
-        kernel_variance,
-    )
-    log_aux = _evaluate(log_auxiliary_fn, particles, shrunk)
-    _validate_log_density_batch(log_aux, num_particles, name="log_auxiliary_fn")
-    log_first_norm, log_first_sum = log_normalize(log_weights + log_aux)
-    first_ess = jnp.asarray(compute_ess(log_first_norm))
-    do_resample, ancestors, invalid_resampling = _conditional_resample(
-        resample_key,
-        log_first_norm,
-        first_ess,
-        resampling_fn,
-        resampling_threshold,
-        num_particles,
-        identity,
-        time_index,
-    )
-    param_dim = params.shape[1]
-    eps = jr.normal(
-        parameter_key,
-        (num_particles, param_dim),
-        dtype=covariance_factor.dtype,
-    )
-    moved_params = (
-        shrunk[ancestors].astype(covariance_factor.dtype)
-        + eps @ covariance_factor.T
-    ).astype(params.dtype)
-    # Under the 'on_selection' policy the shrink-and-jitter move is
-    # confined to selected steps, where the auxiliary weights account
-    # for it; unselected steps leave the parameter cloud untouched.
-    # The jitter key is consumed either way so both policies share one
-    # key schedule.
-    if move_only_on_selection:
-        new_params = jnp.where(do_resample, moved_params, params[ancestors])
+    if static_never_select:
+        # A concrete zero threshold with moves confined to selection is
+        # a pure sequential-importance-sampling pass: the shrink-and-
+        # jitter kernel is inert, so its eigendecomposition must not
+        # enter the computation graph — its reverse-mode derivative is
+        # undefined for repeated eigenvalues and would poison gradients
+        # of a run in which the move never happens (follow-up review
+        # R7). Zeros stand in for the unused auxiliary quantities.
+        do_resample = jnp.asarray(False)
+        ancestors = identity
+        invalid_resampling = jnp.asarray(False)
+        new_params = params
+        log_aux = jnp.zeros_like(log_weights)
+        log_first_sum = jnp.zeros(())
     else:
-        new_params = moved_params
+        weights = normalize(log_weights)
+        shrunk, covariance_factor = _parameter_kernel(
+            params,
+            weights,
+            shrinkage,
+            kernel_variance,
+        )
+        log_aux = _evaluate(log_auxiliary_fn, particles, shrunk)
+        _validate_log_density_batch(
+            log_aux, num_particles, name="log_auxiliary_fn"
+        )
+        log_first_norm, log_first_sum = log_normalize(log_weights + log_aux)
+        first_ess = jnp.asarray(compute_ess(log_first_norm))
+        do_resample, ancestors, invalid_resampling = _conditional_resample(
+            resample_key,
+            log_first_norm,
+            first_ess,
+            resampling_fn,
+            resampling_threshold,
+            num_particles,
+            identity,
+            time_index,
+        )
+        param_dim = params.shape[1]
+        eps = jr.normal(
+            parameter_key,
+            (num_particles, param_dim),
+            dtype=covariance_factor.dtype,
+        )
+        moved_params = (
+            shrunk[ancestors].astype(covariance_factor.dtype)
+            + eps @ covariance_factor.T
+        ).astype(params.dtype)
+        # Under the 'on_selection' policy the shrink-and-jitter move is
+        # confined to selected steps, where the auxiliary weights
+        # account for it; unselected steps leave the parameter cloud
+        # untouched. The jitter key is consumed either way so both
+        # policies share one key schedule.
+        if move_only_on_selection:
+            new_params = jnp.where(do_resample, moved_params, params[ancestors])
+        else:
+            new_params = moved_params
     particle_keys = jr.split(transition_key, num_particles)
     if input_t is None:
         transition_fn = cast(ParamTransitionSampler, transition_sampler)
@@ -476,8 +495,8 @@ def liu_west_filter(
     *,
     shrinkage: float = 0.95,
     resampling_fn: ResamplingFn = systematic,
-    resampling_threshold: float | ResamplingCriterion = 2.0,
-    parameter_moves: str = "on_selection",
+    resampling_threshold: float | ResamplingCriterion | None = None,
+    parameter_moves: str | None = None,
     inputs: InputSequence | None = None,
     param_initial_state_sampler: ParamCloudInitialStateSampler
     | ParamCloudInitialStateSamplerWithInput
@@ -535,21 +554,29 @@ def liu_west_filter(
             ``(normalized_log_weights, absolute_ess, time_index) -> bool``.
             Numeric values must be finite and nonnegative; zero disables
             resampling and values above one force it at every update.
-            The default (2.0) selects at every update — the algorithm of
-            Liu and West (2001). Fractions below one make selection
-            conditional; see ``parameter_moves`` for what happens to the
-            parameter cloud on unselected steps. The callback receives
-            the first-stage weights and ESS at the zero-based emission
-            indices 1 through T - 1.
-        parameter_moves: When ``"on_selection"`` (the default), the
-            shrink-and-jitter parameter move applies only on steps where
-            selection occurs, so every move is accounted for by the
-            auxiliary weights and the run stays inside the derivation of
-            Liu and West (2001) at any threshold. ``"always"`` moves the
-            parameters at every observation; on unselected steps the
-            importance weights carry no correction for that move, so the
-            run is an explicitly approximate extension. The two coincide
-            at the default threshold.
+            Omitting the argument keeps the 2.x default (0.5) and warns:
+            in smcx 3.0 the default becomes 2.0 — selection at every
+            update, the algorithm of Liu and West (2001). See
+            ``parameter_moves`` for what happens to the parameter cloud
+            on unselected steps. The callback receives the first-stage
+            weights and ESS at the zero-based emission indices 1
+            through T - 1.
+        parameter_moves: When ``"on_selection"``, the shrink-and-jitter
+            parameter move applies only on steps where selection occurs,
+            so every move is accounted for by the auxiliary weights and
+            the run stays inside the derivation of Liu and West (2001)
+            at any threshold; with a concrete zero threshold the inert
+            kernel also stays out of the computation graph, keeping
+            gradients defined for degenerate parameter clouds.
+            ``"always"`` moves the parameters at every observation; on
+            unselected steps the importance weights carry no correction
+            for that move, so the run is an explicitly approximate
+            extension. Omitting the argument keeps the 2.x default
+            (``"always"``) and warns; smcx 3.0 defaults to
+            ``"on_selection"``. When the move is active, differentiating
+            through the kernel's eigendecomposition is undefined at
+            repeated eigenvalues of the weighted parameter covariance
+            (a JAX ``eigh`` limitation) and can return NaN gradients.
         inputs: Optional exogenous inputs with shape ``(T, input_dim)``
             or ``(T,)`` and a nonempty event. Inputs follow ``params`` in
             every callback;
@@ -577,6 +604,23 @@ def liu_west_filter(
             count, shrinkage, threshold, callback output, or criterion result
             is structurally invalid.
     """
+    if resampling_threshold is None or parameter_moves is None:
+        warnings.warn(
+            "liu_west_filter's defaults change in smcx 3.0 to the "
+            "Liu-West (2001) algorithm: selection at every update "
+            "(resampling_threshold=2.0) with "
+            "parameter_moves='on_selection'. The current defaults "
+            "(resampling_threshold=0.5, parameter_moves='always') "
+            "apply an uncorrected shrink-and-jitter move on "
+            "unselected steps. Pass both arguments explicitly to "
+            "keep either behavior and silence this warning.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        if resampling_threshold is None:
+            resampling_threshold = 0.5
+        if parameter_moves is None:
+            parameter_moves = "always"
     _validate_resampling_threshold(resampling_threshold)
     if parameter_moves not in ("on_selection", "always"):
         raise ValueError(
@@ -584,6 +628,14 @@ def liu_west_filter(
             f"got {parameter_moves!r}"
         )
     move_only_on_selection = parameter_moves == "on_selection"
+    static_never_select = (
+        move_only_on_selection
+        and not callable(resampling_threshold)
+        and not isinstance(resampling_threshold, core.Tracer)
+        # Exact zero is the documented disables-resampling sentinel,
+        # so exact comparison is intended here.
+        and float(resampling_threshold) == 0.0  # noqa: RUF069
+    )
     emissions, num_timesteps = _validate_filter_inputs(
         emissions,
         num_particles,
@@ -657,6 +709,7 @@ def liu_west_filter(
             kernel_variance=h_sq,
             state_signature=state_signature,
             move_only_on_selection=move_only_on_selection,
+            static_never_select=static_never_select,
         )
         if store_history:
             return next_carry, output

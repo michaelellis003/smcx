@@ -137,7 +137,7 @@ For a model with $x_0 \perp \mu$, pass the existing
 required; keeping the alternatives explicit preserves the legacy
 callback signature and fixed-key RNG schedule.
 
-The one knob beyond the model is `shrinkage`, the Liu-West discount
+The main knob beyond the model is `shrinkage`, the Liu-West discount
 $a \in (0, 1)$. Resampling the parameter alongside the state would
 collapse the parameter cloud to a few duplicated values within a
 handful of steps; Liu-West counters this by shrinking each resampled

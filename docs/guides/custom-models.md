@@ -363,7 +363,10 @@ their ESS, because those are the quantities governing ancestor selection.
 Numeric thresholds must be finite and nonnegative. Zero disables resampling;
 because the comparison is strict and ESS cannot exceed N, values above one
 force resampling at every eligible step. The default `0.5` retains the rule
-`ESS < 0.5 * N`.
+`ESS < 0.5 * N`. For `liu_west_filter` the selection threshold and the
+`parameter_moves` policy are announced to change in smcx 3.0 (to the
+always-select Liu-West algorithm with moves on selection); omitting
+either argument keeps the 2.x behavior and emits a `FutureWarning`.
 
 The separate `resampling_fn` callback must return a JAX array of exactly
 `num_samples` ancestor indices with dtype `int32`. Every index must be in
