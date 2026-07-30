@@ -435,3 +435,29 @@ class TestCompiledDegeneracyContract:
             return run_smc(jr.key(0), fk, 8).marginal_loglik
 
         assert np.isneginf(float(run()))
+
+
+class TestBoundarySweep:
+    """Boolean particle counts and empty time axes are named errors (R9)."""
+
+    def _fk(self):
+        model = smcx.StateSpaceModel(
+            sample_initial=lambda key, params, i0: jr.normal(key, (1,)),
+            sample_transition=lambda key, state, params, it: state,
+            log_observation=lambda emission, state, params, it: (
+                -0.5 * (emission[0] - state[0]) ** 2
+            ),
+        )
+        return smcx.bootstrap_fk(model, {}, jnp.zeros((3, 1)))
+
+    def test_rejects_boolean_particle_count(self):
+        with pytest.raises(ValueError, match="not a boolean"):
+            run_smc(jr.key(0), self._fk(), True)
+
+    def test_rejects_empty_time_axis(self):
+        # The named-filter derivations already reject empty emissions;
+        # a caller-constructed FeynmanKac must get the same named error
+        # instead of a raw IndexError from ``leaf[0]``.
+        broken = self._fk()._replace(contexts=(jnp.zeros((0, 1)),))
+        with pytest.raises(ValueError, match="at least one time step"):
+            run_smc(jr.key(0), broken, 8)

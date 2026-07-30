@@ -263,6 +263,10 @@ def run_smc(
         ValueError: A callback output or resampler output violates its
             structural contract.
     """
+    if isinstance(num_particles, bool):
+        raise ValueError(
+            "num_particles must be a positive integer, not a boolean"
+        )
     try:
         num_particles = operator.index(num_particles)
     except TypeError as error:
@@ -284,6 +288,11 @@ def run_smc(
             f"got shapes {sorted(jnp.shape(leaf) for leaf in context_leaves)}"
         )
     num_timesteps = context_leaves[0].shape[0]
+    if num_timesteps == 0:
+        raise ValueError(
+            "fk.contexts must cover at least one time step; "
+            "got an empty leading axis"
+        )
     key, init_key = jr.split(key)
     log_n = jnp.asarray(math.log(num_particles))
     context_0 = tree.map(lambda leaf: leaf[0], fk.contexts)

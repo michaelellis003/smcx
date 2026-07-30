@@ -783,7 +783,7 @@ class ModelEmissionSampler(Protocol):
         params: Any,
         input_t: ModelInput | None,
         /,
-    ) -> Emission: ...
+    ) -> EmissionValue: ...
 
 
 @runtime_checkable
