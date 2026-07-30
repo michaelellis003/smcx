@@ -388,3 +388,50 @@ class TestRunSmcBoundary:
         broken = fk._replace(contexts=(fk.contexts, jnp.zeros(2)))
         with pytest.raises(ValueError, match="context"):
             run_smc(jr.key(0), broken, 8)
+
+
+class TestCompiledDegeneracyContract:
+    """Under user JIT a zero-likelihood run returns exactly -inf (R5).
+
+    Negative infinity is a valid zero-likelihood state that
+    pseudo-marginal and outer SMC algorithms can treat as rejection;
+    NaN would contaminate their acceptance arithmetic. The binding
+    contract is AGENTS.md and architecture guide section 6.
+    """
+
+    def _degenerate_model(self, lookahead):
+        return smcx.StateSpaceModel(
+            sample_initial=lambda key, params, i0: jr.normal(key, (1,)),
+            sample_transition=lambda key, state, params, it: state,
+            log_observation=lambda emission, state, params, it: jnp.asarray(
+                -jnp.inf
+            ),
+            log_lookahead=lookahead,
+        )
+
+    def test_jitted_bootstrap_zero_likelihood_is_minus_inf(self):
+        model = self._degenerate_model(None)
+
+        @jax.jit
+        def run():
+            fk = smcx.bootstrap_fk(model, {}, jnp.zeros((2, 1)))
+            return run_smc(jr.key(0), fk, 8).marginal_loglik
+
+        assert np.isneginf(float(run()))
+
+    def test_jitted_auxiliary_zero_lookahead_is_minus_inf(self):
+        model = self._degenerate_model(
+            lambda emission, state, params, it: jnp.asarray(-jnp.inf)
+        )
+        model = model._replace(
+            log_observation=lambda emission, state, params, it: (
+                -0.5 * (emission[0] - state[0]) ** 2
+            )
+        )
+
+        @jax.jit
+        def run():
+            fk = smcx.auxiliary_fk(model, {}, jnp.zeros((3, 1)))
+            return run_smc(jr.key(0), fk, 8).marginal_loglik
+
+        assert np.isneginf(float(run()))

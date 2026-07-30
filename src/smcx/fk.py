@@ -247,7 +247,8 @@ def run_smc(
         gate_stage_normalizers: When True (the default), a nonfinite
             stage normalizer at any time step is degenerate for the
             whole run — the uniform policy of the named filters: an
-            eager raise, and a NaN marginal under ``jax.jit``. False
+            eager raise, and an exactly ``-inf`` marginal under
+            ``jax.jit``. False
             restores the stage-local view in which only the retained
             normalizers gate the result; a degenerate intermediate
             stage then passes silently, so prefer the default.
@@ -392,12 +393,16 @@ def run_smc(
     final_log_evidence = final_state.log_marginal_likelihood + final_correction
     if gate_stage_normalizers:
         # Every stage normalizer must be finite for the marginal to be
-        # meaningful; otherwise report NaN (raised eagerly below).
+        # meaningful. A degenerate stage is a valid zero likelihood, so
+        # the gated value is exactly -inf (raised eagerly below; under a
+        # user jit it propagates so outer pseudo-marginal algorithms can
+        # treat it as rejection rather than NaN-poisoned acceptance
+        # arithmetic).
         all_finite = jnp.isfinite(log_ev_0) & jnp.all(normalizers_rest)
         final_log_evidence = jnp.where(
             all_finite,
             final_log_evidence,
-            jnp.nan,
+            -jnp.inf,
         )
 
     _raise_invalid_ancestors(invalid, num_particles)
