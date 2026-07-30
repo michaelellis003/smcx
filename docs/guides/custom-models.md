@@ -601,6 +601,19 @@ forecast.
 
 There are two useful, different PyTrees at this boundary.
 
+Each derivation reads a fixed set of `StateSpaceModel` fields and
+raises a named error at construction when one is `None`:
+
+| Operation | Required fields |
+| --- | --- |
+| `bootstrap_fk` | `sample_initial`, `sample_transition`, `log_observation` |
+| `guided_fk` | bootstrap fields plus `sample_proposal`, `log_proposal`, `log_transition` |
+| `auxiliary_fk` | bootstrap fields plus `log_lookahead` |
+
+The callback-first named filters are the short on-ramp; the record
+and Feynman–Kac path is the reusable workbench layer, where one model
+definition serves every applicable derivation.
+
 The **latent-state PyTree** is one particle's evolving state. Bootstrap,
 auxiliary, and guided filters accept a nonempty PyTree of arrays. The initial
 sampler adds a leading particle axis to every leaf, and each transition
