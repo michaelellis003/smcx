@@ -1294,7 +1294,7 @@ class TestAbsoluteForecastAccuracy:
 
 
 class TestDirectionalMomentHelpers:
-    """Both moment helpers stay finite in the negative direction (R3b)."""
+    """The negative direction is finite and differentiable (R3b)."""
 
     @pytest.mark.parametrize(
         "family_fn", [poisson, bernoulli], ids=["poisson", "bernoulli"]
@@ -1312,19 +1312,69 @@ class TestDirectionalMomentHelpers:
         assert np.isfinite(float(posterior.marginal_loglik))
         assert np.isfinite(float(posterior.filtered_means[0, 0]))
 
+    @pytest.mark.parametrize(
+        ("family_fn", "expected"),
+        [
+            # -exp(-17) and -sigmoid(-17): the q -> 0 limits of the
+            # evidence gradient with respect to the initial mean at
+            # y = 0.
+            (poisson, -4.1399377188e-8),
+            (bernoulli, -4.1399375474e-8),
+        ],
+        ids=["poisson", "bernoulli"],
+    )
+    def test_low_predictor_gradient_matches_the_limit(
+        self, family_fn, expected
+    ):
+        # A two-branch where-form of the directional helper leaves
+        # log1p(-1) in the inactive branch; its infinite partial
+        # derivative reaches reverse mode as NaN (round-4 review).
+        family = family_fn()
+
+        def loglik(initial_mean):
+            return smcx.dglm_filter(
+                initial_mean,
+                jnp.array([[1e-6]]),
+                jnp.eye(1),
+                jnp.array([1.0]),
+                jnp.array([0.0]),
+                family=family,
+                transition_covariance=jnp.array([[0.0]]),
+            ).marginal_loglik
+
+        initial_mean = jnp.array([-17.0])
+        # Under x64 the branch rule keeps the exact finite-q algebra,
+        # whose gradient differs from the q -> 0 limit by a measured
+        # 6.7e-4 relative correction; under float32 the calibrated
+        # floor selects the limit expression and the difference is
+        # rounding only. rtol = 2e-3 covers the larger case with a
+        # 3x margin and still rejects NaN, zero, and sign errors.
+        for transform in (jax.value_and_grad, _jit_value_and_grad):
+            value, gradient = transform(loglik)(initial_mean)
+            assert np.isfinite(float(value))
+            np.testing.assert_allclose(float(gradient[0]), expected, rtol=2e-3)
+
+
+def _jit_value_and_grad(fun):
+    return jax.jit(jax.value_and_grad(fun))
+
 
 class TestAsymmetricRecurrence:
     """The asymmetric mean update matches its recurrence (R3b)."""
 
-    def test_bernoulli_update_matches_one_over_alpha(self):
-        # f = 0.1, q = 1e-6, y = 1, unit gain. With y = 1 the update
-        # increments alpha, so the filtered mean equals the
-        # represented predictor mean at the matched parameters plus
-        # psi(alpha + 1) - psi(alpha) = 1 / alpha. Comparing against
-        # the represented mean (the same digamma difference the
-        # matcher and posterior now share) cancels the matcher's
-        # log-space residual, which in float32 has the same scale as
-        # the increment itself.
+    #: mpmath (50 digits): exact beta moment match at f = 0.1,
+    #: q = 1e-6, then the linear-Bayes mean feedback with unit gain
+    #: after observing y = 1 (psi(alpha + 1) - psi(alpha) = 1/alpha).
+    RECURRENCE = 0.1000004750206997
+
+    def test_bernoulli_success_moves_the_mean_up(self):
+        # f = 0.1, q = 1e-6, y = 1, unit observation vector, zero
+        # evolution covariance. Observing a success increments alpha,
+        # so the public filtered mean must move upward by about
+        # 1/alpha = 4.7502e-7. The pre-fix feedback subtracted the
+        # supplied forecast mean from the grid-represented posterior
+        # mean, so the matcher's solve residual (the same order as
+        # the update) reversed the direction eagerly.
         def run():
             return smcx.dglm_filter(
                 jnp.array([0.1]),
@@ -1336,29 +1386,16 @@ class TestAsymmetricRecurrence:
                 transition_covariance=jnp.array([[0.0]]),
             ).filtered_means[0, 0]
 
-        family = bernoulli()
-        alpha, beta = family.match_moments(jnp.asarray(0.1), jnp.asarray(1e-6))
-        represented_mean = float(
-            dglm_module._digamma_difference_safe(alpha, beta)
-        )
-        expected = represented_mean + 1.0 / float(alpha)
-
-        eager = float(run())
-        compiled = float(jax.jit(run)())
-        # Eager evaluation shares the test helpers' arithmetic, so the
-        # comparison is tight. Compilation may fuse the solver's
-        # series arithmetic differently and land one ulp of
-        # log(alpha) away on the matched-parameter grid, which moves
-        # the mean by about eps * log(alpha); the compiled band is
-        # that grid step.
-        float32 = jnp.asarray(0.0).dtype == jnp.float32
-        tight = 5e-8 if float32 else 1e-10
-        grid = (
-            4.0
-            * float(jnp.finfo(jnp.asarray(0.0).dtype).eps)
-            * math.log(float(alpha))
-        )
-        np.testing.assert_allclose(eager, expected, rtol=0.0, atol=tight)
-        np.testing.assert_allclose(
-            compiled, expected, rtol=0.0, atol=max(grid, tight)
-        )
+        # Measured errors are at most 4.2e-9 in float32 (the eager
+        # result is the nearest float32 to the recurrence); 5e-8
+        # keeps a 10x margin while sitting 10x below the 4.7502e-7
+        # update it must resolve.
+        atol = 5e-8 if jnp.asarray(0.0).dtype == jnp.float32 else 1e-10
+        for result in (float(run()), float(jax.jit(run)())):
+            assert result > 0.1
+            np.testing.assert_allclose(
+                result, self.RECURRENCE, rtol=0.0, atol=atol
+            )
+            np.testing.assert_allclose(
+                result - 0.1, self.RECURRENCE - 0.1, rtol=0.0, atol=atol
+            )

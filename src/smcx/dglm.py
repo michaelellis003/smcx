@@ -164,14 +164,18 @@ def _log_ratio_directional(a: Scalar, b: Scalar) -> Scalar:
     ``log1p((a - b) / b)`` fails in one direction: when ``a`` is far
     below ``b``, the represented quotient can round to exactly ``-1``
     and produce ``log1p(-1) = -inf`` (round-3 response review, R3b).
-    Dividing the exact stored-value difference by the smaller operand
-    keeps both directions finite.
+    The helper therefore orders the operands, evaluates one ``log1p``
+    on the nonnegative magnitude, and applies the sign afterward. A
+    two-branch ``jnp.where`` form is not equivalent: the inactive
+    branch still evaluates ``log1p(-1)`` and its infinite partial
+    derivative reaches reverse-mode differentiation as ``NaN``
+    (round-4 response review, R3b).
     """
-    return jnp.where(
-        a >= b,
-        jnp.log1p((a - b) / b),
-        -jnp.log1p((b - a) / a),
-    )
+    swap = a < b
+    high = jnp.where(swap, b, a)
+    low = jnp.where(swap, a, b)
+    magnitude = jnp.log1p((high - low) / low)
+    return jnp.where(swap, -magnitude, magnitude)
 
 
 def _digamma_difference_safe(a: Scalar, b: Scalar) -> Scalar:
@@ -265,26 +269,26 @@ def poisson() -> DGLMFamily:
     def log_forecast(emission, alpha, beta):
         # Branch rule (round-3 response review, R3a). The matched
         # negative binomial converges to Poisson(e^f) as the predictor
-        # variance q shrinks. The limit's truncation is bounded by
-        # q*((y - rate)^2 + y + rate + 1)/2. That bound was
-        # conservative on every high-precision reference probe used to
-        # calibrate it. The exact algebra keeps priority. The limit is
-        # taken only when its bound falls below a calibrated floor of
-        # the direct evaluation's rounding error,
-        # 0.03*eps*alpha*log(alpha). The floor is fitted to measured
-        # cases and is not a proven bound. Inactive operands are
+        # variance q shrinks. The limit's truncation error is
+        # estimated by q*((y - rate)^2 + y + rate + 1)/2; the estimate
+        # was conservative on every high-precision reference probe
+        # used to calibrate it, but it is not a proven bound. The
+        # exact algebra keeps priority. The limit is taken only when
+        # the estimate falls below a calibrated floor of the direct
+        # evaluation's rounding error, 0.03*eps*alpha*log(alpha),
+        # itself fitted to measured cases. Inactive operands are
         # clamped so the unused branch cannot poison gradients (R3c).
         eps = jnp.finfo(jnp.result_type(alpha)).eps
         predictor_variance = _trigamma_safe(alpha)
         predictor_mean = _digamma_minus_log_safe(alpha, beta)
         rate = jnp.exp(predictor_mean)
-        limit_bound = (
+        limit_error_estimate = (
             0.5
             * predictor_variance
             * ((emission - rate) ** 2 + emission + rate + 1.0)
         )
         exact_floor = 0.03 * eps * alpha * jnp.log(alpha)
-        use_limit = limit_bound < exact_floor
+        use_limit = limit_error_estimate < exact_floor
         limit = emission * predictor_mean - rate - gammaln(emission + 1.0)
         alpha_safe = jnp.where(use_limit, jnp.ones_like(alpha), alpha)
         beta_safe = jnp.where(use_limit, jnp.ones_like(beta), beta)
@@ -391,7 +395,7 @@ def binomial(*, trials: int) -> DGLMFamily:
         predictor_mean = _digamma_difference_safe(alpha, beta)
         success_probability = jax_sigmoid(predictor_mean)
         mean_count = trials * success_probability
-        limit_bound = (
+        limit_error_estimate = (
             0.5
             * predictor_variance
             * (
@@ -402,7 +406,7 @@ def binomial(*, trials: int) -> DGLMFamily:
         )
         total = alpha + beta
         exact_floor = 0.03 * eps * total * jnp.log(total)
-        use_limit = limit_bound < exact_floor
+        use_limit = limit_error_estimate < exact_floor
         limit = (
             gammaln(trials + 1.0)
             - gammaln(emission + 1.0)
@@ -641,10 +645,18 @@ def dglm_filter(
         post_mean, post_variance = family.posterior_moments(
             alpha_post, beta_post
         )
+        # Measure the conjugate moment change on one represented
+        # parameter grid: subtracting the recovered matched moments
+        # rather than the supplied forecast moments cancels the moment
+        # matcher's solve residual, which otherwise swamps updates
+        # smaller than that residual (round-4 response review, R3b).
+        # For the normal family the recovery is the identity, so the
+        # Kalman reduction is unchanged.
+        matched_mean, matched_variance = family.posterior_moments(alpha, beta)
         gain = prior_cov @ observation_vector / forecast_variance
-        new_mean = prior_mean + gain * (post_mean - forecast_mean)
+        new_mean = prior_mean + gain * (post_mean - matched_mean)
         new_cov = prior_cov - jnp.outer(gain, gain) * (
-            forecast_variance - post_variance
+            matched_variance - post_variance
         )
         loglik, compensation = _neumaier_add(
             carry.marginal_loglik,
