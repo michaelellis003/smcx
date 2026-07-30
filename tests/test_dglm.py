@@ -1327,8 +1327,8 @@ class TestDirectionalMomentHelpers:
         self, family_fn, expected
     ):
         # A two-branch where-form of the directional helper leaves
-        # log1p(-1) in the inactive branch; its infinite partial
-        # derivative reaches reverse mode as NaN (round-4 review).
+        # log1p(-1) in the inactive branch. Its infinite partial
+        # derivative reaches reverse mode as NaN.
         family = family_fn()
 
         def loglik(initial_mean):
@@ -1343,12 +1343,15 @@ class TestDirectionalMomentHelpers:
             ).marginal_loglik
 
         initial_mean = jnp.array([-17.0])
-        # Under x64 the branch rule keeps the exact finite-q algebra,
-        # whose gradient differs from the q -> 0 limit by a measured
-        # 6.7e-4 relative correction; under float32 the calibrated
-        # floor selects the limit expression and the difference is
-        # rounding only. rtol = 2e-3 covers the larger case with a
-        # 3x margin and still rejects NaN, zero, and sign errors.
+        # The mathematical finite-q derivative sits only 5e-7
+        # relative from the q -> 0 limit (for Poisson y = 0,
+        # d log p / df = -alpha / (beta + 1)). Under x64 the branch
+        # rule keeps the exact algebra, and its compiled evaluation
+        # carries a measured 6.7e-4 relative exact-branch error.
+        # Under float32 the calibrated floor selects the limit
+        # expression and the difference is rounding only.
+        # rtol = 2e-3 covers the larger case with a 3x margin and
+        # still rejects NaN, zero, and sign errors.
         for transform in (jax.value_and_grad, _jit_value_and_grad):
             value, gradient = transform(loglik)(initial_mean)
             assert np.isfinite(float(value))
@@ -1360,12 +1363,15 @@ def _jit_value_and_grad(fun):
 
 
 class TestAsymmetricRecurrence:
-    """The asymmetric mean update matches its recurrence (R3b)."""
+    """The asymmetric moment updates match their recurrences."""
 
     #: mpmath (50 digits): exact beta moment match at f = 0.1,
     #: q = 1e-6, then the linear-Bayes mean feedback with unit gain
     #: after observing y = 1 (psi(alpha + 1) - psi(alpha) = 1/alpha).
     RECURRENCE = 0.1000004750206997
+    #: The matching covariance feedback
+    #: (trigamma(alpha + 1) = trigamma(alpha) - 1/alpha**2).
+    COVARIANCE = 9.99999774355335e-7
 
     def test_bernoulli_success_moves_the_mean_up(self):
         # f = 0.1, q = 1e-6, y = 1, unit observation vector, zero
@@ -1384,14 +1390,24 @@ class TestAsymmetricRecurrence:
                 jnp.array([1.0]),
                 family=bernoulli(),
                 transition_covariance=jnp.array([[0.0]]),
-            ).filtered_means[0, 0]
+            )
 
-        # Measured errors are at most 4.2e-9 in float32 (the eager
-        # result is the nearest float32 to the recurrence); 5e-8
-        # keeps a 10x margin while sitting 10x below the 4.7502e-7
-        # update it must resolve.
-        atol = 5e-8 if jnp.asarray(0.0).dtype == jnp.float32 else 1e-10
-        for result in (float(run()), float(jax.jit(run)())):
+        # Measured mean errors are at most 4.2e-9 in float32. The
+        # eager result is the nearest float32 to the recurrence.
+        # 5e-8 keeps a 10x margin while sitting about one order
+        # below the 4.7502e-7 update it must resolve. The measured
+        # covariance error is 4.3e-15 against the pre-fix value one
+        # float32 ulp higher at 1.1e-13 from the reference, so 5e-14
+        # separates them.
+        float32 = jnp.asarray(0.0).dtype == jnp.float32
+        atol = 5e-8 if float32 else 1e-10
+        cov_atol = 5e-14 if float32 else 1e-16
+        for posterior in (run(), jax.jit(run)()):
+            result = float(posterior.filtered_means[0, 0])
+            covariance = float(posterior.filtered_covariances[0, 0, 0])
+            np.testing.assert_allclose(
+                covariance, self.COVARIANCE, rtol=0.0, atol=cov_atol
+            )
             assert result > 0.1
             np.testing.assert_allclose(
                 result, self.RECURRENCE, rtol=0.0, atol=atol
