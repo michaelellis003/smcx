@@ -39,7 +39,9 @@ References:
     https://doi.org/10.1007/b98971
 """
 
+from collections.abc import Callable
 from typing import NamedTuple
+from weakref import WeakKeyDictionary
 
 import jax.numpy as jnp
 import numpy as np
@@ -58,7 +60,6 @@ from smcx.kalman import _check_covariance, _check_float_array
 from smcx.types import (
     EmissionSequence,
     FamilyConjugateUpdate,
-    FamilyEmissionValidator,
     FamilyLogForecast,
     FamilyMomentMatch,
     FamilyPosteriorMoments,
@@ -88,19 +89,30 @@ class DGLMFamily(NamedTuple):
         posterior_moments: ``(alpha_star, beta_star) -> (f_star,
             q_star)`` — posterior mean and variance of the linear
             predictor, fed back to the state by linear Bayes.
-        validate_emissions: Optional ``(emissions,) -> None`` support
-            check, run once, eagerly, on the concrete canonicalized
-            emissions at the `dglm_filter` boundary; it raises
-            ``ValueError`` on out-of-support values and is skipped for
-            traced emissions. ``None`` states no checkable support
-            (#283).
+
+    Note:
+        The built-in factories additionally register an eager
+        emission-support check that `dglm_filter` runs once on
+        concrete emissions at its boundary (#283). The check lives
+        outside the record because the record's released contract is
+        this four-field sequence (#317). Emissions of a user-defined
+        family are not support-checked.
     """
 
     match_moments: FamilyMomentMatch
     log_forecast: FamilyLogForecast
     update: FamilyConjugateUpdate
     posterior_moments: FamilyPosteriorMoments
-    validate_emissions: FamilyEmissionValidator | None = None
+
+
+# Support validators for the built-in families, keyed on each
+# family's own ``log_forecast`` closure: the closure is unique per
+# factory call, weak-referenceable (a NamedTuple is not), and kept
+# alive by the record itself, so an entry lives exactly as long as
+# its family (#317).
+_SUPPORT_VALIDATORS: WeakKeyDictionary[
+    Callable[..., Scalar], Callable[[Shaped[Array, "..."]], None]
+] = WeakKeyDictionary()
 
 
 _ASYMPTOTIC_CUTOFF = 1e8
@@ -310,12 +322,12 @@ def poisson() -> DGLMFamily:
                 "poisson emissions must be nonnegative integer counts"
             )
 
+    _SUPPORT_VALIDATORS[log_forecast] = validate_emissions
     return DGLMFamily(
         match_moments=match_moments,
         log_forecast=log_forecast,
         update=update,
         posterior_moments=posterior_moments,
-        validate_emissions=validate_emissions,
     )
 
 
@@ -439,12 +451,12 @@ def binomial(*, trials: int) -> DGLMFamily:
                 f"binomial emissions must be integers in [0, {trials}]"
             )
 
+    _SUPPORT_VALIDATORS[log_forecast] = validate_emissions
     return DGLMFamily(
         match_moments=match_moments,
         log_forecast=log_forecast,
         update=update,
         posterior_moments=posterior_moments,
-        validate_emissions=validate_emissions,
     )
 
 
@@ -523,8 +535,8 @@ def dglm_filter(
             exactly one of the two forms, a linear predictor
             whose prior variance at the first step is zero — the
             conjugate moment match divides by that variance — or
-            concrete emissions outside the family's documented
-            support when the family supplies ``validate_emissions``.
+            concrete emissions outside a built-in family's
+            documented support.
 
     Note:
         Only the first step's predictor variance is checkable at the
@@ -572,10 +584,9 @@ def dglm_filter(
     # to float32 1.0 and a float64 -1e-50 to negative zero, which
     # would defeat integer- and nonnegativity-support checks
     # (follow-up review R8).
-    if family.validate_emissions is not None and not isinstance(
-        emissions, core.Tracer
-    ):
-        family.validate_emissions(emissions)
+    validator = _SUPPORT_VALIDATORS.get(family.log_forecast)
+    if validator is not None and not isinstance(emissions, core.Tracer):
+        validator(emissions)
     emission_values = emissions.astype(dtype)
     num_timesteps = emissions.shape[0]
 
