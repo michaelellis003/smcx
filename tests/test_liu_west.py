@@ -406,6 +406,7 @@ def test_uncompiled_step_matches_compiled_scan():
             kernel_variance=1.0 - shrinkage**2,
             state_signature=signature,
             move_only_on_selection=True,
+            static_never_select=False,
         )
 
     with jax.disable_jit():
@@ -1045,3 +1046,77 @@ class TestParameterMovePolicy:
         always = self._run(parameter_moves="always")
         for kept_leaf, moved_leaf in zip(selected, always, strict=True):
             np.testing.assert_array_equal(kept_leaf, moved_leaf)
+
+
+class TestDefaultVersioning:
+    """Omitted policy arguments warn and keep 2.x behavior (R6)."""
+
+    @staticmethod
+    def _run(**overrides):
+        def initial_sampler(key, n):
+            return jr.normal(key, (n, 1))
+
+        def transition_sampler(key, state, params):
+            return state + 0.1 * jr.normal(key, (1,))
+
+        def log_density(emission, state, params):
+            return -0.5 * (emission[0] - state[0]) ** 2
+
+        def param_initial_sampler(key, n):
+            return jr.normal(key, (n, 1))
+
+        return liu_west_filter(
+            jr.key(11),
+            initial_sampler,
+            transition_sampler,
+            log_density,
+            log_density,
+            param_initial_sampler,
+            jnp.zeros((3, 1)),
+            32,
+            **overrides,
+        )
+
+    def test_omitted_defaults_warn_and_match_prior_behavior(self):
+        with pytest.warns(FutureWarning, match="smcx 3.0"):
+            implicit = self._run()
+        explicit = self._run(resampling_threshold=0.5, parameter_moves="always")
+        for implicit_leaf, explicit_leaf in zip(
+            implicit, explicit, strict=True
+        ):
+            np.testing.assert_array_equal(implicit_leaf, explicit_leaf)
+
+    def test_explicit_arguments_do_not_warn(self):
+        import warnings as _warnings
+
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("error", FutureWarning)
+            self._run(resampling_threshold=0.5, parameter_moves="always")
+
+
+def test_inert_move_gradient_is_finite_for_degenerate_cloud():
+    """An unselected move must not poison gradients via eigh (R7).
+
+    With a concrete zero threshold and moves confined to selection,
+    the shrink-and-jitter kernel is inert, so its eigendecomposition
+    (reverse-mode-undefined at repeated eigenvalues, as in this
+    isotropic cloud) must stay out of the graph.
+    """
+    cloud = jnp.asarray([[-1.0, -1.0], [1.0, 1.0], [-1.0, 1.0], [1.0, -1.0]])
+
+    def run(scale):
+        return liu_west_filter(
+            jr.key(3),
+            lambda key, n: jnp.zeros((n, 1)),
+            lambda key, state, params: state,
+            lambda e, s, params: scale * -0.25 * (e[0] - params[0]) ** 2,
+            lambda e, s, params: scale * -0.25 * (e[0] - params[0]) ** 2,
+            lambda key, n: cloud,
+            jnp.zeros((2, 1)),
+            4,
+            resampling_threshold=0.0,
+            parameter_moves="on_selection",
+        ).marginal_loglik
+
+    gradient = jax.grad(run)(jnp.asarray(1.0))
+    assert np.isfinite(float(gradient))
