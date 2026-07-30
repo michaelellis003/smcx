@@ -973,3 +973,46 @@ class TestObservationSupport:
         # that guards default-config users; both name the parameter.
         with pytest.raises((ValueError, TypeCheckError), match="trials"):
             binomial(trials=trials)
+
+
+class TestSolverRobustness:
+    """The moment solvers converge on moderate valid inputs (R3a, R3b)."""
+
+    @pytest.mark.parametrize("mean", [-30.0, -4.0, 0.0, 4.0, 30.0])
+    @pytest.mark.parametrize("variance", [1e-4, 0.5, 20.0, 100.0])
+    def test_beta_match_recovers_the_moments(self, mean, variance):
+        alpha, beta = dglm_module._match_beta_moments(
+            jnp.asarray(mean), jnp.asarray(variance)
+        )
+        recovered_mean = float(
+            dglm_module._digamma_safe(alpha) - dglm_module._digamma_safe(beta)
+        )
+        recovered_variance = float(
+            dglm_module._trigamma_safe(alpha) + dglm_module._trigamma_safe(beta)
+        )
+        np.testing.assert_allclose(
+            recovered_mean, mean, rtol=_dtype_rtol(1e-8, 1e-4), atol=1e-6
+        )
+        np.testing.assert_allclose(
+            recovered_variance, variance, rtol=_dtype_rtol(1e-6, 1e-3)
+        )
+
+    def test_public_bernoulli_moderate_prior_is_finite(self):
+        posterior = smcx.dglm_filter(
+            jnp.array([4.0]),
+            jnp.array([[20.0]]),
+            jnp.eye(1),
+            jnp.array([1.0]),
+            jnp.array([1.0, 0.0, 1.0]),
+            family=bernoulli(),
+            transition_covariance=jnp.array([[0.01]]),
+        )
+        for field in posterior:
+            assert np.all(np.isfinite(np.asarray(field))), field
+
+    def test_float32_inverse_trigamma_survives_tiny_variance(self):
+        alpha = dglm_module._inverse_trigamma(jnp.asarray(1e-20, jnp.float32))
+        assert np.isfinite(float(alpha))
+        wide = jnp.asarray(alpha, jnp.float64)
+        recovered = float(dglm_module._trigamma_safe(wide))
+        np.testing.assert_allclose(recovered, 1e-20, rtol=1e-4)
