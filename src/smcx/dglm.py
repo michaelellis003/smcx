@@ -492,11 +492,16 @@ def dglm_filter(
             "dglm_filter is univariate: emissions must have shape "
             f"(ntime,) or (ntime, 1); got {emissions.shape}"
         )
-    emission_values = emissions.astype(dtype)
+    # Support validation sees the concrete input values BEFORE the
+    # lossy cast to the working dtype: a float64 1.00000001 truncates
+    # to float32 1.0 and a float64 -1e-50 to negative zero, which
+    # would defeat integer- and nonnegativity-support checks
+    # (follow-up review R8).
     if family.validate_emissions is not None and not isinstance(
-        emission_values, core.Tracer
+        emissions, core.Tracer
     ):
-        family.validate_emissions(emission_values)
+        family.validate_emissions(emissions)
+    emission_values = emissions.astype(dtype)
     num_timesteps = emissions.shape[0]
 
     for name, value, expected in (

@@ -1085,3 +1085,33 @@ class TestSmallVarianceStability:
             family.log_forecast(jnp.asarray(1.0, jnp.float32), alpha, beta)
         )
         np.testing.assert_allclose(actual, -1.0, rtol=1e-4)
+
+
+@pytest.mark.skipif(
+    not _CPU_X64, reason="the pre-cast values require a float64 backend"
+)
+class TestValidationBeforeCast:
+    """Support checks see pre-cast values (R8)."""
+
+    def _run(self, emissions):
+        return smcx.dglm_filter(
+            jnp.array([0.0], jnp.float32),
+            jnp.array([[0.5]], jnp.float32),
+            jnp.eye(1, dtype=jnp.float32),
+            jnp.array([1.0], jnp.float32),
+            emissions,
+            family=poisson(),
+            transition_covariance=jnp.array([[0.01]], jnp.float32),
+        )
+
+    def test_near_integer_float64_emission_is_rejected(self):
+        # Casting to the float32 state dtype would truncate this to
+        # exactly 1.0 and pass integer support.
+        with pytest.raises(ValueError, match="nonnegative integer"):
+            self._run(jnp.array([1.00000001, 0.0], jnp.float64))
+
+    def test_tiny_negative_float64_emission_is_rejected(self):
+        # Casting would flush this to negative zero and pass the
+        # nonnegativity check.
+        with pytest.raises(ValueError, match="nonnegative integer"):
+            self._run(jnp.array([-1e-50, 0.0], jnp.float64))
