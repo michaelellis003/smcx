@@ -45,4 +45,6 @@ benchmarks/data/
 /ROADMAP.md
 docs/adr/
 docs/design/
+docs/review/
+docs/implementation/
 docs/research/
