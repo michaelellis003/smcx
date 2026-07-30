@@ -235,7 +235,7 @@ posterior.marginal_loglik  # sum of exact negative-binomial forecasts
 The observation family is a `smcx.DGLMFamily` record of four pure
 callables (moment matching, forecast log density, conjugate update,
 posterior moments), so a new family is user-definable without
-touching the filter; the library's own tests build a normal family
+touching the filter. The library's own tests build a normal family
 through this record to prove the recursion reduces exactly to the
 Kalman filter. The built-in factories also check emission support
 eagerly at the filter boundary. A user-defined family's emissions

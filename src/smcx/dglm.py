@@ -39,9 +39,7 @@ References:
     https://doi.org/10.1007/b98971
 """
 
-from collections.abc import Callable
 from typing import NamedTuple
-from weakref import WeakKeyDictionary
 
 import jax.numpy as jnp
 import numpy as np
@@ -91,7 +89,7 @@ class DGLMFamily(NamedTuple):
             predictor, fed back to the state by linear Bayes.
 
     Note:
-        The built-in factories additionally register an eager
+        The built-in factories additionally attach an eager
         emission-support check that `dglm_filter` runs once on
         concrete emissions at its boundary (#283). The check lives
         outside the record because the record's released contract is
@@ -105,14 +103,11 @@ class DGLMFamily(NamedTuple):
     posterior_moments: FamilyPosteriorMoments
 
 
-# Support validators for the built-in families, keyed on each
-# family's own ``log_forecast`` closure: the closure is unique per
-# factory call, weak-referenceable (a NamedTuple is not), and kept
-# alive by the record itself, so an entry lives exactly as long as
-# its family (#317).
-_SUPPORT_VALIDATORS: WeakKeyDictionary[
-    Callable[..., Scalar], Callable[[Shaped[Array, "..."]], None]
-] = WeakKeyDictionary()
+# The built-in factories mark their own ``log_forecast`` closures
+# with this attribute; the filter boundary reads it with ``getattr``,
+# which places no hashability or weak-reference requirement on
+# user-supplied callables (#317).
+_VALIDATOR_ATTRIBUTE = "_smcx_validate_emissions"
 
 
 _ASYMPTOTIC_CUTOFF = 1e8
@@ -322,7 +317,7 @@ def poisson() -> DGLMFamily:
                 "poisson emissions must be nonnegative integer counts"
             )
 
-    _SUPPORT_VALIDATORS[log_forecast] = validate_emissions
+    setattr(log_forecast, _VALIDATOR_ATTRIBUTE, validate_emissions)
     return DGLMFamily(
         match_moments=match_moments,
         log_forecast=log_forecast,
@@ -451,7 +446,7 @@ def binomial(*, trials: int) -> DGLMFamily:
                 f"binomial emissions must be integers in [0, {trials}]"
             )
 
-    _SUPPORT_VALIDATORS[log_forecast] = validate_emissions
+    setattr(log_forecast, _VALIDATOR_ATTRIBUTE, validate_emissions)
     return DGLMFamily(
         match_moments=match_moments,
         log_forecast=log_forecast,
@@ -584,7 +579,7 @@ def dglm_filter(
     # to float32 1.0 and a float64 -1e-50 to negative zero, which
     # would defeat integer- and nonnegativity-support checks
     # (follow-up review R8).
-    validator = _SUPPORT_VALIDATORS.get(family.log_forecast)
+    validator = getattr(family.log_forecast, _VALIDATOR_ATTRIBUTE, None)
     if validator is not None and not isinstance(emissions, core.Tracer):
         validator(emissions)
     emission_values = emissions.astype(dtype)

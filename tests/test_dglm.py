@@ -4,6 +4,7 @@
 """Tests for the WHM dynamic generalized linear model filter."""
 
 import math
+import weakref
 
 import jax
 import jax.numpy as jnp
@@ -959,6 +960,28 @@ class TestObservationSupport:
         posterior = self._run(poisson(), [1.0, 0.0, 3.0])
         assert np.isfinite(float(posterior.marginal_loglik))
         posterior = self._run(binomial(trials=2), [2.0, 0.0])
+        assert np.isfinite(float(posterior.marginal_loglik))
+
+    def test_unhashable_callable_field_reaches_inference(self):
+        # The boundary reads an attribute from the family's own
+        # log_forecast with getattr, so a user callable needs neither
+        # hashability nor weak-reference support.
+        base = poisson()
+
+        class UnhashableForecast:
+            __slots__ = ()
+            __hash__ = None
+
+            def __call__(self, emission, alpha, beta):
+                return base.log_forecast(emission, alpha, beta)
+
+        forecast = UnhashableForecast()
+        with pytest.raises(TypeError):
+            hash(forecast)
+        with pytest.raises(TypeError):
+            weakref.ref(forecast)
+        family = base._replace(log_forecast=forecast)
+        posterior = self._run(family, [1.0, 0.0])
         assert np.isfinite(float(posterior.marginal_loglik))
 
     def test_user_defined_family_is_unchecked(self):
