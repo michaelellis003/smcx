@@ -2,6 +2,153 @@
 
 <!-- version list -->
 
+## v2.1.0 (2026-07-30)
+
+### Bug Fixes
+
+- Cancel the matcher residual in DGLM moment feedback
+  ([#323](https://github.com/michaelellis003/smcx/pull/323),
+  [`38dafd9`](https://github.com/michaelellis003/smcx/commit/38dafd9d06c6033091678a43b8ccb845c7e5b3e1))
+
+- Choose the DGLM forecast branch by error, keep moment differences stable
+  ([#314](https://github.com/michaelellis003/smcx/pull/314),
+  [`532f84d`](https://github.com/michaelellis003/smcx/commit/532f84d7908e3f87653d67805f4707e5430d86bc))
+
+- Confine the Liu-West move and its factorization to the selected branch
+  ([#315](https://github.com/michaelellis003/smcx/pull/315),
+  [`a160571`](https://github.com/michaelellis003/smcx/commit/a1605716ebe68facf117d4d4610b8588cea6f989))
+
+- Globalize the DGLM moment solvers with clamped Newton steps
+  ([#305](https://github.com/michaelellis003/smcx/pull/305),
+  [`ee52d61`](https://github.com/michaelellis003/smcx/commit/ee52d6160e49552677cefd8a83f4b908815a3cb2))
+
+- Keep 2.x Liu-West defaults behind a FutureWarning and inert-move gradients defined
+  ([#307](https://github.com/michaelellis003/smcx/pull/307),
+  [`d91fac0`](https://github.com/michaelellis003/smcx/commit/d91fac0ce794c3142b6f0a82bfca01cbf0384658))
+
+- Keep float32 Kalman/DLM evidence finite on representable data
+  ([#291](https://github.com/michaelellis003/smcx/pull/291),
+  [`bfa23a7`](https://github.com/michaelellis003/smcx/commit/bfa23a735a6ab49e43ec03719b08a91190171a2a))
+
+- Keep representable DLM scale updates finite eagerly
+  ([#304](https://github.com/michaelellis003/smcx/pull/304),
+  [`fcb8d00`](https://github.com/michaelellis003/smcx/commit/fcb8d005c94cc1caad168f1fb92f2879a3a926f0))
+
+- Keep the exact DGLM algebra unless the limit provably wins
+  ([#320](https://github.com/michaelellis003/smcx/pull/320),
+  [`3c32087`](https://github.com/michaelellis003/smcx/commit/3c3208776553ce2d224ececc529fb4a114b5b45d))
+
+- Name the remaining run_smc boundary errors and correct record docs
+  ([#310](https://github.com/michaelellis003/smcx/pull/310),
+  [`30a9234`](https://github.com/michaelellis003/smcx/commit/30a92349e4a8b883c709c2bba06956cb3ce78dca))
+
+- Reproduce the forward symmetrization in the RTS noise reconstruction
+  ([#303](https://github.com/michaelellis003/smcx/pull/303),
+  [`85f7209`](https://github.com/michaelellis003/smcx/commit/85f72090efc562491612eb8748348d1a37612801))
+
+- Restore the four-field DGLMFamily sequence contract
+  ([#322](https://github.com/michaelellis003/smcx/pull/322),
+  [`a078f37`](https://github.com/michaelellis003/smcx/commit/a078f37a6db3a3328bb58ca94b33614385eabf3a))
+
+- Return exactly -inf for gated degeneracy under jit
+  ([#302](https://github.com/michaelellis003/smcx/pull/302),
+  [`dd12699`](https://github.com/michaelellis003/smcx/commit/dd126990266e99cb4e2b62362913c0e8099bdcf7))
+
+- Rewrite the RTS covariance update in Joseph form
+  ([#295](https://github.com/michaelellis003/smcx/pull/295),
+  [`2d9c688`](https://github.com/michaelellis003/smcx/commit/2d9c688d9fb97fad25e85002f36dbf91d2bfe69c))
+
+- Solve DGLM moment matching across the full input domain
+  ([#293](https://github.com/michaelellis003/smcx/pull/293),
+  [`1db3c29`](https://github.com/michaelellis003/smcx/commit/1db3c29fc5f8c7f1da0662064d384d9b951a5463))
+
+- Switch DGLM forecasts to conjugate limits below the variance crossover
+  ([#309](https://github.com/michaelellis003/smcx/pull/309),
+  [`2d6e958`](https://github.com/michaelellis003/smcx/commit/2d6e958eb2a5bf8bbd1e7f99d1453046bd14f279))
+
+- Unify run_smc degeneracy policy and boundary validation
+  ([#298](https://github.com/michaelellis003/smcx/pull/298),
+  [`b0de918`](https://github.com/michaelellis003/smcx/commit/b0de9183d671cf9d928683646b867e6ddbdce298))
+
+- Validate DGLM observation support and binomial trials eagerly
+  ([#297](https://github.com/michaelellis003/smcx/pull/297),
+  [`9137d91`](https://github.com/michaelellis003/smcx/commit/9137d91d0d32343ceca41302d6d21f7e72fa08b2))
+
+- Validate DGLM support before the lossy emission cast
+  ([#311](https://github.com/michaelellis003/smcx/pull/311),
+  [`106a6f5`](https://github.com/michaelellis003/smcx/commit/106a6f57d7cb67ba2b881086ab417ebb1f2b51f9))
+
+- Whiten the DLM residual one factor at a time
+  ([#313](https://github.com/michaelellis003/smcx/pull/313),
+  [`e6c438c`](https://github.com/michaelellis003/smcx/commit/e6c438c2a611b5fddd7c28817dfb29aacab1cfce))
+
+### Chores
+
+- Keep review and implementation records local
+  ([#308](https://github.com/michaelellis003/smcx/pull/308),
+  [`7c1c902`](https://github.com/michaelellis003/smcx/commit/7c1c902663a3e7fde37675c6e318f7bd646aab5a))
+
+### Documentation
+
+- Apply the round-5 bounded correction set
+  ([#324](https://github.com/michaelellis003/smcx/pull/324),
+  [`098960b`](https://github.com/michaelellis003/smcx/commit/098960b82f70e158bf84bb1f95e128b086126d8a))
+
+- Correct the gradient identity and state the model-scope neutrally
+  ([#316](https://github.com/michaelellis003/smcx/pull/316),
+  [`1566c1c`](https://github.com/michaelellis003/smcx/commit/1566c1c6c1a0ef587e8a3026a640104a38cfebaf))
+
+- Describe the actual interface layers and the unused emission capability
+  ([#318](https://github.com/michaelellis003/smcx/pull/318),
+  [`9ca44aa`](https://github.com/michaelellis003/smcx/commit/9ca44aaa1252b3177c0b90f7b584ee8c63ad6d3d))
+
+- Name the DLM Student-t scale matrix correctly; drop stale pre-2.0 text
+  ([#292](https://github.com/michaelellis003/smcx/pull/292),
+  [`c510c7a`](https://github.com/michaelellis003/smcx/commit/c510c7a3007b2534b325adc7e9c928d7040dbb19))
+
+- State measured claims and actual boundaries in the round-4 passages
+  ([#321](https://github.com/michaelellis003/smcx/pull/321),
+  [`b790461`](https://github.com/michaelellis003/smcx/commit/b790461e02772f8721b624f19b21e8a071488cfe))
+
+- State the finite-N bias and pathwise limits of the particle gradient
+  ([#306](https://github.com/michaelellis003/smcx/pull/306),
+  [`638f0e5`](https://github.com/michaelellis003/smcx/commit/638f0e5beec887a38ea448edc1c53d17f0c00dba))
+
+- State what jax.grad of a resampling particle filter computes
+  ([#294](https://github.com/michaelellis003/smcx/pull/294),
+  [`57097d2`](https://github.com/michaelellis003/smcx/commit/57097d2a8ecebee77395d0e3e06dfb776e2e105d))
+
+### Features
+
+- Parameter_moves policy for liu_west_filter, defaulting to the paper
+  ([#299](https://github.com/michaelellis003/smcx/pull/299),
+  [`a9f48a6`](https://github.com/michaelellis003/smcx/commit/a9f48a65910325ef21a840746734dcb7b3e8d051))
+
+### Refactoring
+
+- Type the record callbacks with Protocols
+  ([#301](https://github.com/michaelellis003/smcx/pull/301),
+  [`28c2adb`](https://github.com/michaelellis003/smcx/commit/28c2adb64c0fbd9d797fa54016472759cb5e4b7f))
+
+### Testing
+
+- Bind the RTS symmetrization fix through the public smoother
+  ([#312](https://github.com/michaelellis003/smcx/pull/312),
+  [`cce2981`](https://github.com/michaelellis003/smcx/commit/cce2981383ce8044835fffa5997bb4e185b0720f))
+
+- Follow the backend's factorability verdict for the roundoff correlation
+  ([#300](https://github.com/michaelellis003/smcx/pull/300),
+  [`71027e0`](https://github.com/michaelellis003/smcx/commit/71027e0ddcf408e61bba017d7b46799c386786a0))
+
+- Give the DLM regressions a host-side float64 oracle
+  ([#319](https://github.com/michaelellis003/smcx/pull/319),
+  [`2af8a6c`](https://github.com/michaelellis003/smcx/commit/2af8a6c18f211227c059dd8cae24d9e581eda370))
+
+- Run the suite in the float32 default configuration
+  ([#296](https://github.com/michaelellis003/smcx/pull/296),
+  [`5593f26`](https://github.com/michaelellis003/smcx/commit/5593f26f82400d9b76d8dadaf451eacb37178fc6))
+
+
 ## v2.0.0 (2026-07-29)
 
 ### Bug Fixes
