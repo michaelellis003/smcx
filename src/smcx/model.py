@@ -79,7 +79,10 @@ class StateSpaceModel(NamedTuple):
             scalar`` auxiliary-filter look-ahead evaluated at the
             pre-propagation state.
         sample_emission: Optional ``(key, state, params, input_t) ->
-            emission`` for simulation and posterior prediction.
+            emission``. Reserved capability: no smcx function consumes
+            it today — `smcx.simulate` and the predictive functions
+            take standalone callbacks — and its retention or removal
+            is a compatibility decision, not implied usage.
     """
 
     sample_initial: ModelInitialSampler

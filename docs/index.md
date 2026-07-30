@@ -15,11 +15,15 @@ smcx implements all of these methods. The
 [introduction](guides/sequential-inference.md) develops them one
 assumption at a time, with the equations and references.
 
-Models enter as records of pure JAX callables with explicitly threaded
-parameters; every particle algorithm is a Feynman–Kac derivation over
-one generic loop; resamplers, criteria, proposals, potentials,
-look-ahead twists, mutation kernels, temperature schedules, and
-Gaussian linearization strategies are all caller-replaceable.
+Models are supplied as plain JAX callbacks. `StateSpaceModel` groups
+the particle-model callbacks for reuse across the bootstrap, guided,
+and auxiliary Feynman–Kac derivations over one shared loop, while the
+named filters provide the shortest one-call interface; Liu–West,
+tempered SMC, SMC², and the caller-owned runner have their own
+drivers. Resamplers, criteria, proposals, potentials, look-ahead
+twists, mutation kernels, temperature schedules, and Gaussian
+linearization strategies are all caller-replaceable, with parameters
+as explicitly threaded PyTrees on the record path.
 
 ## Installation
 
