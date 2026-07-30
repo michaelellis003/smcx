@@ -514,7 +514,7 @@ def test_public_smoother_binds_the_symmetrized_reconstruction():
     )
 
     # Floor: a few ulps of the largest quantity entering the Joseph
-    # products, |P| ~ 42, not a band fitted to the observed result.
+    # products, max|P| ~ 125, not a band fitted to the observed result.
     scale = float(jnp.abs(prediction).max())
     floor = -8.0 * float(jnp.finfo(dtype).eps) * scale
     assert eager >= floor, eager
