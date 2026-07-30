@@ -434,19 +434,51 @@ def test_float32_evidence_survives_large_observation():
             prior_scale=1.0,
         )
 
-    reference = run(jnp.float64)
+    expected_scales, expected_loglik = _host_dlm_reference(
+        1.0, 1.0, 1.0, [2e19]
+    )
     posterior = run(jnp.float32)
     np.testing.assert_allclose(
-        float(posterior.marginal_loglik),
-        float(reference.marginal_loglik),
-        rtol=1e-5,
+        float(posterior.marginal_loglik), expected_loglik, rtol=1e-5
     )
     np.testing.assert_allclose(
         float(posterior.scale_estimates[-1]),
-        float(reference.scale_estimates[-1]),
+        expected_scales[-1],
         rtol=1e-5,
     )
     assert np.all(np.isfinite(np.asarray(posterior.filtered_means)))
+
+
+def _host_dlm_reference(prior_shape, prior_scale, c0, emissions):
+    """Closed-form scalar DLM recursion in host float64 (math module).
+
+    The oracle must not run through JAX: with x64 disabled a
+    ``jnp.float64`` "reference" silently truncates to float32 and
+    reproduces the defect under test (round-3 response review, R2).
+    G = F = 1 and W = 0, matching the regressions below.
+    """
+    dof, scale, cov = float(prior_shape), float(prior_scale), float(c0)
+    scales, total = [], 0.0
+    for emission in emissions:
+        q_free = cov + 1.0
+        residual = float(emission)
+        total += (
+            math.lgamma((dof + 1.0) / 2.0)
+            - math.lgamma(dof / 2.0)
+            - 0.5
+            * (math.log(dof) + math.log(math.pi) + math.log(scale * q_free))
+            - (dof + 1.0)
+            / 2.0
+            * math.log1p(residual * residual / (dof * scale * q_free))
+        )
+        scale = (
+            dof / (dof + 1.0) * (scale + residual * residual / (dof * q_free))
+        )
+        gain = cov / q_free
+        cov = cov - gain * gain * q_free
+        dof = dof + 1.0
+        scales.append(scale)
+    return scales, total
 
 
 def test_float32_large_prior_scale_matches_jit_and_reference():
@@ -472,19 +504,17 @@ def test_float32_large_prior_scale_matches_jit_and_reference():
             prior_scale=1e37,
         )
 
-    reference = run(jnp.float64)
+    expected_scales, expected_loglik = _host_dlm_reference(
+        100.0, 1e37, 1.0, [0.0, 0.0]
+    )
     eager = run(jnp.float32)
     compiled = jax.jit(lambda: run(jnp.float32))()
 
     np.testing.assert_allclose(
-        np.asarray(eager.scale_estimates),
-        np.asarray(reference.scale_estimates),
-        rtol=1e-5,
+        np.asarray(eager.scale_estimates), expected_scales, rtol=1e-5
     )
     np.testing.assert_allclose(
-        float(eager.marginal_loglik),
-        float(reference.marginal_loglik),
-        rtol=1e-5,
+        float(eager.marginal_loglik), expected_loglik, rtol=1e-5
     )
     for eager_field, compiled_field in zip(eager, compiled, strict=True):
         np.testing.assert_allclose(
@@ -519,8 +549,8 @@ def _one_step_reference(dtype, prior_shape, prior_scale, c0, emission):
 def test_float32_representable_whitening_survives(
     prior_shape, prior_scale, c0, emission
 ):
-    reference = _one_step_reference(
-        jnp.float64, prior_shape, prior_scale, c0, emission
+    expected_scales, expected_loglik = _host_dlm_reference(
+        prior_shape, prior_scale, c0, [emission]
     )
     eager = _one_step_reference(
         jnp.float32, prior_shape, prior_scale, c0, emission
@@ -532,14 +562,10 @@ def test_float32_representable_whitening_survives(
     )()
 
     np.testing.assert_allclose(
-        np.asarray(eager.scale_estimates),
-        np.asarray(reference.scale_estimates),
-        rtol=1e-5,
+        np.asarray(eager.scale_estimates), expected_scales, rtol=1e-5
     )
     np.testing.assert_allclose(
-        float(eager.marginal_loglik),
-        float(reference.marginal_loglik),
-        rtol=1e-5,
+        float(eager.marginal_loglik), expected_loglik, rtol=1e-5
     )
     for eager_field, compiled_field in zip(eager, compiled, strict=True):
         np.testing.assert_allclose(
