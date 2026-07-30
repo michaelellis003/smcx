@@ -456,9 +456,9 @@ def _host_dlm_reference(prior_shape, prior_scale, c0, emissions):
     ``jnp.float64`` "reference" silently truncates to float32 and
     reproduces the defect under test (round-3 response review, R2).
     G = F = 1, W = 0, and m0 = 0, matching the regressions below.
-    Comparisons against it use rtol=1e-5: float32 carries about
-    seven decimal digits, and the filter's few-step arithmetic
-    leaves roughly two of them to accumulated rounding.
+    Comparisons against it use rtol=1e-5. This requires about five
+    of float32's roughly seven significant decimal digits and leaves
+    two for accumulated rounding in the few-step recurrence.
     """
     dof, scale, cov = float(prior_shape), float(prior_scale), float(c0)
     scales, total = [], 0.0
