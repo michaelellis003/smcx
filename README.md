@@ -1,18 +1,15 @@
 # smcx
 
-Sequential inference for state-space models (SSMs) in JAX:
-Kalman-family filters, particle filters, and sequential Monte Carlo
-(SMC) samplers. Following a theme of some modern probabilistic
-programming languages like [NumPyro](https://num.pyro.ai/en/stable/)
-and other projects in the JAX ecosystem like
-[dynestyx](https://github.com/BasisResearch/dynestyx), I aimed to
-decouple the inference code from the model code. smcx keeps model
-specification separate from inference: its algorithms consume plain
-JAX callables and small typed records, and it provides no
-probabilistic programming language of its own. Users define their
-models as plain JAX functions. This also lets them wrap models built
-in other SSM libraries like
-[dynamax](https://github.com/probml/dynamax).
+Sequential inference for state-space models in JAX: Kalman-family
+and DLM/DGLM filters, and SMC methods including particle filters,
+tempered SMC, and SMC². Algorithms consume plain JAX callables and
+small typed records, keeping model definitions separate from
+inference. smcx defines no probabilistic programming language.
+Models written elsewhere can be adapted by mapping them to those
+callables. Examples include [NumPyro](https://num.pyro.ai/en/stable/)
+programs for static targets, models from
+[dynamax](https://github.com/probml/dynamax), and dynamical models
+from [dynestyx](https://github.com/BasisResearch/dynestyx).
 
 An introduction to the Kalman and SMC methods is developed in
 [the documentation](https://michaelellis003.github.io/smcx/guides/sequential-inference/).
@@ -64,10 +61,9 @@ kalman = smcx.kalman_filter(m0, C0, G, W, F, V, y)
 print(kalman.marginal_loglik)  # -29.26, exact
 ```
 
-If you want to define your own model, of any form, you instead
-write functions for the initial distribution, the transition
-distribution, and the observation distribution, and pass them to a
-particle filter. Here is the same model through the bootstrap
+A particle filter instead needs a Markov state-space model given by
+three functions: a sampler for the initial law, a sampler for the
+transition, and an evaluable observation log density. Here is the same model through the bootstrap
 particle filter:
 
 ```python
@@ -95,10 +91,12 @@ particle = smcx.bootstrap_filter(
 print(particle.marginal_loglik)  # -29.16, N = 10,000
 ```
 
-The two estimates agree because the model is the same. If our model
-leaves the linear-Gaussian family, we can no longer use the Kalman
-filter. We only change the three functions of the bootstrap call to
-the new densities. The table below maps each model class to its
+The particle estimate approximates the exact Kalman value. At this
+key and N = 10,000 the two log-likelihoods differ by 0.10.
+Quantifying general agreement needs the Monte Carlo spread over
+repeated keys. If our model leaves the linear-Gaussian family, we
+can no longer use the Kalman filter. We only change the three
+functions of the bootstrap call to the new densities. The table below maps each model class to its
 methods, and the
 [introduction in the documentation](https://michaelellis003.github.io/smcx/guides/sequential-inference/)
 develops the theory with four worked examples, relaxing one
@@ -116,7 +114,7 @@ smcx implements the standard sequential inference methods:
 | Count and binary observations | Conjugate/linear-Bayes DGLM, approximate; the observation family is an argument | `dglm_filter` with `poisson()`, `bernoulli()`, or `binomial(trials=n)` |
 | General densities | Bootstrap, auxiliary, and guided particle filters | `bootstrap_filter`, `auxiliary_filter`, `guided_filter` |
 | Custom particle algorithms | Feynman–Kac derivations over one generic loop | `StateSpaceModel`, `FeynmanKac`, `run_smc`, `run_particle_filter` |
-| Static parameters | Adaptive tempered SMC, SMC², and the joint Liu-West filter | `temper`, `smc2`, `liu_west_filter` |
+| Static parameters | Tempered SMC targets a fixed posterior through a temperature path. SMC² nests a particle filter inside parameter-space SMC. Liu-West is approximate online parameter learning through kernel shrinkage | `temper`, `smc2`, `liu_west_filter` |
 | Simulation and prediction | Model simulation and posterior predictive draws | `simulate`, `posterior_predictive_sample` |
 | Resampling | Systematic, stratified, multinomial, residual | `systematic`, `stratified`, `multinomial`, `residual` |
 | Diagnostics and reporting | ESS, scoring rules, trajectory reconstruction, ArviZ export | `diagnose`, `crps`, `reconstruct_trajectories`, `to_arviz` |

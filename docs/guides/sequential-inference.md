@@ -1,9 +1,8 @@
 # A short introduction to sequential inference for state-space models
 
-I want to start with a quick sketch of how these methods developed.
-Which algorithm to use depends largely on the assumptions you are
-willing to make about the form of your state-space model. It also
-depends on which pieces of the model you are willing to assume known.
+Which algorithm to use depends on the assumptions you are willing
+to make about the form of your state-space model. It also depends on
+which pieces of the model you are willing to assume known.
 Let us start with a linear-Gaussian state-space model:
 
 $$
@@ -192,7 +191,8 @@ particles to propagate
 Observation-informed proposals sharpen the approximation further
 ([Doucet, Godsill, and Andrieu, 2000](https://doi.org/10.1023/A:1008935410038)).
 
-One relaxation remains. It is the one promised at the start. So far
+Finally, let the transition or observation densities depend on an
+unknown static parameter. So far
 every relaxation changed the form of the model. The pieces
 themselves stayed known: first the matrices and covariances, then
 the nonlinear functions, then the densities. Now drop that
@@ -224,16 +224,16 @@ statistics carries $p(\theta_t, \phi \mid y_{1:t})$ forward
 augmented state $(\theta_t, \phi)$ does not rescue the particle
 filter either. The recursion itself still holds, but a static $\phi$
 is never refreshed by the state density. The particle cloud's $\phi$-support
-can only ever shrink. Sequential Monte Carlo, a name the literature
-often uses interchangeably with particle methods, answers with the
-same weighted-particle machinery aimed at any sequence of
-distributions
+can only ever shrink. Particle filters are sequential Monte Carlo methods specialized to
+sequential state inference. The broader SMC framework targets other
+sequences of distributions with the same weighted-particle
+recursion, including tempered paths for static parameters
 ([Chopin and Papaspiliopoulos, 2020](https://doi.org/10.1007/978-3-030-47845-2)).
 We can rejuvenate $\phi$ online beside the states
 ([Liu and West, 2001](https://doi.org/10.1007/978-1-4757-3437-9_10)).
 We can run a filter for every parameter particle
 (SMC²: [Chopin, Jacob, and Papaspiliopoulos, 2013](https://doi.org/10.1111/j.1467-9868.2012.01046.x)).
-Or we can leave time behind entirely and anneal from prior to
+Or we can temper a fixed-data posterior, moving from prior to
 posterior through a ladder of temperatures
 ([Del Moral, Doucet, and Jasra, 2006](https://doi.org/10.1111/j.1467-9868.2006.00553.x)).
 

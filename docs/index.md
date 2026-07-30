@@ -6,11 +6,15 @@ sequential Monte Carlo, with model code decoupled from inference code.
 When a state-space model is linear and Gaussian with known
 covariances, the Kalman filter computes the exact posterior by a
 two-step recursion. Relaxing linearity keeps a Gaussian approximation
-alive (the extended and unscented filters); asking to *learn* a noise
-covariance, or observing through a discrete or heavy-tailed model,
-breaks the recursion outright. Particle filters carry the posterior as
-a weighted sample cloud instead, and sequential Monte Carlo extends
-the same machinery to tempering and joint state-parameter inference.
+alive (the extended and unscented filters). Outside special conjugate
+cases, unknown noise parameters or non-Gaussian observations break
+the Gaussian closed form. smcx implements an exact variance-scaled
+DLM and approximate conjugate/linear-Bayes DGLMs for specific
+observation families. Particle filters carry the posterior as a
+weighted sample cloud and cover general nonlinear or non-Gaussian
+models. Broader sequential Monte Carlo methods target other
+distribution sequences, including tempered paths for static
+parameters and nested state-parameter inference.
 smcx implements all of these methods. The
 [introduction](guides/sequential-inference.md) develops them one
 assumption at a time, with the equations and references.

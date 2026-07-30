@@ -302,19 +302,22 @@ smcx never inspects it beyond reading its fields (a Dynamax or other
 model-library adapter is just a function returning one).
 
 The positional-callback filters (`smcx.bootstrap_filter` and
-friends) remain supported with their original signatures; the model
-record supersedes the per-algorithm binding factories this guide
-previously recommended.
+friends) remain supported with their original signatures. A model
+record can be reused across every derivation that consumes its
+fields.
 
 ## Write a custom Feynman-Kac model
 
-A researcher's algorithm that is not in the catalog is usually still
-one `smcx.FeynmanKac`: an initial law ``m0``, a per-particle mutation
-kernel ``m``, and a per-particle log-potential ``log_g``, over a
-context PyTree whose leading axis is time. `smcx.run_smc` then
-supplies the conditional-resampling loop, the branch weight rule, the
-evidence accounting, and the posterior container. Annealing the
-potential is a two-line change to the derived record:
+The boundary between the two extension points is the loop shape. An
+algorithm of resample-mutate-reweight form fits `smcx.FeynmanKac`:
+an initial law ``m0``, a per-particle mutation kernel ``m``, and a
+per-particle log-potential ``log_g``, over a context PyTree whose
+leading axis is time. `smcx.run_smc` then supplies the
+conditional-resampling loop, the branch weight rule, the evidence
+accounting, and the posterior container. An algorithm that must own
+its full step belongs on `smcx.run_particle_filter` instead. As one
+record-level example, annealing the potential replaces ``log_g`` on
+the derived record:
 
 ```python
 fk = smcx.bootstrap_fk(model, params, emissions)
@@ -599,20 +602,26 @@ forecast.
 
 ## Keep the two PyTree roles separate
 
-There are two useful, different PyTrees at this boundary.
+Two PyTrees with different roles meet at this boundary. The
+latent-state PyTree flows through resampling and mutation as
+inference state. The parameter PyTree flows into every callback as
+explicit data.
 
-Each derivation reads a fixed set of `StateSpaceModel` fields and
-raises a named error at construction when one is `None`:
+The three base fields (`sample_initial`, `sample_transition`,
+`log_observation`) are required by the record's typed contract.
+The optional derivations validate only their additional capabilities
+and raise a named error at construction when one is `None`. The
+table lists the fields each derivation consumes:
 
-| Operation | Required fields |
+| Operation | Fields consumed |
 | --- | --- |
 | `bootstrap_fk` | `sample_initial`, `sample_transition`, `log_observation` |
-| `guided_fk` | bootstrap fields plus `sample_proposal`, `log_proposal`, `log_transition` |
+| `guided_fk` | `sample_initial`, `log_observation`, plus `sample_proposal`, `log_proposal`, `log_transition` |
 | `auxiliary_fk` | bootstrap fields plus `log_lookahead` |
 
-The callback-first named filters are the short on-ramp; the record
-and Feynman–Kac path is the reusable workbench layer, where one model
-definition serves every applicable derivation.
+The callback-first named filters are the short on-ramp. The record
+and Feynman–Kac path is the reusable workbench layer, where one
+model definition serves every derivation that consumes its fields.
 
 The **latent-state PyTree** is one particle's evolving state. Bootstrap,
 auxiliary, and guided filters accept a nonempty PyTree of arrays. The initial
