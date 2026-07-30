@@ -416,3 +416,60 @@ def test_float32_rts_smoothed_variances_stay_nonnegative():
         float(double.filtered_covariances[-1, 0, 0]),
         rtol=1e-9,
     )
+
+
+def test_rts_noise_reconstruction_is_exact_for_zero_process_noise():
+    """The reconstruction reproduces the forward symmetrization (R1).
+
+    The float32 product (A @ C) @ A.T is asymmetric by roundoff.
+    Subtracting the raw product from the symmetrized stored prediction
+    leaves an indefinite residue (eigenvalues of order eps times the
+    product scale) that the backward gain can amplify; reproducing the
+    forward symmetrization makes the zero-process-noise reconstruction
+    exactly zero.
+    """
+    dtype = jnp.float32
+    covariance = jnp.asarray([[8.0, 2.0], [2.0, 10.0]], dtype)
+    transition = jnp.asarray([[-1.2, -1.1], [-2.6, -2.2]], dtype)
+    raw = (transition @ covariance) @ transition.T
+    stored_prediction = kalman_module._symmetrize(raw)
+
+    reconstructed = stored_prediction - kalman_module._symmetrize(raw)
+    np.testing.assert_array_equal(np.asarray(reconstructed), 0.0)
+
+    # The defect the fix removes: the raw-product reconstruction is
+    # nonzero and indefinite for the same inputs.
+    indefinite = np.asarray(stored_prediction - raw)
+    assert np.abs(indefinite).max() > 0.0
+    assert np.linalg.eigvalsh(0.5 * (indefinite + indefinite.T)).min() < 0.0
+
+
+def test_multidimensional_float32_smoothed_covariances_stay_psd():
+    """Smoothed covariances stay PSD in a moderate float32 regime (R1).
+
+    Runs without a float64 reference so it also covers float32-only
+    backends. Extreme transition conditioning with zero process noise
+    remains outside any covariance-form smoother's guarantee (the
+    backward recursion amplifies roundoff by the squared condition
+    number per step); that limit is documented on `rts_smoother`.
+    """
+    dtype = jnp.float32
+    initial_covariance = jnp.asarray([[8.0, 2.0], [2.0, 10.0]], dtype)
+    transition = jnp.asarray([[-1.2, -1.1], [-2.6, -2.2]], dtype)
+    posterior = smcx.kalman_filter(
+        jnp.zeros(2, dtype),
+        initial_covariance,
+        transition,
+        jnp.zeros((2, 2), dtype),
+        jnp.eye(2, dtype=dtype),
+        jnp.eye(2, dtype=dtype),
+        jnp.zeros((3, 2), dtype),
+    )
+    smoothed = smcx.rts_smoother(posterior, transition)
+
+    covariances = np.asarray(smoothed.smoothed_covariances)
+    scale = float(np.abs(covariances).max())
+    floor = -8.0 * float(jnp.finfo(dtype).eps) * scale
+    for step in range(covariances.shape[0]):
+        eigenvalues = np.linalg.eigvalsh(covariances[step])
+        assert eigenvalues.min() >= floor, (step, eigenvalues)
