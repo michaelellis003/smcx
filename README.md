@@ -6,8 +6,10 @@ Kalman-family filters, particle filters, and sequential Monte Carlo
 programming languages like [NumPyro](https://num.pyro.ai/en/stable/)
 and other projects in the JAX ecosystem like
 [dynestyx](https://github.com/BasisResearch/dynestyx), I aimed to
-decouple the inference code from the model code. smcx goes one step
-further and has no modeling language of its own. Users define their
+decouple the inference code from the model code. smcx keeps model
+specification separate from inference: its algorithms consume plain
+JAX callables and small typed records, and it provides no
+probabilistic programming language of its own. Users define their
 models as plain JAX functions. This also lets them wrap models built
 in other SSM libraries like
 [dynamax](https://github.com/probml/dynamax).
