@@ -44,6 +44,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 import numpy as np
 from jax import core, lax
+from jax.nn import sigmoid as jax_sigmoid
 from jax.nn import softplus
 from jax.scipy.special import digamma, gammaln, polygamma
 from jax.scipy.stats import betabinom, nbinom
@@ -140,11 +141,11 @@ def _tetragamma_safe(value: Scalar) -> Scalar:
 
 
 def _tetragamma_times_arg_safe(value: Scalar) -> Scalar:
-    r"""Return $lpha\,\psi''(lpha)$ without the intermediate square.
+    r"""Return $\alpha\,\psi''(\alpha)$ without the intermediate square.
 
     ``_tetragamma_safe(a) * a`` forms ``1 / a**2`` before multiplying,
     which overflows float32 for the huge solutions of tiny target
-    variances even though the fused product $-1/lpha - 1/lpha^2$ is
+    variances even though the fused product $-1/\alpha - 1/\alpha^2$ is
     representable (follow-up review R3b).
     """
     large = value > _ASYMPTOTIC_CUTOFF
@@ -167,6 +168,45 @@ def _small_variance_cutoff(value: Scalar) -> Scalar:
     """
     eps = jnp.finfo(jnp.result_type(value)).eps
     return 3.0 * jnp.sqrt(eps)
+
+
+def _digamma_difference_safe(a: Scalar, b: Scalar) -> Scalar:
+    r"""$\psi(a) - \psi(b)$ without large-argument cancellation.
+
+    For large conjugate parameters the raw digamma difference cancels
+    to the working epsilon times $\log a$, erasing representable
+    posterior-moment differences (follow-up review R3b). The series
+    form keeps the numerator ``a - b`` exact and truncates at
+    $O(1/a^4)$.
+    """
+    large = jnp.minimum(a, b) > 1e3
+    a_ord = jnp.where(large, jnp.ones_like(a), a)
+    b_ord = jnp.where(large, jnp.ones_like(b), b)
+    a_big = jnp.where(large, a, jnp.ones_like(a))
+    b_big = jnp.where(large, b, jnp.ones_like(b))
+    series = (
+        jnp.log1p((a_big - b_big) / b_big)
+        - 1.0 / (2.0 * a_big)
+        + 1.0 / (2.0 * b_big)
+        - 1.0 / (12.0 * a_big * a_big)
+        + 1.0 / (12.0 * b_big * b_big)
+    )
+    return jnp.where(large, series, digamma(a_ord) - digamma(b_ord))
+
+
+def _digamma_minus_log_safe(a: Scalar, b: Scalar) -> Scalar:
+    r"""$\psi(a) - \log(b)$ without large-argument cancellation."""
+    large = jnp.minimum(a, b) > 1e3
+    a_ord = jnp.where(large, jnp.ones_like(a), a)
+    b_ord = jnp.where(large, jnp.ones_like(b), b)
+    a_big = jnp.where(large, a, jnp.ones_like(a))
+    b_big = jnp.where(large, b, jnp.ones_like(b))
+    series = (
+        jnp.log1p((a_big - b_big) / b_big)
+        - 1.0 / (2.0 * a_big)
+        - 1.0 / (12.0 * a_big * a_big)
+    )
+    return jnp.where(large, series, digamma(a_ord) - jnp.log(b_ord))
 
 
 # Log-space Newton steps larger than this are clamped. Far from the
@@ -219,25 +259,42 @@ def poisson() -> DGLMFamily:
         return alpha, beta
 
     def log_forecast(emission, alpha, beta):
-        exact = nbinom.logpmf(emission, alpha, beta / (1.0 + beta))
-        # Small predictor variance: the gammaln differences above lose
-        # most significant digits to cancellation, while the matched
-        # negative binomial converges to Poisson(e^f); switch to the
-        # limit, whose truncation error is O(q) at the crossover
-        # (validated against 50-digit references; R3c).
+        # Error-aware branch (follow-up response review R3a): the
+        # matched negative binomial converges to Poisson(e^f) as the
+        # predictor variance q shrinks, with truncation bounded by
+        # q*((y - rate)^2 + y + rate + 1)/2 (calibrated conservative
+        # against 50-digit references), while the exact gammaln
+        # algebra cancels at roughly eps*alpha*(log(alpha)+|f|+1).
+        # Each observation takes whichever error is smaller, so the
+        # exact finite-q evidence is kept wherever it is the more
+        # accurate representable evaluation. Inactive operands are
+        # clamped so the unused branch cannot poison gradients (R3c).
+        eps = jnp.finfo(jnp.result_type(alpha)).eps
         predictor_variance = _trigamma_safe(alpha)
-        predictor_mean = _digamma_safe(alpha) - jnp.log(beta)
+        predictor_mean = _digamma_minus_log_safe(alpha, beta)
         rate = jnp.exp(predictor_mean)
-        limit = emission * predictor_mean - rate - gammaln(emission + 1.0)
-        return jnp.where(
-            predictor_variance < _small_variance_cutoff(alpha), limit, exact
+        limit_bound = (
+            0.5
+            * predictor_variance
+            * ((emission - rate) ** 2 + emission + rate + 1.0)
         )
+        exact_estimate = (
+            eps * alpha * (jnp.log(alpha) + jnp.abs(predictor_mean) + 1.0)
+        )
+        use_limit = limit_bound < exact_estimate
+        limit = emission * predictor_mean - rate - gammaln(emission + 1.0)
+        alpha_safe = jnp.where(use_limit, jnp.ones_like(alpha), alpha)
+        beta_safe = jnp.where(use_limit, jnp.ones_like(beta), beta)
+        exact = nbinom.logpmf(
+            emission, alpha_safe, beta_safe / (1.0 + beta_safe)
+        )
+        return jnp.where(use_limit, limit, exact)
 
     def update(emission, alpha, beta):
         return alpha + emission, beta + 1.0
 
     def posterior_moments(alpha, beta):
-        return _digamma_safe(alpha) - jnp.log(beta), _trigamma_safe(alpha)
+        return _digamma_minus_log_safe(alpha, beta), _trigamma_safe(alpha)
 
     def validate_emissions(emissions):
         values = np.asarray(emissions)
@@ -323,12 +380,28 @@ def binomial(*, trials: int) -> DGLMFamily:
         return _match_beta_moments(forecast_mean, forecast_variance)
 
     def log_forecast(emission, alpha, beta):
-        exact = betabinom.logpmf(emission, trials, alpha, beta)
-        # Small predictor variance: the matched beta-binomial converges
-        # to Binomial(trials, sigmoid(f)); the exact gammaln algebra
-        # cancels catastrophically there (R3c).
+        # Error-aware branch between the exact beta-binomial algebra
+        # and its Binomial(trials, sigmoid(f)) limit; see the Poisson
+        # family for the bound construction (R3a, R3c).
+        eps = jnp.finfo(jnp.result_type(alpha)).eps
         predictor_variance = _trigamma_safe(alpha) + _trigamma_safe(beta)
-        predictor_mean = _digamma_safe(alpha) - _digamma_safe(beta)
+        predictor_mean = _digamma_difference_safe(alpha, beta)
+        success_probability = jax_sigmoid(predictor_mean)
+        mean_count = trials * success_probability
+        limit_bound = (
+            0.5
+            * predictor_variance
+            * (
+                (emission - mean_count) ** 2
+                + mean_count * (1.0 - success_probability)
+                + 1.0
+            )
+        )
+        total = alpha + beta
+        exact_estimate = (
+            eps * total * (jnp.log(total) + jnp.abs(predictor_mean) + 1.0)
+        )
+        use_limit = limit_bound < exact_estimate
         limit = (
             gammaln(trials + 1.0)
             - gammaln(emission + 1.0)
@@ -336,19 +409,20 @@ def binomial(*, trials: int) -> DGLMFamily:
             + emission * predictor_mean
             - trials * softplus(predictor_mean)
         )
-        return jnp.where(
-            predictor_variance < _small_variance_cutoff(alpha), limit, exact
-        )
+        alpha_safe = jnp.where(use_limit, jnp.ones_like(alpha), alpha)
+        beta_safe = jnp.where(use_limit, jnp.ones_like(beta), beta)
+        exact = betabinom.logpmf(emission, trials, alpha_safe, beta_safe)
+        return jnp.where(use_limit, limit, exact)
 
     def update(emission, alpha, beta):
         return alpha + emission, beta + trials - emission
 
     def posterior_moments(alpha, beta):
-        # The asymptotic-safe forms bound the absolute error of the
-        # digamma difference by the representation error of the linear
-        # predictor itself (follow-up review R3c).
+        # Stable difference: the raw digamma subtraction erases
+        # representable posterior-moment differences for the large
+        # matched parameters of small predictor variances (R3b).
         return (
-            _digamma_safe(alpha) - _digamma_safe(beta),
+            _digamma_difference_safe(alpha, beta),
             _trigamma_safe(alpha) + _trigamma_safe(beta),
         )
 

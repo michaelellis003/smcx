@@ -1115,3 +1115,126 @@ class TestValidationBeforeCast:
         # nonnegativity check.
         with pytest.raises(ValueError, match="nonnegative integer"):
             self._run(jnp.array([-1e-50, 0.0], jnp.float64))
+
+
+class TestErrorAwareCrossover:
+    """The branch choice tracks the actual error, not q alone (R3a).
+
+    References are 50-digit mpmath evaluations of the exact conjugate
+    forecasts. The moderate-intensity and multi-trial cases sit where
+    a q-only crossover chose the limit and lost more than a tenth of
+    a nat; the error-aware switch must keep the exact algebra there.
+    """
+
+    #: (f, q, y, exact nbinom log-pmf)
+    POISSON_MODERATE = (
+        (6.0, 0.001, 403, -4.0882232570866959),
+        (6.0, 0.001, 380, -4.555902852993563),
+        (2.0, 0.01, 12, -3.3142847774208137),
+        (0.0, 1e-05, 3, -2.791744469532216),
+    )
+
+    #: (f, q, trials, y, exact beta-binomial log-pmf)
+    BINOMIAL_MODERATE = (
+        (0.0, 0.001, 100, 50, -2.5432211861360956),
+        (0.0, 0.001, 100, 60, -4.4877197397299169),
+        (1.0, 0.01, 20, 10, -4.0556590178591073),
+    )
+
+    @pytest.mark.parametrize(
+        "mean, variance, emission, expected", POISSON_MODERATE
+    )
+    def test_poisson_moderate_intensity(
+        self, mean, variance, emission, expected
+    ):
+        family = poisson()
+        alpha, beta = family.match_moments(
+            jnp.asarray(mean), jnp.asarray(variance)
+        )
+        actual = float(
+            family.log_forecast(jnp.asarray(float(emission)), alpha, beta)
+        )
+        np.testing.assert_allclose(
+            actual, expected, rtol=_dtype_rtol(1e-6, 2e-3)
+        )
+
+    @pytest.mark.parametrize(
+        "mean, variance, trials, emission, expected", BINOMIAL_MODERATE
+    )
+    def test_binomial_multi_trial(
+        self, mean, variance, trials, emission, expected
+    ):
+        family = binomial(trials=trials)
+        alpha, beta = family.match_moments(
+            jnp.asarray(mean), jnp.asarray(variance)
+        )
+        actual = float(
+            family.log_forecast(jnp.asarray(float(emission)), alpha, beta)
+        )
+        np.testing.assert_allclose(
+            actual, expected, rtol=_dtype_rtol(1e-6, 2e-3)
+        )
+
+
+class TestStableMomentDifferences:
+    """Representable posterior-moment differences survive (R3b)."""
+
+    def test_bernoulli_recurrence_through_the_filter(self):
+        # f=0, q=1e-6, y=1: matched a = b, posterior a* = b* + 1, so
+        # the true mean update is digamma(b*+1) - digamma(b*) = 1/b*
+        # (the represented recurrence, about 5.0000011e-7); the gain
+        # is one, so the filtered mean equals that difference.
+        def run():
+            return smcx.dglm_filter(
+                jnp.array([0.0]),
+                jnp.array([[1e-6]]),
+                jnp.eye(1),
+                jnp.array([1.0]),
+                jnp.array([1.0]),
+                family=bernoulli(),
+                transition_covariance=jnp.array([[1e-12]]),
+            )
+
+        eager = float(run().filtered_means[0, 0])
+        compiled = float(jax.jit(run)().filtered_means[0, 0])
+        family = bernoulli()
+        _, beta = family.match_moments(jnp.asarray(0.0), jnp.asarray(1e-6))
+        # The represented recurrence digamma(b*+1) - digamma(b*) with
+        # b* = beta + 1 equals 1 / (beta + 1).
+        expected = 1.0 / (float(beta) + 1.0)
+        np.testing.assert_allclose(
+            eager, expected, rtol=_dtype_rtol(1e-4, 1e-2)
+        )
+        np.testing.assert_allclose(compiled, eager, rtol=1e-6, atol=0.0)
+
+
+class TestSmallVarianceGradients:
+    """Finite public evidence has a finite gradient (R3c)."""
+
+    def test_poisson_limit_gradient_matches_analytic(self):
+        def evidence(initial_mean):
+            return smcx.dglm_filter(
+                initial_mean,
+                jnp.array([[1e-8]]),
+                jnp.eye(1),
+                jnp.array([1.0]),
+                jnp.array([1.0]),
+                family=poisson(),
+                transition_covariance=jnp.array([[0.0]]),
+            ).marginal_loglik
+
+        point = jnp.array([1.0])
+        value_eager = float(evidence(point))
+        grad_eager = float(jax.grad(evidence)(point)[0])
+        grad_compiled = float(jax.jit(jax.grad(evidence))(point)[0])
+
+        np.testing.assert_allclose(
+            value_eager, 1.0 - math.e - math.lgamma(2.0), rtol=1e-6
+        )
+        expected_gradient = 1.0 - math.e
+        np.testing.assert_allclose(
+            grad_eager, expected_gradient, rtol=_dtype_rtol(1e-6, 1e-4)
+        )
+        np.testing.assert_allclose(
+            grad_compiled, expected_gradient, rtol=_dtype_rtol(1e-6, 1e-4)
+        )
