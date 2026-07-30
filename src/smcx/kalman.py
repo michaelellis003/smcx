@@ -1705,13 +1705,20 @@ def _rts_step(
     # classic subtractive form, whose cancellation returns negative
     # variances in float32 when the smoothed and predicted covariances
     # nearly coincide (#286). The process noise is recovered from the
-    # stored forward pass, reproducing its product order, so it is
-    # exact whenever the forward prediction is reproduced bitwise.
+    # stored forward pass by reproducing its product order AND its
+    # symmetrization: the raw float product (A C) A' is asymmetric by
+    # roundoff, and subtracting it from the symmetrized stored
+    # prediction leaves an indefinite residue that a near-singular
+    # transition amplifies into negative eigenvalues (follow-up review
+    # R1). With the symmetrization reproduced, the reconstruction is
+    # bitwise zero for zero process noise and symmetric otherwise;
+    # caller-constructed posteriors get the same guarantee only when
+    # their stored predictions are consistent with their filtered
+    # moments (documented on rts_smoother).
     identity = jnp.eye(filtered_mean.shape[0], dtype=filtered_mean.dtype)
     residual_operator = identity - gain @ transition_matrix
-    process_noise = (
-        next_predicted_covariance
-        - (transition_matrix @ filtered_covariance) @ transition_matrix.T
+    process_noise = next_predicted_covariance - _symmetrize(
+        (transition_matrix @ filtered_covariance) @ transition_matrix.T
     )
     smoothed_covariance = _symmetrize(
         residual_operator @ filtered_covariance @ residual_operator.T
@@ -1755,6 +1762,18 @@ def rts_smoother(
         run eagerly and are skipped for traced arrays. Nonzero subnormal
         covariance entries are rejected; positive-time predictions must yield
         a finite, positive-diagonal factor on the active backend.
+
+        The backward update recovers each step's process noise from the
+        stored moments as ``predicted - symmetrize(A @ filtered @ A.T)``,
+        so a caller-constructed posterior gets the Joseph-form
+        positive-semidefiniteness behavior only when its stored
+        predictions are consistent with its filtered moments under that
+        expression. Covariance-form smoothing also amplifies float32
+        roundoff by roughly the squared condition number of the
+        transition per backward step; ill-conditioned transitions with
+        near-zero process noise can lose positive semidefiniteness for
+        that reason alone, which a square-root smoother would be needed
+        to prevent.
     """
     num_timesteps, state_dim, dtype = _validate_filter_posterior(
         filtered_posterior
