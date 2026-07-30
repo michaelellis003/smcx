@@ -236,14 +236,21 @@ def dlm_filter(
         )
         residual = emission_t[0] - forecast
         gain = prior_cov @ observation_vector / forecast_scale_free
-        forecast_scale = carry.scale * forecast_scale_free
-        # Whiten before squaring: the raw square overflows float32 for
-        # residuals past ~1.8e19 while the Student-t log density (heavy
-        # tails) and the updated scale stay representable (#281).
-        # Barriers stop XLA from rewriting (r/s)**2 into r**2/s**2,
-        # which would resurrect the overflow inside the compiled scan.
+        # The forecast scale ``carry.scale * forecast_scale_free`` is
+        # never materialized: for a representable scale near the dtype
+        # maximum the product overflows while the log density and the
+        # updated scale stay representable (follow-up review R2). Its
+        # logarithm separates, and the whitening divides by the two
+        # factors in turn. Whiten before squaring: the raw square
+        # overflows float32 for residuals past ~1.8e19 while the
+        # Student-t log density (heavy tails) stays representable
+        # (#281). Barriers stop XLA from reassociating the divisions
+        # into the overflowing product, which would also break the
+        # eager/JIT numerical-equivalence contract.
+        log_forecast_scale = jnp.log(carry.scale) + jnp.log(forecast_scale_free)
         whitened = lax.optimization_barrier(
-            residual / jnp.sqrt(dof * forecast_scale)
+            (residual / jnp.sqrt(carry.scale))
+            / jnp.sqrt(dof * forecast_scale_free)
         )
         squared = whitened * whitened
         abs_whitened = jnp.abs(whitened)
@@ -255,7 +262,7 @@ def dlm_filter(
         log_density = (
             gammaln((dof + 1.0) / 2.0)
             - gammaln(dof / 2.0)
-            - 0.5 * (jnp.log(dof) + log_pi + jnp.log(forecast_scale))
+            - 0.5 * (jnp.log(dof) + log_pi + log_forecast_scale)
             - (dof + 1.0) / 2.0 * log1p_term
         )
         new_mean = prior_mean + gain * residual
@@ -264,7 +271,12 @@ def dlm_filter(
         half_width = lax.optimization_barrier(
             residual / jnp.sqrt(dof * forecast_scale_free)
         )
-        new_scale = dof * (carry.scale + half_width * half_width) / new_shape
+        # Bounded ratio before multiplication: ``dof * (...)`` overflows
+        # about ``dof``-fold before the divided result does (R2).
+        ratio = dof / new_shape
+        new_scale = lax.optimization_barrier(
+            ratio * carry.scale
+        ) + lax.optimization_barrier(ratio * (half_width * half_width))
         loglik, compensation = _neumaier_add(
             carry.marginal_loglik,
             carry.log_evidence_compensation,
