@@ -190,10 +190,14 @@ posterior = smcx.dlm_filter(
     prior_shape=4.0,  # Inverse-Gamma degrees of freedom
     prior_scale=1.0,  # prior point estimate of V
 )
-scaled_covariances = (
+scale_matrices = (
     posterior.scale_estimates[:, None, None]
     * posterior.filtered_scale_free_covariances
 )
+# These are Student-t scale matrices, not covariances; the filtered
+# covariance carries the tail factor n / (n - 2) and exists for n > 2.
+dof = posterior.scale_shapes[:, None, None]
+filtered_covariances = dof / (dof - 2.0) * scale_matrices
 ```
 
 A `variance_discount` below one instead tracks a slowly changing
@@ -230,7 +234,8 @@ posterior.marginal_loglik  # sum of exact negative-binomial forecasts
 
 The observation family is a `smcx.DGLMFamily` record of four pure
 callables (moment matching, forecast log density, conjugate update,
-posterior moments), so a new family is user-definable without
+posterior moments) plus an optional eager support validator, so a
+new family is user-definable without
 touching the filter; the library's own tests build a normal family
 through this record to prove the recursion reduces exactly to the
 Kalman filter. `smcx.bernoulli()` and `smcx.binomial(trials=n)`
