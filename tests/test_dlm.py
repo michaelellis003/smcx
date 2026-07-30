@@ -447,3 +447,46 @@ def test_float32_evidence_survives_large_observation():
         rtol=1e-5,
     )
     assert np.all(np.isfinite(np.asarray(posterior.filtered_means)))
+
+
+def test_float32_large_prior_scale_matches_jit_and_reference():
+    """Representable scale updates survive eagerly, and eager == jit (R2).
+
+    With prior shape 100 and prior scale 1e37, every updated scale and
+    the evidence are float32-representable, but a numerator formed as
+    ``dof * (scale + ...)`` overflows about ``dof``-fold early — and
+    only eagerly, because XLA reassociates the compiled expression,
+    which breaks the eager/JIT equivalence contract.
+    """
+
+    def run(dtype):
+        eye = jnp.eye(1, dtype=dtype)
+        return smcx.dlm_filter(
+            jnp.zeros(1, dtype),
+            eye,
+            eye,
+            jnp.ones(1, dtype),
+            jnp.zeros((2, 1), dtype),
+            scale_free_transition_covariance=jnp.zeros((1, 1), dtype),
+            prior_shape=100.0,
+            prior_scale=1e37,
+        )
+
+    reference = run(jnp.float64)
+    eager = run(jnp.float32)
+    compiled = jax.jit(lambda: run(jnp.float32))()
+
+    np.testing.assert_allclose(
+        np.asarray(eager.scale_estimates),
+        np.asarray(reference.scale_estimates),
+        rtol=1e-5,
+    )
+    np.testing.assert_allclose(
+        float(eager.marginal_loglik),
+        float(reference.marginal_loglik),
+        rtol=1e-5,
+    )
+    for eager_field, compiled_field in zip(eager, compiled, strict=True):
+        np.testing.assert_allclose(
+            np.asarray(compiled_field), np.asarray(eager_field), rtol=1e-6
+        )
