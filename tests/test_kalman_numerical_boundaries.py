@@ -473,3 +473,49 @@ def test_multidimensional_float32_smoothed_covariances_stay_psd():
     for step in range(covariances.shape[0]):
         eigenvalues = np.linalg.eigvalsh(covariances[step])
         assert eigenvalues.min() >= floor, (step, eigenvalues)
+
+
+def test_public_smoother_binds_the_symmetrized_reconstruction():
+    """The symmetrization fix is observable through rts_smoother (R1).
+
+    A caller-constructed two-step posterior stores the prediction the
+    forward pass would have produced and a zero final filtered
+    covariance, so the entire first-step result flows through the
+    process-noise reconstruction. With the raw-product reconstruction
+    the minimum eigenvalue is about -4.4e-4; with the forward
+    symmetrization reproduced it is nonnegative up to a dtype- and
+    scale-derived floor. Reverting the production expression makes
+    this test fail (verified when the test was written).
+    """
+    dtype = jnp.float32
+    initial_covariance = jnp.asarray([[8.0, 2.0], [2.0, 10.0]], dtype)
+    transition = jnp.asarray([[-1.2, -1.1], [-2.6, -2.2]], dtype)
+    prediction = kalman_module._symmetrize(
+        (transition @ initial_covariance) @ transition.T
+    )
+    zero = jnp.zeros((2, 2), dtype)
+    means = jnp.zeros((2, 2), dtype)
+    posterior = smcx.GaussianFilterPosterior(
+        jnp.asarray(0.0, dtype),
+        means,
+        jnp.stack([initial_covariance, prediction]),
+        means,
+        jnp.stack([initial_covariance, zero]),
+        jnp.zeros(2, dtype),
+    )
+
+    def smallest_eigenvalue(smoothed):
+        first = np.asarray(smoothed.smoothed_covariances[0])
+        return float(np.linalg.eigvalsh(first).min())
+
+    eager = smallest_eigenvalue(smcx.rts_smoother(posterior, transition))
+    compiled = smallest_eigenvalue(
+        jax.jit(smcx.rts_smoother)(posterior, transition)
+    )
+
+    # Floor: a few ulps of the largest quantity entering the Joseph
+    # products, |P| ~ 42, not a band fitted to the observed result.
+    scale = float(jnp.abs(prediction).max())
+    floor = -8.0 * float(jnp.finfo(dtype).eps) * scale
+    assert eager >= floor, eager
+    assert compiled >= floor, compiled
