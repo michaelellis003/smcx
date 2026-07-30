@@ -139,6 +139,31 @@ def _tetragamma_safe(value: Scalar) -> Scalar:
     )
 
 
+def _tetragamma_times_arg_safe(value: Scalar) -> Scalar:
+    r"""Return $lpha\,\psi''(lpha)$ without the intermediate square.
+
+    ``_tetragamma_safe(a) * a`` forms ``1 / a**2`` before multiplying,
+    which overflows float32 for the huge solutions of tiny target
+    variances even though the fused product $-1/lpha - 1/lpha^2$ is
+    representable (follow-up review R3b).
+    """
+    large = value > _ASYMPTOTIC_CUTOFF
+    ordinary = jnp.where(large, jnp.ones_like(value), value)
+    big = jnp.where(large, value, jnp.ones_like(value))
+    return jnp.where(
+        large,
+        -1.0 / big - 1.0 / (big * big),
+        polygamma(2, ordinary) * ordinary,
+    )
+
+
+# Log-space Newton steps larger than this are clamped. Far from the
+# root the clamp bounds each multiplicative update (a standard Newton
+# globalization); near the root steps are small, so the quadratic
+# convergence is untouched.
+_NEWTON_MAX_LOG_STEP = 4.0
+
+
 def _inverse_trigamma(value: Scalar) -> Scalar:
     r"""Solve $\psi'(\alpha) = q$ for $\alpha > 0$.
 
@@ -156,8 +181,11 @@ def _inverse_trigamma(value: Scalar) -> Scalar:
     for _ in range(_NEWTON_ITERATIONS):
         alpha = jnp.exp(log_alpha)
         residual = _trigamma_safe(alpha) - value
-        slope = _tetragamma_safe(alpha) * alpha
-        log_alpha = log_alpha - residual / slope
+        slope = _tetragamma_times_arg_safe(alpha)
+        step = jnp.clip(
+            residual / slope, -_NEWTON_MAX_LOG_STEP, _NEWTON_MAX_LOG_STEP
+        )
+        log_alpha = log_alpha - step
     return jnp.exp(log_alpha)
 
 
@@ -231,15 +259,21 @@ def _match_beta_moments(
         residual_var = _trigamma_safe(alpha) + _trigamma_safe(beta) - variance
         j11 = _trigamma_safe(alpha) * alpha
         j12 = -_trigamma_safe(beta) * beta
-        j21 = _tetragamma_safe(alpha) * alpha
-        j22 = _tetragamma_safe(beta) * beta
+        j21 = _tetragamma_times_arg_safe(alpha)
+        j22 = _tetragamma_times_arg_safe(beta)
         determinant = j11 * j22 - j12 * j21
-        log_alpha = (
-            log_alpha - (j22 * residual_mean - j12 * residual_var) / determinant
+        step_alpha = jnp.clip(
+            (j22 * residual_mean - j12 * residual_var) / determinant,
+            -_NEWTON_MAX_LOG_STEP,
+            _NEWTON_MAX_LOG_STEP,
         )
-        log_beta = (
-            log_beta - (-j21 * residual_mean + j11 * residual_var) / determinant
+        step_beta = jnp.clip(
+            (-j21 * residual_mean + j11 * residual_var) / determinant,
+            -_NEWTON_MAX_LOG_STEP,
+            _NEWTON_MAX_LOG_STEP,
         )
+        log_alpha = log_alpha - step_alpha
+        log_beta = log_beta - step_beta
     return jnp.exp(log_alpha), jnp.exp(log_beta)
 
 
@@ -374,6 +408,13 @@ def dglm_filter(
             conjugate moment match divides by that variance — or
             concrete emissions outside the family's documented
             support when the family supplies ``validate_emissions``.
+
+    Note:
+        Only the first step's predictor variance is checkable at the
+        boundary. A model whose predictor direction loses all variance
+        at a later step (for example a nilpotent transition with zero
+        evolution covariance) divides by zero there and returns NaN in
+        every field from that step onward (follow-up review R3).
     """
     if (transition_covariance is None) == (discount is None):
         raise ValueError(
