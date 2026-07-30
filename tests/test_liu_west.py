@@ -1120,3 +1120,52 @@ def test_inert_move_gradient_is_finite_for_degenerate_cloud():
 
     gradient = jax.grad(run)(jnp.asarray(1.0))
     assert np.isfinite(float(gradient))
+
+
+class TestUnselectedMoveGradients:
+    """Data-dependent false selections keep gradients defined (R7)."""
+
+    @staticmethod
+    def _run(scale, resampling_threshold):
+        cloud = jnp.asarray([
+            [-1.0, -1.0],
+            [1.0, 1.0],
+            [-1.0, 1.0],
+            [1.0, -1.0],
+        ])
+        return liu_west_filter(
+            jr.key(3),
+            lambda key, n: jnp.zeros((n, 1)),
+            lambda key, state, params: state,
+            lambda e, s, params: scale * -0.25 * (e[0] - params[0]) ** 2,
+            lambda e, s, params: scale * -0.25 * (e[0] - params[0]) ** 2,
+            lambda key, n: cloud,
+            jnp.zeros((2, 1)),
+            4,
+            resampling_threshold=resampling_threshold,
+            parameter_moves="on_selection",
+        ).marginal_loglik
+
+    @pytest.mark.parametrize(
+        "threshold",
+        [0.5, lambda log_w, ess, t: jnp.asarray(False)],
+        ids=["uniform-weights-no-selection", "criterion-false"],
+    )
+    def test_gradient_is_finite_and_matches_never_select(self, threshold):
+        # The isotropic cloud has a repeated-eigenvalue weighted
+        # covariance, so any eigendecomposition in the differentiated
+        # graph would return NaN. With no selection occurring, the
+        # gradient must equal the static never-select path's.
+        reference = float(
+            jax.grad(lambda s: self._run(s, 0.0))(jnp.asarray(1.0))
+        )
+
+        def objective(scale):
+            return self._run(scale, threshold)
+
+        eager = float(jax.grad(objective)(jnp.asarray(1.0)))
+        compiled = float(jax.jit(jax.grad(objective))(jnp.asarray(1.0)))
+
+        assert np.isfinite(eager)
+        np.testing.assert_allclose(eager, reference, rtol=1e-6)
+        np.testing.assert_allclose(compiled, reference, rtol=1e-6)

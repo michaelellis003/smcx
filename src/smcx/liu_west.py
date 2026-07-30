@@ -48,7 +48,7 @@ from typing import NamedTuple, cast
 
 import jax.numpy as jnp
 import jax.random as jr
-from jax import core, vmap
+from jax import core, lax, vmap
 from jaxtyping import Array, Bool, Float, Int
 
 from smcx._numerics import _neumaier_add
@@ -116,6 +116,103 @@ class _LiuWestStepOutput(NamedTuple):
     normalizers_finite: Bool[Array, ""]
 
 
+def _centered_parameter_moments(
+    params: Float[Array, "num_particles param_dim"],
+    weights: Float[Array, " num_particles"],
+) -> tuple[Array, Array, Array, Array, Array]:
+    """Anchor-relative weighted moments shared by shrink and factor.
+
+    Moments are evaluated relative to a maximum-weight parameter,
+    avoiding amplification of weight-sum error by a large common
+    offset. Represented-zero parameters are masked before centered
+    arithmetic.
+    """
+    working_dtype = jnp.promote_types(params.dtype, jnp.float32)
+    working_params = params.astype(working_dtype)
+    weights = weights.astype(working_dtype)
+    weights = weights / jnp.sum(weights)
+    anchor = working_params[jnp.argmax(weights)]
+    material = weights[:, None] > 0.0
+    offsets = jnp.where(
+        material,
+        working_params - anchor,
+        jnp.zeros_like(working_params),
+    )
+    offset_mean = jnp.sum(weights[:, None] * offsets, axis=0)
+    return anchor, offsets, offset_mean, weights, material
+
+
+def _shrunk_parameters(
+    params: Float[Array, "num_particles param_dim"],
+    weights: Float[Array, " num_particles"],
+    shrinkage: Float[Array, ""],
+) -> Float[Array, "num_particles param_dim"]:
+    """Shrink the cloud toward its weighted mean; no factorization.
+
+    This feeds the auxiliary weights and the selection decision, so it
+    must not touch the eigendecomposition — its derivative is
+    undefined at repeated eigenvalues, and the decision path is
+    differentiated on every step (follow-up response review R7).
+    """
+    working_dtype = jnp.promote_types(params.dtype, jnp.float32)
+    anchor, offsets, offset_mean, _, _ = _centered_parameter_moments(
+        params, weights
+    )
+    shrinkage = jnp.asarray(shrinkage, dtype=working_dtype)
+    one = jnp.asarray(1.0, dtype=working_dtype)
+    shrunk = (
+        anchor[None, :]
+        + shrinkage * offsets
+        + (one - shrinkage) * offset_mean[None, :]
+    )
+    return shrunk.astype(params.dtype)
+
+
+def _kernel_covariance_factor(
+    params: Float[Array, "num_particles param_dim"],
+    weights: Float[Array, " num_particles"],
+    kernel_variance: Float[Array, ""],
+) -> Float[Array, "param_dim param_dim"]:
+    """PSD spectral root of the weighted kernel covariance.
+
+    Spectral modes no larger than ``D * eps * ||covariance||_2`` are
+    indistinguishable from eigensolver roundoff and are left
+    unperturbed.
+    """
+    working_dtype = jnp.promote_types(params.dtype, jnp.float32)
+    _, _, offset_mean, weights, material = _centered_parameter_moments(
+        params, weights
+    )
+    working_params = params.astype(working_dtype)
+    anchor = working_params[jnp.argmax(weights)]
+    offsets = jnp.where(
+        material,
+        working_params - anchor,
+        jnp.zeros_like(working_params),
+    )
+    deviations = jnp.where(
+        material,
+        offsets - offset_mean[None, :],
+        jnp.zeros_like(offsets),
+    )
+    kernel_variance = jnp.asarray(kernel_variance, dtype=working_dtype)
+    covariance = jnp.einsum(
+        "n,nd,ne->de",
+        weights,
+        deviations,
+        deviations,
+    )
+    eigenvalues, eigenvectors = jnp.linalg.eigh(kernel_variance * covariance)
+    spectral_scale = jnp.max(jnp.abs(eigenvalues))
+    tolerance = (
+        jnp.asarray(params.shape[1], dtype=working_dtype)
+        * jnp.asarray(jnp.finfo(working_dtype).eps, dtype=working_dtype)
+        * spectral_scale
+    )
+    eigenvalues = jnp.where(eigenvalues > tolerance, eigenvalues, 0.0)
+    return (eigenvectors * jnp.sqrt(eigenvalues)[None, :]) @ eigenvectors.T
+
+
 def _parameter_kernel(
     params: Float[Array, "num_particles param_dim"],
     weights: Float[Array, " num_particles"],
@@ -125,61 +222,11 @@ def _parameter_kernel(
     Float[Array, "num_particles param_dim"],
     Float[Array, "param_dim param_dim"],
 ]:
-    """Return shrunk parameters and a PSD kernel covariance factor.
-
-    Moments are evaluated relative to a maximum-weight parameter,
-    avoiding amplification of weight-sum error by a large common offset.
-    Represented-zero parameters are masked before centered arithmetic.
-    Spectral modes no larger than ``D * eps * ||covariance||_2`` are
-    indistinguishable from eigensolver roundoff and are left unperturbed.
-    """
-    dtype = params.dtype
-    working_dtype = jnp.promote_types(dtype, jnp.float32)
-    working_params = params.astype(working_dtype)
-    weights = weights.astype(working_dtype)
-    weights = weights / jnp.sum(weights)
-    shrinkage = jnp.asarray(shrinkage, dtype=working_dtype)
-    kernel_variance = jnp.asarray(kernel_variance, dtype=working_dtype)
-
-    anchor = working_params[jnp.argmax(weights)]
-    material = weights[:, None] > 0.0
-    offsets = jnp.where(
-        material,
-        working_params - anchor,
-        jnp.zeros_like(working_params),
+    """Return shrunk parameters and a PSD kernel covariance factor."""
+    return (
+        _shrunk_parameters(params, weights, shrinkage),
+        _kernel_covariance_factor(params, weights, kernel_variance),
     )
-    offset_mean = jnp.sum(weights[:, None] * offsets, axis=0)
-    deviations = jnp.where(
-        material,
-        offsets - offset_mean[None, :],
-        jnp.zeros_like(offsets),
-    )
-    covariance = jnp.einsum(
-        "n,nd,ne->de",
-        weights,
-        deviations,
-        deviations,
-    )
-
-    eigenvalues, eigenvectors = jnp.linalg.eigh(kernel_variance * covariance)
-    spectral_scale = jnp.max(jnp.abs(eigenvalues))
-    tolerance = (
-        jnp.asarray(params.shape[1], dtype=working_dtype)
-        * jnp.asarray(jnp.finfo(working_dtype).eps, dtype=working_dtype)
-        * spectral_scale
-    )
-    eigenvalues = jnp.where(eigenvalues > tolerance, eigenvalues, 0.0)
-    covariance_factor = (
-        eigenvectors * jnp.sqrt(eigenvalues)[None, :]
-    ) @ eigenvectors.T
-
-    one = jnp.asarray(1.0, dtype=working_dtype)
-    shrunk = (
-        anchor[None, :]
-        + shrinkage * offsets
-        + (one - shrinkage) * offset_mean[None, :]
-    )
-    return shrunk.astype(dtype), covariance_factor
 
 
 def _validate_dense_initial_cloud(
@@ -385,12 +432,10 @@ def _liu_west_step(
         log_first_sum = jnp.zeros(())
     else:
         weights = normalize(log_weights)
-        shrunk, covariance_factor = _parameter_kernel(
-            params,
-            weights,
-            shrinkage,
-            kernel_variance,
-        )
+        # Only the mean shrink feeds the auxiliary weights and the
+        # selection decision; the covariance factorization exists for
+        # the stochastic move alone (follow-up response review R7).
+        shrunk = _shrunk_parameters(params, weights, shrinkage)
         log_aux = _evaluate(log_auxiliary_fn, particles, shrunk)
         _validate_log_density_batch(
             log_aux, num_particles, name="log_auxiliary_fn"
@@ -408,24 +453,41 @@ def _liu_west_step(
             time_index,
         )
         param_dim = params.shape[1]
-        eps = jr.normal(
-            parameter_key,
-            (num_particles, param_dim),
-            dtype=covariance_factor.dtype,
-        )
-        moved_params = (
-            shrunk[ancestors].astype(covariance_factor.dtype)
-            + eps @ covariance_factor.T
-        ).astype(params.dtype)
-        # Under the 'on_selection' policy the shrink-and-jitter move is
-        # confined to selected steps, where the auxiliary weights
-        # account for it; unselected steps leave the parameter cloud
-        # untouched. The jitter key is consumed either way so both
-        # policies share one key schedule.
+        factor_dtype = jnp.promote_types(params.dtype, jnp.float32)
+
+        def _moved(operand):
+            params_op, weights_op, ancestors_op, key_op = operand
+            factor = _kernel_covariance_factor(
+                params_op, weights_op, kernel_variance
+            )
+            eps = jr.normal(
+                key_op, (num_particles, param_dim), dtype=factor_dtype
+            )
+            return (
+                shrunk[ancestors_op].astype(factor_dtype) + eps @ factor.T
+            ).astype(params.dtype)
+
+        # Under the 'on_selection' policy the move — including its
+        # eigendecomposition, whose derivative is undefined at
+        # repeated eigenvalues — lives inside the selected branch, so
+        # an ordinary data-dependent false decision keeps it out of
+        # the differentiated graph entirely. The key is split outside
+        # the branch, preserving the key schedule; selected-step
+        # draws are bitwise-identical to the unconditional form.
         if move_only_on_selection:
-            new_params = jnp.where(do_resample, moved_params, params[ancestors])
+
+            def _kept(operand):
+                params_op, _, ancestors_op, _ = operand
+                return params_op[ancestors_op]
+
+            new_params = lax.cond(
+                do_resample,
+                _moved,
+                _kept,
+                (params, weights, ancestors, parameter_key),
+            )
         else:
-            new_params = moved_params
+            new_params = _moved((params, weights, ancestors, parameter_key))
     particle_keys = jr.split(transition_key, num_particles)
     if input_t is None:
         transition_fn = cast(ParamTransitionSampler, transition_sampler)
