@@ -834,10 +834,3 @@ class FamilyPosteriorMoments(Protocol):
         beta: Scalar,
         /,
     ) -> tuple[Scalar, Scalar]: ...
-
-
-@runtime_checkable
-class FamilyEmissionValidator(Protocol):
-    """Eager support check of concrete canonicalized emissions."""
-
-    def __call__(self, emissions: Shaped[Array, "..."], /) -> None: ...

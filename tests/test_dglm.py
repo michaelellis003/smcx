@@ -4,6 +4,7 @@
 """Tests for the WHM dynamic generalized linear model filter."""
 
 import math
+import weakref
 
 import jax
 import jax.numpy as jnp
@@ -961,10 +962,57 @@ class TestObservationSupport:
         posterior = self._run(binomial(trials=2), [2.0, 0.0])
         assert np.isfinite(float(posterior.marginal_loglik))
 
-    def test_custom_family_without_validator_is_unchecked(self):
-        family = poisson()._replace(validate_emissions=None)
+    def test_unhashable_callable_field_reaches_inference(self):
+        # The boundary reads an attribute from the family's own
+        # log_forecast with getattr, so a user callable needs neither
+        # hashability nor weak-reference support.
+        base = poisson()
+
+        class UnhashableForecast:
+            __slots__ = ()
+            __hash__ = None
+
+            def __call__(self, emission, alpha, beta):
+                return base.log_forecast(emission, alpha, beta)
+
+        forecast = UnhashableForecast()
+        with pytest.raises(TypeError):
+            hash(forecast)
+        with pytest.raises(TypeError):
+            weakref.ref(forecast)
+        family = base._replace(log_forecast=forecast)
+        posterior = self._run(family, [1.0, 0.0])
+        assert np.isfinite(float(posterior.marginal_loglik))
+
+    def test_user_defined_family_is_unchecked(self):
+        # A user family supplies its own callables, so its
+        # log_forecast is not a registered built-in closure and the
+        # boundary runs no support check.
+        base = poisson()
+        family = base._replace(
+            log_forecast=lambda y, alpha, beta: base.log_forecast(
+                y, alpha, beta
+            )
+        )
         posterior = self._run(family, [0.5, 1.0])
         assert np.isfinite(float(posterior.marginal_loglik))
+
+    def test_family_record_keeps_the_four_field_sequence_contract(self):
+        # The released 2.x contract: a four-element sequence that
+        # unpacks positionally (#317).
+        family = poisson()
+        assert len(family) == 4
+        match_moments, log_forecast, update, posterior_moments = family
+        assert match_moments is family.match_moments
+        assert log_forecast is family.log_forecast
+        assert update is family.update
+        assert posterior_moments is family.posterior_moments
+        assert family._fields == (
+            "match_moments",
+            "log_forecast",
+            "update",
+            "posterior_moments",
+        )
 
     @pytest.mark.parametrize("trials", [1.5, True, "2", 0, -3])
     def test_binomial_rejects_non_integer_trials(self, trials):
