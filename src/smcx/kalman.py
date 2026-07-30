@@ -1701,20 +1701,26 @@ def _rts_step(
     smoothed_mean = filtered_mean + gain @ (
         next_state.mean - next_predicted_mean
     )
-    # Joseph-form update: three positive-semidefinite terms replace the
-    # classic subtractive form, whose cancellation returns negative
-    # variances in float32 when the smoothed and predicted covariances
-    # nearly coincide (#286). The process noise is recovered from the
-    # stored forward pass by reproducing its product order AND its
-    # symmetrization: the raw float product (A C) A' is asymmetric by
-    # roundoff, and subtracting it from the symmetrized stored
-    # prediction leaves an indefinite residue that a near-singular
-    # transition amplifies into negative eigenvalues (follow-up review
-    # R1). With the symmetrization reproduced, the reconstruction is
-    # bitwise zero for zero process noise and symmetric otherwise;
-    # caller-constructed posteriors get the same guarantee only when
-    # their stored predictions are consistent with their filtered
-    # moments (documented on rts_smoother).
+    # Joseph-form update: three terms that are positive semidefinite
+    # in exact arithmetic replace the classic subtractive form, whose
+    # cancellation returns negative variances in float32 when the
+    # smoothed and predicted covariances nearly coincide (#286). The
+    # process noise is recovered from the stored forward pass by
+    # reproducing its product order AND its symmetrization: the raw
+    # float product (A C) A' is asymmetric by roundoff, and
+    # subtracting it from the symmetrized stored prediction leaves an
+    # indefinite residue that a near-singular transition amplifies
+    # into negative eigenvalues (follow-up review R1). With the
+    # symmetrization reproduced, the reconstruction is bitwise zero
+    # for zero process noise and symmetric otherwise. In floating
+    # point the guarantee is correspondingly bounded: the represented
+    # reconstructed residual is symmetric and consistent but can
+    # still carry eigenvalues of order eps times the product scale
+    # (a represented rank-one covariance reconstructs with a small
+    # negative eigenvalue, for example), and caller-constructed
+    # posteriors get even that only when their stored predictions are
+    # consistent with their filtered moments (documented on
+    # rts_smoother).
     identity = jnp.eye(filtered_mean.shape[0], dtype=filtered_mean.dtype)
     residual_operator = identity - gain @ transition_matrix
     process_noise = next_predicted_covariance - _symmetrize(
