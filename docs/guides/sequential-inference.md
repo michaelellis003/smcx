@@ -224,10 +224,11 @@ statistics carries $p(\theta_t, \phi \mid y_{1:t})$ forward
 augmented state $(\theta_t, \phi)$ does not rescue the particle
 filter either. The recursion itself still holds, but a static $\phi$
 is never refreshed by the state density. The particle cloud's $\phi$-support
-can only ever shrink. Particle filters are sequential Monte Carlo methods specialized to
-sequential state inference. The broader SMC framework targets other
-sequences of distributions with the same weighted-particle
-recursion, including tempered paths for static parameters
+can only ever shrink. Particle filters are sequential Monte Carlo
+methods specialized to sequential state inference. Broader SMC
+methods target other sequences of distributions through mutation,
+weighting, and resampling. Tempered SMC is one example for static
+parameters
 ([Chopin and Papaspiliopoulos, 2020](https://doi.org/10.1007/978-3-030-47845-2)).
 We can rejuvenate $\phi$ online beside the states
 ([Liu and West, 2001](https://doi.org/10.1007/978-1-4757-3437-9_10)).

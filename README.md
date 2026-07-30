@@ -5,11 +5,8 @@ and DLM/DGLM filters, and SMC methods including particle filters,
 tempered SMC, and SMC². Algorithms consume plain JAX callables and
 small typed records, keeping model definitions separate from
 inference. smcx defines no probabilistic programming language.
-Models written elsewhere can be adapted by mapping them to those
-callables. Examples include [NumPyro](https://num.pyro.ai/en/stable/)
-programs for static targets, models from
-[dynamax](https://github.com/probml/dynamax), and dynamical models
-from [dynestyx](https://github.com/BasisResearch/dynestyx).
+Models defined elsewhere can be used when the caller maps their
+components to these callables or records.
 
 An introduction to the Kalman and SMC methods is developed in
 [the documentation](https://michaelellis003.github.io/smcx/guides/sequential-inference/).
@@ -63,8 +60,8 @@ print(kalman.marginal_loglik)  # -29.26, exact
 
 A particle filter instead needs a Markov state-space model given by
 three functions: a sampler for the initial law, a sampler for the
-transition, and an evaluable observation log density. Here is the same model through the bootstrap
-particle filter:
+transition, and an evaluable observation log density. Here is the
+same model through the bootstrap particle filter:
 
 ```python
 def sample_initial(key, num_particles):
@@ -92,12 +89,13 @@ print(particle.marginal_loglik)  # -29.16, N = 10,000
 ```
 
 The particle estimate approximates the exact Kalman value. At this
-key and N = 10,000 the two log-likelihoods differ by 0.10.
-Quantifying general agreement needs the Monte Carlo spread over
-repeated keys. If our model leaves the linear-Gaussian family, we
-can no longer use the Kalman filter. We only change the three
-functions of the bootstrap call to the new densities. The table below maps each model class to its
-methods, and the
+key and N = 10,000 the two log-likelihoods differ by 0.10. This
+single key does not characterize Monte Carlo error. Repeated keys
+are needed to estimate the bias and spread of the log-likelihood
+error at N = 10,000. If our model leaves the linear-Gaussian
+family, we can no longer use the Kalman filter. We only change the
+three functions of the bootstrap call to the new densities. The
+table below maps each model class to its methods, and the
 [introduction in the documentation](https://michaelellis003.github.io/smcx/guides/sequential-inference/)
 develops the theory with four worked examples, relaxing one
 assumption at a time.

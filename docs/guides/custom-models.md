@@ -310,27 +310,27 @@ fields.
 
 ## Write a custom Feynman-Kac model
 
-The boundary between the two extension points is the loop shape. An
-algorithm of resample-mutate-reweight form fits `smcx.FeynmanKac`:
-an initial law ``m0``, a per-particle mutation kernel ``m``, and a
-per-particle log-potential ``log_g``, over a context PyTree whose
-leading axis is time. `smcx.run_smc` then supplies the
-conditional-resampling loop, the branch weight rule, the evidence
-accounting, and the posterior container. An algorithm that must own
-its full step belongs on `smcx.run_particle_filter` instead. As one
-record-level example, annealing the potential replaces ``log_g`` on
-the derived record:
+An algorithm of resample-mutate-reweight form fits
+`smcx.FeynmanKac`: an initial law ``m0``, a per-particle mutation
+kernel ``m``, and a per-particle log-potential ``log_g``, over a
+context PyTree whose leading axis is time. `smcx.run_smc` then
+supplies the conditional-resampling loop, the branch weight rule,
+the evidence accounting, and the posterior container. An algorithm
+that must own its full step belongs on `smcx.run_particle_filter`
+instead. As one record-level example, scaling the potential by a
+fixed constant replaces ``log_g`` on the derived record. This
+defines one likelihood-powered target, not an annealing path:
 
 ```python
 fk = smcx.bootstrap_fk(model, params, emissions)
 
 
-def annealed_log_g(parent, state, context_t):
+def scaled_log_g(parent, state, context_t):
     return 0.5 * fk.log_g(parent, state, context_t)
 
 
-annealed = fk._replace(log_g=annealed_log_g)
-posterior = smcx.run_smc(jr.key(0), annealed, num_particles=4_096)
+scaled = fk._replace(log_g=scaled_log_g)
+posterior = smcx.run_smc(jr.key(0), scaled, num_particles=4_096)
 ```
 
 An optional ``log_eta`` field adds an auxiliary-filter look-ahead
@@ -604,8 +604,7 @@ forecast.
 
 ## Keep the two PyTree roles separate
 
-Two PyTrees with different roles meet at this boundary. The
-latent-state PyTree flows through resampling and mutation as
+The latent-state PyTree flows through resampling and mutation as
 inference state. The parameter PyTree flows into every callback as
 explicit data.
 
@@ -757,7 +756,7 @@ posterior = smcx.run_smc(
 
 Here the Equinox module itself is the ``params`` PyTree, so smcx
 threads it explicitly and `jax.grad` with respect to the module's
-arrays works through the filter. No Equinox-specific adapter exists
-or is needed.
+arrays works through the filter. smcx ships no Equinox-specific
+adapter. This example does not need one.
 
 [equinox-module]: https://docs.kidger.site/equinox/api/module/module/
