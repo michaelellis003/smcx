@@ -158,16 +158,20 @@ def _tetragamma_times_arg_safe(value: Scalar) -> Scalar:
     )
 
 
-def _small_variance_cutoff(value: Scalar) -> Scalar:
-    r"""Crossover below which the conjugate limit forms take over.
+def _log_ratio_directional(a: Scalar, b: Scalar) -> Scalar:
+    r"""$\log(a/b)$ with the small difference in the numerator.
 
-    Below roughly $\sqrt{\varepsilon}$ the exact special-function
-    differences lose more digits to cancellation than the $O(q)$
-    truncation of the $q \to 0$ conjugate limits; the crossover
-    balances the two error sources per dtype (follow-up review R3c).
+    ``log1p((a - b) / b)`` fails in one direction: when ``a`` is far
+    below ``b``, the represented quotient can round to exactly ``-1``
+    and produce ``log1p(-1) = -inf`` (round-3 response review, R3b).
+    Dividing the exact stored-value difference by the smaller operand
+    keeps both directions finite.
     """
-    eps = jnp.finfo(jnp.result_type(value)).eps
-    return 3.0 * jnp.sqrt(eps)
+    return jnp.where(
+        a >= b,
+        jnp.log1p((a - b) / b),
+        -jnp.log1p((b - a) / a),
+    )
 
 
 def _digamma_difference_safe(a: Scalar, b: Scalar) -> Scalar:
@@ -185,7 +189,7 @@ def _digamma_difference_safe(a: Scalar, b: Scalar) -> Scalar:
     a_big = jnp.where(large, a, jnp.ones_like(a))
     b_big = jnp.where(large, b, jnp.ones_like(b))
     series = (
-        jnp.log1p((a_big - b_big) / b_big)
+        _log_ratio_directional(a_big, b_big)
         - 1.0 / (2.0 * a_big)
         + 1.0 / (2.0 * b_big)
         - 1.0 / (12.0 * a_big * a_big)
@@ -202,7 +206,7 @@ def _digamma_minus_log_safe(a: Scalar, b: Scalar) -> Scalar:
     a_big = jnp.where(large, a, jnp.ones_like(a))
     b_big = jnp.where(large, b, jnp.ones_like(b))
     series = (
-        jnp.log1p((a_big - b_big) / b_big)
+        _log_ratio_directional(a_big, b_big)
         - 1.0 / (2.0 * a_big)
         - 1.0 / (12.0 * a_big * a_big)
     )
@@ -259,15 +263,16 @@ def poisson() -> DGLMFamily:
         return alpha, beta
 
     def log_forecast(emission, alpha, beta):
-        # Error-aware branch (follow-up response review R3a): the
-        # matched negative binomial converges to Poisson(e^f) as the
-        # predictor variance q shrinks, with truncation bounded by
-        # q*((y - rate)^2 + y + rate + 1)/2 (calibrated conservative
-        # against 50-digit references), while the exact gammaln
-        # algebra cancels at roughly eps*alpha*(log(alpha)+|f|+1).
-        # Each observation takes whichever error is smaller, so the
-        # exact finite-q evidence is kept wherever it is the more
-        # accurate representable evaluation. Inactive operands are
+        # Branch rule (round-3 response review, R3a). The matched
+        # negative binomial converges to Poisson(e^f) as the predictor
+        # variance q shrinks. The limit's truncation is bounded by
+        # q*((y - rate)^2 + y + rate + 1)/2. That bound was
+        # conservative on every high-precision reference probe used to
+        # calibrate it. The exact algebra keeps priority. The limit is
+        # taken only when its bound falls below a calibrated floor of
+        # the direct evaluation's rounding error,
+        # 0.03*eps*alpha*log(alpha). The floor is fitted to measured
+        # cases and is not a proven bound. Inactive operands are
         # clamped so the unused branch cannot poison gradients (R3c).
         eps = jnp.finfo(jnp.result_type(alpha)).eps
         predictor_variance = _trigamma_safe(alpha)
@@ -278,10 +283,8 @@ def poisson() -> DGLMFamily:
             * predictor_variance
             * ((emission - rate) ** 2 + emission + rate + 1.0)
         )
-        exact_estimate = (
-            eps * alpha * (jnp.log(alpha) + jnp.abs(predictor_mean) + 1.0)
-        )
-        use_limit = limit_bound < exact_estimate
+        exact_floor = 0.03 * eps * alpha * jnp.log(alpha)
+        use_limit = limit_bound < exact_floor
         limit = emission * predictor_mean - rate - gammaln(emission + 1.0)
         alpha_safe = jnp.where(use_limit, jnp.ones_like(alpha), alpha)
         beta_safe = jnp.where(use_limit, jnp.ones_like(beta), beta)
@@ -336,7 +339,7 @@ def _match_beta_moments(
     log_beta = softplus(-mean) - jnp.log(variance)
     for _ in range(_NEWTON_ITERATIONS_2D):
         alpha, beta = jnp.exp(log_alpha), jnp.exp(log_beta)
-        residual_mean = _digamma_safe(alpha) - _digamma_safe(beta) - mean
+        residual_mean = _digamma_difference_safe(alpha, beta) - mean
         residual_var = _trigamma_safe(alpha) + _trigamma_safe(beta) - variance
         j11 = _trigamma_safe(alpha) * alpha
         j12 = -_trigamma_safe(beta) * beta
@@ -380,9 +383,9 @@ def binomial(*, trials: int) -> DGLMFamily:
         return _match_beta_moments(forecast_mean, forecast_variance)
 
     def log_forecast(emission, alpha, beta):
-        # Error-aware branch between the exact beta-binomial algebra
-        # and its Binomial(trials, sigmoid(f)) limit; see the Poisson
-        # family for the bound construction (R3a, R3c).
+        # Branch rule between the exact beta-binomial algebra and its
+        # Binomial(trials, sigmoid(f)) limit. The floor construction
+        # follows the Poisson family (R3a, R3c).
         eps = jnp.finfo(jnp.result_type(alpha)).eps
         predictor_variance = _trigamma_safe(alpha) + _trigamma_safe(beta)
         predictor_mean = _digamma_difference_safe(alpha, beta)
@@ -398,10 +401,8 @@ def binomial(*, trials: int) -> DGLMFamily:
             )
         )
         total = alpha + beta
-        exact_estimate = (
-            eps * total * (jnp.log(total) + jnp.abs(predictor_mean) + 1.0)
-        )
-        use_limit = limit_bound < exact_estimate
+        exact_floor = 0.03 * eps * total * jnp.log(total)
+        use_limit = limit_bound < exact_floor
         limit = (
             gammaln(trials + 1.0)
             - gammaln(emission + 1.0)

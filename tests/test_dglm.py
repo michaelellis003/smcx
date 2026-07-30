@@ -1019,12 +1019,13 @@ class TestSolverRobustness:
 
 
 class TestSmallVarianceStability:
-    """Small predictor variances keep forecast accuracy (R3c).
+    """Small predictor variances keep forecast accuracy (R3a, R3c).
 
-    Below the per-dtype crossover the families switch to their exact
-    conjugate q -> 0 limits (negative binomial -> Poisson,
-    beta-binomial -> binomial), validated against 50-digit mpmath
-    references; above it the exact special-function algebra applies.
+    The branch rule prefers the exact conjugate algebra. It takes the
+    q -> 0 limit (negative binomial -> Poisson, beta-binomial ->
+    binomial) only when the limit's truncation bound falls below a
+    calibrated floor of the exact evaluation's rounding error. The
+    reference values are 50-digit mpmath evaluations.
     """
 
     #: (f, q, y, exact nbinom log-pmf), mpmath dps=50
@@ -1198,10 +1199,10 @@ class TestStableMomentDifferences:
         eager = float(run().filtered_means[0, 0])
         compiled = float(jax.jit(run)().filtered_means[0, 0])
         family = bernoulli()
-        _, beta = family.match_moments(jnp.asarray(0.0), jnp.asarray(1e-6))
-        # The represented recurrence digamma(b*+1) - digamma(b*) with
-        # b* = beta + 1 equals 1 / (beta + 1).
-        expected = 1.0 / (float(beta) + 1.0)
+        alpha, _ = family.match_moments(jnp.asarray(0.0), jnp.asarray(1e-6))
+        # With y = 1 the conjugate update increments alpha, so the mean
+        # moves by psi(alpha + 1) - psi(alpha) = 1 / alpha.
+        expected = 1.0 / float(alpha)
         np.testing.assert_allclose(
             eager, expected, rtol=_dtype_rtol(1e-4, 1e-2)
         )
@@ -1237,4 +1238,127 @@ class TestSmallVarianceGradients:
         )
         np.testing.assert_allclose(
             grad_compiled, expected_gradient, rtol=_dtype_rtol(1e-6, 1e-4)
+        )
+
+
+class TestAbsoluteForecastAccuracy:
+    """Public forecasts hold absolute log-score accuracy (R3a).
+
+    References are 80-digit mpmath evaluations of the exact conjugate
+    forecasts at the round-3 response review's counterexamples. The
+    previous branch rule selected the limit here and lost 0.048 and
+    0.0052 nats. Tolerances are absolute nats for the tested dtype.
+    """
+
+    def _increment(self, mean, variance, family, emission):
+        posterior = smcx.dglm_filter(
+            jnp.array([mean]),
+            jnp.array([[variance]]),
+            jnp.eye(1),
+            jnp.array([1.0]),
+            jnp.array([float(emission)]),
+            family=family,
+            transition_covariance=jnp.array([[0.0]]),
+        )
+        return float(posterior.log_evidence_increments[0])
+
+    @pytest.mark.parametrize(
+        "mean, variance, family_fn, emission, expected",
+        [
+            # mpmath dps=80, matched conjugate forecast log-pmf.
+            (6.0, 1e-5, poisson, 303, -17.417682772497664),
+            (2.0, 1e-3, lambda: binomial(trials=100), 88, -2.1100522688388537),
+        ],
+        ids=["poisson-moderate-intensity", "binomial-n100"],
+    )
+    def test_matches_reference_in_absolute_nats(
+        self, mean, variance, family_fn, emission, expected
+    ):
+        atol = 2e-3 if jnp.asarray(0.0).dtype == jnp.float32 else 1e-8
+        eager = self._increment(mean, variance, family_fn(), emission)
+        compiled = float(
+            jax.jit(
+                lambda: smcx.dglm_filter(
+                    jnp.array([mean]),
+                    jnp.array([[variance]]),
+                    jnp.eye(1),
+                    jnp.array([1.0]),
+                    jnp.array([float(emission)]),
+                    family=family_fn(),
+                    transition_covariance=jnp.array([[0.0]]),
+                ).log_evidence_increments[0]
+            )()
+        )
+        np.testing.assert_allclose(eager, expected, rtol=0.0, atol=atol)
+        np.testing.assert_allclose(compiled, expected, rtol=0.0, atol=atol)
+
+
+class TestDirectionalMomentHelpers:
+    """Both moment helpers stay finite in the negative direction (R3b)."""
+
+    @pytest.mark.parametrize(
+        "family_fn", [poisson, bernoulli], ids=["poisson", "bernoulli"]
+    )
+    def test_low_predictor_zero_count_is_finite(self, family_fn):
+        posterior = smcx.dglm_filter(
+            jnp.array([-17.0]),
+            jnp.array([[1e-6]]),
+            jnp.eye(1),
+            jnp.array([1.0]),
+            jnp.array([0.0]),
+            family=family_fn(),
+            transition_covariance=jnp.array([[0.0]]),
+        )
+        assert np.isfinite(float(posterior.marginal_loglik))
+        assert np.isfinite(float(posterior.filtered_means[0, 0]))
+
+
+class TestAsymmetricRecurrence:
+    """The asymmetric mean update matches its recurrence (R3b)."""
+
+    def test_bernoulli_update_matches_one_over_alpha(self):
+        # f = 0.1, q = 1e-6, y = 1, unit gain. With y = 1 the update
+        # increments alpha, so the filtered mean equals the
+        # represented predictor mean at the matched parameters plus
+        # psi(alpha + 1) - psi(alpha) = 1 / alpha. Comparing against
+        # the represented mean (the same digamma difference the
+        # matcher and posterior now share) cancels the matcher's
+        # log-space residual, which in float32 has the same scale as
+        # the increment itself.
+        def run():
+            return smcx.dglm_filter(
+                jnp.array([0.1]),
+                jnp.array([[1e-6]]),
+                jnp.eye(1),
+                jnp.array([1.0]),
+                jnp.array([1.0]),
+                family=bernoulli(),
+                transition_covariance=jnp.array([[0.0]]),
+            ).filtered_means[0, 0]
+
+        family = bernoulli()
+        alpha, beta = family.match_moments(jnp.asarray(0.1), jnp.asarray(1e-6))
+        represented_mean = float(
+            dglm_module._digamma_difference_safe(alpha, beta)
+        )
+        expected = represented_mean + 1.0 / float(alpha)
+
+        eager = float(run())
+        compiled = float(jax.jit(run)())
+        # Eager evaluation shares the test helpers' arithmetic, so the
+        # comparison is tight. Compilation may fuse the solver's
+        # series arithmetic differently and land one ulp of
+        # log(alpha) away on the matched-parameter grid, which moves
+        # the mean by about eps * log(alpha); the compiled band is
+        # that grid step.
+        float32 = jnp.asarray(0.0).dtype == jnp.float32
+        tight = 5e-8 if float32 else 1e-10
+        grid = (
+            4.0
+            * float(jnp.finfo(jnp.asarray(0.0).dtype).eps)
+            * math.log(float(alpha))
+        )
+        np.testing.assert_allclose(eager, expected, rtol=0.0, atol=tight)
+        np.testing.assert_allclose(
+            compiled, expected, rtol=0.0, atol=max(grid, tight)
         )
