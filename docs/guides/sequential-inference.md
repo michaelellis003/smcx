@@ -430,22 +430,34 @@ def log_marginal(params):
 gradient = jax.grad(log_marginal)(params)
 ```
 
-Be precise about what this gradient is. It is the pathwise
-derivative of the realized program for a fixed key: the resampling
-step selects integer ancestors, and those selections are constants
-to `jax.grad`, so the derivative ignores how resampling
-probabilities change with the parameters. When no resampling
-triggers (`resampling_threshold=0.0`), the average of this gradient
-over keys is the likelihood score. When resampling is active — as it
-is here at the default threshold — it is not: on a linear-Gaussian
-test model where the exact score is available from `kalman_filter`,
-the resampling-on average sits many standard errors from the truth.
-The gradient remains useful as an optimization signal, and the
-transform itself is fully supported; treating it as an unbiased
-score estimate is what requires care. Corrected estimators
-(stop-gradient resampling, [Ścibior and Wood,
-2021](https://arxiv.org/abs/2106.10314); differentiable resampling,
-[Corenflos et al., 2021](https://proceedings.mlr.press/v139/corenflos21a.html))
+Be precise about what this gradient is. It is the fixed-key
+pathwise derivative of the realized program — the exact derivative
+of this run's log marginal likelihood estimate, not of the true log
+marginal likelihood. Three gaps separate the two. First, the
+resampling step selects integer ancestors, and those selections are
+constants to `jax.grad`, so with resampling active — as it is here
+at the default threshold — the derivative ignores how resampling
+probabilities change with the parameters; on a linear-Gaussian test
+model where the exact score is available from `kalman_filter`, the
+resampling-on average over keys sits many standard errors from the
+truth. Second, even with resampling disabled, the average over keys
+is the gradient of $E[\log \hat Z_N]$, which differs from
+$\log E[\hat Z_N]$ at any finite particle count — the log of an
+unbiased estimate is biased, and the same gap defines filtering
+variational objectives
+([Maddison et al., 2017](https://arxiv.org/abs/1705.09279)). The
+bias shrinks as particles grow, so for differentiable models
+without resampling the estimator is a consistent, finite-$N$-biased
+score approximation
+([Ścibior and Wood, 2021](https://arxiv.org/abs/2106.10314)).
+Third, the pathwise derivative sees only reparameterized
+randomness: a parameter that acts through a discrete draw (a
+regime indicator, a jump count) contributes nothing, and the
+derivative can be exactly zero at any particle count. The gradient
+remains useful as an optimization signal, and the transform itself
+is fully supported; the corrected estimators
+(stop-gradient resampling, Ścibior and Wood, 2021; differentiable
+resampling, [Corenflos et al., 2021](https://proceedings.mlr.press/v139/corenflos21a.html))
 are out of smcx's current scope.
 
 On a longer series from this model, the filtered intensity tracks
