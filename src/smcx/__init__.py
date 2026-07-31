@@ -56,6 +56,7 @@ from smcx.guided import guided_filter
 from smcx.kalman import (
     extended_kalman_filter,
     gaussian_filter,
+    gaussian_smoother,
     kalman_filter,
     rts_smoother,
     taylor_order1,
@@ -124,6 +125,7 @@ __all__ = [
     "ess",
     "extended_kalman_filter",
     "gaussian_filter",
+    "gaussian_smoother",
     "guided_filter",
     "guided_fk",
     "kalman_filter",
