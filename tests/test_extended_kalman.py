@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for extended Kalman filtering."""
+"""Tests for extended Kalman filtering and smoothing."""
 
 import jax
 import jax.numpy as jnp
@@ -54,6 +54,17 @@ def _nonlinear_observation_jacobian(state):
         [1.0, 0.20 * state[1]],
         [0.12 * jnp.cos(state[0]), 0.65],
     ])
+
+
+def _extended_smoother(posterior):
+    return smcx.gaussian_smoother(
+        posterior,
+        _nonlinear_transition_mean,
+        method=smcx.taylor_order1(
+            _nonlinear_transition_jacobian,
+            _nonlinear_observation_jacobian,
+        ),
+    )
 
 
 def test_extended_kalman_reduces_to_linear_filter():
@@ -175,8 +186,8 @@ def test_extended_kalman_input_callbacks_match_linear_controls():
     _assert_posterior_close(extended, exact)
 
 
-def test_extended_kalman_matches_independent_nonlinear_reference():
-    """Every posterior field matches Stone Soup's Joseph-form EKF."""
+def test_extended_filter_and_smoother_match_independent_reference():
+    """Every moment matches Stone Soup's Joseph-form EKF and smoother."""
     reference = nonlinear_reference
 
     posterior = smcx.extended_kalman_filter(
@@ -197,11 +208,17 @@ def test_extended_kalman_matches_independent_nonlinear_reference():
         reference.FILTERED_MEANS,
         reference.FILTERED_COVARIANCES,
         reference.LOG_EVIDENCE_INCREMENTS,
+        reference.SMOOTHED_MEANS,
+        reference.SMOOTHED_COVARIANCES,
     )
+    smoothed = _extended_smoother(posterior)
+    compiled = jax.jit(_extended_smoother)(posterior)
 
-    # Five 2x2 steps have innovation condition number below 2.62.
-    # 256*eps*scale covers the observed operation depth on CPU and Metal.
-    _assert_posterior_close(posterior, expected_fields, ulps=256)
+    # Five 2x2 steps have innovation condition number below 2.62 and
+    # positive-time prediction condition number below 1.40. The established
+    # 256*eps*scale budget covers their operation depth on CPU and Metal.
+    _assert_posterior_close(smoothed, expected_fields, ulps=256)
+    _assert_posterior_close(compiled, smoothed, ulps=32)
 
 
 def test_extended_smoother_uses_filtered_state_and_destination_input():

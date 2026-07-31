@@ -379,8 +379,9 @@ def test_float32_gaussian_evidence_survives_representable_residual(
     jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
     reason="the float32-vs-float64 comparison needs a float64 backend",
 )
-def test_float32_rts_smoothed_variances_stay_nonnegative():
-    """The Joseph-form backward update cannot cancel negative (#286)."""
+@pytest.mark.parametrize("smoother", ["rts", "taylor"])
+def test_float32_smoothed_variances_stay_nonnegative(smoother):
+    """Either public path uses the cancellation-safe update (#286)."""
 
     def run(dtype):
         emissions = jnp.full((4, 1), 0.1, dtype)
@@ -396,7 +397,17 @@ def test_float32_rts_smoothed_variances_stay_nonnegative():
             observation_covariances,
             emissions,
         )
-        return smcx.rts_smoother(posterior, jnp.eye(1, dtype=dtype))
+        transition = jnp.eye(1, dtype=dtype)
+        if smoother == "rts":
+            return smcx.rts_smoother(posterior, transition)
+        return smcx.gaussian_smoother(
+            posterior,
+            lambda state: state,
+            method=smcx.taylor_order1(
+                lambda _state: transition,
+                lambda _state: transition,
+            ),
+        )
 
     single = run(jnp.float32)
     double = run(jnp.float64)
@@ -465,14 +476,23 @@ def test_multidimensional_float32_smoothed_covariances_stay_psd():
         jnp.eye(2, dtype=dtype),
         jnp.zeros((3, 2), dtype),
     )
-    smoothed = smcx.rts_smoother(posterior, transition)
+    rts = smcx.rts_smoother(posterior, transition)
+    taylor = smcx.gaussian_smoother(
+        posterior,
+        lambda state: transition @ state,
+        method=smcx.taylor_order1(
+            lambda _state: transition,
+            lambda _state: jnp.eye(2, dtype=dtype),
+        ),
+    )
 
-    covariances = np.asarray(smoothed.smoothed_covariances)
-    scale = float(np.abs(covariances).max())
-    floor = -8.0 * float(jnp.finfo(dtype).eps) * scale
-    for step in range(covariances.shape[0]):
-        eigenvalues = np.linalg.eigvalsh(covariances[step])
-        assert eigenvalues.min() >= floor, (step, eigenvalues)
+    for smoothed in (rts, taylor):
+        covariances = np.asarray(smoothed.smoothed_covariances)
+        scale = float(np.abs(covariances).max())
+        floor = -8.0 * float(jnp.finfo(dtype).eps) * scale
+        for step in range(covariances.shape[0]):
+            eigenvalues = np.linalg.eigvalsh(covariances[step])
+            assert eigenvalues.min() >= floor, (step, eigenvalues)
 
 
 def test_public_smoother_binds_the_symmetrized_reconstruction():
