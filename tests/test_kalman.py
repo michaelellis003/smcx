@@ -815,8 +815,19 @@ def test_gaussian_smoothers_vmap_match_independent_runs():
         )
 
     taylor = jax.vmap(smooth)(batched)
+
+    def smooth_unscented(posterior):
+        return smcx.gaussian_smoother(
+            posterior,
+            lambda state: transition @ state,
+            method=smcx.unscented(),
+        )
+
+    sigma = jax.vmap(smooth_unscented)(batched)
     eps = float(jnp.finfo(rts.smoothed_means.dtype).eps)
-    for actual in (rts, taylor):
+    # These scalar linear reductions have unit-scale conditioning. Observed
+    # CPU/MPS error is at most 0.5 eps; 32 eps covers scan and solve depth.
+    for actual in (rts, taylor, sigma):
         assert actual.smoothed_means.shape == (2, 3, 1)
         assert actual.smoothed_covariances.shape == (2, 3, 1, 1)
         for index, posterior in enumerate(filtered):
@@ -867,6 +878,17 @@ def test_gaussian_smoother_gradients_match_scalar_recursion():
             + 0.25 * smoothed.smoothed_covariances[0, 0, 0]
         )
 
+    def unscented_objective(coefficient):
+        smoothed = smcx.gaussian_smoother(
+            filtered,
+            lambda state: coefficient * state,
+            method=smcx.unscented(),
+        )
+        return (
+            smoothed.smoothed_means[0, 0]
+            + 0.25 * smoothed.smoothed_covariances[0, 0, 0]
+        )
+
     coefficient = jnp.asarray(0.6)
     mean_derivative = 0.8 / 1.1 * (0.7 - 0.1)
     covariance_derivative = 2.0 * 0.8**2 * 0.6 * (0.4 - 1.1) / 1.1**2
@@ -876,7 +898,9 @@ def test_gaussian_smoother_gradients_match_scalar_recursion():
     )
 
     eps = float(jnp.finfo(coefficient.dtype).eps)
-    for objective in (rts_objective, taylor_objective):
+    # The analytic scalar derivative is well conditioned. Observed eager/JIT
+    # error is at most 0.5 eps; 32 eps covers autodiff and solve depth.
+    for objective in (rts_objective, taylor_objective, unscented_objective):
         gradient_fn = jax.grad(objective)
         gradients = (
             gradient_fn(coefficient),
@@ -927,6 +951,14 @@ def test_gaussian_smoothers_one_step_are_filter_identity():
         np.testing.assert_array_equal(
             smoothed.smoothed_covariances,
             filtered.filtered_covariances,
+        )
+
+    with pytest.raises(ValueError, match="alpha must be greater than zero"):
+        smcx.gaussian_smoother(
+            filtered,
+            unused_callback,
+            method=smcx.unscented(alpha=0.0),
+            inputs=jnp.array([0.5]),
         )
 
 

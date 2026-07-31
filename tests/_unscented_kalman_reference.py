@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Frozen independent outputs for an unscented Kalman filter.
+"""Frozen independent outputs for an unscented Kalman filter and smoother.
 
 The canonical outputs were generated on CPU in float64 with CPython 3.13.9,
 NumPy 2.5.1, Stone Soup 1.9.1, and SciPy 1.18.0. The scaled-rule parameters
@@ -14,14 +14,18 @@ Stone Soup 1.9.1, commit
 * https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/stonesoup/functions/__init__.py
 * https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/stonesoup/predictor/kalman.py
 * https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/stonesoup/updater/kalman.py
+* https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/stonesoup/smoother/kalman.py#L271-L325
 * https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/LICENSE
 
-``UnscentedKalmanPredictor`` and ``UnscentedKalmanUpdater`` supplied the
-moments. The updater used its default subtractive covariance form, and every
-stored covariance was forced symmetric. Measurement sigma points were
-regenerated after the complete process-noise-inclusive prediction. Recomputing
-the update in smcx's residual-sigma form changed array fields by at most
-2.78e-16 and total evidence by 4.44e-16.
+``UnscentedKalmanPredictor`` and ``UnscentedKalmanUpdater`` produced the
+filtering track, and ``UnscentedKalmanSmoother`` consumed it. All three used
+the explicitly stated scaled-rule parameters. The updater used its default
+subtractive covariance form, and every stored covariance was forced symmetric.
+The retained smoother covariances were also symmetrized, changing raw Stone
+Soup entries by less than 1.74e-18. Measurement sigma points were regenerated
+after the complete process-noise-inclusive prediction. Recomputing the update
+in smcx's residual-sigma form changed array fields by at most 2.78e-16 and
+total evidence by 4.44e-16.
 
 SciPy 1.18.0, commit
 ``54ef5423f2e4376230ec3bfda6912a07a50958e3``, BSD-3-Clause, supplied the
@@ -35,7 +39,9 @@ The values were cross-checked with Dynamax 1.0.2, commit
 ``a216d7feec0d025560a0a194ed5abab538648375``, MIT:
 
 * https://github.com/probml/dynamax/releases/tag/1.0.2
-* https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/dynamax/nonlinear_gaussian_ssm/inference_ukf.py
+* https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/dynamax/nonlinear_gaussian_ssm/inference_ukf.py#L79-L122
+* https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/dynamax/nonlinear_gaussian_ssm/inference_ukf.py#L242-L318
+* https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/dynamax/utils/utils.py#L213-L218
 * https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/LICENSE
 
 That cross-check used JAX/JAXlib 0.10.2,
@@ -43,8 +49,9 @@ tfp-nightly 0.26.0.dev20260717, ``JAX_PLATFORMS=cpu``, and JAX float64.
 Dynamax differed by at most 3.46e-10 in predicted means, 1.56e-9 in predicted
 covariances, 3.76e-10 in filtered means, 1.94e-9 in filtered covariances, and
 9.29e-9 in total evidence because its PSD solve adds a 1e-9 diagonal boost.
-The maximum Stone Soup innovation-covariance condition number was
-2.613033461095126.
+Its smoother differed by less than 1.08e-9 in means and 2.50e-9 in
+covariances. The maximum Stone Soup innovation-covariance condition number
+was 2.613033461095126.
 
 Only numerical inputs and outputs are retained. No implementation code was
 copied or translated, and no comparison package is a test dependency.
@@ -139,6 +146,41 @@ FILTERED_COVARIANCES = np.array(
         [
             [0.046110136505925735, 0.0015818280960216164],
             [0.0015818280960216164, 0.06012674750321503],
+        ],
+        [
+            [0.04541482912631204, 0.0015594461287094241],
+            [0.0015594461287094241, 0.05700662098798591],
+        ],
+    ],
+    dtype=np.float64,
+)
+SMOOTHED_MEANS = np.array(
+    [
+        [0.19207014197706154, -0.08918541784614414],
+        [0.1810768806356682, -0.06256674996308037],
+        [0.14908531891971977, -0.02967933437804084],
+        [0.18401701327216213, -0.040984287677055684],
+        [0.11121904272233052, -0.09453411027467092],
+    ],
+    dtype=np.float64,
+)
+SMOOTHED_COVARIANCES = np.array(
+    [
+        [
+            [0.05756351733138948, -0.004582080543671107],
+            [-0.004582080543671107, 0.06814112710437469],
+        ],
+        [
+            [0.04119810299179997, -0.002789666471017912],
+            [-0.002789666471017912, 0.053734840494212226],
+        ],
+        [
+            [0.03708336653291222, -0.001706053868571588],
+            [-0.001706053868571588, 0.0484751842077438],
+        ],
+        [
+            [0.03787155747645921, -0.0010753231476699114],
+            [-0.0010753231476699114, 0.048913011062869174],
         ],
         [
             [0.04541482912631204, 0.0015594461287094241],

@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for scaled unscented Kalman filtering."""
+"""Tests for scaled unscented Kalman filtering and smoothing."""
 
 import math
 from typing import Any
@@ -10,10 +10,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from jax.scipy.linalg import solve_triangular
 
 import smcx
 import smcx.kalman as kalman_module
 from tests import _unscented_kalman_reference as nonlinear_reference
+from tests._gaussian_smoothing_reference import dense_joint_marginals
 
 
 def _identity(state):
@@ -429,7 +431,7 @@ def test_unscented_accepts_singular_transition_covariance():
 
 
 def test_unscented_guard_boundary_keeps_covariance_psd():
-    """The PSD-guarantee boundary of the rule guard is safe, not a bug.
+    """The filter/smoother PSD-guarantee boundary is safe, not a bug.
 
     With ``s = alpha**2 * (d + kappa)``, the accepted domain
     ``alpha**2 * kappa + d * beta >= 0`` equals
@@ -437,26 +439,269 @@ def test_unscented_guard_boundary_keeps_covariance_psd():
     the paired sigma deltas is exactly the condition for the paired
     moment to dominate the negative rank-one correction. The boundary
     configuration below has ``beta < alpha**2`` (a subtractive
-    rank-one weight) yet must be accepted and must keep every filtered
-    covariance PSD up to roundoff.
+    rank-one weight) yet must be accepted and must keep every filtered and
+    smoothed covariance PSD up to roundoff.
     """
     posterior = smcx.unscented_kalman_filter(
         jnp.array([0.1], dtype=jnp.float32),
-        jnp.array([[1.0]], dtype=jnp.float32),
-        _identity,
-        jnp.array([[0.1]], dtype=jnp.float32),
+        jnp.array([[0.2]], dtype=jnp.float32),
+        lambda state: state**3,
+        jnp.array([[0.05]], dtype=jnp.float32),
         _square,
         jnp.array([[0.5]], dtype=jnp.float32),
-        jnp.array([[0.3], [0.2], [0.4]], dtype=jnp.float32),
+        jnp.array([[0.3], [0.2]], dtype=jnp.float32),
         alpha=2.0,
         beta=0.0,
         kappa=0.0,
     )
 
-    eigenvalues = np.linalg.eigvalsh(np.asarray(posterior.filtered_covariances))
+    smoothed = smcx.gaussian_smoother(
+        posterior,
+        lambda state: state**3,
+        method=smcx.unscented(alpha=2.0, beta=0.0, kappa=0.0),
+    )
+    mean = posterior.filtered_means[0, 0]
+    covariance = posterior.filtered_covariances[0, 0, 0]
+    # For d=1, alpha=2, and kappa=0, the cubic sigma cross moment is
+    # D = P * (3*m**2 + 4*P). The analytic/public means were exact on CPU
+    # and MPS; 16 f32 eps covers this scalar solve's operation depth.
+    cross_covariance = covariance * (3.0 * mean**2 + 4.0 * covariance)
+    gain = cross_covariance / posterior.predicted_covariances[1, 0, 0]
+    expected_mean = mean + gain * (
+        posterior.filtered_means[1, 0] - posterior.predicted_means[1, 0]
+    )
+    _assert_roundoff_close(
+        smoothed.smoothed_means[0, 0], expected_mean, ulps=16
+    )
+    covariances = jnp.concatenate((
+        posterior.filtered_covariances,
+        smoothed.smoothed_covariances,
+    ))
+    eigenvalues = np.linalg.eigvalsh(np.asarray(covariances))
     floor = -8 * np.finfo(np.float32).eps
     assert np.all(np.isfinite(eigenvalues))
     assert np.all(eigenvalues >= floor)
+    diagonals = np.diagonal(
+        np.asarray(smoothed.smoothed_covariances),
+        axis1=-2,
+        axis2=-1,
+    )
+    assert np.all(diagonals >= 0.0)
+
+
+def test_unscented_smoother_uses_sigma_cross_covariance_directly():
+    """The public gain uses D rather than recovering it through A_eff."""
+    dtype = jnp.float32
+    cosine = jnp.sqrt(jnp.asarray(2.0 / 3.0, dtype))
+    sine = -jnp.sqrt(jnp.asarray(1.0 / 3.0, dtype))
+    rotation = jnp.array([[cosine, -sine], [sine, cosine]], dtype)
+    filtered_covariance = rotation @ jnp.diag(jnp.array([1.0, 1e-4], dtype))
+    filtered_covariance = filtered_covariance @ rotation.T
+    filtered_covariance = (filtered_covariance + filtered_covariance.T) / 2
+    filtered_mean = jnp.array([-0.07525469, -0.146573], dtype)
+    transition = jnp.array(
+        [[93.36103, -29.875969], [104.618095, -19.394943]],
+        dtype,
+    )
+    offsets = (
+        jnp.sqrt(jnp.asarray(2.0, dtype))
+        * jnp.linalg.cholesky(filtered_covariance)
+    ).T
+    center = transition @ filtered_mean
+    state_positive = filtered_mean + offsets
+    state_negative = filtered_mean - offsets
+    positive = jax.vmap(lambda state: transition @ state)(state_positive)
+    negative = jax.vmap(lambda state: transition @ state)(state_negative)
+    delta_sum = ((positive - center) + (negative - center)).sum(axis=0)
+    state_offsets = 0.5 * (state_positive - state_negative)
+    cross_covariance = 0.25 * state_offsets.T @ (positive - negative)
+    transformed_covariance = 0.25 * (
+        (positive - center).T @ (positive - center)
+        + (negative - center).T @ (negative - center)
+    ) + 0.0625 * jnp.outer(delta_sum, delta_sum)
+    predicted_covariance = transformed_covariance + 0.01 * jnp.eye(
+        2, dtype=dtype
+    )
+    predicted_covariance = (predicted_covariance + predicted_covariance.T) / 2
+    predicted_mean = center + 0.25 * delta_sum
+    residual = jnp.array([-7.1869713, 6.953233], dtype)
+    posterior = smcx.GaussianFilterPosterior(
+        jnp.asarray(0.0, dtype),
+        jnp.stack((filtered_mean, predicted_mean)),
+        jnp.stack((filtered_covariance, predicted_covariance)),
+        jnp.stack((filtered_mean, predicted_mean + residual)),
+        jnp.stack((filtered_covariance, 0.5 * predicted_covariance)),
+        jnp.zeros(2, dtype),
+    )
+
+    smoothed = smcx.gaussian_smoother(
+        posterior,
+        lambda state: transition @ state,
+        method=smcx.unscented(),
+    )
+
+    factor = jnp.linalg.cholesky(predicted_covariance)
+    lower_solution = solve_triangular(factor, cross_covariance.T, lower=True)
+    gain = solve_triangular(factor.T, lower_solution, lower=False).T
+    expected = filtered_mean + gain @ residual
+    scale = max(1.0, float(np.abs(expected).max()))
+    # The A_eff-to-D reconstruction mutant misses by approximately 1.36e-3
+    # on CPU and 4.39e-3 on MPS; this budget is at most 1.53e-5.
+    tolerance = float(128 * np.finfo(np.float32).eps * scale)
+    np.testing.assert_allclose(
+        np.asarray(smoothed.smoothed_means[0]),
+        np.asarray(expected),
+        rtol=0.0,
+        atol=tolerance,
+    )
+
+
+def test_unscented_smoother_matches_dense_linear_oracle_with_inputs():
+    """G7 and destination-time inputs hold for a varying linear model."""
+    initial_mean = jnp.array([0.2, -0.1])
+    initial_covariance = jnp.array([[0.7, 0.08], [0.08, 0.5]])
+    base_transition = jnp.array([[0.9, 0.1], [-0.05, 0.85]])
+    input_slope = jnp.array([[0.03, -0.02], [0.01, 0.02]])
+    transition_covariance = jnp.array([[0.08, 0.01], [0.01, 0.06]])
+    observation_matrix = jnp.array([[1.0, 0.2]])
+    observation_covariance = jnp.array([[0.3]])
+    emissions = jnp.array([[0.1], [-0.2], [0.3], [0.05]])
+    inputs = jnp.array([[40.0], [-0.4], [0.6], [0.2]])
+
+    def transition_mean(state, input_t):
+        matrix = base_transition + input_t[0] * input_slope
+        return matrix @ state
+
+    def observation_mean(state, _input_t):
+        return observation_matrix @ state
+
+    posterior = smcx.gaussian_filter(
+        initial_mean,
+        initial_covariance,
+        transition_mean,
+        transition_covariance,
+        observation_mean,
+        observation_covariance,
+        emissions,
+        method=smcx.unscented(),
+        inputs=inputs,
+    )
+    smoothed = smcx.gaussian_smoother(
+        posterior,
+        transition_mean,
+        method=smcx.unscented(),
+        inputs=inputs,
+    )
+
+    transitions = np.stack([
+        np.asarray(base_transition + input_t[0] * input_slope)
+        for input_t in inputs[1:]
+    ])
+    expected_means, expected_covariances = dense_joint_marginals(
+        np.asarray(initial_mean),
+        np.asarray(initial_covariance),
+        transitions,
+        np.broadcast_to(np.asarray(transition_covariance), (3, 2, 2)),
+        np.zeros((3, 2)),
+        np.broadcast_to(np.asarray(observation_matrix), (4, 1, 2)),
+        np.broadcast_to(np.asarray(observation_covariance), (4, 1, 1)),
+        np.zeros((4, 1)),
+        np.asarray(emissions),
+    )
+    # The dense joint has condition number below 68.7; observed error is
+    # at most 3.75 scaled eps on CPU and MPS.
+    _assert_roundoff_close(smoothed.smoothed_means, expected_means, ulps=64)
+    _assert_roundoff_close(
+        smoothed.smoothed_covariances, expected_covariances, ulps=64
+    )
+
+
+def test_unscented_smoother_exposes_mismatched_record_precondition():
+    """G8: an EKF record has no Unscented covariance guarantee."""
+    posterior = smcx.extended_kalman_filter(
+        jnp.array([0.2]),
+        jnp.array([[0.5]]),
+        lambda state: state**3,
+        lambda state: (3.0 * state**2)[None],
+        jnp.array([[0.001]]),
+        _identity,
+        lambda _state: jnp.ones((1, 1)),
+        jnp.array([[0.2]]),
+        jnp.array([[0.1], [0.15]]),
+    )
+
+    smoothed = smcx.gaussian_smoother(
+        posterior,
+        lambda state: state**3,
+        method=smcx.unscented(),
+    )
+    mean = posterior.filtered_means[0, 0]
+    covariance = posterior.filtered_covariances[0, 0, 0]
+    effective_transition = covariance + 3.0 * mean**2
+    reconstructed_noise = (
+        posterior.predicted_covariances[1, 0, 0]
+        - effective_transition**2 * covariance
+    )
+    scale = max(
+        1.0,
+        float(abs(posterior.predicted_covariances[1, 0, 0])),
+        float(abs(effective_transition**2 * covariance)),
+    )
+    assert float(reconstructed_noise) < (
+        -128 * np.finfo(np.asarray(reconstructed_noise).dtype).eps * scale
+    )
+
+    expected = smcx.rts_smoother(
+        posterior,
+        effective_transition.reshape(1, 1),
+    )
+    assert np.all(np.isfinite(np.asarray(smoothed.smoothed_covariances)))
+    # The scalar reduction differs by at most one eps on CPU and MPS.
+    _assert_roundoff_close(
+        smoothed.smoothed_means, expected.smoothed_means, ulps=32
+    )
+    _assert_roundoff_close(
+        smoothed.smoothed_covariances, expected.smoothed_covariances, ulps=32
+    )
+
+
+@pytest.mark.parametrize(
+    ("transition_mean", "message"),
+    [
+        (lambda _state: jnp.zeros(2), r"must have shape \(1,\)"),
+        (lambda _state: jnp.zeros(1, dtype=jnp.float16), "must have dtype"),
+        (lambda _state: np.zeros(1), "must return a JAX array"),
+    ],
+)
+@pytest.mark.parametrize("with_input", [False, True], ids=["plain", "input"])
+def test_unscented_smoother_rejects_invalid_transition_output(
+    transition_mean,
+    message,
+    with_input,
+):
+    """Both callback arities report structural errors uniformly."""
+    posterior = smcx.unscented_kalman_filter(
+        jnp.zeros(1),
+        jnp.eye(1),
+        _identity,
+        jnp.eye(1),
+        _identity,
+        jnp.eye(1),
+        jnp.zeros((2, 1)),
+    )
+
+    def callback(state, *_input_t):
+        return transition_mean(state)
+
+    inputs = jnp.zeros((2, 1)) if with_input else None
+
+    with pytest.raises(ValueError, match=message):
+        smcx.gaussian_smoother(
+            posterior,
+            callback,
+            method=smcx.unscented(),
+            inputs=inputs,
+        )
 
 
 def test_unscented_nondefault_rule_matches_scalar_oracle():
@@ -570,8 +815,8 @@ def test_unscented_float32_update_is_psd_and_accurate():
     assert np.linalg.eigvalsh((actual + actual.T) / 2).min() >= -psd_budget
 
 
-def test_unscented_kalman_matches_independent_nonlinear_reference():
-    """Every posterior field matches the Stone Soup UKF oracle."""
+def test_unscented_filter_and_smoother_match_independent_reference():
+    """Every moment matches the Stone Soup UKF and smoother oracle."""
     reference = nonlinear_reference
 
     def transition_mean(state):
@@ -598,6 +843,17 @@ def test_unscented_kalman_matches_independent_nonlinear_reference():
         beta=reference.BETA,
         kappa=reference.KAPPA,
     )
+    method = smcx.unscented(
+        alpha=reference.ALPHA,
+        beta=reference.BETA,
+        kappa=reference.KAPPA,
+    )
+
+    def smooth(record):
+        return smcx.gaussian_smoother(record, transition_mean, method=method)
+
+    smoothed = smooth(posterior)
+    compiled = jax.jit(smooth)(posterior)
     expected_fields = (
         reference.MARGINAL_LOG_LIKELIHOOD,
         reference.PREDICTED_MEANS,
@@ -605,9 +861,16 @@ def test_unscented_kalman_matches_independent_nonlinear_reference():
         reference.FILTERED_MEANS,
         reference.FILTERED_COVARIANCES,
         reference.LOG_EVIDENCE_INCREMENTS,
+        reference.SMOOTHED_MEANS,
+        reference.SMOOTHED_COVARIANCES,
     )
 
-    # Five 2x2 steps have innovation condition number below 2.62.
-    # 256*eps*scale covers the observed operation depth on CPU and Metal.
-    for actual, expected in zip(posterior, expected_fields, strict=True):
+    # Five 2x2 steps have innovation condition number below 2.62, while
+    # positive-time predicted and nonterminal filtered covariances are below
+    # 1.50. The established 256*eps budget covers CPU and Metal depth.
+    for actual, expected in zip(smoothed, expected_fields, strict=True):
         _assert_roundoff_close(actual, expected, ulps=256)
+
+    # Compilation adds no substantive error to this well-conditioned record.
+    for actual, expected in zip(compiled, smoothed, strict=True):
+        _assert_roundoff_close(actual, expected, ulps=32)
