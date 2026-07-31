@@ -102,7 +102,12 @@ assumption at a time.
 
 ## Methods
 
-smcx implements the standard sequential inference methods:
+Filtering conditions each state on the observations up to its own
+time and runs online. Smoothing revisits every state once the
+complete record is in hand: a backward pass consumes the stored
+filter output, so `rts_smoother` takes the result of
+`kalman_filter` rather than rerunning it. smcx implements the
+standard sequential inference methods:
 
 | Setting | Methods | Functions |
 | --- | --- | --- |
