@@ -10,35 +10,37 @@ import numpy as np
 import smcx
 
 
-def test_posterior_sample_keeps_draw_axis_and_repeats_at_same_key():
-    """One draw keeps its axis and an explicit key fixes the result."""
-    covariance = jnp.eye(1)
-    posterior = smcx.kalman_filter(
-        jnp.zeros(1),
-        covariance,
-        covariance,
-        covariance,
-        covariance,
-        covariance,
-        jnp.zeros((2, 1)),
+def test_posterior_sample_matches_fixed_key_scalar_conditional():
+    """A two-time oracle binds the gain, variance, keys, and draw axes."""
+    means = jnp.zeros((2, 1))
+    posterior = smcx.GaussianFilterPosterior(
+        jnp.asarray(0.0),
+        means,
+        jnp.asarray([[[1.0]], [[2.0]]]),
+        means,
+        jnp.ones((2, 1, 1)),
+        jnp.zeros(2),
     )
     key = jr.key(330)
+    keys = jr.split(key, 2)
+    count = np.int64(3)
 
-    first = smcx.posterior_sample(
+    actual = smcx.posterior_sample(
         key,
         posterior,
-        covariance,
-        num_draws=1,
+        jnp.ones((1, 1)),
+        num_draws=count,
     )
-    second = smcx.posterior_sample(
-        key,
-        posterior,
-        covariance,
-        num_draws=1,
-    )
+    terminal = jr.normal(keys[1], (3, 1), dtype=means.dtype)
+    earlier = 0.5 * terminal + jnp.sqrt(
+        jnp.asarray(0.5, means.dtype)
+    ) * jr.normal(keys[0], (3, 1), dtype=means.dtype)
+    expected = jnp.stack((earlier, terminal), axis=1)
 
-    assert first.shape == (1, 2, 1)
-    np.testing.assert_array_equal(first, second)
+    # The same backend and key share normal blocks; 16 eps covers the scalar
+    # solve and multiply, while a wrong key or conditional differs by O(1).
+    tolerance = 16.0 * np.finfo(np.asarray(actual).dtype).eps
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=tolerance)
 
 
 def test_posterior_sample_one_time_preserves_zero_variance_coordinate():
