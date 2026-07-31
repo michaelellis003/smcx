@@ -92,10 +92,10 @@ share one float32 or float64 dtype.
 All covariance arrays are finite and symmetric. The EKF permits positive
 semidefinite prior and transition covariances, including deterministic state
 components, and requires a positive-definite observation covariance. The UKF
-requires all three covariances to be positive definite because it also takes
-Cholesky square roots of state covariances. These value checks run at eager
-Python entry and are skipped when the arrays are tracers inside a JAX
-transformation.
+also requires a positive-definite prior because it takes Cholesky square roots
+of state covariances; its transition covariance remains positive
+semidefinite. These value checks run at eager Python entry and are skipped
+when the arrays are tracers inside a JAX transformation.
 Concrete entries must be zero or normal finite values. Positive-definite
 covariances must also be non-indefinite within dtype-scaled roundoff and yield
 a finite, positive-diagonal Cholesky factor on the active backend, as described
@@ -116,11 +116,10 @@ exchangeable strategy on one model: pass
 for first-order linearization or `method=smcx.unscented(alpha, beta,
 kappa)` for sigma points, with results identical to the named filters.
 
-The Taylor strategy also supplies the transition Jacobian for the matching
-extended RTS smoother:
+The strategy configures the matching nonlinear RTS smoother:
 
 ```python
-smoothed = smcx.gaussian_smoother(
+extended_smoothed = smcx.gaussian_smoother(
     posterior,
     transition_mean,
     method=smcx.taylor_order1(
@@ -128,11 +127,19 @@ smoothed = smcx.gaussian_smoother(
         observation_jacobian,
     ),
 )
+unscented_smoothed = smcx.gaussian_smoother(
+    unscented,
+    transition_mean,
+    method=smcx.unscented(),
+)
 ```
 
-The smoother consumes the stored filtering moments and evaluates transition
-Jacobians at the filtered means. It does not rerun the transition mean or use
-the observation Jacobian. Unscented smoothing is not yet available.
+The smoother strategy must match the one used for its filter record. Taylor
+smoothing evaluates transition Jacobians at the filtered means and does not call
+`transition_mean`. Unscented smoothing re-evaluates `transition_mean` at sigma
+points. Neither path uses the observation side of the strategy. Unscented
+smoothing requires positive-definite nonterminal filtered covariances and a
+record produced with the same transition model and sigma-point rule.
 
 ## Choose particle callbacks for the algorithm
 

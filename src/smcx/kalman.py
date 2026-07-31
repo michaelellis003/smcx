@@ -575,22 +575,36 @@ def _scaled_unscented_rule(
     )
 
 
+def _sigma_points_and_cholesky(
+    mean: Float[Array, " state_dim"],
+    covariance: Float[Array, "state_dim state_dim"],
+    rule: _ScaledUnscentedRule,
+) -> tuple[
+    Float[Array, "num_sigma state_dim"],
+    Float[Array, "state_dim state_dim"],
+]:
+    """Generate sigma points and return their covariance factor."""
+    factor = jnp.linalg.cholesky(
+        _symmetrize(covariance),
+        symmetrize_input=False,
+    )
+    offsets = (rule.sigma_scale * factor).T
+    points = jnp.concatenate((
+        mean[None],
+        mean[None] + offsets,
+        mean[None] - offsets,
+    ))
+    return points, factor
+
+
 def _sigma_points(
     mean: Float[Array, " state_dim"],
     covariance: Float[Array, "state_dim state_dim"],
     rule: _ScaledUnscentedRule,
 ) -> Float[Array, "num_sigma state_dim"]:
     """Generate center-first, column-oriented symmetric sigma points."""
-    factor = jnp.linalg.cholesky(
-        _symmetrize(covariance),
-        symmetrize_input=False,
-    )
-    offsets = (rule.sigma_scale * factor).T
-    return jnp.concatenate((
-        mean[None],
-        mean[None] + offsets,
-        mean[None] - offsets,
-    ))
+    points, _ = _sigma_points_and_cholesky(mean, covariance, rule)
+    return points
 
 
 def _unscented_moments(
@@ -654,6 +668,80 @@ def _unscented_cross_covariance(
         - transformed_points[state_dim + 1 :]
     )
     return rule.off_center_weight * offsets.T @ transformed_differences
+
+
+def _unscented_transition_linearization(
+    filtered_mean: Float[Array, " state_dim"],
+    filtered_covariance: Float[Array, "state_dim state_dim"],
+    transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
+    rule: _ScaledUnscentedRule,
+    input_t: GaussianInput | None = None,
+) -> tuple[
+    Float[Array, "state_dim state_dim"],
+    Float[Array, "state_dim state_dim"],
+]:
+    """Return a sigma-point effective transition and direct cross moment."""
+    state_dim = filtered_mean.shape[0]
+    state_points, factor = _sigma_points_and_cholesky(
+        filtered_mean,
+        filtered_covariance,
+        rule,
+    )
+    if input_t is None:
+        transition_fn = cast(TransitionMeanFn, transition_mean_fn)
+
+        def checked_transition(
+            state: Float[Array, " state_dim"],
+        ) -> Float[Array, " state_dim"]:
+            value = transition_fn(state)
+            _check_callback_array(
+                value,
+                (state_dim,),
+                "transition_mean_fn output",
+                filtered_mean.dtype,
+            )
+            return value
+
+        transition_points = vmap(checked_transition)(state_points)
+    else:
+        transition_fn_u = cast(
+            TransitionMeanFnWithInput,
+            transition_mean_fn,
+        )
+
+        def checked_transition_with_input(
+            state: Float[Array, " state_dim"],
+            input_value: GaussianInput,
+        ) -> Float[Array, " state_dim"]:
+            value = transition_fn_u(state, input_value)
+            _check_callback_array(
+                value,
+                (state_dim,),
+                "transition_mean_fn output",
+                filtered_mean.dtype,
+            )
+            return value
+
+        transition_points = vmap(
+            checked_transition_with_input,
+            in_axes=(0, None),
+        )(state_points, input_t)
+    cross_covariance = _unscented_cross_covariance(
+        state_points,
+        transition_points,
+        rule,
+    )
+    lower_solution = solve_triangular(
+        factor,
+        cross_covariance,
+        lower=True,
+    )
+    effective_transition = solve_triangular(
+        factor.T,
+        lower_solution,
+        lower=False,
+    ).T
+    return effective_transition, cross_covariance
 
 
 def _unscented_condition(
@@ -1615,6 +1703,8 @@ def unscented_kalman_filter(
 
 def _validate_filter_posterior(
     posterior: GaussianFilterPosterior,
+    *,
+    filtered_positive_definite: bool = False,
 ) -> tuple[int, int, jnp.dtype]:
     """Validate the moment shapes needed by the public smoother."""
     means = posterior.filtered_means
@@ -1649,11 +1739,23 @@ def _validate_filter_posterior(
             raise ValueError(
                 f"{name} must have shape {shape}; got {value.shape}"
             )
-    _check_covariance(
-        posterior.filtered_covariances,
-        "filtered_covariances",
-        positive_definite=False,
-    )
+    if filtered_positive_definite:
+        _check_covariance(
+            posterior.filtered_covariances[:-1],
+            "filtered_covariances[:-1]",
+            positive_definite=True,
+        )
+        _check_covariance(
+            posterior.filtered_covariances[-1:],
+            "filtered_covariances[-1:]",
+            positive_definite=False,
+        )
+    else:
+        _check_covariance(
+            posterior.filtered_covariances,
+            "filtered_covariances",
+            positive_definite=False,
+        )
     _check_covariance(
         posterior.predicted_covariances[:1],
         "predicted_covariances[:1]",
@@ -1870,7 +1972,7 @@ class TaylorOrder1(NamedTuple):
 
 
 class Unscented(NamedTuple):
-    """Scaled sigma-point linearization strategy (the unscented filter).
+    """Scaled sigma-point strategy (the unscented filter and smoother).
 
     Attributes:
         alpha: Positive sigma-point spread parameter.
@@ -1920,7 +2022,7 @@ def unscented(
             be positive.
 
     Returns:
-        A strategy record for `gaussian_filter`.
+        A strategy record for `gaussian_filter` or `gaussian_smoother`.
     """
     return Unscented(alpha, beta, kappa)
 
@@ -1930,7 +2032,7 @@ def unscented(
 # method instead of a wrapper-specific type-check error.
 if TYPE_CHECKING:
     _GaussianLinearization: TypeAlias = TaylorOrder1 | Unscented
-    _GaussianSmootherLinearization: TypeAlias = TaylorOrder1
+    _GaussianSmootherLinearization: TypeAlias = TaylorOrder1 | Unscented
 else:
     _GaussianLinearization: TypeAlias = object
     _GaussianSmootherLinearization: TypeAlias = object
@@ -2021,21 +2123,22 @@ def gaussian_smoother(
     method: _GaussianSmootherLinearization,
     inputs: GaussianInputSequence | None = None,
 ) -> GaussianSmootherPosterior:
-    r"""Run a first-order Gaussian backward smoother.
+    r"""Run a Gaussian backward smoother under one linearization strategy.
 
-    This is the extended Rauch--Tung--Striebel smoother for an
-    additive-Gaussian transition model. It evaluates the transition
-    Jacobian at each filtered mean, then runs the same backward kernel as
-    `rts_smoother` under those effective transition matrices.
+    `taylor_order1` selects the extended Rauch--Tung--Striebel smoother.
+    `unscented` selects its scaled sigma-point counterpart. Both run the
+    shared Joseph-form backward kernel under effective transition matrices;
+    the Unscented path supplies its sigma-point cross-covariance directly.
 
     Args:
         filtered_posterior: Forward-pass Gaussian moments, normally from
             `gaussian_filter` with the same ``method`` and transition model.
         transition_mean_fn: Transition mean callback from the forward model.
-            A Taylor-order-one smoother does not evaluate it; the argument is
-            retained for the shared nonlinear-smoother interface.
-        method: Strategy from `taylor_order1`. Its observation Jacobian is
-            unused because smoothing consumes the stored filtering moments.
+            The Unscented smoother evaluates it; the Taylor-order-one
+            smoother does not because its strategy carries the Jacobian.
+        method: Strategy from `taylor_order1` or `unscented`. The Taylor
+            observation Jacobian is unused because smoothing consumes stored
+            filtering moments.
         inputs: Optional exogenous inputs with shape ``(ntime, input_dim)``
             or ``(ntime,)``. Transition ``t`` to ``t + 1`` consumes input
             ``t + 1``; input zero does not affect the backward pass.
@@ -2045,51 +2148,66 @@ def gaussian_smoother(
         covariances.
 
     Raises:
-        ValueError: ``method`` is not a Taylor-order-one strategy, an input or
-            posterior field is invalid, or a transition Jacobian has the
-            wrong shape or dtype.
+        ValueError: ``method`` is not a supported linearization strategy, an
+            input or posterior field is invalid, a rule is invalid, or a
+            transition callback has the wrong shape or dtype.
 
     Note:
-        Filtered covariances and the first predicted covariance may be
-        positive semidefinite. Positive-time predicted covariances must be
-        positive definite because the backward recursion factors them.
-        Concrete value checks run eagerly and are skipped for traced arrays.
+        The first predicted covariance and terminal filtered covariance may
+        be positive semidefinite. Positive-time predicted covariances must be
+        positive definite. Under `unscented`, nonterminal filtered
+        covariances must also be positive definite because sigma-point
+        generation factors them. Concrete value checks run eagerly and are
+        skipped for traced arrays.
 
         The stored predictions must have been produced from the same
-        transition model and Jacobians evaluated at the same filtered
-        moments. That consistency makes the reconstructed process noise
-        agree with the forward pass and gives the shared Joseph-form update
-        its documented covariance behavior.
+        transition model, filtered moments, and selected rule. This is a
+        precondition rather than a runtime comparison. It makes reconstructed
+        process noise agree with the forward pass and gives the shared
+        Joseph-form update its documented covariance behavior.
 
     References:
         Cox, H. (1964). On the Estimation of State Variables and Parameters
         for Noisy Dynamic Systems.
         https://doi.org/10.1109/TAC.1964.1105635
+        Särkkä, S. (2008). Unscented Rauch--Tung--Striebel Smoother.
+        https://doi.org/10.1109/TAC.2008.919531
         Särkkä, S., and Svensson, L. (2023). Bayesian Filtering and
-        Smoothing, second edition, chapter 13.
+        Smoothing, second edition, chapter 13 and section 14.4.
         https://doi.org/10.1017/9781108917407
     """
-    if not isinstance(method, TaylorOrder1):
+    if not isinstance(method, (TaylorOrder1, Unscented)):
         raise ValueError(
-            "method must be a Taylor-order-one strategy built by "
-            "smcx.taylor_order1(...); got "
+            "method must be a linearization strategy built by "
+            "smcx.taylor_order1(...) or smcx.unscented(...); got "
             f"{type(method).__name__}"
         )
 
     num_timesteps, state_dim, dtype = _validate_filter_posterior(
-        filtered_posterior
+        filtered_posterior,
+        filtered_positive_definite=isinstance(method, Unscented),
     )
+    rule = None
+    if isinstance(method, Unscented):
+        rule = _scaled_unscented_rule(
+            state_dim,
+            dtype,
+            method.alpha,
+            method.beta,
+            method.kappa,
+        )
     inputs_arr = None
     if inputs is not None:
         inputs_arr = _canonicalize_inputs(inputs, num_timesteps)
         _check_float_array(inputs_arr, "inputs", dtype)
 
+    cross_covariances = None
     if num_timesteps == 1:
         effective_transitions = jnp.empty(
             (0, state_dim, state_dim),
             dtype=dtype,
         )
-    elif inputs_arr is None:
+    elif isinstance(method, TaylorOrder1) and inputs_arr is None:
         jacobian_fn = cast(
             TransitionJacobianFn,
             method.transition_jacobian_fn,
@@ -2110,7 +2228,8 @@ def gaussian_smoother(
         effective_transitions = vmap(checked_jacobian)(
             filtered_posterior.filtered_means[:-1]
         )
-    else:
+    elif isinstance(method, TaylorOrder1):
+        assert inputs_arr is not None
         jacobian_fn_u = cast(
             TransitionJacobianFnWithInput,
             method.transition_jacobian_fn,
@@ -2133,6 +2252,51 @@ def gaussian_smoother(
             filtered_posterior.filtered_means[:-1],
             inputs_arr[1:],
         )
+    elif inputs_arr is None:
+        assert rule is not None
+
+        def linearize(
+            mean: Float[Array, " state_dim"],
+            covariance: Float[Array, "state_dim state_dim"],
+        ) -> tuple[
+            Float[Array, "state_dim state_dim"],
+            Float[Array, "state_dim state_dim"],
+        ]:
+            return _unscented_transition_linearization(
+                mean,
+                covariance,
+                transition_mean_fn,
+                rule,
+            )
+
+        effective_transitions, cross_covariances = vmap(linearize)(
+            filtered_posterior.filtered_means[:-1],
+            filtered_posterior.filtered_covariances[:-1],
+        )
+    else:
+        assert rule is not None
+
+        def linearize_with_input(
+            mean: Float[Array, " state_dim"],
+            covariance: Float[Array, "state_dim state_dim"],
+            input_t: GaussianInput,
+        ) -> tuple[
+            Float[Array, "state_dim state_dim"],
+            Float[Array, "state_dim state_dim"],
+        ]:
+            return _unscented_transition_linearization(
+                mean,
+                covariance,
+                transition_mean_fn,
+                rule,
+                input_t,
+            )
+
+        effective_transitions, cross_covariances = vmap(linearize_with_input)(
+            filtered_posterior.filtered_means[:-1],
+            filtered_posterior.filtered_covariances[:-1],
+            inputs_arr[1:],
+        )
 
     smoothed_means, smoothed_covariances = _backward_pass(
         filtered_posterior.filtered_means,
@@ -2140,6 +2304,7 @@ def gaussian_smoother(
         filtered_posterior.predicted_means,
         filtered_posterior.predicted_covariances,
         effective_transitions,
+        cross_covariances=cross_covariances,
     )
     return GaussianSmootherPosterior(
         *filtered_posterior,
