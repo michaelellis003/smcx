@@ -149,18 +149,29 @@ them. The caller supplies the matching model pieces to the backward pass:
 | Forward result | Retrospective operation | Caller must reuse | Claim |
 | --- | --- | --- | --- |
 | `kalman_filter` | `rts_smoother` | Static or time-varying transition matrices | Exact for a consistent linear-Gaussian model |
-| `extended_kalman_filter` or `gaussian_filter(..., method=taylor_order1(...))` | `gaussian_smoother(..., method=taylor_order1(...))` | Transition Jacobian and full input sequence | Approximate extended RTS moments |
-| `unscented_kalman_filter` or `gaussian_filter(..., method=unscented(...))` | `gaussian_smoother(..., method=unscented(...))` | Transition mean, sigma-point rule, and full input sequence | Approximate unscented RTS moments |
+| `extended_kalman_filter` or `gaussian_filter(..., method=taylor_order1(...))` | `gaussian_smoother(..., method=taylor_order1(...))` | Transition Jacobian and `inputs[1:]` if used; supply a full length-`T` input array | Approximate extended RTS moments |
+| `unscented_kalman_filter` or `gaussian_filter(..., method=unscented(...))` | `gaussian_smoother(..., method=unscented(...))` | Transition mean, sigma-point rule, and `inputs[1:]` if used; supply a full length-`T` input array | Approximate unscented RTS moments |
 
-smcx cannot compare these model identities at runtime. Gaussian smoothers do
-not consume DLM, DGLM, particle, Liu-West, tempered-SMC, or SMC² records.
+smcx cannot compare these model identities at runtime. The remaining records
+have different contracts. DLM and DGLM results use distinct posterior layouts.
+Particle and Liu-West results are weighted-particle records rather than
+Gaussian moment records. Tempered SMC has no state-time filtering record.
+SMC² returns an outer parameter-particle record. Gaussian smoothers consume
+none of them.
 
-Both nonlinear smoothers require positive-definite predicted covariances at
-positive times. Unscented smoothing also factors each nonterminal filtered
-covariance, so those matrices must be positive definite; the terminal filtered
-covariance may be positive semidefinite. For the backward transition from
-time `t` to `t + 1`, an input-aware callback receives `inputs[t + 1]`.
-`inputs[0]` is unused by smoothing.
+All filtered covariances and the first predicted covariance must be finite,
+symmetric, and positive semidefinite. Positive-time predicted covariances must
+be positive definite. Unscented smoothing also factors each nonterminal
+filtered covariance, so those matrices must be positive definite; the terminal
+filtered covariance may remain positive semidefinite. For the backward
+transition from time `t` to `t + 1`, an input-aware callback receives
+`inputs[t + 1]`. `inputs[0]` is unused by smoothing.
+
+As reference cases, Särkkä and Svensson (2023) apply ERTSS and URTSS to the
+same noisy-pendulum model in
+[Examples 13.2 and 14.10](https://doi.org/10.1017/9781108917407); the latter
+appears in section 14.4. These are reference cases rather than smcx numerical
+oracles; smcx does not use the reported RMSEs as frozen expected values.
 
 ## Choose particle callbacks for the algorithm
 

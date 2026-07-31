@@ -148,10 +148,14 @@ approximation through a backward pass over the stored moments.
 `gaussian_smoother` evaluates transition Jacobians at the filtered means
 under `taylor_order1`; it reevaluates the transition mean at sigma points
 under `unscented`. Neither method reruns the observation side. The caller
-must reuse the forward transition model, full input sequence, and
-linearization strategy or sigma-point rule. The record stores no model
-identity, so smcx cannot compare that match at runtime. Both smoothing
-results remain approximate. The
+must reuse the forward transition model and, if inputs were used, the
+transition values `inputs[1:]`. It must also reuse the transition Jacobian
+or sigma-point rule. An input-aware smoother still accepts a full length-`T`
+array; `inputs[0]` is ignored. The record stores no model identity, so smcx
+cannot compare that match at runtime. Both smoothing results remain
+approximate. The extended and unscented recursions follow
+[Cox (1964)](https://doi.org/10.1109/TAC.1964.1105635) and
+[Särkkä (2008)](https://doi.org/10.1109/TAC.2008.919531), respectively. The
 [custom models guide](custom-models.md)
 gives runnable calls and the covariance requirements.
 
