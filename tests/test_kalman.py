@@ -13,6 +13,7 @@ import pytest
 import smcx
 import smcx.kalman as kalman_module
 from tests import _kalman_reference as multivariate_reference
+from tests._gaussian_smoothing_reference import dense_joint_marginals
 from tests._kalman import kalman_1d
 from tests._lgssm_reference import EXACT_LOG_LIKELIHOOD, REFERENCE_TIMES
 from tests._lgssm_reference import FILTERED_MEANS as EXACT_FILTERED_MEANS
@@ -23,9 +24,10 @@ def _assert_roundoff_close(actual, expected):
     """Compare the small, well-conditioned reference within f32/f64 error."""
     actual_array = np.asarray(actual)
     expected_array = np.asarray(expected)
-    # The fixtures have either 50 stable scalar steps or five 2x2 steps
-    # with covariance condition numbers below 2.7. A 64*eps*scale
-    # forward-error budget covers their reductions and triangular solves.
+    # The fixtures have either 50 stable scalar steps, five 2x2 steps with
+    # covariance condition numbers below 2.7, or a 10x10 joint-precision
+    # solve with condition number below 15. A 64*eps*scale forward-error
+    # budget covers their reductions, triangular solves, and dense solve.
     scale = max(1.0, float(np.max(np.abs(expected_array))))
     atol = 64 * np.finfo(actual_array.dtype).eps * scale
     np.testing.assert_allclose(
@@ -621,6 +623,57 @@ def test_multivariate_filter_and_smoother_match_independent_references():
     )
 
 
+def test_rts_smoother_matches_dense_joint_precision_oracle():
+    """RTS marginals agree with a derivation-independent Gaussian solve."""
+    reference = multivariate_reference
+    posterior = smcx.kalman_filter(
+        jnp.asarray(reference.INITIAL_MEAN),
+        jnp.asarray(reference.INITIAL_COVARIANCE),
+        jnp.asarray(reference.TRANSITION_MATRIX),
+        jnp.asarray(reference.TRANSITION_COVARIANCE),
+        jnp.asarray(reference.OBSERVATION_MATRIX),
+        jnp.asarray(reference.OBSERVATION_COVARIANCE),
+        jnp.asarray(reference.EMISSIONS),
+        transition_bias=jnp.asarray(reference.TRANSITION_BIAS),
+        observation_bias=jnp.asarray(reference.OBSERVATION_BIAS),
+        transition_input_matrix=jnp.asarray(reference.TRANSITION_INPUT_MATRIX),
+        observation_input_matrix=jnp.asarray(
+            reference.OBSERVATION_INPUT_MATRIX
+        ),
+        inputs=jnp.asarray(reference.INPUTS),
+    )
+    smoothed = smcx.rts_smoother(
+        posterior,
+        jnp.asarray(reference.TRANSITION_MATRIX),
+    )
+
+    transition_offsets = reference.TRANSITION_BIAS + (
+        reference.INPUTS[1:] @ reference.TRANSITION_INPUT_MATRIX.T
+    )
+    observation_offsets = reference.OBSERVATION_BIAS + (
+        reference.INPUTS @ reference.OBSERVATION_INPUT_MATRIX.T
+    )
+    expected_means, expected_covariances = dense_joint_marginals(
+        reference.INITIAL_MEAN,
+        reference.INITIAL_COVARIANCE,
+        reference.TRANSITION_MATRIX,
+        reference.TRANSITION_COVARIANCE,
+        transition_offsets,
+        reference.OBSERVATION_MATRIX,
+        reference.OBSERVATION_COVARIANCE,
+        observation_offsets,
+        reference.EMISSIONS,
+    )
+
+    # The 10x10 joint precision has condition number below 15. The existing
+    # 64-eps roundoff budget covers both its dense solve and the RTS scan.
+    _assert_roundoff_close(smoothed.smoothed_means, expected_means)
+    _assert_roundoff_close(
+        smoothed.smoothed_covariances,
+        expected_covariances,
+    )
+
+
 def test_rts_smoother_compiled_matches_eager():
     """Compilation preserves a nonempty RTS backward scan."""
     filtered = smcx.kalman_filter(
@@ -641,6 +694,93 @@ def test_rts_smoother_compiled_matches_eager():
 
     for eager_value, compiled_value in zip(eager, compiled, strict=True):
         np.testing.assert_allclose(compiled_value, eager_value)
+
+
+def test_rts_smoother_vmap_matches_independent_runs():
+    """Batching the public smoother preserves independent posteriors."""
+    transition = jnp.array([[0.9]])
+    emissions = (
+        jnp.array([[0.2], [-0.1], [0.4]]),
+        jnp.array([[-0.3], [0.5], [0.1]]),
+    )
+    filtered = tuple(
+        smcx.kalman_filter(
+            jnp.array([0.0]),
+            jnp.array([[1.0]]),
+            transition,
+            jnp.array([[0.25]]),
+            jnp.array([[1.0]]),
+            jnp.array([[0.5]]),
+            batch,
+        )
+        for batch in emissions
+    )
+    batched = jax.tree.map(
+        lambda *fields: jnp.stack(fields),
+        *filtered,
+    )
+
+    actual = jax.vmap(smcx.rts_smoother, in_axes=(0, None))(
+        batched,
+        transition,
+    )
+
+    assert actual.smoothed_means.shape == (2, 3, 1)
+    assert actual.smoothed_covariances.shape == (2, 3, 1, 1)
+    eps = float(jnp.finfo(actual.smoothed_means.dtype).eps)
+    for index, posterior in enumerate(filtered):
+        expected = smcx.rts_smoother(posterior, transition)
+        np.testing.assert_allclose(
+            actual.smoothed_means[index],
+            expected.smoothed_means,
+            rtol=32 * eps,
+            atol=32 * eps,
+        )
+        np.testing.assert_allclose(
+            actual.smoothed_covariances[index],
+            expected.smoothed_covariances,
+            rtol=32 * eps,
+            atol=32 * eps,
+        )
+
+
+def test_rts_smoother_gradient_matches_scalar_recursion():
+    """Mean and covariance gradients follow the scalar RTS recursion."""
+    filtered = smcx.GaussianFilterPosterior(
+        jnp.asarray(0.0),
+        jnp.array([[0.0], [0.1]]),
+        jnp.array([[[1.0]], [[1.1]]]),
+        jnp.array([[0.2], [0.7]]),
+        jnp.array([[[0.8]], [[0.4]]]),
+        jnp.zeros(2),
+    )
+
+    def objective(coefficient):
+        smoothed = smcx.rts_smoother(filtered, coefficient[None, None])
+        return (
+            smoothed.smoothed_means[0, 0]
+            + 0.25 * smoothed.smoothed_covariances[0, 0, 0]
+        )
+
+    coefficient = jnp.asarray(0.6)
+    gradient_fn = jax.grad(objective)
+    eager = gradient_fn(coefficient)
+    compiled = jax.jit(gradient_fn)(coefficient)
+    mean_derivative = 0.8 / 1.1 * (0.7 - 0.1)
+    covariance_derivative = 2.0 * 0.8**2 * 0.6 * (0.4 - 1.1) / 1.1**2
+    expected = jnp.asarray(
+        mean_derivative + 0.25 * covariance_derivative,
+        dtype=eager.dtype,
+    )
+
+    eps = float(jnp.finfo(eager.dtype).eps)
+    for actual in (eager, compiled):
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=32 * eps,
+            atol=32 * eps,
+        )
 
 
 def test_rts_smoother_one_step_is_filter_identity():
