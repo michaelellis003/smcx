@@ -444,12 +444,12 @@ def test_unscented_guard_boundary_keeps_covariance_psd():
     """
     posterior = smcx.unscented_kalman_filter(
         jnp.array([0.1], dtype=jnp.float32),
-        jnp.array([[1.0]], dtype=jnp.float32),
-        _identity,
-        jnp.array([[0.1]], dtype=jnp.float32),
+        jnp.array([[0.2]], dtype=jnp.float32),
+        lambda state: state**3,
+        jnp.array([[0.05]], dtype=jnp.float32),
         _square,
         jnp.array([[0.5]], dtype=jnp.float32),
-        jnp.array([[0.3], [0.2], [0.4]], dtype=jnp.float32),
+        jnp.array([[0.3], [0.2]], dtype=jnp.float32),
         alpha=2.0,
         beta=0.0,
         kappa=0.0,
@@ -457,8 +457,21 @@ def test_unscented_guard_boundary_keeps_covariance_psd():
 
     smoothed = smcx.gaussian_smoother(
         posterior,
-        _identity,
+        lambda state: state**3,
         method=smcx.unscented(alpha=2.0, beta=0.0, kappa=0.0),
+    )
+    mean = posterior.filtered_means[0, 0]
+    covariance = posterior.filtered_covariances[0, 0, 0]
+    # For d=1, alpha=2, and kappa=0, the cubic sigma cross moment is
+    # D = P * (3*m**2 + 4*P). The analytic/public means were exact on CPU
+    # and MPS; 16 f32 eps covers this scalar solve's operation depth.
+    cross_covariance = covariance * (3.0 * mean**2 + 4.0 * covariance)
+    gain = cross_covariance / posterior.predicted_covariances[1, 0, 0]
+    expected_mean = mean + gain * (
+        posterior.filtered_means[1, 0] - posterior.predicted_means[1, 0]
+    )
+    _assert_roundoff_close(
+        smoothed.smoothed_means[0, 0], expected_mean, ulps=16
     )
     covariances = jnp.concatenate((
         posterior.filtered_covariances,
@@ -528,20 +541,12 @@ def test_unscented_smoother_uses_sigma_cross_covariance_directly():
     )
 
     factor = jnp.linalg.cholesky(predicted_covariance)
-    lower_solution = solve_triangular(
-        factor,
-        cross_covariance.T,
-        lower=True,
-    )
-    gain = solve_triangular(
-        factor.T,
-        lower_solution,
-        lower=False,
-    ).T
+    lower_solution = solve_triangular(factor, cross_covariance.T, lower=True)
+    gain = solve_triangular(factor.T, lower_solution, lower=False).T
     expected = filtered_mean + gain @ residual
     scale = max(1.0, float(np.abs(expected).max()))
-    # The A_eff-to-D reconstruction mutant misses by at least 1.36e-3 on
-    # CPU and 4.39e-3 on MPS; this 128-eps budget is at most 1.53e-5.
+    # The A_eff-to-D reconstruction mutant misses by approximately 1.36e-3
+    # on CPU and 4.39e-3 on MPS; this budget is at most 1.53e-5.
     tolerance = float(128 * np.finfo(np.float32).eps * scale)
     np.testing.assert_allclose(
         np.asarray(smoothed.smoothed_means[0]),
@@ -604,16 +609,10 @@ def test_unscented_smoother_matches_dense_linear_oracle_with_inputs():
         np.asarray(emissions),
     )
     # The dense joint has condition number below 68.7; observed error is
-    # below 3.75 scaled eps on CPU and MPS.
+    # at most 3.75 scaled eps on CPU and MPS.
+    _assert_roundoff_close(smoothed.smoothed_means, expected_means, ulps=64)
     _assert_roundoff_close(
-        smoothed.smoothed_means,
-        expected_means,
-        ulps=64,
-    )
-    _assert_roundoff_close(
-        smoothed.smoothed_covariances,
-        expected_covariances,
-        ulps=64,
+        smoothed.smoothed_covariances, expected_covariances, ulps=64
     )
 
 
@@ -659,14 +658,10 @@ def test_unscented_smoother_exposes_mismatched_record_precondition():
     assert np.all(np.isfinite(np.asarray(smoothed.smoothed_covariances)))
     # The scalar reduction differs by at most one eps on CPU and MPS.
     _assert_roundoff_close(
-        smoothed.smoothed_means,
-        expected.smoothed_means,
-        ulps=32,
+        smoothed.smoothed_means, expected.smoothed_means, ulps=32
     )
     _assert_roundoff_close(
-        smoothed.smoothed_covariances,
-        expected.smoothed_covariances,
-        ulps=32,
+        smoothed.smoothed_covariances, expected.smoothed_covariances, ulps=32
     )
 
 
@@ -678,11 +673,13 @@ def test_unscented_smoother_exposes_mismatched_record_precondition():
         (lambda _state: np.zeros(1), "must return a JAX array"),
     ],
 )
+@pytest.mark.parametrize("with_input", [False, True], ids=["plain", "input"])
 def test_unscented_smoother_rejects_invalid_transition_output(
     transition_mean,
     message,
+    with_input,
 ):
-    """The new callback boundary reports structural errors uniformly."""
+    """Both callback arities report structural errors uniformly."""
     posterior = smcx.unscented_kalman_filter(
         jnp.zeros(1),
         jnp.eye(1),
@@ -693,11 +690,17 @@ def test_unscented_smoother_rejects_invalid_transition_output(
         jnp.zeros((2, 1)),
     )
 
+    def callback(state, *_input_t):
+        return transition_mean(state)
+
+    inputs = jnp.zeros((2, 1)) if with_input else None
+
     with pytest.raises(ValueError, match=message):
         smcx.gaussian_smoother(
             posterior,
-            transition_mean,
+            callback,
             method=smcx.unscented(),
+            inputs=inputs,
         )
 
 
@@ -845,18 +848,12 @@ def test_unscented_filter_and_smoother_match_independent_reference():
         beta=reference.BETA,
         kappa=reference.KAPPA,
     )
-    smoothed = smcx.gaussian_smoother(
-        posterior,
-        transition_mean,
-        method=method,
-    )
-    compiled = jax.jit(
-        lambda record: smcx.gaussian_smoother(
-            record,
-            transition_mean,
-            method=method,
-        )
-    )(posterior)
+
+    def smooth(record):
+        return smcx.gaussian_smoother(record, transition_mean, method=method)
+
+    smoothed = smooth(posterior)
+    compiled = jax.jit(smooth)(posterior)
     expected_fields = (
         reference.MARGINAL_LOG_LIKELIHOOD,
         reference.PREDICTED_MEANS,

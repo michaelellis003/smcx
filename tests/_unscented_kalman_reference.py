@@ -22,7 +22,7 @@ filtering track, and ``UnscentedKalmanSmoother`` consumed it. All three used
 the explicitly stated scaled-rule parameters. The updater used its default
 subtractive covariance form, and every stored covariance was forced symmetric.
 The retained smoother covariances were also symmetrized, changing raw Stone
-Soup entries by at most 1.73e-18. Measurement sigma points were regenerated
+Soup entries by less than 1.74e-18. Measurement sigma points were regenerated
 after the complete process-noise-inclusive prediction. Recomputing the update
 in smcx's residual-sigma form changed array fields by at most 2.78e-16 and
 total evidence by 4.44e-16.
@@ -49,7 +49,7 @@ tfp-nightly 0.26.0.dev20260717, ``JAX_PLATFORMS=cpu``, and JAX float64.
 Dynamax differed by at most 3.46e-10 in predicted means, 1.56e-9 in predicted
 covariances, 3.76e-10 in filtered means, 1.94e-9 in filtered covariances, and
 9.29e-9 in total evidence because its PSD solve adds a 1e-9 diagonal boost.
-Its smoother differed by at most 1.07e-9 in means and 2.49e-9 in
+Its smoother differed by less than 1.08e-9 in means and 2.50e-9 in
 covariances. The maximum Stone Soup innovation-covariance condition number
 was 2.613033461095126.
 
@@ -157,9 +157,9 @@ FILTERED_COVARIANCES = np.array(
 SMOOTHED_MEANS = np.array(
     [
         [0.19207014197706154, -0.08918541784614414],
-        [0.18107688063566820, -0.06256674996308037],
+        [0.1810768806356682, -0.06256674996308037],
         [0.14908531891971977, -0.02967933437804084],
-        [0.18401701327216213, -0.04098428767705568],
+        [0.18401701327216213, -0.040984287677055684],
         [0.11121904272233052, -0.09453411027467092],
     ],
     dtype=np.float64,
@@ -167,24 +167,24 @@ SMOOTHED_MEANS = np.array(
 SMOOTHED_COVARIANCES = np.array(
     [
         [
-            [0.05756351733138948, -0.00458208054367111],
-            [-0.00458208054367111, 0.06814112710437469],
+            [0.05756351733138948, -0.004582080543671107],
+            [-0.004582080543671107, 0.06814112710437469],
         ],
         [
-            [0.04119810299179997, -0.00278966647101791],
-            [-0.00278966647101791, 0.05373484049421223],
+            [0.04119810299179997, -0.002789666471017912],
+            [-0.002789666471017912, 0.053734840494212226],
         ],
         [
-            [0.03708336653291222, -0.00170605386857159],
-            [-0.00170605386857159, 0.04847518420774380],
+            [0.03708336653291222, -0.001706053868571588],
+            [-0.001706053868571588, 0.0484751842077438],
         ],
         [
-            [0.03787155747645921, -0.00107532314766991],
-            [-0.00107532314766991, 0.04891301106286917],
+            [0.03787155747645921, -0.0010753231476699114],
+            [-0.0010753231476699114, 0.048913011062869174],
         ],
         [
-            [0.04541482912631204, 0.00155944612870942],
-            [0.00155944612870942, 0.05700662098798591],
+            [0.04541482912631204, 0.0015594461287094241],
+            [0.0015594461287094241, 0.05700662098798591],
         ],
     ],
     dtype=np.float64,

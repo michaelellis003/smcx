@@ -825,6 +825,8 @@ def test_gaussian_smoothers_vmap_match_independent_runs():
 
     sigma = jax.vmap(smooth_unscented)(batched)
     eps = float(jnp.finfo(rts.smoothed_means.dtype).eps)
+    # These scalar linear reductions have unit-scale conditioning. Observed
+    # CPU/MPS error is at most 0.5 eps; 32 eps covers scan and solve depth.
     for actual in (rts, taylor, sigma):
         assert actual.smoothed_means.shape == (2, 3, 1)
         assert actual.smoothed_covariances.shape == (2, 3, 1, 1)
@@ -896,6 +898,8 @@ def test_gaussian_smoother_gradients_match_scalar_recursion():
     )
 
     eps = float(jnp.finfo(coefficient.dtype).eps)
+    # The analytic scalar derivative is well conditioned. Observed eager/JIT
+    # error is at most 0.5 eps; 32 eps covers autodiff and solve depth.
     for objective in (rts_objective, taylor_objective, unscented_objective):
         gradient_fn = jax.grad(objective)
         gradients = (
