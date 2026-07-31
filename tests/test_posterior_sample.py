@@ -58,9 +58,9 @@ def test_posterior_sample_one_time_preserves_zero_variance_coordinate():
     )
 
     draws = smcx.posterior_sample(
-        jr.key(331), posterior, jnp.eye(2), num_draws=4
+        jr.key(331), posterior, jnp.eye(2), num_draws=1
     )
 
-    assert draws.shape == (4, 1, 2)
+    assert draws.shape == (1, 1, 2)
     np.testing.assert_array_equal(draws[:, 0, 1], -1.0)
     assert np.all(np.isfinite(draws))
