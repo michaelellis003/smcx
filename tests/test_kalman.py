@@ -751,6 +751,30 @@ def test_taylor_smoother_constant_jacobian_is_bitwise_rts():
         np.testing.assert_array_equal(actual_field, expected_field)
 
 
+def test_unscented_smoother_linear_transition_matches_rts():
+    """Sigma-point smoothing reduces to RTS on a linear transition."""
+    transition = jnp.array([[0.9]])
+    filtered = smcx.kalman_filter(
+        jnp.array([0.0]),
+        jnp.array([[1.0]]),
+        transition,
+        jnp.array([[0.25]]),
+        jnp.array([[1.0]]),
+        jnp.array([[0.5]]),
+        jnp.array([[0.2], [-0.1], [0.4]]),
+    )
+
+    actual = smcx.gaussian_smoother(
+        filtered,
+        lambda state: transition @ state,
+        method=smcx.unscented(),
+    )
+    expected = smcx.rts_smoother(filtered, transition)
+
+    for actual_field, expected_field in zip(actual, expected, strict=True):
+        _assert_roundoff_close(actual_field, expected_field)
+
+
 def test_gaussian_smoothers_vmap_match_independent_runs():
     """Batching either public smoother preserves independent posteriors."""
     transition = jnp.array([[0.9]])
@@ -889,7 +913,13 @@ def test_gaussian_smoothers_one_step_are_filter_identity():
         method=smcx.taylor_order1(unused_callback, unused_callback),
         inputs=jnp.array([0.5]),
     )
-    for smoothed in (rts, taylor):
+    sigma = smcx.gaussian_smoother(
+        filtered,
+        unused_callback,
+        method=smcx.unscented(),
+        inputs=jnp.array([0.5]),
+    )
+    for smoothed in (rts, taylor, sigma):
         np.testing.assert_array_equal(
             smoothed.smoothed_means,
             filtered.filtered_means,
@@ -933,8 +963,8 @@ def _valid_filter_posterior() -> smcx.GaussianFilterPosterior:
 @pytest.mark.parametrize(
     ("case", "message"),
     [
-        ("method", "Taylor-order-one strategy"),
-        ("unscented", "Taylor-order-one strategy"),
+        ("method", "linearization strategy"),
+        ("unscented_rule", "alpha must be greater than zero"),
         ("input_length", "leading dimension T=2"),
         ("input_dtype", "inputs must have a floating dtype"),
         ("jacobian_shape", r"must have shape \(2, 2\)"),
@@ -956,8 +986,8 @@ def test_gaussian_smoother_rejects_invalid_new_arguments(case, message):
     inputs = None
     if case == "method":
         method = "ekf"
-    elif case == "unscented":
-        method = smcx.unscented()
+    elif case == "unscented_rule":
+        method = smcx.unscented(alpha=0.0)
     elif case == "input_length":
         inputs = jnp.zeros(3)
     elif case == "input_dtype":
@@ -1044,6 +1074,32 @@ def test_rts_smoother_accepts_semidefinite_unfactored_covariances():
 
     smoothed = smcx.rts_smoother(posterior, jnp.eye(2))
 
+    assert jnp.all(jnp.isfinite(smoothed.smoothed_covariances))
+
+
+def test_unscented_smoother_factors_only_nonterminal_filtered_covariances():
+    """Sigma-point generation tightens only the moments it consumes."""
+    posterior = _valid_filter_posterior()
+    singular = jnp.array([[1.0, 0.0], [0.0, 0.0]])
+    method = smcx.unscented()
+
+    invalid = posterior._replace(
+        filtered_covariances=posterior.filtered_covariances.at[0].set(singular)
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"filtered_covariances\[:-1\].*positive definite",
+    ):
+        smcx.gaussian_smoother(invalid, lambda state: state, method=method)
+
+    valid = posterior._replace(
+        filtered_covariances=posterior.filtered_covariances.at[-1].set(singular)
+    )
+    smoothed = smcx.gaussian_smoother(
+        valid,
+        lambda state: state,
+        method=method,
+    )
     assert jnp.all(jnp.isfinite(smoothed.smoothed_covariances))
 
 

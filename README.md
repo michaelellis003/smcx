@@ -112,7 +112,7 @@ standard sequential inference methods:
 | Setting | Methods | Functions |
 | --- | --- | --- |
 | Linear-Gaussian, fully known | Kalman filter and RTS smoother, exact | `kalman_filter`, `rts_smoother` |
-| Known nonlinear functions | Extended and unscented Kalman filters plus extended RTS smoothing, approximate; the linearization strategy is an argument | `extended_kalman_filter`, `unscented_kalman_filter`, `gaussian_filter`, `gaussian_smoother` |
+| Known nonlinear functions | Extended and unscented Kalman filters and RTS smoothers, approximate; the linearization strategy is an argument | `extended_kalman_filter`, `unscented_kalman_filter`, `gaussian_filter`, `gaussian_smoother` |
 | Observation variance unknown, variance-scaled | Conjugate DLM, exact | `dlm_filter` |
 | Count and binary observations | Conjugate/linear-Bayes DGLM, approximate; the observation family is an argument | `dglm_filter` with `poisson()`, `bernoulli()`, or `binomial(trials=n)` |
 | General densities | Bootstrap, auxiliary, and guided particle filters | `bootstrap_filter`, `auxiliary_filter`, `guided_filter` |
