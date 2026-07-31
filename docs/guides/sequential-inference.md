@@ -152,8 +152,9 @@ For `taylor_order1`, the caller must reuse the transition Jacobian.
 For `unscented`, it must reuse the transition mean and sigma-point rule.
 If inputs were used, it must supply the same `inputs[1:]` values within a
 full length-`T` array; `inputs[0]` is ignored. The record stores no model
-identity, so smcx cannot compare that match at runtime. Both smoothing
-approximate. The extended and unscented recursions follow
+identity, so smcx cannot compare that match at runtime.
+Both smoothing results remain approximate. The extended and unscented
+recursions follow
 [Cox (1964)](https://doi.org/10.1109/TAC.1964.1105635) and
 [Särkkä (2008)](https://doi.org/10.1109/TAC.2008.919531), respectively. The
 [custom models guide](custom-models.md)
