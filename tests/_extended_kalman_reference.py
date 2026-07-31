@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-"""Frozen independent outputs for a nonlinear extended Kalman filter.
+"""Frozen outputs for a nonlinear extended Kalman filter and smoother.
 
 The canonical outputs were generated on CPU in float64 with Stone Soup
 1.9.1 and SciPy 1.18.0:
@@ -13,6 +13,7 @@ The canonical outputs were generated on CPU in float64 with Stone Soup
   https://github.com/dstl/Stone-Soup/releases/tag/v1.9.1
   https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/stonesoup/predictor/kalman.py
   https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/stonesoup/updater/kalman.py
+  https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/stonesoup/smoother/kalman.py
   https://github.com/dstl/Stone-Soup/blob/a4336b920a799cfe0a77ecb05867c5deeb371c7a/LICENSE
 * SciPy 1.18.0, commit
   54ef5423f2e4376230ec3bfda6912a07a50958e3, BSD-3-Clause:
@@ -20,21 +21,24 @@ The canonical outputs were generated on CPU in float64 with Stone Soup
   https://github.com/scipy/scipy/blob/54ef5423f2e4376230ec3bfda6912a07a50958e3/scipy/stats/_multivariate.py
   https://github.com/scipy/scipy/blob/54ef5423f2e4376230ec3bfda6912a07a50958e3/LICENSE.txt
 
-Stone Soup's ``ExtendedKalmanPredictor`` and ``ExtendedKalmanUpdater`` were
-used with ``use_joseph_cov=True`` and forced covariance symmetry. SciPy's
-multivariate normal log density supplied the innovation likelihoods.
+Stone Soup's ``ExtendedKalmanPredictor`` and ``ExtendedKalmanUpdater``
+produced the filtering track, and ``ExtendedKalmanSmoother`` consumed it.
+The updater used ``use_joseph_cov=True`` and forced covariance symmetry.
+SciPy's multivariate normal log density supplied the innovation likelihoods.
 
-The values were cross-checked with Dynamax 1.0.2, commit
+The values were cross-checked on CPU in float64 with Dynamax 1.0.2, commit
 a216d7feec0d025560a0a194ed5abab538648375, MIT:
 https://github.com/probml/dynamax/releases/tag/1.0.2
 https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/dynamax/nonlinear_gaussian_ssm/inference_ekf.py
+https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/dynamax/utils/utils.py#L197-L202
 https://github.com/probml/dynamax/blob/a216d7feec0d025560a0a194ed5abab538648375/LICENSE
 
-Dynamax differed by at most 3.35e-10 in filtered means, 1.94e-9 in
-covariances, and 9.40e-9 in total evidence because its PSD solve adds a
-1e-9 diagonal boost. The maximum Stone Soup innovation-covariance condition
-number was 2.618. Only numerical inputs and outputs are retained here; no
-implementation code was copied or translated.
+Dynamax differed by at most 3.35e-10 in filtered means, 1.94e-9 in filtered
+covariances, and 9.40e-9 in total evidence because its PSD solve adds a 1e-9
+diagonal boost. Its extended smoother differed by at most 1.10e-9 in means
+and 2.50e-9 in covariances. The maximum Stone Soup innovation-covariance
+condition number was 2.618. Only numerical inputs and outputs are retained
+here; no implementation code was copied or translated.
 """
 
 import numpy as np
@@ -141,3 +145,39 @@ LOG_EVIDENCE_INCREMENTS = np.array(
     dtype=np.float64,
 )
 MARGINAL_LOG_LIKELIHOOD = np.float64(-2.4409430911865453)
+
+SMOOTHED_MEANS = np.array(
+    [
+        [0.21502172773243183, -0.09353585798018477],
+        [0.19875461351753573, -0.06836833390546121],
+        [0.16263978257320436, -0.03600779149201859],
+        [0.19461908602603487, -0.04756207512971136],
+        [0.11948403290075882, -0.10124821257992712],
+    ],
+    dtype=np.float64,
+)
+SMOOTHED_COVARIANCES = np.array(
+    [
+        [
+            [0.05619869548853317, -0.00497989306041453],
+            [-0.00497989306041453, 0.06805403779276664],
+        ],
+        [
+            [0.04069650781168731, -0.00285974283169139],
+            [-0.00285974283169139, 0.05381044307347230],
+        ],
+        [
+            [0.03687761185382012, -0.00171079160394626],
+            [-0.00171079160394626, 0.04854886515132259],
+        ],
+        [
+            [0.03776677611173165, -0.00108540148805407],
+            [-0.00108540148805407, 0.04897885179125839],
+        ],
+        [
+            [0.04534578071889979, 0.00154226995981523],
+            [0.00154226995981523, 0.05708215892992072],
+        ],
+    ],
+    dtype=np.float64,
+)

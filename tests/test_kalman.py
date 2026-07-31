@@ -726,8 +726,8 @@ def test_taylor_smoother_constant_jacobian_is_bitwise_rts():
         np.testing.assert_array_equal(actual_field, expected_field)
 
 
-def test_rts_smoother_vmap_matches_independent_runs():
-    """Batching the public smoother preserves independent posteriors."""
+def test_gaussian_smoothers_vmap_match_independent_runs():
+    """Batching either public smoother preserves independent posteriors."""
     transition = jnp.array([[0.9]])
     emissions = (
         jnp.array([[0.2], [-0.1], [0.4]]),
@@ -750,32 +750,44 @@ def test_rts_smoother_vmap_matches_independent_runs():
         *filtered,
     )
 
-    actual = jax.vmap(smcx.rts_smoother, in_axes=(0, None))(
+    rts = jax.vmap(smcx.rts_smoother, in_axes=(0, None))(
         batched,
         transition,
     )
 
-    assert actual.smoothed_means.shape == (2, 3, 1)
-    assert actual.smoothed_covariances.shape == (2, 3, 1, 1)
-    eps = float(jnp.finfo(actual.smoothed_means.dtype).eps)
-    for index, posterior in enumerate(filtered):
-        expected = smcx.rts_smoother(posterior, transition)
-        np.testing.assert_allclose(
-            actual.smoothed_means[index],
-            expected.smoothed_means,
-            rtol=32 * eps,
-            atol=32 * eps,
-        )
-        np.testing.assert_allclose(
-            actual.smoothed_covariances[index],
-            expected.smoothed_covariances,
-            rtol=32 * eps,
-            atol=32 * eps,
+    def smooth(posterior):
+        return smcx.gaussian_smoother(
+            posterior,
+            lambda state: transition @ state,
+            method=smcx.taylor_order1(
+                lambda _state: transition,
+                lambda _state: jnp.ones((1, 1)),
+            ),
         )
 
+    taylor = jax.vmap(smooth)(batched)
+    eps = float(jnp.finfo(rts.smoothed_means.dtype).eps)
+    for actual in (rts, taylor):
+        assert actual.smoothed_means.shape == (2, 3, 1)
+        assert actual.smoothed_covariances.shape == (2, 3, 1, 1)
+        for index, posterior in enumerate(filtered):
+            expected = smcx.rts_smoother(posterior, transition)
+            np.testing.assert_allclose(
+                actual.smoothed_means[index],
+                expected.smoothed_means,
+                rtol=32 * eps,
+                atol=32 * eps,
+            )
+            np.testing.assert_allclose(
+                actual.smoothed_covariances[index],
+                expected.smoothed_covariances,
+                rtol=32 * eps,
+                atol=32 * eps,
+            )
 
-def test_rts_smoother_gradient_matches_scalar_recursion():
-    """Mean and covariance gradients follow the scalar RTS recursion."""
+
+def test_gaussian_smoother_gradients_match_scalar_recursion():
+    """Both smoothers differentiate mean and covariance through the scan."""
     filtered = smcx.GaussianFilterPosterior(
         jnp.asarray(0.0),
         jnp.array([[0.0], [0.1]]),
@@ -785,32 +797,49 @@ def test_rts_smoother_gradient_matches_scalar_recursion():
         jnp.zeros(2),
     )
 
-    def objective(coefficient):
+    def rts_objective(coefficient):
         smoothed = smcx.rts_smoother(filtered, coefficient[None, None])
         return (
             smoothed.smoothed_means[0, 0]
             + 0.25 * smoothed.smoothed_covariances[0, 0, 0]
         )
 
+    def taylor_objective(coefficient):
+        smoothed = smcx.gaussian_smoother(
+            filtered,
+            lambda state: state,
+            method=smcx.taylor_order1(
+                lambda _state: coefficient[None, None],
+                lambda _state: jnp.ones((1, 1)),
+            ),
+        )
+        return (
+            smoothed.smoothed_means[0, 0]
+            + 0.25 * smoothed.smoothed_covariances[0, 0, 0]
+        )
+
     coefficient = jnp.asarray(0.6)
-    gradient_fn = jax.grad(objective)
-    eager = gradient_fn(coefficient)
-    compiled = jax.jit(gradient_fn)(coefficient)
     mean_derivative = 0.8 / 1.1 * (0.7 - 0.1)
     covariance_derivative = 2.0 * 0.8**2 * 0.6 * (0.4 - 1.1) / 1.1**2
     expected = jnp.asarray(
         mean_derivative + 0.25 * covariance_derivative,
-        dtype=eager.dtype,
+        dtype=coefficient.dtype,
     )
 
-    eps = float(jnp.finfo(eager.dtype).eps)
-    for actual in (eager, compiled):
-        np.testing.assert_allclose(
-            actual,
-            expected,
-            rtol=32 * eps,
-            atol=32 * eps,
+    eps = float(jnp.finfo(coefficient.dtype).eps)
+    for objective in (rts_objective, taylor_objective):
+        gradient_fn = jax.grad(objective)
+        gradients = (
+            gradient_fn(coefficient),
+            jax.jit(gradient_fn)(coefficient),
         )
+        for actual in gradients:
+            np.testing.assert_allclose(
+                actual,
+                expected,
+                rtol=32 * eps,
+                atol=32 * eps,
+            )
 
 
 def test_gaussian_smoothers_one_step_are_filter_identity():
