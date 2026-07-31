@@ -28,10 +28,10 @@ y_t &\sim \mathcal{N}(\theta_t,\ 0.3), \\
 \end{aligned}
 $$
 
-In this case we can calculate the exact filtering distribution in
-closed form using the Kalman filter. The Kalman filter assumes the
-model is linear and Gaussian, so all you need to provide are the
-model parameters.
+In this case, assuming the only unknown is the latent state, we can
+calculate the exact filtering distribution in closed form using the
+Kalman filter. The Kalman filter assumes the model is linear and
+Gaussian, so all you need to provide are the model parameters.
 
 ```python
 import jax.numpy as jnp

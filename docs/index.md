@@ -3,9 +3,10 @@
 Sequential inference in JAX: Kalman filters, particle filters, and
 sequential Monte Carlo, with model code decoupled from inference code.
 
-When a state-space model is linear and Gaussian with known
-covariances, the Kalman filter computes the exact posterior by a
-two-step recursion. Relaxing linearity keeps a Gaussian approximation
+When a state-space model is linear and Gaussian with every model
+matrix known (coefficients and covariances alike), the only unknowns
+are the latent states. The Kalman filter computes their exact
+posterior by a two-step recursion. Relaxing linearity keeps a Gaussian approximation
 alive (the extended and unscented filters). Outside special conjugate
 cases, unknown noise parameters or non-Gaussian observations break
 the Gaussian closed form. smcx implements an exact variance-scaled
