@@ -19,10 +19,6 @@ References:
     Rauch, H. E., Tung, F., and Striebel, C. T. (1965). Maximum
     Likelihood Estimates of Linear Dynamic Systems.
     https://doi.org/10.2514/3.3166
-    Carter, C. K., and Kohn, R. (1994). On Gibbs Sampling for State
-    Space Models. https://doi.org/10.1093/biomet/81.3.541
-    Frühwirth-Schnatter, S. (1994). Data Augmentation and Dynamic
-    Linear Models. https://doi.org/10.1111/j.1467-9892.1994.tb00184.x
     Schmidt, S. F. (1966). Application of State-Space Methods to
     Navigation Problems.
     https://doi.org/10.1016/B978-1-4831-6716-9.50011-4
@@ -1998,10 +1994,7 @@ def _sampling_covariance_factor(
 ) -> Float[Array, "state_dim state_dim"]:
     """Use ordinary Cholesky with a bounded semidefinite fallback."""
     covariance = _symmetrize(covariance)
-    cholesky = jnp.linalg.cholesky(
-        covariance,
-        symmetrize_input=False,
-    )
+    cholesky = jnp.linalg.cholesky(covariance, symmetrize_input=False)
     usable = jnp.all(jnp.isfinite(cholesky)) & jnp.all(jnp.diag(cholesky) > 0.0)
     return lax.cond(
         usable,
