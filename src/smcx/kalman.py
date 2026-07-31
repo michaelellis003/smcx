@@ -36,7 +36,7 @@ References:
 
 import math
 import operator
-from typing import TYPE_CHECKING, NamedTuple, TypeAlias, cast
+from typing import TYPE_CHECKING, NamedTuple, SupportsIndex, TypeAlias, cast
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -2116,7 +2116,7 @@ def posterior_sample(
     filtered_posterior: GaussianFilterPosterior,
     transition_matrix: Shaped[Array, "*transition_matrix_shape"],
     *,
-    num_draws: int,
+    num_draws: SupportsIndex,
 ) -> Float[Array, "num_draws ntime state_dim"]:
     r"""Draw joint trajectories from a linear-Gaussian posterior.
 
@@ -2130,9 +2130,9 @@ def posterior_sample(
         transition_matrix: Static ``(state_dim, state_dim)`` matrix or
             time-varying array with leading length ``ntime - 1``. Entry
             ``i`` maps state ``i`` to state ``i + 1``.
-        num_draws: Positive number of trajectories. This controls an output
-            shape and must be closed over or marked static when passed through
-            an outer ``jax.jit`` boundary.
+        num_draws: Positive integer trajectory count. This controls an output
+            shape and must be closed over or marked static through an outer
+            ``jax.jit`` boundary.
 
     Returns:
         Dense trajectories with shape ``(num_draws, ntime, state_dim)``.
