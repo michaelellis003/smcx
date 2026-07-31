@@ -23,8 +23,20 @@ return to what happens when they are not known at the end of this
 tour. The classic first case there is an unknown observation
 variance.
 
-Let us focus on the filtering distribution
-$p(\theta_t \mid y_{1:t})$ as the posterior distribution of interest.
+Three posterior distributions of the latent states are of common
+interest. The filtering distribution $p(\theta_t \mid y_{1:t})$
+conditions each state on the observations up to its own time. The
+smoothing distribution $p(\theta_t \mid y_{1:T})$ conditions every
+state on the complete record of $T$ observations. The forecast
+distribution $p(\theta_{t+k} \mid y_{1:t})$ extends the
+conditioning $k$ steps ahead. Filtering is the online problem: each
+new observation updates the current state estimate as it arrives.
+Smoothing is the retrospective problem: once the record is
+complete, every earlier estimate is revised in light of the
+observations that came after it. We focus on the filtering
+distribution first. The smoothing recursions consume the filter's
+output, and we return to that link below.
+
 In this linear-Gaussian case with everything known, the filtering
 distribution is also Gaussian
 ([West and Harrison, 1997](https://doi.org/10.1007/b98971);
@@ -84,6 +96,22 @@ earlier observations had to say. The new posterior becomes the prior
 for the next observation and the cycle repeats. That is, the exact
 posterior of the state $\theta_t$ is updated observation by
 observation.
+
+The filtered moments also support the retrospective pass. The
+smoother of
+[Rauch, Tung, and Striebel (1965)](https://doi.org/10.2514/3.3166)
+starts from the final filtered posterior and runs backward through
+the stored pairs $(m_t, C_t)$ and $(a_{t+1}, R_{t+1})$, revising
+each state estimate with the information that arrived after time
+$t$. The result is the smoothing distribution
+$\theta_t \mid y_{1:T} \sim \mathcal{N}(m_t^s, C_t^s)$, with
+$C_t^s$ never exceeding $C_t$ in the matrix ordering. The backward
+pass needs only the stored forward moments and the transition
+matrices, so smcx exposes the two passes separately:
+`kalman_filter` returns the stored moments and `rts_smoother`
+consumes them. Use the filter alone for online estimation and
+forecasting. Add the smoother when the record is complete and the
+question is what the states were.
 
 Now we can relax the assumptions one at a time. Start with
 linearity. In the linear-Gaussian model the products $G_t

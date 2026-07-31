@@ -6,8 +6,10 @@ sequential Monte Carlo, with model code decoupled from inference code.
 When a state-space model is linear and Gaussian with every model
 matrix known (coefficients and covariances alike), the only unknowns
 are the latent states. The Kalman filter computes their exact
-posterior by a two-step recursion. Relaxing linearity keeps a Gaussian approximation
-alive (the extended and unscented filters). Outside special conjugate
+filtering posterior by a two-step recursion, and the RTS smoother
+revises every estimate from the complete record in one backward
+pass over the stored filter output. Relaxing linearity keeps a
+Gaussian approximation alive (the extended and unscented filters). Outside special conjugate
 cases, unknown noise parameters or non-Gaussian observations break
 the Gaussian closed form. smcx implements an exact variance-scaled
 DLM and approximate conjugate/linear-Bayes DGLMs for specific
