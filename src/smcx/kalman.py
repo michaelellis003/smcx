@@ -1735,6 +1735,45 @@ def _rts_step(
     return state, state
 
 
+def _backward_pass(
+    filtered_means: Float[Array, "ntime state_dim"],
+    filtered_covariances: Float[Array, "ntime state_dim state_dim"],
+    predicted_means: Float[Array, "ntime state_dim"],
+    predicted_covariances: Float[Array, "ntime state_dim state_dim"],
+    effective_transitions: Float[Array, "num_transitions state_dim state_dim"],
+) -> tuple[
+    Float[Array, "ntime state_dim"],
+    Float[Array, "ntime state_dim state_dim"],
+]:
+    """Run the common backward recursion over prepared Gaussian moments."""
+    last_state = _SmootherState(
+        filtered_means[-1],
+        filtered_covariances[-1],
+    )
+    scan_inputs = (
+        filtered_means[:-1],
+        filtered_covariances[:-1],
+        predicted_means[1:],
+        predicted_covariances[1:],
+        effective_transitions,
+    )
+    _, earlier_states = lax.scan(
+        _rts_step,
+        last_state,
+        scan_inputs,
+        reverse=True,
+    )
+    smoothed_means = jnp.concatenate((
+        earlier_states.mean,
+        last_state.mean[None],
+    ))
+    smoothed_covariances = jnp.concatenate((
+        earlier_states.covariance,
+        last_state.covariance[None],
+    ))
+    return smoothed_means, smoothed_covariances
+
+
 def rts_smoother(
     filtered_posterior: GaussianFilterPosterior,
     transition_matrix: Shaped[Array, "*transition_matrix_shape"],
@@ -1792,31 +1831,13 @@ def rts_smoother(
         state_dim,
         "transition_matrix",
     )
-    last_state = _SmootherState(
-        filtered_posterior.filtered_means[-1],
-        filtered_posterior.filtered_covariances[-1],
-    )
-    scan_inputs = (
-        filtered_posterior.filtered_means[:-1],
-        filtered_posterior.filtered_covariances[:-1],
-        filtered_posterior.predicted_means[1:],
-        filtered_posterior.predicted_covariances[1:],
+    smoothed_means, smoothed_covariances = _backward_pass(
+        filtered_posterior.filtered_means,
+        filtered_posterior.filtered_covariances,
+        filtered_posterior.predicted_means,
+        filtered_posterior.predicted_covariances,
         transition_matrices,
     )
-    _, earlier_states = lax.scan(
-        _rts_step,
-        last_state,
-        scan_inputs,
-        reverse=True,
-    )
-    smoothed_means = jnp.concatenate((
-        earlier_states.mean,
-        last_state.mean[None],
-    ))
-    smoothed_covariances = jnp.concatenate((
-        earlier_states.covariance,
-        last_state.covariance[None],
-    ))
     return GaussianSmootherPosterior(
         *filtered_posterior,
         smoothed_means,
