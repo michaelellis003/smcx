@@ -413,6 +413,7 @@ def test_scan_steps_uncompiled_match_public_two_step_run():
             full.predicted_means[1],
             full.predicted_covariances[1],
             transition,
+            None,
         ),
     )
     np.testing.assert_allclose(direct.mean, smoothed.smoothed_means[0])
@@ -420,6 +421,30 @@ def test_scan_steps_uncompiled_match_public_two_step_run():
         direct.covariance,
         smoothed.smoothed_covariances[0],
     )
+
+
+def test_rts_step_uses_a_prepared_cross_covariance_directly():
+    """The shared kernel does not reconstruct a producer-supplied D."""
+    next_state = kalman_module._SmootherState(
+        jnp.array([2.0]),
+        jnp.array([[1.0]]),
+    )
+
+    _, state = kalman_module._rts_step(
+        next_state,
+        (
+            jnp.array([0.0]),
+            jnp.array([[2.0]]),
+            jnp.array([0.0]),
+            jnp.array([[4.0]]),
+            jnp.array([[0.5]]),
+            jnp.array([[1.5]]),
+        ),
+    )
+
+    # D / Pbar = 3/8. Recomputing P A' would instead give a gain of 1/4.
+    np.testing.assert_array_equal(state.mean, jnp.array([0.75]))
+    np.testing.assert_array_equal(state.covariance, jnp.array([[1.953125]]))
 
 
 def _valid_linear_model() -> dict[str, jax.Array]:

@@ -1673,7 +1673,7 @@ def _validate_filter_posterior(
 
 def _rts_step(
     next_state: _SmootherState,
-    args: tuple[Array, Array, Array, Array, Array],
+    args: tuple[Array, Array, Array, Array, Array, Array | None],
 ) -> tuple[_SmootherState, _SmootherState]:
     """Apply one uncompiled Rauch--Tung--Striebel backward step."""
     (
@@ -1682,8 +1682,10 @@ def _rts_step(
         next_predicted_mean,
         next_predicted_covariance,
         transition_matrix,
+        cross_covariance,
     ) = args
-    cross_covariance = filtered_covariance @ transition_matrix.T
+    if cross_covariance is None:
+        cross_covariance = filtered_covariance @ transition_matrix.T
     predicted_cholesky = jnp.linalg.cholesky(
         _symmetrize(next_predicted_covariance),
         symmetrize_input=False,
@@ -1741,6 +1743,10 @@ def _backward_pass(
     predicted_means: Float[Array, "ntime state_dim"],
     predicted_covariances: Float[Array, "ntime state_dim state_dim"],
     effective_transitions: Float[Array, "num_transitions state_dim state_dim"],
+    *,
+    cross_covariances: (
+        Float[Array, "num_transitions state_dim state_dim"] | None
+    ) = None,
 ) -> tuple[
     Float[Array, "ntime state_dim"],
     Float[Array, "ntime state_dim state_dim"],
@@ -1756,6 +1762,7 @@ def _backward_pass(
         predicted_means[1:],
         predicted_covariances[1:],
         effective_transitions,
+        cross_covariances,
     )
     _, earlier_states = lax.scan(
         _rts_step,
