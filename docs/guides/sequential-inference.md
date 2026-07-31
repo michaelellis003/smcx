@@ -105,9 +105,10 @@ the stored pairs $(m_t, C_t)$ and $(a_{t+1}, R_{t+1})$, revising
 each state estimate with the information that arrived after time
 $t$. The result is the smoothing distribution
 $\theta_t \mid y_{1:T} \sim \mathcal{N}(m_t^s, C_t^s)$, with
-$C_t^s$ never exceeding $C_t$ in the matrix ordering. The backward
-pass needs only the stored forward moments and the transition
-matrices, so smcx exposes the two passes separately:
+the difference $C_t - C_t^s$ positive semidefinite in exact arithmetic
+for a consistent linear-Gaussian record. The backward pass needs only
+the stored forward moments and the transition matrices, so smcx exposes
+the two passes separately:
 `kalman_filter` returns the stored moments and `rts_smoother`
 consumes them. Use the filter alone for online estimation and
 forecasting. Add the smoother when the record is complete and the
@@ -142,6 +143,22 @@ $g_t$ and $h_t$ and matches moments
 Both return an approximate pair $(m_t, C_t)$, not the exact
 posterior
 ([Särkkä and Svensson, 2023](https://doi.org/10.1017/9781108917407)).
+The matching extended and unscented smoothers carry this Gaussian
+approximation through a backward pass over the stored moments.
+`gaussian_smoother` evaluates transition Jacobians at the filtered means
+under `taylor_order1`; it reevaluates the transition mean at sigma points
+under `unscented`. Neither method reruns the observation side.
+For `taylor_order1`, the caller must reuse the transition Jacobian.
+For `unscented`, it must reuse the transition mean and sigma-point rule.
+If inputs were used, it must supply the same `inputs[1:]` values within a
+full length-`T` array; `inputs[0]` is ignored. The record stores no model
+identity, so smcx cannot compare that match at runtime.
+Both smoothing results remain approximate. The extended and unscented
+recursions follow
+[Cox (1964)](https://doi.org/10.1109/TAC.1964.1105635) and
+[Särkkä (2008)](https://doi.org/10.1109/TAC.2008.919531), respectively. The
+[custom models guide](custom-models.md)
+gives runnable calls and the covariance requirements.
 
 Now relax the distributional assumptions as well. The observations
 may be discrete counts, bounded quantities, or heavy-tailed

@@ -9,8 +9,9 @@ are the latent states. The Kalman filter computes their exact
 filtering posterior by a two-step recursion, and the RTS smoother
 revises every estimate from the complete record in one backward
 pass over the stored filter output. Relaxing linearity keeps a
-Gaussian approximation alive (the extended and unscented filters). Outside special conjugate
-cases, unknown noise parameters or non-Gaussian observations break
+Gaussian approximation alive (the extended and unscented filters and smoothers).
+Outside special conjugate cases, unknown noise parameters or non-Gaussian
+observations break
 the Gaussian closed form. smcx implements an exact variance-scaled
 DLM and approximate conjugate/linear-Bayes DGLMs for specific
 observation families. Particle filters carry the posterior as a
@@ -53,9 +54,9 @@ pip install "smcx[arviz]"
   then builds, diagnoses, and improves a particle filter.
 - [Filtering tutorial](tutorials/filtering.md) runs a complete example and
   plots its filtering intervals and effective sample size.
-- [Custom models](guides/custom-models.md) covers the model record,
-  Feynman–Kac derivations, structured latent states, time-varying
-  inputs, and an optional Equinox representation.
+- [Custom models](guides/custom-models.md) covers nonlinear Gaussian filters
+  and smoothers, the model record, Feynman–Kac derivations, structured latent
+  states, time-varying inputs, and an optional Equinox representation.
 - [Stochastic volatility](guides/stochastic-volatility.md) learns a static
   parameter online with the Liu–West filter.
 - [ArviZ reporting](guides/arviz.md) exports weighted particle output for
