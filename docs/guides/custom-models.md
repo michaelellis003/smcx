@@ -7,7 +7,7 @@ arrays, PyTrees, and, for stochastic algorithms, explicit PRNG keys. Exact
 linear-Gaussian models instead use the dense-array interface shown in the
 [quickstart](quickstart.md#establish-the-exact-baseline).
 
-## Compose a nonlinear Gaussian filter
+## Compose a nonlinear Gaussian filter and smoother
 
 The extended and unscented Kalman filters share two ordinary mean callbacks.
 The extended filter additionally takes explicit Jacobians:
@@ -138,8 +138,29 @@ The smoother strategy must match the one used for its filter record. Taylor
 smoothing evaluates transition Jacobians at the filtered means and does not call
 `transition_mean`. Unscented smoothing re-evaluates `transition_mean` at sigma
 points. Neither path uses the observation side of the strategy. Unscented
-smoothing requires positive-definite nonterminal filtered covariances and a
-record produced with the same transition model and sigma-point rule.
+smoothing requires a record produced with the same transition model and
+sigma-point rule.
+
+### Match a smoother to its forward result
+
+Filter records store moments, not the identity of the model that produced
+them. The caller supplies the matching model pieces to the backward pass:
+
+| Forward result | Retrospective operation | Caller must reuse | Claim |
+| --- | --- | --- | --- |
+| `kalman_filter` | `rts_smoother` | Static or time-varying transition matrices | Exact for a consistent linear-Gaussian model |
+| `extended_kalman_filter` or `gaussian_filter(..., method=taylor_order1(...))` | `gaussian_smoother(..., method=taylor_order1(...))` | Transition Jacobian and full input sequence | Approximate extended RTS moments |
+| `unscented_kalman_filter` or `gaussian_filter(..., method=unscented(...))` | `gaussian_smoother(..., method=unscented(...))` | Transition mean, sigma-point rule, and full input sequence | Approximate unscented RTS moments |
+
+smcx cannot compare these model identities at runtime. Gaussian smoothers do
+not consume DLM, DGLM, particle, Liu-West, tempered-SMC, or SMC² records.
+
+Both nonlinear smoothers require positive-definite predicted covariances at
+positive times. Unscented smoothing also factors each nonterminal filtered
+covariance, so those matrices must be positive definite; the terminal filtered
+covariance may be positive semidefinite. For the backward transition from
+time `t` to `t + 1`, an input-aware callback receives `inputs[t + 1]`.
+`inputs[0]` is unused by smoothing.
 
 ## Choose particle callbacks for the algorithm
 
