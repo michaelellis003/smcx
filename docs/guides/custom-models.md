@@ -116,6 +116,24 @@ exchangeable strategy on one model: pass
 for first-order linearization or `method=smcx.unscented(alpha, beta,
 kappa)` for sigma points, with results identical to the named filters.
 
+The Taylor strategy also supplies the transition Jacobian for the matching
+extended RTS smoother:
+
+```python
+smoothed = smcx.gaussian_smoother(
+    posterior,
+    transition_mean,
+    method=smcx.taylor_order1(
+        transition_jacobian,
+        observation_jacobian,
+    ),
+)
+```
+
+The smoother consumes the stored filtering moments and evaluates transition
+Jacobians at the filtered means. It does not rerun the transition mean or use
+the observation Jacobian. Unscented smoothing is not yet available.
+
 ## Choose particle callbacks for the algorithm
 
 Most particle callbacks act on one particle. smcx maps them over the particle

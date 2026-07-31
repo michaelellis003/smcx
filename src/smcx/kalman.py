@@ -2055,6 +2055,9 @@ def gaussian_smoother(
         its documented covariance behavior.
 
     References:
+        Cox, H. (1964). On the Estimation of State Variables and Parameters
+        for Noisy Dynamic Systems.
+        https://doi.org/10.1109/TAC.1964.1105635
         Särkkä, S., and Svensson, L. (2023). Bayesian Filtering and
         Smoothing, second edition, chapter 13.
         https://doi.org/10.1017/9781108917407
