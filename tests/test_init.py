@@ -71,6 +71,7 @@ def test_public_api_exports_all_expected_names(package):
         "param_weighted_quantile",
         "pareto_k_diagnostic",
         "poisson",
+        "posterior_sample",
         "reconstruct_trajectories",
         "particle_diversity",
         "posterior_predictive_sample",
