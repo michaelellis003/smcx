@@ -696,6 +696,36 @@ def test_rts_smoother_compiled_matches_eager():
         np.testing.assert_allclose(compiled_value, eager_value)
 
 
+def test_taylor_smoother_constant_jacobian_is_bitwise_rts():
+    """A constant Taylor linearization runs the identical backward pass."""
+    transition = jnp.array([[0.9]])
+    filtered = smcx.kalman_filter(
+        jnp.array([0.0]),
+        jnp.array([[1.0]]),
+        transition,
+        jnp.array([[0.25]]),
+        jnp.array([[1.0]]),
+        jnp.array([[0.5]]),
+        jnp.array([[0.2], [-0.1], [0.4]]),
+    )
+
+    def unused_callback(*_args):
+        raise AssertionError("Taylor smoothing must not call this callback")
+
+    actual = smcx.gaussian_smoother(
+        filtered,
+        unused_callback,
+        method=smcx.taylor_order1(
+            lambda _state: transition,
+            unused_callback,
+        ),
+    )
+    expected = smcx.rts_smoother(filtered, transition)
+
+    for actual_field, expected_field in zip(actual, expected, strict=True):
+        np.testing.assert_array_equal(actual_field, expected_field)
+
+
 def test_rts_smoother_vmap_matches_independent_runs():
     """Batching the public smoother preserves independent posteriors."""
     transition = jnp.array([[0.9]])
@@ -783,8 +813,8 @@ def test_rts_smoother_gradient_matches_scalar_recursion():
         )
 
 
-def test_rts_smoother_one_step_is_filter_identity():
-    """A one-step model has no backward transition to apply."""
+def test_gaussian_smoothers_one_step_are_filter_identity():
+    """A one-step model has no backward transition or callback to apply."""
     filtered = smcx.kalman_filter(
         jnp.array([0.0]),
         jnp.array([[1.0]]),
@@ -794,16 +824,26 @@ def test_rts_smoother_one_step_is_filter_identity():
         jnp.array([[0.5]]),
         jnp.array([[0.2]]),
     )
-    smoothed = smcx.rts_smoother(filtered, jnp.array([[0.9]]))
+    rts = smcx.rts_smoother(filtered, jnp.array([[0.9]]))
 
-    np.testing.assert_array_equal(
-        smoothed.smoothed_means,
-        filtered.filtered_means,
+    def unused_callback(*_args):
+        raise AssertionError("A one-step smoother must not call callbacks")
+
+    taylor = smcx.gaussian_smoother(
+        filtered,
+        unused_callback,
+        method=smcx.taylor_order1(unused_callback, unused_callback),
+        inputs=jnp.array([0.5]),
     )
-    np.testing.assert_array_equal(
-        smoothed.smoothed_covariances,
-        filtered.filtered_covariances,
-    )
+    for smoothed in (rts, taylor):
+        np.testing.assert_array_equal(
+            smoothed.smoothed_means,
+            filtered.filtered_means,
+        )
+        np.testing.assert_array_equal(
+            smoothed.smoothed_covariances,
+            filtered.filtered_covariances,
+        )
 
 
 def test_rts_smoother_rejects_misaligned_transition_history():
@@ -834,6 +874,63 @@ def _valid_filter_posterior() -> smcx.GaussianFilterPosterior:
         covariances,
         jnp.zeros(2),
     )
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("method", "Taylor-order-one strategy"),
+        ("unscented", "Taylor-order-one strategy"),
+        ("input_length", "leading dimension T=2"),
+        ("input_dtype", "inputs must have a floating dtype"),
+        ("jacobian_shape", r"must have shape \(2, 2\)"),
+        ("jacobian_dtype", "must have dtype float32"),
+        ("jacobian_type", "must return a JAX array"),
+    ],
+)
+def test_gaussian_smoother_rejects_invalid_new_arguments(case, message):
+    """The nonlinear smoother owns its strategy, input, and callback errors."""
+    posterior = _valid_filter_posterior()
+
+    def observation_jacobian(state):
+        return jnp.eye(state.shape[0], dtype=state.dtype)
+
+    method: object = smcx.taylor_order1(
+        lambda state: jnp.eye(state.shape[0], dtype=state.dtype),
+        observation_jacobian,
+    )
+    inputs = None
+    if case == "method":
+        method = "ekf"
+    elif case == "unscented":
+        method = smcx.unscented()
+    elif case == "input_length":
+        inputs = jnp.zeros(3)
+    elif case == "input_dtype":
+        inputs = jnp.zeros(2, dtype=jnp.int32)
+    elif case == "jacobian_shape":
+        method = smcx.taylor_order1(
+            lambda _state: jnp.ones((1, 1)),
+            observation_jacobian,
+        )
+    elif case == "jacobian_dtype":
+        method = smcx.taylor_order1(
+            lambda _state: jnp.eye(2, dtype=jnp.float16),
+            observation_jacobian,
+        )
+    else:
+        method = smcx.taylor_order1(
+            lambda _state: np.eye(2),  # ty: ignore[invalid-argument-type]
+            observation_jacobian,
+        )
+
+    with pytest.raises(ValueError, match=message):
+        smcx.gaussian_smoother(
+            posterior,
+            lambda state: state,
+            method=method,  # ty: ignore[invalid-argument-type]
+            inputs=inputs,
+        )
 
 
 @pytest.mark.parametrize(

@@ -57,6 +57,7 @@ def test_public_api_exports_all_expected_names(package):
         "ess",
         "extended_kalman_filter",
         "gaussian_filter",
+        "gaussian_smoother",
         "liu_west_filter",
         "log_bayes_factor",
         "log_ess",

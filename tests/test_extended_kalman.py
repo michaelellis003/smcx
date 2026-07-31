@@ -204,6 +204,97 @@ def test_extended_kalman_matches_independent_nonlinear_reference():
     _assert_posterior_close(posterior, expected_fields, ulps=256)
 
 
+def test_extended_smoother_uses_filtered_state_and_destination_input():
+    """The public smoother reconstructs Q under its forward linearization."""
+    initial_mean = jnp.array([0.15, -0.2])
+    initial_covariance = jnp.array([[0.5, 0.04], [0.04, 0.4]])
+    transition_covariance = jnp.array([[0.06, 0.01], [0.01, 0.05]])
+    observation_covariance = jnp.array([[0.25, 0.02], [0.02, 0.2]])
+    inputs = jnp.array([[40.0], [0.2], [-0.3], [0.4]])
+    emissions = jnp.array([
+        [0.1, -0.1],
+        [-0.2, 0.15],
+        [0.35, -0.05],
+        [0.05, 0.2],
+    ])
+
+    def transition_mean(state, input_t):
+        input_value = input_t[0]
+        return jnp.stack((
+            0.8 * state[0] + 0.1 * state[1] ** 2 + 0.2 * input_value * state[0],
+            -0.1 * state[0]
+            + 0.9 * state[1]
+            + 0.05 * state[0] * state[1]
+            - 0.15 * input_value * state[1],
+        ))
+
+    def transition_jacobian(state, input_t):
+        input_value = input_t[0]
+        return jnp.array([
+            [0.8 + 0.2 * input_value, 0.2 * state[1]],
+            [
+                -0.1 + 0.05 * state[1],
+                0.9 + 0.05 * state[0] - 0.15 * input_value,
+            ],
+        ])
+
+    def observation_mean(state, _input_t):
+        return state
+
+    def observation_jacobian(_state, _input_t):
+        return jnp.eye(2)
+
+    filtered = smcx.extended_kalman_filter(
+        initial_mean,
+        initial_covariance,
+        transition_mean,
+        transition_jacobian,
+        transition_covariance,
+        observation_mean,
+        observation_jacobian,
+        observation_covariance,
+        emissions,
+        inputs=inputs,
+    )
+    effective_transitions = jax.vmap(transition_jacobian)(
+        filtered.filtered_means[:-1],
+        inputs[1:],
+    )
+    propagated = jax.vmap(
+        lambda matrix, covariance: (matrix @ covariance) @ matrix.T
+    )(effective_transitions, filtered.filtered_covariances[:-1])
+    propagated = 0.5 * (propagated + jnp.swapaxes(propagated, -1, -2))
+    reconstructed = filtered.predicted_covariances[1:] - propagated
+
+    # Two 2x2 matmuls and symmetric additions contribute fewer than 32
+    # rounded terms per entry; 32*eps*scale is the f32-honest budget.
+    arrays = (
+        filtered.predicted_covariances[1:],
+        propagated,
+        transition_covariance,
+    )
+    scale = max(float(np.max(np.abs(np.asarray(value)))) for value in arrays)
+    atol = 32 * np.finfo(np.asarray(reconstructed).dtype).eps * scale
+    np.testing.assert_allclose(
+        reconstructed,
+        jnp.broadcast_to(transition_covariance, reconstructed.shape),
+        rtol=0.0,
+        atol=atol,
+    )
+
+    actual = smcx.gaussian_smoother(
+        filtered,
+        transition_mean,
+        method=smcx.taylor_order1(
+            transition_jacobian,
+            observation_jacobian,
+        ),
+        inputs=inputs,
+    )
+    expected = smcx.rts_smoother(filtered, effective_transitions)
+    _assert_posterior_close(actual, expected, ulps=32)
+
+
 def test_extended_kalman_rejects_non_array_callback_output():
     """Callback structural failures use the public validation exception."""
 

@@ -1846,7 +1846,7 @@ def rts_smoother(
 
 
 class TaylorOrder1(NamedTuple):
-    """First-order Taylor linearization strategy (the extended filter).
+    """First-order Taylor strategy (the extended filter and smoother).
 
     Attributes:
         transition_jacobian_fn: ``state[, input_t] -> (state_dim,
@@ -1894,7 +1894,7 @@ def taylor_order1(
         observation_jacobian_fn: Observation-mean Jacobian callback.
 
     Returns:
-        A strategy record for `gaussian_filter`.
+        A strategy record for `gaussian_filter` or `gaussian_smoother`.
     """
     return TaylorOrder1(transition_jacobian_fn, observation_jacobian_fn)
 
@@ -1923,8 +1923,10 @@ def unscented(
 # method instead of a wrapper-specific type-check error.
 if TYPE_CHECKING:
     _GaussianLinearization: TypeAlias = TaylorOrder1 | Unscented
+    _GaussianSmootherLinearization: TypeAlias = TaylorOrder1
 else:
     _GaussianLinearization: TypeAlias = object
+    _GaussianSmootherLinearization: TypeAlias = object
 
 
 def gaussian_filter(
@@ -2002,4 +2004,138 @@ def gaussian_filter(
         "method must be a linearization strategy built by "
         "smcx.taylor_order1(...) or smcx.unscented(...); got "
         f"{type(method).__name__}"
+    )
+
+
+def gaussian_smoother(
+    filtered_posterior: GaussianFilterPosterior,
+    transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
+    *,
+    method: _GaussianSmootherLinearization,
+    inputs: GaussianInputSequence | None = None,
+) -> GaussianSmootherPosterior:
+    r"""Run a first-order Gaussian backward smoother.
+
+    This is the extended Rauch--Tung--Striebel smoother for an
+    additive-Gaussian transition model. It evaluates the transition
+    Jacobian at each filtered mean, then runs the same backward kernel as
+    `rts_smoother` under those effective transition matrices.
+
+    Args:
+        filtered_posterior: Forward-pass Gaussian moments, normally from
+            `gaussian_filter` with the same ``method`` and transition model.
+        transition_mean_fn: Transition mean callback from the forward model.
+            A Taylor-order-one smoother does not evaluate it; the argument is
+            retained for the shared nonlinear-smoother interface.
+        method: Strategy from `taylor_order1`. Its observation Jacobian is
+            unused because smoothing consumes the stored filtering moments.
+        inputs: Optional exogenous inputs with shape ``(ntime, input_dim)``
+            or ``(ntime,)``. Transition ``t`` to ``t + 1`` consumes input
+            ``t + 1``; input zero does not affect the backward pass.
+
+    Returns:
+        The retained forward-pass fields plus approximate smoothed means and
+        covariances.
+
+    Raises:
+        ValueError: ``method`` is not a Taylor-order-one strategy, an input or
+            posterior field is invalid, or a transition Jacobian has the
+            wrong shape or dtype.
+
+    Note:
+        Filtered covariances and the first predicted covariance may be
+        positive semidefinite. Positive-time predicted covariances must be
+        positive definite because the backward recursion factors them.
+        Concrete value checks run eagerly and are skipped for traced arrays.
+
+        The stored predictions must have been produced from the same
+        transition model and Jacobians evaluated at the same filtered
+        moments. That consistency makes the reconstructed process noise
+        agree with the forward pass and gives the shared Joseph-form update
+        its documented covariance behavior.
+
+    References:
+        Cox, H. (1964). On the Estimation of State Variables and Parameters
+        for Noisy Dynamic Systems.
+        https://doi.org/10.1109/TAC.1964.1105635
+        Särkkä, S., and Svensson, L. (2023). Bayesian Filtering and
+        Smoothing, second edition, chapter 13.
+        https://doi.org/10.1017/9781108917407
+    """
+    if not isinstance(method, TaylorOrder1):
+        raise ValueError(
+            "method must be a Taylor-order-one strategy built by "
+            "smcx.taylor_order1(...); got "
+            f"{type(method).__name__}"
+        )
+
+    num_timesteps, state_dim, dtype = _validate_filter_posterior(
+        filtered_posterior
+    )
+    inputs_arr = None
+    if inputs is not None:
+        inputs_arr = _canonicalize_inputs(inputs, num_timesteps)
+        _check_float_array(inputs_arr, "inputs", dtype)
+
+    if num_timesteps == 1:
+        effective_transitions = jnp.empty(
+            (0, state_dim, state_dim),
+            dtype=dtype,
+        )
+    elif inputs_arr is None:
+        jacobian_fn = cast(
+            TransitionJacobianFn,
+            method.transition_jacobian_fn,
+        )
+
+        def checked_jacobian(
+            state: Float[Array, " state_dim"],
+        ) -> Float[Array, "state_dim state_dim"]:
+            value = jacobian_fn(state)
+            _check_callback_array(
+                value,
+                (state_dim, state_dim),
+                "transition_jacobian_fn output",
+                dtype,
+            )
+            return value
+
+        effective_transitions = vmap(checked_jacobian)(
+            filtered_posterior.filtered_means[:-1]
+        )
+    else:
+        jacobian_fn_u = cast(
+            TransitionJacobianFnWithInput,
+            method.transition_jacobian_fn,
+        )
+
+        def checked_jacobian_with_input(
+            state: Float[Array, " state_dim"],
+            input_t: GaussianInput,
+        ) -> Float[Array, "state_dim state_dim"]:
+            value = jacobian_fn_u(state, input_t)
+            _check_callback_array(
+                value,
+                (state_dim, state_dim),
+                "transition_jacobian_fn output",
+                dtype,
+            )
+            return value
+
+        effective_transitions = vmap(checked_jacobian_with_input)(
+            filtered_posterior.filtered_means[:-1],
+            inputs_arr[1:],
+        )
+
+    smoothed_means, smoothed_covariances = _backward_pass(
+        filtered_posterior.filtered_means,
+        filtered_posterior.filtered_covariances,
+        filtered_posterior.predicted_means,
+        filtered_posterior.predicted_covariances,
+        effective_transitions,
+    )
+    return GaussianSmootherPosterior(
+        *filtered_posterior,
+        smoothed_means,
+        smoothed_covariances,
     )
