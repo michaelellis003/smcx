@@ -25,6 +25,7 @@ from smcx.containers import (
     ParticleFilterPosterior,
     ParticleFilterRecord,
     ParticleFilterResult,
+    ParticleSmootherPosterior,
     ParticleState,
     SMC2Posterior,
     TemperedPosterior,
@@ -83,6 +84,7 @@ from smcx.resampling import (
 from smcx.runner import run_particle_filter
 from smcx.simulate import simulate
 from smcx.smc2 import smc2
+from smcx.smoothing import backward_simulation
 from smcx.tempering import temper
 from smcx.weights import ess, log_ess, log_normalize, normalize
 
@@ -107,6 +109,7 @@ __all__ = [
     "ParticleFilterPosterior",
     "ParticleFilterRecord",
     "ParticleFilterResult",
+    "ParticleSmootherPosterior",
     "ParticleState",
     "SMC2Posterior",
     "StateSpaceModel",
@@ -114,6 +117,7 @@ __all__ = [
     "__version__",
     "auxiliary_filter",
     "auxiliary_fk",
+    "backward_simulation",
     "bernoulli",
     "binomial",
     "bootstrap_filter",
