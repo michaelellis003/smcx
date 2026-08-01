@@ -194,7 +194,9 @@ The implemented methods draw on these primary sources:
 
 - Exact linear-Gaussian state estimation:
   [Kalman (1960)](https://doi.org/10.1115/1.3662552) and
-  [Rauch, Tung, and Striebel (1965)](https://doi.org/10.2514/3.3166).
+  [Rauch, Tung, and Striebel (1965)](https://doi.org/10.2514/3.3166), with
+  joint draws from [Carter and Kohn (1994)](https://doi.org/10.1093/biomet/81.3.541)
+  and [Frühwirth-Schnatter (1994)](https://doi.org/10.1111/j.1467-9892.1994.tb00184.x).
 - Conjugate dynamic models:
   [West and Harrison (1997)](https://doi.org/10.1007/b98971) and
   [West, Harrison, and Migon (1985)](https://doi.org/10.1080/01621459.1985.10477131).
