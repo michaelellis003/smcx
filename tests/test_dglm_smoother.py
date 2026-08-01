@@ -49,6 +49,7 @@ def _assert_roundoff_close(actual: jax.Array, expected: object) -> None:
         expected_array,
         rtol=0.0,
         atol=tolerance,
+        equal_nan=False,
     )
 
 
@@ -227,12 +228,23 @@ def test_dglm_smoother_validates_every_record_field(
         invalid = jnp.zeros_like(getattr(record, field), dtype=jnp.int32)
     malformed = record._replace(**{field: invalid})
 
-    with pytest.raises(ValueError, match=field):
-        unwrap(smcx.dglm_smoother)(
-            malformed,
+    def smooth(value: smcx.DGLMFilterPosterior):
+        return unwrap(smcx.dglm_smoother)(
+            value,
             jnp.eye(2, dtype=dtype),
             discount=jnp.asarray(1.0, dtype=dtype),
         )
+
+    for call in (smooth, jax.jit(smooth)):
+        with pytest.raises(ValueError, match=field):
+            call(malformed)
+    if invalid.dtype == jnp.int32 and jax.config.read("jax_enable_x64"):
+        mixed = record._replace(**{
+            field: getattr(record, field).astype(jnp.float64)
+        })
+        for call in (smooth, jax.jit(smooth)):
+            with pytest.raises(ValueError, match="all arrays must have dtype"):
+                call(mixed)
 
 
 @pytest.mark.parametrize(
@@ -300,6 +312,21 @@ def test_dglm_smoother_rejects_invalid_evolution(
                     record, transition, discount=value
                 )
             )(jnp.asarray([0.9, 0.8], dtype=dtype))
+    if message == "floating dtype" and jax.config.read("jax_enable_x64"):
+        is_transition = transition.dtype == jnp.int32
+        mixed_transition = (
+            _F32_EYE_2.astype(jnp.float64) if is_transition else _F32_EYE_2
+        )
+        mixed_options = (
+            {"discount": 1.0}
+            if is_transition
+            else {"transition_covariance": _F32_ZERO_2.astype(jnp.float64)}
+        )
+        name = "transition_matrix" if is_transition else "transition_covariance"
+        with pytest.raises(ValueError, match=name):
+            unwrap(smcx.dglm_smoother)(
+                record, mixed_transition, **mixed_options
+            )
 
 
 @pytest.mark.parametrize("evolution", ["static", "timed", "discount"])
@@ -327,19 +354,16 @@ def test_dglm_smoother_one_step_is_factor_free(
     transition = jnp.zeros((2, 2), dtype=dtype)
 
     def smooth(value: smcx.DGLMFilterPosterior):
-        if evolution == "static":
-            return smcx.dglm_smoother(
-                value,
-                transition,
-                transition_covariance=jnp.zeros((2, 2), dtype=dtype),
-            )
-        if evolution == "timed":
-            return smcx.dglm_smoother(
-                value,
-                transition,
-                transition_covariance=jnp.empty((0, 2, 2), dtype=dtype),
-            )
-        return smcx.dglm_smoother(value, transition, discount=1.0)
+        if evolution == "discount":
+            return smcx.dglm_smoother(value, transition, discount=1.0)
+        covariance = (
+            _F32_ZERO_2
+            if evolution == "static"
+            else jnp.empty((0, 2, 2), dtype=dtype)
+        )
+        return smcx.dglm_smoother(
+            value, transition, transition_covariance=covariance
+        )
 
     for posterior in (smooth(record), jax.jit(smooth)(record)):
         assert all(
@@ -390,8 +414,15 @@ def test_dglm_smoother_factors_only_reconstructed_priors() -> None:
         )
 
     for posterior in (smooth(accepted), jax.jit(smooth)(accepted)):
+        assert all(
+            np.all(np.isfinite(np.asarray(field))) for field in posterior
+        )
         np.testing.assert_array_equal(
-            posterior.smoothed_covariances[-1], singular
+            posterior.smoothed_means, jnp.zeros((2, 2), dtype=dtype)
+        )
+        np.testing.assert_array_equal(
+            posterior.smoothed_covariances,
+            jnp.stack((singular, singular)),
         )
 
     rejected = accepted._replace(
@@ -449,8 +480,9 @@ def test_dglm_smoother_canonicalizes_released_producer_under_jit() -> None:
     )
     raw = np.asarray(filtered.filtered_covariances).copy()
     transpose = raw.swapaxes(-1, -2)
-    diagonal_scale = np.sqrt(np.diagonal(raw, axis1=-2, axis2=-1))
-    normalized = (raw.astype(np.float64) / diagonal_scale[..., :, None]) / (
+    raw64 = raw.astype(np.float64)
+    diagonal_scale = np.sqrt(np.diagonal(raw64, axis1=-2, axis2=-1))
+    normalized = (raw64 / diagonal_scale[..., :, None]) / (
         diagonal_scale[..., None, :]
     )
     skew = float(np.max(np.abs(normalized - normalized.swapaxes(-1, -2))))
@@ -519,7 +551,7 @@ def test_dglm_smoother_vmap_and_jit_are_lane_independent() -> None:
 
 def test_dglm_smoother_gradient_matches_scalar_derivative() -> None:
     """Autodiff crosses reconstruction, solve, mean, and covariance updates."""
-    dtype = jnp.float32
+    dtype = _working_dtype()
     record = _dglm_record(
         jnp.asarray([[0.0], [0.7]], dtype=dtype),
         jnp.asarray([[[0.8]], [[0.4]]], dtype=dtype),
@@ -546,5 +578,6 @@ def test_dglm_smoother_gradient_matches_scalar_derivative() -> None:
             actual,
             expected,
             rtol=0.0,
-            atol=8 * float(np.finfo(np.float32).eps),
+            atol=8 * float(np.finfo(np.asarray(actual).dtype).eps),
+            equal_nan=False,
         )
