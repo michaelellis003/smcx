@@ -27,10 +27,11 @@ def _one_time_posterior(covariance):
     """Build a minimal posterior whose terminal covariance is under test."""
     state_dim = covariance.shape[0]
     means = jnp.zeros((1, state_dim), dtype=covariance.dtype)
+    identity = jnp.eye(state_dim, dtype=covariance.dtype)
     return smcx.GaussianFilterPosterior(
         jnp.asarray(0.0, dtype=covariance.dtype),
         means,
-        covariance[None],
+        identity[None],
         means,
         covariance[None],
         jnp.zeros(1, dtype=covariance.dtype),
@@ -127,6 +128,8 @@ def test_posterior_sample_preserves_joseph_forward_product_order():
         predicted,
         transition,
     ))
+    # This is a fixture-separation bound, not a general forward-error claim;
+    # both direct Schur orders exceed it by more than an order of magnitude.
     tolerance = 32.0 * np.finfo(dtype).eps * float(jnp.max(covariance))
 
     np.testing.assert_array_equal(process_noise, jnp.zeros_like(covariance))
@@ -166,6 +169,8 @@ def test_spectral_factor_clips_covariance_inside_normalized_band():
     expected = np.full((2, 2), 1.0 + float(delta) / 2.0)
 
     assert np.all(np.isfinite(factor))
+    # Four eps covers the f32 eigensolver reconstruction. Adding the nominal
+    # 16-eps admission band as jitter exceeds this bound.
     np.testing.assert_allclose(
         reconstructed, expected, rtol=0.0, atol=4.0 * epsilon
     )
@@ -191,6 +196,8 @@ def test_spectral_factor_rescales_state_coordinates_on_left():
     )
     normalized = (reconstructed / scales[:, None]) / scales[None, :]
 
+    # Eight eps covers factor reconstruction plus the two rescaling divisions;
+    # multiplying the eigenvectors on the right differs here by order one.
     np.testing.assert_allclose(
         normalized, np.ones((2, 2)), rtol=0.0, atol=8.0 * epsilon
     )
