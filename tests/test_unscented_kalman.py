@@ -15,7 +15,7 @@ from jax.scipy.linalg import solve_triangular
 import smcx
 import smcx.kalman as kalman_module
 from tests import _unscented_kalman_reference as nonlinear_reference
-from tests._gaussian_smoothing_reference import dense_joint_marginals
+from tests._gaussian_smoothing_reference import dense_joint_moments
 
 
 def _identity(state):
@@ -597,7 +597,7 @@ def test_unscented_smoother_matches_dense_linear_oracle_with_inputs():
         np.asarray(base_transition + input_t[0] * input_slope)
         for input_t in inputs[1:]
     ])
-    expected_means, expected_covariances = dense_joint_marginals(
+    expected_means, expected_covariances, _ = dense_joint_moments(
         np.asarray(initial_mean),
         np.asarray(initial_covariance),
         transitions,
