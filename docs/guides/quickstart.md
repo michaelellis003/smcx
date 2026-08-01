@@ -94,10 +94,15 @@ exact = smcx.kalman_filter(
     emissions=observations,
 )
 smoothed = smcx.rts_smoother(exact, transition)
+cross_covariances = smcx.smoothed_cross_covariances(smoothed, transition)
 
 exact.filtered_means.shape
 smoothed.smoothed_means.shape
+cross_covariances.shape
 ```
+
+Entry `t` of `cross_covariances` is
+`Cov(x_t, x_{t + 1} | observations)`; its shape is `(ntime - 1, 1, 1)` here.
 
 The filter and smoother are independent pieces: a compatible
 `GaussianFilterPosterior` produced by research code can be passed to
