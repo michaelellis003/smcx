@@ -266,14 +266,14 @@ $$
 
 Conditional on the finite filtering record, the draw-major rows are
 independent, equally weighted draws from its discrete approximation to the
-joint smoothing distribution. The method needs the full corrected particle
-and weight history and an evaluable transition density or mass for the same
-fixed parameters and time-varying inputs used by the filter. Drawing $M$
-paths costs $O(TMN)$ transition evaluations. It can retain more early-time
-diversity when several predecessors have positive backward mass, but it
-cannot recover support missing from the filtering clouds and agrees with
-genealogy when only one predecessor is possible. These are the trajectory
-and backward-simulation methods of
+joint smoothing distribution. The method needs the full particle history,
+corrected filtering weights, and an evaluable transition density or mass for
+the same fixed parameters and time-varying inputs used by the filter.
+Drawing $M$ paths costs $O(TMN)$ transition evaluations. It can retain more
+early-time diversity when several predecessors have positive backward mass,
+but it cannot recover support missing from the filtering clouds and agrees
+with genealogy when only one predecessor is possible. These are the
+trajectory and backward-simulation methods of
 [Godsill, Doucet, and West (2004)](https://doi.org/10.1198/016214504000000151).
 
 Finally, let the transition or observation densities depend on an
@@ -583,8 +583,8 @@ resampling, [Corenflos et al., 2021](https://proceedings.mlr.press/v139/corenflo
 are out of smcx's current scope.
 
 Retain the default full history when the latent path is also of interest.
-The genealogy is time-major and keeps the final filtering weights. The
-backward-simulation result is draw-major and equally weighted:
+The genealogy is time-major, and its path summaries use the final filtering
+weights. The backward-simulation result is draw-major and equally weighted:
 
 ```python
 particle_posterior = smcx.run_smc(
