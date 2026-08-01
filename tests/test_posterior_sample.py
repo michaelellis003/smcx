@@ -209,3 +209,72 @@ def test_posterior_sample_normalizes_finite_raw_row_sum_overflow():
         )
 
     assert np.all(np.isfinite(draws))
+
+
+@pytest.mark.parametrize(
+    "covariance",
+    [
+        np.asarray([[1.0, 2.0**-10], [2.0**-10, 0.0]], dtype=np.float32),
+        np.diag(np.asarray([1.0, -4.0 * np.finfo(np.float32).eps])),
+        np.asarray(
+            [
+                [1.0, 1.0 + 64.0 * np.finfo(np.float32).eps],
+                [1.0 + 64.0 * np.finfo(np.float32).eps, 1.0],
+            ],
+            dtype=np.float32,
+        ),
+        np.asarray(
+            [[1.0e20, 0.0, 0.0], [0.0, 1.0, 2.0], [0.0, 2.0, 1.0]],
+            dtype=np.float32,
+        ),
+        np.asarray([[2.0e38, 2.5e38], [2.5e38, 2.0e38]], dtype=np.float32),
+    ],
+    ids=[
+        "zero-row",
+        "negative-diagonal",
+        "outside-band",
+        "scale-separated",
+        "raw-norm-overflow",
+    ],
+)
+def test_posterior_sample_rejects_invalid_covariance_eager_and_traced(
+    covariance,
+):
+    """Concrete invalid covariances raise; traced ones produce only NaNs."""
+    covariance = jnp.asarray(covariance, dtype=jnp.float32)
+
+    def sample(value):
+        state_dim = value.shape[0]
+        return smcx.posterior_sample(
+            jr.key(335),
+            _one_time_posterior(value),
+            jnp.eye(state_dim, dtype=value.dtype),
+            num_draws=2,
+        )
+
+    with pytest.raises(ValueError, match="positive semidefinite"):
+        sample(covariance)
+    with jax.debug_nans(False), jax.debug_infs(False):
+        traced = jax.jit(sample)(covariance)
+
+    assert np.all(np.isnan(traced))
+
+
+def test_posterior_sample_rejects_active_backend_factor(monkeypatch):
+    """The public shell rejects a factor that the active backend cannot form."""
+
+    def rejected_factor(covariance):
+        return jnp.full_like(covariance, jnp.nan)
+
+    monkeypatch.setattr(
+        kalman_module, "_sampling_covariance_factor", rejected_factor
+    )
+    covariance = jnp.eye(2, dtype=jnp.float32)
+
+    with pytest.raises(ValueError, match="factorable on the active backend"):
+        smcx.posterior_sample(
+            jr.key(336),
+            _one_time_posterior(covariance),
+            covariance,
+            num_draws=2,
+        )
