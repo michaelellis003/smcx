@@ -114,6 +114,16 @@ consumes them. Use the filter alone for online estimation and
 forecasting. Add the smoother when the record is complete and the
 question is what the states were.
 
+Smoothed marginals still describe each time separately; independent draws
+from them do not form coherent state paths. For a linear-Gaussian model,
+`posterior_sample` instead draws the exact joint trajectory posterior by
+sampling the terminal filtering distribution and then its backward
+conditionals. The returned shape is `(num_draws, ntime, state_dim)`, so each
+row is one joint path. The call needs an explicit random key and the same
+transition history as the filter. This linear-only construction follows
+[Carter and Kohn (1994)](https://doi.org/10.1093/biomet/81.3.541) and
+[Frühwirth-Schnatter (1994)](https://doi.org/10.1111/j.1467-9892.1994.tb00184.x).
+
 Now we can relax the assumptions one at a time. Start with
 linearity. In the linear-Gaussian model the products $G_t
 \theta_{t-1}$ and $F_t \theta_t$ define linear functions. The
@@ -346,8 +356,15 @@ F = jnp.eye(1)
 V = 0.3 * jnp.eye(1)
 
 posterior = smcx.kalman_filter(m0, C0, G, W, F, V, y)
+smoothed = smcx.rts_smoother(posterior, G)
+paths = smcx.posterior_sample(jr.key(7), posterior, G, num_draws=4)
 print(posterior.marginal_loglik)  # -29.26, exact
+print(smoothed.smoothed_means.shape)  # (25, 1)
+print(paths.shape)  # (4, 25, 1)
 ```
+
+Each row of `paths` is one draw from the joint distribution across all 25
+times. It is not a stack of independent draws from the 25 smoothed marginals.
 
 ### The observation variance unknown
 
@@ -407,8 +424,27 @@ posterior = smcx.dlm_filter(
     prior_shape=n0,
     prior_scale=S0,
 )
+smoothed = smcx.dlm_smoother(
+    posterior,
+    G,
+    scale_free_transition_covariance=W_tilde,
+)
+smoothed_scale_matrices = (
+    posterior.scale_estimates[-1] * smoothed.smoothed_scale_free_covariances
+)
 print(posterior.scale_estimates[-1])  # 0.32, the truth was 0.3
+print(smoothed_scale_matrices.shape)  # (25, 1, 1)
 ```
+
+For the constant common variance, retrospection gives
+$\theta_t\mid V,y_{1:T}\sim\mathcal{N}(m_t^s,V\widetilde C_t^s)$ and
+$\theta_t\mid y_{1:T}\sim T_{n_T}[m_t^s,S_T\widetilde C_t^s]$. Every time
+uses the final $n_T$ and $S_T$. The displayed
+`smoothed_scale_matrices` are Student-t scale matrices, not covariances. When
+$n_T>2$, covariance is $n_T/(n_T-2)$ times that scale. The smoother requires
+the same $G$ and $\widetilde W$ (or state `discount`) as the filter and assumes
+`variance_discount=1`; state discount is distinct from observation-variance
+discounting.
 
 ### Count observations, nothing Gaussian
 

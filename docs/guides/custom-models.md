@@ -149,16 +149,18 @@ them. The caller supplies the matching model pieces to the backward pass:
 | Forward result | Retrospective operation | Caller must reuse | Claim |
 | --- | --- | --- | --- |
 | `kalman_filter` | `rts_smoother` | Static or time-varying transition matrices | Exact for a consistent linear-Gaussian model |
+| `kalman_filter` | `posterior_sample` | Static or time-varying transition matrices | Exact joint linear-Gaussian trajectories |
 | `extended_kalman_filter` or `gaussian_filter(..., method=taylor_order1(...))` | `gaussian_smoother(..., method=taylor_order1(...))` | Transition Jacobian and `inputs[1:]` if used; supply a full length-`T` input array | Approximate extended RTS moments |
 | `unscented_kalman_filter` or `gaussian_filter(..., method=unscented(...))` | `gaussian_smoother(..., method=unscented(...))` | Transition mean, sigma-point rule, and `inputs[1:]` if used; supply a full length-`T` input array | Approximate unscented RTS moments |
+| `dlm_filter` | `dlm_smoother` | Static `G`, the same scale-free `W_tilde` or state discount, and `variance_discount=1` | Exact constant-common-variance Student-t marginals |
 
 `smoothed_cross_covariances` is the exact linear-RTS companion; nonlinear
 smoother records do not retain the direct cross-covariances for that claim.
 
-smcx cannot compare these model identities at runtime. The remaining records
-have different contracts. DLM and DGLM results use distinct posterior layouts.
+smcx cannot compare these model identities at runtime. DLM records use the
+dedicated path above; DGLM records have no shipped retrospective operation.
 Particle and Liu-West results are weighted-particle records rather than
-Gaussian moment records. Tempered SMC has no state-time filtering record.
+Gaussian moment records. Tempered SMC has no state-time filtering record, and
 SMC² returns an outer parameter-particle record. Gaussian smoothers consume
 none of them.
 
@@ -250,6 +252,7 @@ posterior = smcx.dlm_filter(
     prior_shape=4.0,  # Inverse-Gamma degrees of freedom
     prior_scale=1.0,  # prior point estimate of V
 )
+smoothed = smcx.dlm_smoother(posterior, jnp.eye(1), discount=0.95)
 scale_matrices = (
     posterior.scale_estimates[:, None, None]
     * posterior.filtered_scale_free_covariances
@@ -258,7 +261,14 @@ scale_matrices = (
 # covariance carries the tail factor n / (n - 2) and exists for n > 2.
 dof = posterior.scale_shapes[:, None, None]
 filtered_covariances = dof / (dof - 2.0) * scale_matrices
+smoothed_scale_matrices = (
+    posterior.scale_estimates[-1] * smoothed.smoothed_scale_free_covariances
+)
 ```
+
+The smoothed scale matrices use the final variance estimate and degrees of
+freedom at every time. Here `discount=0.95` is the state-evolution discount;
+the exact retrospective claim still requires `variance_discount=1`.
 
 A `variance_discount` below one instead tracks a slowly changing
 variance (exact under the implied beta-gamma random walk on the

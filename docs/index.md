@@ -6,15 +6,15 @@ sequential Monte Carlo, with model code decoupled from inference code.
 When a state-space model is linear and Gaussian with every model
 matrix known (coefficients and covariances alike), the only unknowns
 are the latent states. The Kalman filter computes their exact
-filtering posterior by a two-step recursion, and the RTS smoother
-revises every estimate from the complete record in one backward
-pass over the stored filter output. Relaxing linearity keeps a
-Gaussian approximation alive (the extended and unscented filters and smoothers).
+filtering posterior by a two-step recursion. The RTS smoother revises
+every estimate from the complete record, while exact joint trajectory
+draws retain dependence across time. Relaxing linearity keeps a Gaussian
+approximation alive (the extended and unscented filters and smoothers).
 Outside special conjugate cases, unknown noise parameters or non-Gaussian
 observations break
-the Gaussian closed form. smcx implements an exact variance-scaled
-DLM and approximate conjugate/linear-Bayes DGLMs for specific
-observation families. Particle filters carry the posterior as a
+the Gaussian closed form. smcx implements an exact variance-scaled DLM
+with retrospective smoothing and approximate conjugate/linear-Bayes DGLMs
+for specific observation families. Particle filters carry the posterior as a
 weighted sample cloud and cover general nonlinear or non-Gaussian
 models. Broader sequential Monte Carlo methods target other
 distribution sequences, including tempered paths for static
