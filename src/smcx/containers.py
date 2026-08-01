@@ -301,6 +301,25 @@ class DLMFilterPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " ntime"]
 
 
+class DLMSmootherPosterior(NamedTuple):
+    """Conjugate unknown-variance DLM smoothing output.
+
+    The first six fields retain the filter record with canonical symmetric
+    covariances. Conditional covariance is ``V * C_tilde_s[t]``; marginally
+    the state is Student-t with final degrees of freedom and scale matrix
+    ``scale_estimates[-1] * smoothed_scale_free_covariances[t]``.
+    """
+
+    filtered_means: Float[Array, "ntime state_dim"]
+    filtered_scale_free_covariances: Float[Array, "ntime state_dim state_dim"]
+    scale_shapes: Float[Array, " ntime"]
+    scale_estimates: Float[Array, " ntime"]
+    marginal_loglik: Float[Array, ""]
+    log_evidence_increments: Float[Array, " ntime"]
+    smoothed_means: Float[Array, "ntime state_dim"]
+    smoothed_scale_free_covariances: Float[Array, "ntime state_dim state_dim"]
+
+
 class DGLMFilterPosterior(NamedTuple):
     """WHM dynamic generalized linear model filtering output.
 

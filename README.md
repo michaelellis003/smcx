@@ -113,7 +113,7 @@ standard sequential inference methods:
 | --- | --- | --- |
 | Linear-Gaussian, fully known | Kalman filter, RTS smoother, and joint posterior draws, exact | `kalman_filter`, `rts_smoother`, `posterior_sample` |
 | Known nonlinear functions | Extended and unscented Kalman filters and RTS smoothers, approximate; the linearization strategy is an argument | `extended_kalman_filter`, `unscented_kalman_filter`, `gaussian_filter`, `gaussian_smoother` |
-| Observation variance unknown, variance-scaled | Conjugate DLM, exact | `dlm_filter` |
+| Observation variance unknown, variance-scaled | Conjugate DLM filter and retrospective smoother, exact | `dlm_filter`, `dlm_smoother` |
 | Count and binary observations | Conjugate/linear-Bayes DGLM, approximate; the observation family is an argument | `dglm_filter` with `poisson()`, `bernoulli()`, or `binomial(trials=n)` |
 | General densities | Bootstrap, auxiliary, and guided particle filters | `bootstrap_filter`, `auxiliary_filter`, `guided_filter` |
 | Custom particle algorithms | Feynman–Kac derivations over one generic loop | `StateSpaceModel`, `FeynmanKac`, `run_smc`, `run_particle_filter` |

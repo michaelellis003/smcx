@@ -35,14 +35,21 @@ import math
 from typing import NamedTuple
 
 import jax.numpy as jnp
+import numpy as np
 from jax import core, lax
 from jax.scipy.special import gammaln
 from jaxtyping import Array, Float, Shaped
 
 from smcx._numerics import _neumaier_add
 from smcx._utils import _canonicalize_emissions
-from smcx.containers import DLMFilterPosterior
-from smcx.kalman import _check_covariance, _check_float_array
+from smcx.containers import DLMFilterPosterior, DLMSmootherPosterior
+from smcx.kalman import (
+    _backward_pass,
+    _check_covariance,
+    _check_float_array,
+    _symmetrize,
+    _time_matrix,
+)
 from smcx.types import GaussianEmissionSequence, Scalar
 
 
@@ -58,8 +65,10 @@ class _DLMCarry(NamedTuple):
 
 
 def _validate_positive_scalar(value: object, name: str) -> object:
-    """Require a finite, strictly positive scalar; pass tracers through."""
+    """Require a positive scalar and validate tracer structure eagerly."""
     if isinstance(value, core.Tracer):
+        if value.ndim != 0 or not jnp.issubdtype(value.dtype, jnp.floating):
+            raise ValueError(f"{name} must be a floating scalar")
         return value
     try:
         scalar = float(value)  # ty: ignore[invalid-argument-type]
@@ -68,6 +77,80 @@ def _validate_positive_scalar(value: object, name: str) -> object:
     if not math.isfinite(scalar) or scalar <= 0.0:
         raise ValueError(f"{name} must be finite and positive; got {scalar}")
     return scalar
+
+
+def _canonicalize_dlm_covariances(
+    value: Float[Array, "ntime state_dim state_dim"],
+    name: str,
+) -> Float[Array, "ntime state_dim state_dim"]:
+    """Admit producer roundoff, then return one symmetric representative."""
+    if not isinstance(value, core.Tracer):
+        covariance = np.asarray(value, dtype=np.float64)
+        if not np.all(np.isfinite(covariance)):
+            raise ValueError(f"{name} must contain only finite values")
+        magnitude = np.abs(covariance)
+        tiny = float(np.finfo(value.dtype).tiny)
+        if np.any(np.not_equal(magnitude, 0.0) & (magnitude < tiny)):
+            raise ValueError(f"{name} contains nonzero subnormal values")
+        diagonal = np.diagonal(covariance, axis1=-2, axis2=-1)
+        if np.any(diagonal < 0.0):
+            raise ValueError(f"{name} must be positive semidefinite")
+        zero_diagonal = np.equal(diagonal, 0.0)
+        transpose = np.swapaxes(covariance, -1, -2)
+        zero_pair = zero_diagonal[..., :, None] | zero_diagonal[..., None, :]
+        if np.any(zero_pair & np.not_equal(covariance, transpose)):
+            raise ValueError(f"{name} has skew at a zero diagonal")
+        diagonal_scale = np.sqrt(np.where(zero_diagonal, 1.0, diagonal))
+        with np.errstate(over="ignore", invalid="ignore"):
+            normalized = (covariance / diagonal_scale[..., :, None]) / (
+                diagonal_scale[..., None, :]
+            )
+            skew = np.abs(normalized - np.swapaxes(normalized, -1, -2))
+        if not np.all(np.isfinite(normalized)):
+            raise ValueError(f"{name} must be positive semidefinite")
+        tolerance = 32.0 * covariance.shape[-1] * np.finfo(value.dtype).eps
+        if np.any(skew > tolerance):
+            raise ValueError(f"{name} must be symmetric within roundoff")
+    canonical = _symmetrize(value)
+    _check_covariance(canonical, name, positive_definite=False)
+    return canonical
+
+
+def _validate_dlm_filter_posterior(
+    posterior: DLMFilterPosterior,
+) -> tuple[int, int, jnp.dtype, Float[Array, "ntime state_dim state_dim"]]:
+    """Validate a DLM record and canonicalize its scale-free covariances."""
+    means = posterior.filtered_means
+    if means.ndim != 2 or means.shape[0] == 0 or means.shape[1] == 0:
+        raise ValueError("filtered_means must have shape (T, d) with T, d > 0")
+    num_timesteps, state_dim = means.shape
+    dtype = means.dtype
+    _check_float_array(means, "filtered_means")
+    names = (
+        "filtered_scale_free_covariances",
+        "scale_shapes",
+        "scale_estimates",
+        "log_evidence_increments",
+    )
+    shapes = ((num_timesteps, state_dim, state_dim), *((num_timesteps,),) * 3)
+    for name, shape in zip(names, shapes, strict=True):
+        value = getattr(posterior, name)
+        _check_float_array(value, name, dtype)
+        if value.shape != shape:
+            raise ValueError(f"{name} shape {value.shape} != {shape}")
+    for name in ("scale_shapes", "scale_estimates"):
+        value = getattr(posterior, name)
+        if not isinstance(value, core.Tracer):
+            concrete = np.asarray(value)
+            if not np.all(np.isfinite(concrete) & (concrete > 0.0)):
+                raise ValueError(f"{name} must contain finite positive values")
+    marginal = jnp.asarray(posterior.marginal_loglik)
+    if marginal.ndim != 0:
+        raise ValueError("marginal_loglik must be scalar")
+    _check_float_array(marginal, "marginal_loglik", dtype)
+    name = names[0]
+    covariance = _canonicalize_dlm_covariances(getattr(posterior, name), name)
+    return num_timesteps, state_dim, dtype, covariance
 
 
 def dlm_filter(
@@ -100,7 +183,7 @@ def dlm_filter(
         scale_free_transition_covariance: Evolution covariance divided
             by the unknown variance, $\tilde W = W / V$ — static
             ``(state_dim, state_dim)`` or timed
-            ``(ntime, state_dim, state_dim)``. Supply exactly one of
+            ``(ntime - 1, state_dim, state_dim)``. Supply exactly one of
             this and ``discount``.
         discount: Discount factor $\delta \in (0, 1]$ specifying
             $\tilde R_t = G \tilde C_{t-1} G' / \delta$. A discount
@@ -134,10 +217,7 @@ def dlm_filter(
             exactly one of the two forms.
     """
     if (scale_free_transition_covariance is None) == (discount is None):
-        raise ValueError(
-            "supply exactly one of scale_free_transition_covariance "
-            "and discount"
-        )
+        raise ValueError("supply exactly one evolution covariance or discount")
     if discount is not None:
         discount_value = _validate_positive_scalar(discount, "discount")
         if not isinstance(discount_value, core.Tracer) and (
@@ -339,4 +419,136 @@ def dlm_filter(
         scale_estimates=scales,
         marginal_loglik=final.marginal_loglik + final.log_evidence_compensation,
         log_evidence_increments=increments,
+    )
+
+
+def dlm_smoother(
+    filtered_posterior: DLMFilterPosterior,
+    transition_matrix: Shaped[Array, "*transition_shape"],
+    *,
+    scale_free_transition_covariance: (
+        Shaped[Array, "*evolution_shape"] | None
+    ) = None,
+    discount: Scalar | None = None,
+) -> DLMSmootherPosterior:
+    r"""Run constant-common-variance DLM retrospective analysis.
+
+    Reconstructed scale-free moments feed the shared Joseph-form smoother:
+    $x_t\mid V,y_{1:T}\sim N(m_t^s,V\widetilde C_t^s)$ conditionally and
+    $x_t\mid y_{1:T}\sim T_{n_T}[m_t^s,S_T\widetilde C_t^s]$ marginally.
+
+    Args:
+        filtered_posterior: Output of `smcx.dlm_filter` under a constant
+            common variance (``variance_discount=1``).
+        transition_matrix: Static state evolution matrix $G$, shape
+            ``(state_dim, state_dim)``.
+        scale_free_transition_covariance: Evolution covariance divided by
+            the common variance, static ``(state_dim, state_dim)`` or timed
+            ``(ntime - 1, state_dim, state_dim)``. Supply exactly one of this
+            and ``discount``.
+        discount: State discount $\delta\in(0,1]$ used by the filter. Supply
+            exactly one of this and ``scale_free_transition_covariance``.
+
+    Returns:
+        `smcx.containers.DLMSmootherPosterior`. Here
+        $S_T\widetilde C_t^s$ is the Student-t scale matrix, not its covariance;
+        for $n_T>2$ covariance is $n_T/(n_T-2)$ times it; smcx never forms it.
+
+    Raises:
+        ValueError: Invalid record/evolution shape, dtype, or covariance.
+
+    Note:
+        Resupply the filter's $G$, $\widetilde W$, or $\delta$ and a record
+        made with ``variance_discount=1``. The record cannot verify these
+        facts; a mismatch can silently describe the wrong marginals.
+        The result stores a canonical symmetric filtering covariance history;
+        the caller's record is unchanged. Positive-time priors must be
+        positive definite because the kernel factors them. Filtered
+        covariances may be semidefinite, and $T=1$ takes no factorization.
+        A traced factorization failure can produce NaNs or a JAX debug error.
+        This covariance-form Joseph update is not a square-root method.
+        Reconstructed noise can have roundoff-sized negative modes, and an
+        ill-conditioned transition can amplify error by roughly its squared
+        condition number per step, losing positive semidefiniteness.
+
+    References:
+        West, M., and Harrison, J. (1997). Bayesian Forecasting and Dynamic
+        Models, second edition, sections 4.5 and 4.8.
+        https://doi.org/10.1007/b98971
+    """
+    if (scale_free_transition_covariance is None) == (discount is None):
+        raise ValueError(
+            "supply exactly one of scale_free_transition_covariance "
+            "and discount"
+        )
+    num_timesteps, state_dim, dtype, canonical_covariances = (
+        _validate_dlm_filter_posterior(filtered_posterior)
+    )
+    _check_float_array(transition_matrix, "transition_matrix", dtype)
+    actual = transition_matrix.shape
+    expected = (state_dim, state_dim)
+    if actual != expected:
+        raise ValueError(f"transition_matrix shape {actual} != {expected}")
+
+    if scale_free_transition_covariance is not None:
+        evolution = scale_free_transition_covariance
+        _check_float_array(evolution, "scale_free_transition_covariance", dtype)
+        timed_evolution = _time_matrix(
+            evolution,
+            num_timesteps - 1,
+            state_dim,
+            state_dim,
+            "scale_free_transition_covariance",
+        )
+        _check_covariance(
+            evolution,
+            "scale_free_transition_covariance",
+            positive_definite=False,
+        )
+    else:
+        discount_value = _validate_positive_scalar(discount, "discount")
+        if not isinstance(discount_value, core.Tracer) and (
+            float(discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+        ):
+            raise ValueError(f"discount outside (0, 1]: {discount_value}")
+        inverse_discount = 1.0 / jnp.asarray(discount_value, dtype=dtype)
+
+    propagated = (
+        transition_matrix @ canonical_covariances[:-1]
+    ) @ transition_matrix.T
+    if scale_free_transition_covariance is None:
+        next_predicted_covariances = _symmetrize(propagated * inverse_discount)
+    else:
+        next_predicted_covariances = _symmetrize(propagated + timed_evolution)
+    _check_covariance(
+        next_predicted_covariances,
+        "reconstructed_scale_free_predicted_covariances",
+        positive_definite=True,
+    )
+    predicted_means = jnp.concatenate((
+        filtered_posterior.filtered_means[:1],
+        filtered_posterior.filtered_means[:-1] @ transition_matrix.T,
+    ))
+    predicted_covariances = jnp.concatenate((
+        canonical_covariances[:1],
+        next_predicted_covariances,
+    ))
+    smoothed_means, smoothed_covariances = _backward_pass(
+        filtered_posterior.filtered_means,
+        canonical_covariances,
+        predicted_means,
+        predicted_covariances,
+        jnp.broadcast_to(
+            transition_matrix, (num_timesteps - 1, state_dim, state_dim)
+        ),
+    )
+    return DLMSmootherPosterior(
+        filtered_means=filtered_posterior.filtered_means,
+        filtered_scale_free_covariances=canonical_covariances,
+        scale_shapes=filtered_posterior.scale_shapes,
+        scale_estimates=filtered_posterior.scale_estimates,
+        marginal_loglik=filtered_posterior.marginal_loglik,
+        log_evidence_increments=filtered_posterior.log_evidence_increments,
+        smoothed_means=smoothed_means,
+        smoothed_scale_free_covariances=smoothed_covariances,
     )
