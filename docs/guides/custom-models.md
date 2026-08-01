@@ -286,7 +286,7 @@ variance (exact under the implied beta-gamma random walk on the
 precision). Learning several free covariances breaks the conjugacy;
 that is where the particle methods below take over.
 
-## Filter and smooth count or binary state moments
+## Filter count or binary observations and smooth state moments
 
 Between the exact conjugate case and the particle methods sits the
 dynamic generalized linear model (West, Harrison, and Migon 1985).

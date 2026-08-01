@@ -203,7 +203,7 @@ The implemented methods draw on these primary sources:
   [West and Harrison (1997)](https://doi.org/10.1007/b98971) and
   [West, Harrison, and Migon (1985)](https://doi.org/10.1080/01621459.1985.10477131),
   with retrospective state moments from
-  [Alves et al. (2024)](https://arxiv.org/html/2201.05387v4#S3.SS2).
+  [Alves et al. (2025)](https://arxiv.org/html/2201.05387v4#S3.SS2).
 - Nonlinear Gaussian filtering:
   [Schmidt (1966)](https://doi.org/10.1016/B978-1-4831-6716-9.50011-4) and
   [Julier (2002)](https://doi.org/10.1109/ACC.2002.1025369).

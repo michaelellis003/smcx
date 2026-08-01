@@ -41,7 +41,7 @@ References:
     West, M., and Harrison, J. (1997). Bayesian Forecasting and
     Dynamic Models, second edition, chapter 14.
     https://doi.org/10.1007/b98971
-    Alves, M. B., Migon, H. S., Santos, T. R., and Marotta, L. (2024).
+    Alves, M. B., Migon, H. S., Santos Jr, S. V., and Marotta, R. (2025).
     An Efficient Sequential Approach for k-Parametric Dynamic Generalised
     Linear Models, section 3.2 and Algorithm 2.
     https://arxiv.org/html/2201.05387v4#S3.SS2
@@ -788,7 +788,7 @@ def dglm_smoother(
     transition_covariance: Shaped[Array, "*evolution_shape"] | None = None,
     discount: Scalar | None = None,
 ) -> DGLMSmootherPosterior:
-    r"""Compute retrospective DGLM state moments (Alves et al., 2024).
+    r"""Compute retrospective DGLM state moments (Alves et al., 2025).
 
     Args:
         filtered_posterior: Result of `smcx.dglm_filter` with full history.
@@ -798,7 +798,7 @@ def dglm_smoother(
             semidefinite and either static ``(state_dim, state_dim)`` or timed
             ``(T - 1, state_dim, state_dim)``. Supply exactly one of this and
             ``discount``.
-        discount: Scalar state discount $delta\in(0,1]$. Supply exactly one
+        discount: Scalar state discount $\delta \in (0, 1]$. Supply exactly one
             of this and ``transition_covariance``.
 
     Returns:
@@ -810,7 +810,7 @@ def dglm_smoother(
         ValueError: Invalid record, evolution shape, dtype, or covariance.
 
     Note:
-        Resupply the filter's $G$, $W$, or $delta$. The record cannot verify
+        Resupply the filter's $G$, $W$, or $\delta$. The record cannot verify
         this fact; a mismatch can silently describe the wrong moments. The
         smoother needs no observation family, observation vector, emissions,
         or dispersion discount. Retained conjugate parameters remain
@@ -832,7 +832,7 @@ def dglm_smoother(
         Gaussian/Bayes-linear state projection, with no error bound.
 
     References:
-        Alves, M. B., Migon, H. S., Santos, T. R., and Marotta, L. (2024).
+        Alves, M. B., Migon, H. S., Santos Jr, S. V., and Marotta, R. (2025).
         An Efficient Sequential Approach for k-Parametric Dynamic Generalised
         Linear Models, section 3.2 and Algorithm 2.
         https://arxiv.org/html/2201.05387v4#S3.SS2

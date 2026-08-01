@@ -510,7 +510,7 @@ retrospective state moments using the same `G`, `W`, or state discount. The
 smoother needs no family or dispersion-discount argument. Its general output
 is not a distribution or credible interval, while a normal-family record with
 `dispersion_discount=1` reduces exactly to RTS. The runnable composition is in
-[Author custom models](custom-models.md#filter-and-smooth-count-or-binary-state-moments).
+[Author custom models](custom-models.md#filter-count-or-binary-observations-and-smooth-state-moments).
 
 A particle filter is the alternative for the fully specified densities above.
 It needs a sampler for the initial density, a sampler for the state density,
