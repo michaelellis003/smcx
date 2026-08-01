@@ -86,6 +86,7 @@ def _assert_five_se(
     estimator_se = estimates.std(axis=0, ddof=1) / math.sqrt(estimates.shape[0])
     five_se = 5.0 * estimator_se
     np.testing.assert_array_less(five_se, maximum_band)
+    # The 2e-5 addend is the explicit f32/Metal arithmetic budget.
     np.testing.assert_array_less(
         np.abs(estimates.mean(axis=0) - expected),
         five_se + 2e-5,
@@ -208,9 +209,10 @@ def test_unique_parent_support_matches_filter_genealogy() -> None:
 def test_backward_simulation_is_independent_of_ancestor_field() -> None:
     """Valid genealogy metadata cannot alter the FFBS target or draws."""
     ntime, num_particles = 4, 5
-    particles = jnp.arange(ntime * num_particles, dtype=jnp.int32).reshape(
-        ntime, num_particles, 1
-    )
+    particles = jnp.broadcast_to(
+        jnp.arange(num_particles, dtype=jnp.int32),
+        (ntime, num_particles),
+    )[..., None]
     identity = jnp.broadcast_to(
         jnp.arange(num_particles, dtype=jnp.int32),
         (ntime, num_particles),
@@ -229,8 +231,13 @@ def test_backward_simulation_is_independent_of_ancestor_field() -> None:
         params: Any,
         input_t: Any,
     ) -> jax.Array:
-        del state, previous, params, input_t
-        return jnp.asarray(0.0, dtype=jnp.float32)
+        del previous, params, input_t
+        in_support = (state[0] >= 0) & (state[0] < num_particles)
+        return jnp.where(
+            in_support,
+            -jnp.log(jnp.asarray(num_particles, dtype=jnp.float32)),
+            -jnp.inf,
+        )
 
     original = smcx.backward_simulation(
         jr.key(1002), posterior, log_transition, None, num_draws=9
