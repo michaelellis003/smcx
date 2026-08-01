@@ -74,10 +74,18 @@ def _draw_previous(
     *,
     validate: bool = False,
 ) -> tuple[_DrawCloud, Int32[Array, " num_draws"], Bool[Array, ""]]:
-    over_previous = vmap(log_transition, in_axes=(None, 0, None, None))
+    def _as_transition_array(*args: Any) -> Array:
+        output = log_transition(*args)
+        try:
+            return jnp.asarray(output)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "log_transition output must be a scalar"
+            ) from error
+
+    over_previous = vmap(_as_transition_array, in_axes=(None, 0, None, None))
     over_draws = vmap(over_previous, in_axes=(0, None, None, None))
-    batch = over_draws(next_states, particles, params, input_t)
-    transition = jnp.asarray(batch)
+    transition = over_draws(next_states, particles, params, input_t)
     if validate:
         shape = (tree.leaves(next_states)[0].shape[0], log_weights.shape[0])
         if transition.shape != shape or not jnp.issubdtype(
@@ -194,6 +202,8 @@ def backward_simulation(
             terminal_valid,
             log_weights.dtype,
         )
+    if not callable(log_transition):
+        raise ValueError("log_transition must be callable")
 
     peeled_input = None if inputs is None else inputs[-1]
     peeled_cloud = tree.map(lambda leaf: leaf[-2], particle_history)
