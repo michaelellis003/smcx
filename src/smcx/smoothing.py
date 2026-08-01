@@ -131,12 +131,15 @@ def backward_simulation(
 ) -> ParticleSmootherPosterior:
     r"""Draw particle FFBS trajectories from stored filtering clouds.
 
-    Draws are independent and equally weighted in the O(T * num_draws * N)
-    approximation. Leaves are draw-major and index their filtering cloud.
+    Conditional on the stored filtering record, rows are independent,
+    equally weighted draws from its discrete FFBS approximation. Runtime is
+    O(T * num_draws * N). Leaves are draw-major; leaf ``[j, t]`` is the state
+    selected by ``backward_indices[j, t]`` from filtering cloud ``t``.
 
     Args:
         key: JAX PRNG key.
-        posterior: Fixed-parameter filter result with full history.
+        posterior: Fixed-parameter ``ParticleFilterPosterior`` with full
+            history.
         log_transition: Forward-consistent transition log density or mass,
             called as ``(state, prev_state, params, input_t) -> scalar``.
         params: Explicit transition parameters.
@@ -145,7 +148,8 @@ def backward_simulation(
             ``inputs[t+1]``; row zero is unused.
 
     Returns:
-        Draw-major trajectories and their filtering-cloud indices.
+        Draw-major trajectories with leaf shape ``(num_draws, ntime, ...)``
+        and filtering-cloud indices shaped ``(num_draws, ntime)``.
 
     Raises:
         ValueError: An argument, history, or callback output is malformed.

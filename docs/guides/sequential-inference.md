@@ -246,6 +246,36 @@ particles to propagate
 Observation-informed proposals sharpen the approximation further
 ([Doucet, Godsill, and Andrieu, 2000](https://doi.org/10.1023/A:1008935410038)).
 
+A stored particle-filter history supports two approximate retrospective
+routes. `reconstruct_trajectories` follows each terminal particle through
+the recorded ancestors. It returns $N$ paths in $O(TN)$ work, and the final
+filtering weights remain the path weights. Resampling makes those lineages
+coalesce, so early path segments may represent only a few distinct states.
+
+`backward_simulation` does not follow the ancestors. It first samples the
+terminal cloud using $w_T$. For draw $j$, let $I_t^{(j)}$ select a particle
+from the cloud at time $t$. Given the already drawn state
+$\theta_{t+1}^{(j)}$, its backward probability is proportional to
+
+$$
+\Pr\!\left(I_t^{(j)}=i \mid \theta_{t+1}^{(j)},
+\text{filter record}\right)
+\propto w_t^{(i)}
+p\!\left(\theta_{t+1}^{(j)} \mid \theta_t^{(i)}\right).
+$$
+
+Conditional on the finite filtering record, the draw-major rows are
+independent, equally weighted draws from its discrete approximation to the
+joint smoothing distribution. The method needs the full corrected particle
+and weight history and an evaluable transition density or mass for the same
+fixed parameters and time-varying inputs used by the filter. Drawing $M$
+paths costs $O(TMN)$ transition evaluations. It can retain more early-time
+diversity when several predecessors have positive backward mass, but it
+cannot recover support missing from the filtering clouds and agrees with
+genealogy when only one predecessor is possible. These are the trajectory
+and backward-simulation methods of
+[Godsill, Doucet, and West (2004)](https://doi.org/10.1198/016214504000000151).
+
 Finally, let the transition or observation densities depend on an
 unknown static parameter. So far
 every relaxation changed the form of the model. The pieces
@@ -473,12 +503,12 @@ y_t &\sim \mathrm{Poisson}(e^{\theta_t}), \\
 \end{aligned}
 $$
 
-No Kalman variant can run this. A particle filter can. The model is
-the densities of the display as three ordinary functions: a sampler
-for the initial density, a sampler for the state density, and the
-log observation density. Its parameters are a PyTree that smcx
-threads through every call, so `jax.grad` differentiates the
-estimator in one call:
+No Kalman variant can run this. A particle filter can. It needs a sampler
+for the initial density, a sampler for the state density, and the log
+observation density. Backward simulation also needs the evaluable state
+transition log density. The record below groups those four functions. Its
+parameters are a PyTree that smcx threads through every call, so `jax.grad`
+differentiates the estimator in one call:
 
 ```python
 def sample_initial(key, params, input_0):
@@ -490,6 +520,13 @@ def sample_transition(key, state, params, input_t):
     return params["rho"] * state + noise
 
 
+def log_transition(state, prev_state, params, input_t):
+    del input_t
+    residual = (state[0] - params["rho"] * prev_state[0]) / params["sigma"]
+    normalizer = jnp.log(params["sigma"] * jnp.sqrt(2.0 * jnp.pi))
+    return -0.5 * residual**2 - normalizer
+
+
 def log_observation(count, state, params, input_t):
     # Poisson log density up to a count-only constant.
     return count[0] * state[0] - jnp.exp(state[0])
@@ -499,6 +536,7 @@ model = smcx.StateSpaceModel(
     sample_initial=sample_initial,
     sample_transition=sample_transition,
     log_observation=log_observation,
+    log_transition=log_transition,
 )
 params = {"rho": jnp.asarray(0.9), "sigma": jnp.asarray(0.4)}
 counts = jnp.asarray([[1], [0], [2], [1], [3]], dtype=jnp.int32)
@@ -543,6 +581,35 @@ is fully supported; the corrected estimators
 (stop-gradient resampling, Ścibior and Wood, 2021; differentiable
 resampling, [Corenflos et al., 2021](https://proceedings.mlr.press/v139/corenflos21a.html))
 are out of smcx's current scope.
+
+Retain the default full history when the latent path is also of interest.
+The genealogy is time-major and keeps the final filtering weights. The
+backward-simulation result is draw-major and equally weighted:
+
+```python
+particle_posterior = smcx.run_smc(
+    jr.key(1),
+    smcx.bootstrap_fk(model, params, counts),
+    num_particles=4_096,
+)
+genealogy = smcx.reconstruct_trajectories(particle_posterior)
+particle_smoothed = smcx.backward_simulation(
+    jr.key(2),
+    particle_posterior,
+    model.log_transition,
+    params,
+    num_draws=256,
+)
+print(genealogy.shape)  # (5, 4096, 1)
+print(particle_smoothed.smoothed_trajectories.shape)  # (256, 5, 1)
+print(particle_smoothed.backward_indices.shape)  # (256, 5)
+```
+
+Entry `[j, t]` of `backward_indices` identifies the filtering-cloud particle
+used by draw `j` at time `t`. The transition density and `params` above are
+the same ones used in the forward model. An input-aware run must likewise
+reuse its full input history; the transition from `t` to `t + 1` receives
+`inputs[t + 1]`, while row zero is unused.
 
 On a longer series from this model, the filtered intensity tracks
 the counts and the band widens where the data are sparse. The band

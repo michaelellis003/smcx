@@ -153,16 +153,26 @@ them. The caller supplies the matching model pieces to the backward pass:
 | `extended_kalman_filter` or `gaussian_filter(..., method=taylor_order1(...))` | `gaussian_smoother(..., method=taylor_order1(...))` | Transition Jacobian and `inputs[1:]` if used; supply a full length-`T` input array | Approximate extended RTS moments |
 | `unscented_kalman_filter` or `gaussian_filter(..., method=unscented(...))` | `gaussian_smoother(..., method=unscented(...))` | Transition mean, sigma-point rule, and `inputs[1:]` if used; supply a full length-`T` input array | Approximate unscented RTS moments |
 | `dlm_filter` | `dlm_smoother` | Static `G`, the same scale-free `W_tilde` or state discount, and `variance_discount=1` | Exact constant-common-variance Student-t marginals |
+| Fixed-parameter `ParticleFilterPosterior` | `reconstruct_trajectories` | Full particle and ancestor history; use final filtering weights for path summaries | Approximate genealogy paths; cheap but subject to early coalescence |
+| Fixed-parameter `ParticleFilterPosterior` | `backward_simulation` | Full particle and corrected weight history; the same transition log density or mass, parameters, and full input history | Equal-weight draws from the discrete particle FFBS approximation |
 
 `smoothed_cross_covariances` is the exact linear-RTS companion; nonlinear
 smoother records do not retain the direct cross-covariances for that claim.
 
 smcx cannot compare these model identities at runtime. DLM records use the
 dedicated path above; DGLM records have no shipped retrospective operation.
-Particle and Liu-West results are weighted-particle records rather than
-Gaussian moment records. Tempered SMC has no state-time filtering record, and
-SMC² returns an outer parameter-particle record. Gaussian smoothers consume
-none of them.
+For particle backward simulation, every stored log-weight row must be the
+normalized filtering weights of that same stored cloud. The named bootstrap,
+guided, and auxiliary filters and their shared-loop derivations satisfy this
+contract, including the auxiliary filter's corrective weight.
+
+`reconstruct_trajectories` can follow the state genealogy of a
+`LiuWestPosterior`, but that result is not a fixed-parameter smoother.
+`backward_simulation` rejects it because one external parameter PyTree cannot
+represent its time- and particle-specific `filtered_params`. A tempered result
+has no latent state-time filtering history. The current `SMC2Posterior`
+exposes its outer parameter history, not the inner state histories needed by
+these consumers. These record shapes therefore have no row in the table.
 
 All filtered covariances and the first predicted covariance must be finite,
 symmetric, and positive semidefinite. Positive-time predicted covariances must
@@ -581,6 +591,18 @@ and evidence increments remain available for every time step. Trajectory
 reconstruction, genealogy-based variance, the combined diagnostic summary,
 and ArviZ export require the default full history.
 
+The final-only option retains the evidence estimate needed by an external
+particle marginal Metropolis--Hastings (PMMH) kernel, but smcx has no
+standalone PMMH API. Such a kernel can use a proposed parameter's fresh
+`posterior.marginal_loglik` as $\log \widehat Z$ when
+$\widehat Z=\exp(\mathtt{marginal\_loglik})$ comes from an unbiased particle
+filter and resampling scheme; the log estimate itself is Jensen-biased. On a
+rejection, the kernel must retain the accepted estimate rather than rerun it.
+`backward_simulation` instead conditions on one fixed-parameter, full-history
+record. `smc2` uses PMMH moves internally; it is not a user-facing PMMH
+chain. See
+[Andrieu, Doucet, and Holenstein (2010)](https://doi.org/10.1111/j.1467-9868.2009.00736.x).
+
 `log_ml_variance` is calibrated only when the filter used multinomial
 resampling. Posterior containers do not retain resampler provenance, so values
 from the default systematic resampler or another scheme are heuristic. Its
@@ -682,13 +704,14 @@ The three base fields (`sample_initial`, `sample_transition`,
 `log_observation`) are required by the record's typed contract.
 The optional derivations validate only their additional capabilities
 and raise a named error at construction when one is `None`. The
-table lists the fields each derivation consumes:
+table lists the fields each operation consumes:
 
 | Operation | Fields consumed |
 | --- | --- |
 | `bootstrap_fk` | `sample_initial`, `sample_transition`, `log_observation` |
 | `guided_fk` | `sample_initial`, `log_observation`, plus `sample_proposal`, `log_proposal`, `log_transition` |
 | `auxiliary_fk` | bootstrap fields plus `log_lookahead` |
+| `backward_simulation` | `log_transition`, passed explicitly with the same `params` and full input history |
 
 The callback-first named filters are the short on-ramp. The record
 and Feynman–Kac path is the reusable workbench layer, where one

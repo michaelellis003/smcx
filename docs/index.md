@@ -16,9 +16,10 @@ the Gaussian closed form. smcx implements an exact variance-scaled DLM
 with retrospective smoothing and approximate conjugate/linear-Bayes DGLMs
 for specific observation families. Particle filters carry the posterior as a
 weighted sample cloud and cover general nonlinear or non-Gaussian
-models. Broader sequential Monte Carlo methods target other
-distribution sequences, including tempered paths for static
-parameters and nested state-parameter inference.
+models. Full particle-filter histories support approximate genealogy paths
+and backward-simulated joint trajectories. Broader sequential Monte Carlo
+methods target other distribution sequences, including tempered paths for
+static parameters and nested state-parameter inference.
 smcx implements all of these methods. The
 [introduction](guides/sequential-inference.md) develops them one
 assumption at a time, with the equations and references.
@@ -55,8 +56,9 @@ pip install "smcx[arviz]"
 - [Filtering tutorial](tutorials/filtering.md) runs a complete example and
   plots its filtering intervals and effective sample size.
 - [Custom models](guides/custom-models.md) covers nonlinear Gaussian filters
-  and smoothers, the model record, Feynman–Kac derivations, structured latent
-  states, time-varying inputs, and an optional Equinox representation.
+  and smoothers, particle smoother composition, the model record,
+  Feynman–Kac derivations, structured latent states, time-varying inputs, and
+  an optional Equinox representation.
 - [Stochastic volatility](guides/stochastic-volatility.md) learns a static
   parameter online with the Liu–West filter.
 - [ArviZ reporting](guides/arviz.md) exports weighted particle output for

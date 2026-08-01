@@ -1,10 +1,11 @@
 # smcx
 
 Sequential inference for state-space models in JAX: Kalman-family
-and DLM/DGLM filters, and SMC methods including particle filters,
-tempered SMC, and SMC². Algorithms consume plain JAX callables and
-small typed records, keeping model definitions separate from
-inference. smcx defines no probabilistic programming language.
+and DLM/DGLM filters, smoothers, and SMC methods including particle
+filtering and smoothing, tempered SMC, and SMC². Algorithms consume
+plain JAX callables and small typed records, keeping model definitions
+separate from inference. smcx defines no probabilistic programming
+language.
 Models defined elsewhere can be used when the caller maps their
 components to these callables or records.
 
@@ -116,11 +117,12 @@ standard sequential inference methods:
 | Observation variance unknown, variance-scaled | Conjugate DLM filter and retrospective smoother, exact | `dlm_filter`, `dlm_smoother` |
 | Count and binary observations | Conjugate/linear-Bayes DGLM, approximate; the observation family is an argument | `dglm_filter` with `poisson()`, `bernoulli()`, or `binomial(trials=n)` |
 | General densities | Bootstrap, auxiliary, and guided particle filters | `bootstrap_filter`, `auxiliary_filter`, `guided_filter` |
+| General densities, retrospective | Genealogy paths and particle FFBS trajectory draws, approximate | `reconstruct_trajectories`, `backward_simulation` |
 | Custom particle algorithms | Feynman–Kac derivations over one generic loop | `StateSpaceModel`, `FeynmanKac`, `run_smc`, `run_particle_filter` |
 | Static parameters | Tempered SMC targets a fixed posterior through a temperature path. SMC² nests a particle filter inside parameter-space SMC. Liu-West is approximate online parameter learning through kernel shrinkage | `temper`, `smc2`, `liu_west_filter` |
 | Simulation and prediction | Model simulation and posterior predictive draws | `simulate`, `posterior_predictive_sample` |
 | Resampling | Systematic, stratified, multinomial, residual | `systematic`, `stratified`, `multinomial`, `residual` |
-| Diagnostics and reporting | ESS, scoring rules, trajectory reconstruction, ArviZ export | `diagnose`, `crps`, `reconstruct_trajectories`, `to_arviz` |
+| Diagnostics and reporting | ESS, scoring rules, ArviZ export | `diagnose`, `crps`, `to_arviz` |
 
 smcx runs on CPU, CUDA, and TPU through JAX, and on Apple-silicon
 GPUs through the optional
@@ -203,9 +205,11 @@ The implemented methods draw on these primary sources:
 - Nonlinear Gaussian filtering:
   [Schmidt (1966)](https://doi.org/10.1016/B978-1-4831-6716-9.50011-4) and
   [Julier (2002)](https://doi.org/10.1109/ACC.2002.1025369).
-- Particle filters: [Gordon, Salmond, and Smith (1993)](https://doi.org/10.1049/ip-f-2.1993.0015),
+- Particle filters and smoothing:
+  [Gordon, Salmond, and Smith (1993)](https://doi.org/10.1049/ip-f-2.1993.0015),
   [Pitt and Shephard (1999)](https://doi.org/10.1080/01621459.1999.10474153),
   [Doucet, Godsill, and Andrieu (2000)](https://doi.org/10.1023/A:1008935410038),
+  [Godsill, Doucet, and West (2004)](https://doi.org/10.1198/016214504000000151),
   and [Liu and West (2001)](https://doi.org/10.1007/978-1-4757-3437-9_10).
 - Static and parameter inference:
   [Del Moral, Doucet, and Jasra (2006)](https://doi.org/10.1111/j.1467-9868.2006.00553.x)
