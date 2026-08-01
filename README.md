@@ -115,7 +115,7 @@ standard sequential inference methods:
 | Linear-Gaussian, fully known | Kalman filter, RTS smoother, lag-one covariances, and joint posterior draws, exact | `kalman_filter`, `rts_smoother`, `smoothed_cross_covariances`, `posterior_sample` |
 | Known nonlinear functions | Extended and unscented Kalman filters and RTS smoothers, approximate; the linearization strategy is an argument | `extended_kalman_filter`, `unscented_kalman_filter`, `gaussian_filter`, `gaussian_smoother` |
 | Observation variance unknown, variance-scaled | Conjugate DLM filter and retrospective smoother, exact | `dlm_filter`, `dlm_smoother` |
-| Count and binary observations | Conjugate/linear-Bayes DGLM, approximate; the observation family is an argument | `dglm_filter` with `poisson()`, `bernoulli()`, or `binomial(trials=n)` |
+| Count and binary observations | Conjugate/linear-Bayes DGLM filtering and retrospective state-moment smoothing, approximate | `dglm_filter` with `poisson()`, `bernoulli()`, or `binomial(trials=n)`; `dglm_smoother` |
 | General densities | Bootstrap, auxiliary, and guided particle filters | `bootstrap_filter`, `auxiliary_filter`, `guided_filter` |
 | General densities, retrospective | Genealogy paths and particle FFBS trajectory draws, approximate | `reconstruct_trajectories`, `backward_simulation` |
 | Custom particle algorithms | Feynman–Kac derivations over one generic loop | `StateSpaceModel`, `FeynmanKac`, `run_smc`, `run_particle_filter` |
@@ -201,7 +201,9 @@ The implemented methods draw on these primary sources:
   and [Frühwirth-Schnatter (1994)](https://doi.org/10.1111/j.1467-9892.1994.tb00184.x).
 - Conjugate dynamic models:
   [West and Harrison (1997)](https://doi.org/10.1007/b98971) and
-  [West, Harrison, and Migon (1985)](https://doi.org/10.1080/01621459.1985.10477131).
+  [West, Harrison, and Migon (1985)](https://doi.org/10.1080/01621459.1985.10477131),
+  with retrospective state moments from
+  [Alves et al. (2024)](https://arxiv.org/html/2201.05387v4#S3.SS2).
 - Nonlinear Gaussian filtering:
   [Schmidt (1966)](https://doi.org/10.1016/B978-1-4831-6716-9.50011-4) and
   [Julier (2002)](https://doi.org/10.1109/ACC.2002.1025369).

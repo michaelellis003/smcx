@@ -503,11 +503,20 @@ y_t &\sim \mathrm{Poisson}(e^{\theta_t}), \\
 \end{aligned}
 $$
 
-No Kalman variant can run this. A particle filter can. It needs a sampler
-for the initial density, a sampler for the state density, and the log
-observation density. Backward simulation also needs the evaluable state
-transition log density. The record below groups those four functions. Its
-parameters are a PyTree that smcx threads through every call, so `jax.grad`
+No Kalman variant can run this. A DGLM instead carries the linear state by
+moments, matches a Poisson conjugate family, and applies linear-Bayes feedback.
+`dglm_filter` is deterministic and approximate; `dglm_smoother` adds
+retrospective state moments using the same `G`, `W`, or state discount. The
+smoother needs no family or dispersion-discount argument. Its general output
+is not a distribution or credible interval, while a normal-family record with
+`dispersion_discount=1` reduces exactly to RTS. The runnable composition is in
+[Author custom models](custom-models.md#filter-and-smooth-count-or-binary-state-moments).
+
+A particle filter is the alternative for the fully specified densities above.
+It needs a sampler for the initial density, a sampler for the state density,
+and the log observation density. Backward simulation also needs the evaluable
+state transition log density. The record below groups those four functions.
+Its parameters are a PyTree that smcx threads to every callable, so `jax.grad`
 differentiates the estimator in one call:
 
 ```python

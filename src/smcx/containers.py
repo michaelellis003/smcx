@@ -360,6 +360,27 @@ class DGLMFilterPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " ntime"]
 
 
+class DGLMSmootherPosterior(NamedTuple):
+    """DGLM retrospective state-moment output.
+
+    The first six fields retain the filter record and its forward semantics,
+    with a canonical symmetric covariance history. Conjugate alpha and beta
+    remain filtering-time quantities; they are not smoothed parameters.
+    For a general DGLM, the smoothed arrays are approximate retrospective
+    linear-Bayes state moments, not a smoothing distribution or credible
+    intervals.
+    """
+
+    filtered_means: Float[Array, "ntime state_dim"]
+    filtered_covariances: Float[Array, "ntime state_dim state_dim"]
+    conjugate_alphas: Float[Array, " ntime"]
+    conjugate_betas: Float[Array, " ntime"]
+    marginal_loglik: Float[Array, ""]
+    log_evidence_increments: Float[Array, " ntime"]
+    smoothed_means: Float[Array, "ntime state_dim"]
+    smoothed_covariances: Float[Array, "ntime state_dim state_dim"]
+
+
 class SMC2Posterior(NamedTuple):
     """SMC² posterior over static parameters.
 
