@@ -156,7 +156,7 @@ def test_posterior_sample_preserves_joseph_forward_product_order():
 
 def test_spectral_factor_clips_covariance_inside_normalized_band():
     """The fallback clips only the small negative normalized mode."""
-    epsilon = np.finfo(np.float32).eps
+    epsilon = float(np.finfo(np.float32).eps)
     delta = np.float32(4.0 * epsilon)
     covariance = jnp.asarray(
         [[1.0, 1.0 + delta], [1.0 + delta, 1.0]], dtype=jnp.float32
@@ -186,7 +186,7 @@ def test_spectral_factor_clips_covariance_inside_normalized_band():
 
 def test_spectral_factor_rescales_state_coordinates_on_left():
     """A rounding-sensitive singular covariance binds normalization order."""
-    epsilon = np.finfo(np.float32).eps
+    epsilon = float(np.finfo(np.float32).eps)
     coordinate_scales = jnp.asarray(
         [3.2212724e-12, 2.3385930e-05, 8.4500571e13],
         dtype=jnp.float32,
