@@ -23,6 +23,35 @@ _SCALAR_POSTERIOR = smcx.GaussianFilterPosterior(
 )
 
 
+def _one_time_posterior(covariance):
+    """Build a minimal posterior whose terminal covariance is under test."""
+    state_dim = covariance.shape[0]
+    means = jnp.zeros((1, state_dim), dtype=covariance.dtype)
+    return smcx.GaussianFilterPosterior(
+        jnp.asarray(0.0, dtype=covariance.dtype),
+        means,
+        covariance[None],
+        means,
+        covariance[None],
+        jnp.zeros(1, dtype=covariance.dtype),
+    )
+
+
+def _two_time_terminal_posterior(covariance):
+    """Build a valid two-time record with the supplied terminal covariance."""
+    state_dim = covariance.shape[0]
+    means = jnp.zeros((2, state_dim), dtype=covariance.dtype)
+    identity = jnp.eye(state_dim, dtype=covariance.dtype)
+    return smcx.GaussianFilterPosterior(
+        jnp.asarray(0.0, dtype=covariance.dtype),
+        means,
+        jnp.stack((identity, identity)),
+        means,
+        jnp.stack((identity, covariance)),
+        jnp.zeros(2, dtype=covariance.dtype),
+    )
+
+
 def test_posterior_sample_matches_fixed_key_scalar_conditional():
     """A two-time oracle binds the gain, variance, keys, and draw axes."""
     key = jr.key(330)
@@ -118,5 +147,65 @@ def test_posterior_sample_preserves_joseph_forward_product_order():
     draws = smcx.posterior_sample(
         jr.key(332), posterior, transition, num_draws=2
     )
+
+    assert np.all(np.isfinite(draws))
+
+
+def test_spectral_factor_clips_covariance_inside_normalized_band():
+    """The fallback clips only the small negative normalized mode."""
+    epsilon = np.finfo(np.float32).eps
+    delta = np.float32(4.0 * epsilon)
+    covariance = jnp.asarray(
+        [[1.0, 1.0 + delta], [1.0 + delta, 1.0]], dtype=jnp.float32
+    )
+
+    factor = kalman_module._sampling_covariance_factor(covariance)
+    reconstructed = np.asarray(factor, dtype=np.float64) @ np.asarray(
+        factor.T, dtype=np.float64
+    )
+    expected = np.full((2, 2), 1.0 + float(delta) / 2.0)
+
+    assert np.all(np.isfinite(factor))
+    np.testing.assert_allclose(
+        reconstructed, expected, rtol=0.0, atol=4.0 * epsilon
+    )
+    with jax.disable_jit(True), jax.debug_nans(True):
+        draws = smcx.posterior_sample(
+            jr.key(333),
+            _two_time_terminal_posterior(covariance),
+            jnp.zeros((2, 2), dtype=jnp.float32),
+            num_draws=2,
+        )
+    assert np.all(np.isfinite(draws))
+
+
+def test_spectral_factor_rescales_state_coordinates_on_left():
+    """A scale-separated singular covariance binds root orientation."""
+    epsilon = np.finfo(np.float32).eps
+    scales = np.asarray([2.0**20, 2.0**-20], dtype=np.float32)
+    covariance = jnp.asarray(scales[:, None] * scales[None, :])
+
+    factor = kalman_module._sampling_covariance_factor(covariance)
+    reconstructed = np.asarray(factor, dtype=np.float64) @ np.asarray(
+        factor.T, dtype=np.float64
+    )
+    normalized = (reconstructed / scales[:, None]) / scales[None, :]
+
+    np.testing.assert_allclose(
+        normalized, np.ones((2, 2)), rtol=0.0, atol=8.0 * epsilon
+    )
+
+
+def test_posterior_sample_normalizes_finite_raw_row_sum_overflow():
+    """A valid normalized covariance survives raw f32 sum overflow."""
+    covariance = jnp.full((2, 2), 2.0e38, dtype=jnp.float32)
+
+    with jax.debug_nans(True), jax.debug_infs(True):
+        draws = smcx.posterior_sample(
+            jr.key(334),
+            _one_time_posterior(covariance),
+            jnp.eye(2, dtype=jnp.float32),
+            num_draws=2,
+        )
 
     assert np.all(np.isfinite(draws))
