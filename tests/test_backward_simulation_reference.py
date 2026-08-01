@@ -421,3 +421,81 @@ def test_backward_simulation_is_independent_of_ancestor_field() -> None:
     np.testing.assert_array_equal(
         original.backward_indices, changed.backward_indices
     )
+
+
+def test_ffbs_retains_more_early_diversity_than_genealogy() -> None:
+    """A coalesced real filter record keeps multiple FFBS predecessors."""
+    num_particles, num_draws = 16, 64
+
+    def initial(key: jax.Array, count: int) -> jax.Array:
+        del key
+        return jnp.arange(count, dtype=jnp.int32)[:, None]
+
+    def select_first_parent(
+        key: jax.Array,
+        weights: jax.Array,
+        count: int,
+    ) -> jax.Array:
+        # This intentionally biased test double fixes one supported outcome.
+        del key, weights
+        return jnp.zeros((count,), dtype=jnp.int32)
+
+    def transition(key: jax.Array, state: jax.Array) -> jax.Array:
+        del key
+        return jnp.zeros_like(state)
+
+    def log_observation(emission: jax.Array, state: jax.Array) -> jax.Array:
+        del emission, state
+        return jnp.asarray(0.0, dtype=jnp.float32)
+
+    posterior = smcx.bootstrap_filter(
+        jr.key(1199),
+        initial,
+        transition,
+        log_observation,
+        jnp.zeros((2, 1), dtype=jnp.float32),
+        num_particles,
+        resampling_fn=select_first_parent,
+        resampling_threshold=1.1,
+    )
+    np.testing.assert_array_equal(
+        posterior.ancestors[1], jnp.zeros(num_particles, dtype=jnp.int32)
+    )
+    np.testing.assert_array_equal(
+        posterior.filtered_particles[1],
+        jnp.zeros((num_particles, 1), dtype=jnp.int32),
+    )
+    np.testing.assert_array_equal(
+        posterior.filtered_log_weights[0],
+        jnp.full_like(
+            posterior.filtered_log_weights[0],
+            posterior.filtered_log_weights[0, 0],
+        ),
+    )
+
+    def log_transition(
+        state: jax.Array,
+        previous: jax.Array,
+        params: Any,
+        input_t: Any,
+    ) -> jax.Array:
+        del previous, params, input_t
+        return jnp.where(state[0] == 0, 0.0, -jnp.inf)
+
+    genealogy = smcx.reconstruct_trajectories(posterior)
+    genealogy_unique = np.unique(np.asarray(genealogy[0, :, 0])).size
+    assert genealogy_unique == 1
+
+    result = smcx.backward_simulation(
+        jr.key(1200),
+        posterior,
+        log_transition,
+        None,
+        num_draws=num_draws,
+    )
+    ffbs_unique = np.unique(
+        np.asarray(result.smoothed_trajectories[:, 0, 0])
+    ).size
+    # The early draws are iid uniform. At alpha=1e-3, the false-failure
+    # probability is 16*(1/16)^64 = 16**(-63) = 1.382e-76 < alpha.
+    assert ffbs_unique > genealogy_unique
