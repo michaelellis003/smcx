@@ -48,9 +48,10 @@ history before exporting.
 Particle-filter output has dimensions `(chain, draw, time, ...)`. Each time
 slice is a filtering marginal $p(x_t \mid y_{0:t})$; draws with the same index
 across time do not form a joint trajectory. `reconstruct_trajectories` gives
-final-weighted genealogy paths, while `backward_simulation` gives equal-weight
-draws from a discrete FFBS approximation. `to_arviz` exports the filtering
-marginals; it does not consume `ParticleSmootherPosterior`.
+genealogy paths whose summaries use the final filtering weights, while
+`backward_simulation` gives equal-weight draws from a discrete FFBS
+approximation. `to_arviz` exports the filtering marginals; it does not consume
+`ParticleSmootherPosterior`.
 
 The `particle_diagnostics` group describes the source particle clouds, not
 the resampled posterior draws. Its leading dimension is `run`, followed by
