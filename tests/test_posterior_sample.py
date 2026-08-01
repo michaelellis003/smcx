@@ -11,6 +11,7 @@ import pytest
 
 import smcx
 import smcx.kalman as kalman_module
+from tests import _kalman_reference as reference
 
 _SCALAR_MEANS = jnp.zeros((2, 1))
 _SCALAR_POSTERIOR = smcx.GaussianFilterPosterior(
@@ -21,6 +22,20 @@ _SCALAR_POSTERIOR = smcx.GaussianFilterPosterior(
     jnp.ones((2, 1, 1)),
     jnp.zeros(2),
 )
+
+
+def _reference_posterior() -> smcx.GaussianFilterPosterior:
+    """Build the frozen multivariate filter record used by sampling gates."""
+    predicted_means = jnp.asarray(reference.PREDICTED_MEANS)
+    dtype = predicted_means.dtype
+    return smcx.GaussianFilterPosterior(
+        jnp.asarray(0.0, dtype=dtype),
+        predicted_means,
+        jnp.asarray(reference.PREDICTED_COVARIANCES, dtype=dtype),
+        jnp.asarray(reference.FILTERED_MEANS, dtype=dtype),
+        jnp.asarray(reference.FILTERED_COVARIANCES, dtype=dtype),
+        jnp.zeros(predicted_means.shape[0], dtype=dtype),
+    )
 
 
 def _one_time_posterior(covariance):
@@ -75,6 +90,81 @@ def test_posterior_sample_matches_fixed_key_scalar_conditional():
     tolerance = 16.0 * np.finfo(np.asarray(actual).dtype).eps
     for result in (actual, compiled):
         np.testing.assert_allclose(result, expected, rtol=0.0, atol=tolerance)
+
+
+def test_posterior_sample_matches_rts_moments_and_lag_covariances():
+    """Joint draws match every RTS marginal and adjacent-state covariance."""
+    count = 65_536
+    posterior = _reference_posterior()
+    transitions = jnp.asarray(
+        reference.TRANSITION_MATRIX,
+        dtype=posterior.filtered_means.dtype,
+    )
+    smoothed = smcx.rts_smoother(posterior, transitions)
+    draws = np.asarray(
+        smcx.posterior_sample(
+            jr.key(337),
+            posterior,
+            transitions,
+            num_draws=count,
+        ),
+        dtype=np.float64,
+    )
+    means = np.asarray(smoothed.smoothed_means, dtype=np.float64)
+    covariances = np.asarray(
+        smoothed.smoothed_covariances,
+        dtype=np.float64,
+    )
+    centered = draws - means[None]
+
+    empirical_means = np.mean(draws, axis=0)
+    empirical_covariances = np.einsum(
+        "nti,ntj->tij", centered, centered
+    ) / float(count)
+    empirical_lag_covariances = np.einsum(
+        "nti,ntj->tij", centered[:, :-1], centered[:, 1:]
+    ) / float(count)
+
+    filtered_covariances = np.asarray(
+        posterior.filtered_covariances,
+        dtype=np.float64,
+    )
+    predicted_covariances = np.asarray(
+        posterior.predicted_covariances,
+        dtype=np.float64,
+    )
+    host_transitions = np.asarray(transitions, dtype=np.float64)
+    products = filtered_covariances[:-1] @ np.swapaxes(host_transitions, -1, -2)
+    gains = np.stack([
+        np.linalg.solve(predicted.T, product.T).T
+        for predicted, product in zip(
+            predicted_covariances[1:], products, strict=True
+        )
+    ])
+    lag_covariances = gains @ covariances[1:]
+
+    diagonal = np.diagonal(covariances, axis1=-2, axis2=-1)
+    mean_se = np.sqrt(diagonal / count)
+    # For known-mean Gaussian products, Isserlis' identity gives
+    # Var(X_i X_j) = P_ii P_jj + P_ij^2 (Biometrika 1918,
+    # https://doi.org/10.1093/biomet/12.1-2.134).
+    covariance_se = np.sqrt(
+        (diagonal[:, :, None] * diagonal[:, None, :] + covariances**2) / count
+    )
+    lag_se = np.sqrt(
+        (diagonal[:-1, :, None] * diagonal[1:, None, :] + lag_covariances**2)
+        / count
+    )
+
+    assert np.max(np.abs(empirical_means - means) / mean_se) <= 5.0
+    assert (
+        np.max(np.abs(empirical_covariances - covariances) / covariance_se)
+        <= 5.0
+    )
+    assert (
+        np.max(np.abs(empirical_lag_covariances - lag_covariances) / lag_se)
+        <= 5.0
+    )
 
 
 @pytest.mark.parametrize("count", [True, 0, np.asarray(1.0)])
