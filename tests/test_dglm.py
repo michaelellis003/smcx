@@ -376,6 +376,125 @@ class TestBernoulliExact:
         )
 
 
+class TestNonGaussianSmoothing:
+    """Independent high-precision Poisson and Bernoulli backward oracles.
+
+    Generated with mpmath 1.4.1 at 100 decimal digits from exact-decimal
+    inputs: West--Harrison--Migon conjugate moment matching followed by the
+    classic covariance form of Alves et al. (2025), Algorithm 2.
+    """
+
+    POISSON_MEANS = (
+        (0.15753056007394604, 0.16917354844636025),
+        (0.31691042514676147, 0.17655825381171205),
+        (0.53039220578523253, 0.17655825381171205),
+    )
+    POISSON_COVARIANCES = (
+        (
+            (0.21461825162172161, -0.049356294958083880),
+            (-0.049356294958083880, 0.080786234283321084),
+        ),
+        (
+            (0.19487380519843440, 0.013702707788876309),
+            (0.013702707788876309, 0.085768065300394347),
+        ),
+        (
+            (0.27813004908155984, 0.086788609664228937),
+            (0.086788609664228937, 0.095768065300394347),
+        ),
+    )
+    BERNOULLI_MEANS = (
+        (0.064539987058913004,),
+        (0.061351705075163471,),
+        (0.099141127065022189,),
+    )
+    BERNOULLI_COVARIANCES = (
+        ((0.41709484864036533,),),
+        ((0.46334822634197497,),),
+        ((0.52318420495600165,),),
+    )
+
+    @staticmethod
+    def _assert_mpmath_close(actual, reference):
+        actual_array = np.asarray(actual)
+        reference_array = np.asarray(reference)
+        scale = max(1.0, float(np.max(np.abs(reference_array))))
+        # Observed error is <=4.25 eps across CPU/x64, CPU/f32, and MPS;
+        # 32 eps covers the two backward solves and Joseph updates.
+        atol = 32 * np.finfo(actual_array.dtype).eps * scale
+        np.testing.assert_allclose(
+            actual_array,
+            reference_array,
+            rtol=0.0,
+            atol=atol,
+        )
+
+    def test_poisson_smoother_matches_mpmath_reference(self):
+        transition, observation, mean_0, cov_0, evolution = _trend_model()
+        filtered = dglm_filter(
+            mean_0,
+            cov_0,
+            transition,
+            observation,
+            jnp.array([1, 0, 3]),
+            family=poisson(),
+            transition_covariance=evolution,
+        )
+        actual = smcx.dglm_smoother(
+            filtered,
+            transition,
+            transition_covariance=evolution,
+        )
+
+        self._assert_mpmath_close(actual.smoothed_means, self.POISSON_MEANS)
+        self._assert_mpmath_close(
+            actual.smoothed_covariances,
+            self.POISSON_COVARIANCES,
+        )
+        assert (
+            np.max(
+                np.abs(
+                    np.asarray(actual.smoothed_means)
+                    - np.asarray(filtered.filtered_means)
+                )
+            )
+            > 0.1
+        )
+
+    def test_bernoulli_smoother_matches_mpmath_reference(self):
+        transition = jnp.eye(1)
+        evolution = jnp.array([[0.08]])
+        filtered = dglm_filter(
+            jnp.array([-0.2]),
+            jnp.array([[0.6]]),
+            transition,
+            jnp.ones(1),
+            jnp.array([1, 0, 1]),
+            family=bernoulli(),
+            transition_covariance=evolution,
+        )
+        actual = smcx.dglm_smoother(
+            filtered,
+            transition,
+            transition_covariance=evolution,
+        )
+
+        self._assert_mpmath_close(actual.smoothed_means, self.BERNOULLI_MEANS)
+        self._assert_mpmath_close(
+            actual.smoothed_covariances,
+            self.BERNOULLI_COVARIANCES,
+        )
+        assert (
+            np.max(
+                np.abs(
+                    np.asarray(actual.smoothed_means)
+                    - np.asarray(filtered.filtered_means)
+                )
+            )
+            > 0.1
+        )
+
+
 @pytest.mark.skipif(not _CPU_X64, reason="frozen CPU/x64 arithmetic contract")
 class TestPinnedPyBATS:
     """Frozen pybats 0.0.5 traces (Apache-2.0, from West's group).
