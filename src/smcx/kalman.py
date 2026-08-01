@@ -2246,6 +2246,11 @@ def posterior_sample(
             domain, or active-backend covariance factor.
 
     Note:
+        The sampler splits ``key`` once into ``ntime`` keys. Key ``t`` draws
+        the complete ``(num_draws, state_dim)`` block for state time ``t``.
+        Reusing a key repeats draws on the same backend and covariance-factor
+        path. Bitwise equality across backends or factor paths is not promised.
+
         The sampler evaluates the backward conditional covariance with the
         same Joseph-form update as `rts_smoother`. This avoids the direct
         Schur subtraction's near-deterministic float32 cancellation. The
