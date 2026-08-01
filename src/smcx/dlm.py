@@ -65,8 +65,10 @@ class _DLMCarry(NamedTuple):
 
 
 def _validate_positive_scalar(value: object, name: str) -> object:
-    """Require a finite, strictly positive scalar; pass tracers through."""
+    """Require a positive scalar and validate tracer structure eagerly."""
     if isinstance(value, core.Tracer):
+        if value.ndim != 0 or not jnp.issubdtype(value.dtype, jnp.floating):
+            raise ValueError(f"{name} must be a floating scalar")
         return value
     try:
         scalar = float(value)  # ty: ignore[invalid-argument-type]
@@ -107,11 +109,11 @@ def _canonicalize_dlm_covariances(
             normalized = (covariance / diagonal_scale[..., :, None]) / (
                 diagonal_scale[..., None, :]
             )
+            skew = np.abs(normalized - np.swapaxes(normalized, -1, -2))
         if not np.all(np.isfinite(normalized)):
             raise ValueError(f"{name} must be positive semidefinite")
         dimension = covariance.shape[-1]
         epsilon = float(np.finfo(value.dtype).eps)
-        skew = np.abs(normalized - np.swapaxes(normalized, -1, -2))
         if np.any(skew > 32.0 * dimension * epsilon):
             raise ValueError(f"{name} must be symmetric within roundoff")
     canonical = _symmetrize(value)
@@ -479,10 +481,10 @@ def dlm_smoother(
     Returns:
         `smcx.containers.DLMSmootherPosterior`. The result retains the final
         degrees of freedom and scale at ``scale_shapes[-1]`` and
-        ``scale_estimates[-1]``. Their product with each scale-free smoothed
-        covariance is the Student-t scale matrix, not its covariance. The
-        covariance exists only for $n_T>2$ and is $n_T/(n_T-2)$ times that
-        scale matrix. The scaled matrix is never materialized.
+        ``scale_estimates[-1]``. The final scale times each scale-free
+        smoothed covariance is the Student-t scale matrix, not its covariance.
+        The covariance exists only for $n_T>2$ and is $n_T/(n_T-2)$ times
+        that scale matrix. The scaled matrix is never materialized.
 
     Raises:
         ValueError: The record or evolution specification has an invalid
@@ -544,7 +546,6 @@ def dlm_smoother(
             "scale_free_transition_covariance",
             positive_definite=False,
         )
-        inverse_discount = jnp.asarray(1.0, dtype=dtype)
     else:
         discount_value = _validate_positive_scalar(discount, "discount")
         if not isinstance(discount_value, core.Tracer) and (
@@ -554,9 +555,6 @@ def dlm_smoother(
                 f"discount must be in (0, 1]; got {discount_value}"
             )
         inverse_discount = 1.0 / jnp.asarray(discount_value, dtype=dtype)
-        timed_evolution = jnp.zeros(
-            (num_timesteps - 1, state_dim, state_dim), dtype=dtype
-        )
 
     next_predicted_means = (
         filtered_posterior.filtered_means[:-1] @ transition_matrix.T

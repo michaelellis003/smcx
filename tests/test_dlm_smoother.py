@@ -4,6 +4,7 @@
 """Conjugate DLM retrospective-analysis tests (W&H 1997, ch. 4)."""
 
 from fractions import Fraction
+from inspect import unwrap
 
 import jax
 import jax.numpy as jnp
@@ -89,9 +90,9 @@ def test_dlm_smoother_matches_timed_evolution_fraction_oracle():
         posterior.smoothed_scale_free_covariances[-1],
         posterior.filtered_scale_free_covariances[-1],
     )
-    with pytest.raises(ValueError, match="shape"):
-        smcx.dlm_smoother(
-            filtered,
-            jnp.eye(1),
-            scale_free_transition_covariance=jnp.ones(1),
-        )
+    with pytest.raises(ValueError, match="scalar"):
+        jax.jit(
+            lambda value: unwrap(smcx.dlm_smoother)(
+                filtered, jnp.eye(1), discount=value
+            )
+        )(jnp.asarray([0.9]))
