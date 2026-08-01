@@ -396,9 +396,7 @@ def test_dlm_smoother_reduces_to_rts_at_concentrated_scale():
     )
     gaussian_smoothed = smcx.rts_smoother(gaussian_filtered, transition)
 
-    # Derive S_T from Gaussian innovations, independently of the DLM scale
-    # recursion. At n0=1e8 the finite concentration term remains resolvable
-    # in float64 but not float32.
+    # Derive S_T independently from Gaussian innovations; n0 needs float64.
     predicted_means = np.asarray(gaussian_filtered.predicted_means)
     predicted_covariances = np.asarray(gaussian_filtered.predicted_covariances)
     observation_np = np.asarray(observation)
@@ -421,6 +419,8 @@ def test_dlm_smoother_reduces_to_rts_at_concentrated_scale():
     rts_covariances = np.asarray(gaussian_smoothed.smoothed_covariances)
     scale_free = np.asarray(smoothed.smoothed_scale_free_covariances)
     eps = np.finfo(np.float64).eps
+    # All covariance conds are <2.53 and CPU error is <=1 eps; 128 eps covers
+    # both filter/smoother pipelines and the final scale product.
     tolerance = float(
         128
         * eps
@@ -475,8 +475,7 @@ def test_dlm_smoother_discount_matches_closed_form_backward_identity():
     expected_means = means.copy()
     expected_covariances = covariances.copy()
     transition_np = np.asarray(transition)
-    # det(G)=1, so this hard-coded dyadic matrix is delta * G^-1 and
-    # cannot share the implementation's factorization or orientation.
+    # Exact dyadic B=delta G^-1 shares no solve or orientation with smcx.
     gain = np.asarray([[0.5625, -0.375], [0.375, 0.75]], dtype=means.dtype)
     for time in range(means.shape[0] - 2, -1, -1):
         expected_means[time] = means[time] + gain @ (
@@ -489,6 +488,7 @@ def test_dlm_smoother_discount_matches_closed_form_backward_identity():
             expected_covariances[time] + expected_covariances[time].T
         )
 
+    # CPU/MPS error is <=1 eps; 32 eps covers the four-step solve/scan.
     eps = np.finfo(means.dtype).eps
     scale = max(
         1.0,
@@ -583,6 +583,7 @@ def test_dlm_smoother_discount_vmap_and_jit_are_lane_independent():
     )
     vectorized = jax.vmap(smooth)(batched)
     compiled = jax.jit(jax.vmap(smooth))(batched)
+    # CPU/MPS error is <=1 eps; 32 eps covers batching and compiled transforms.
     eps = float(np.finfo(np.float32).eps)
     np.testing.assert_allclose(
         vectorized.smoothed_means[:, 0],
@@ -622,7 +623,7 @@ def test_dlm_smoother_gradient_matches_scalar_derivative():
         )
 
     coefficient = jnp.asarray(0.6, dtype=dtype)
-    # Direct differentiation of R=g^2 C0+W and B=C0 g/R gives this value.
+    # Direct derivative; CPU/MPS error <=1.42 eps, so 8 eps covers autodiff.
     expected = -0.14262764664383037
     gradient = jax.grad(objective)
     for actual in (gradient(coefficient), jax.jit(gradient)(coefficient)):
