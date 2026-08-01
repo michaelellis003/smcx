@@ -13,7 +13,7 @@ registered as JAX PyTrees by default.
 
 from typing import NamedTuple, Protocol, runtime_checkable
 
-from jaxtyping import Array, Bool, Float, Int
+from jaxtyping import Array, Bool, Float, Int, Int32, PyTree, Shaped
 
 from smcx.types import ParticleCloud, ParticleHistory, Scalar
 
@@ -143,6 +143,10 @@ class ParticleFilterPosterior(NamedTuple):
     contain only the final row; ESS and evidence increments still cover all
     T observations.
 
+    Each retained log-weight row is the normalized filtering weight of its
+    stored particle cloud, including the corrective weight after an auxiliary
+    look-ahead resample.
+
     Attributes:
         marginal_loglik: Scalar estimate of $\log p(y_{1:T})$.
         filtered_particles: Latent-state PyTree with every leaf shaped
@@ -165,6 +169,19 @@ class ParticleFilterPosterior(NamedTuple):
     ancestors: Int[Array, "ntime num_particles"]
     ess: Float[Array, " ntime"]
     log_evidence_increments: Float[Array, " ntime"]
+
+
+class ParticleSmootherPosterior(NamedTuple):
+    """Equal-weight particle FFBS trajectory draws.
+
+    Attributes:
+        smoothed_trajectories: Draw-major latent-state PyTree.
+        backward_indices: Int32 filtering-cloud indices with shape
+            ``(num_draws, ntime)``. All ``-1`` marks traced degeneracy.
+    """
+
+    smoothed_trajectories: PyTree[Shaped[Array, "num_draws ntime ..."]]
+    backward_indices: Int32[Array, "num_draws ntime"]
 
 
 class GaussianFilterPosterior(NamedTuple):
