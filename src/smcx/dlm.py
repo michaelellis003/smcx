@@ -45,6 +45,7 @@ from smcx._utils import _canonicalize_emissions
 from smcx.containers import DLMFilterPosterior, DLMSmootherPosterior
 from smcx.kalman import (
     _backward_pass,
+    _canonicalize_filter_covariances,
     _check_covariance,
     _check_float_array,
     _symmetrize,
@@ -77,43 +78,6 @@ def _validate_positive_scalar(value: object, name: str) -> object:
     if not math.isfinite(scalar) or scalar <= 0.0:
         raise ValueError(f"{name} must be finite and positive; got {scalar}")
     return scalar
-
-
-def _canonicalize_dlm_covariances(
-    value: Float[Array, "ntime state_dim state_dim"],
-    name: str,
-) -> Float[Array, "ntime state_dim state_dim"]:
-    """Admit producer roundoff, then return one symmetric representative."""
-    if not isinstance(value, core.Tracer):
-        covariance = np.asarray(value, dtype=np.float64)
-        if not np.all(np.isfinite(covariance)):
-            raise ValueError(f"{name} must contain only finite values")
-        magnitude = np.abs(covariance)
-        tiny = float(np.finfo(value.dtype).tiny)
-        if np.any(np.not_equal(magnitude, 0.0) & (magnitude < tiny)):
-            raise ValueError(f"{name} contains nonzero subnormal values")
-        diagonal = np.diagonal(covariance, axis1=-2, axis2=-1)
-        if np.any(diagonal < 0.0):
-            raise ValueError(f"{name} must be positive semidefinite")
-        zero_diagonal = np.equal(diagonal, 0.0)
-        transpose = np.swapaxes(covariance, -1, -2)
-        zero_pair = zero_diagonal[..., :, None] | zero_diagonal[..., None, :]
-        if np.any(zero_pair & np.not_equal(covariance, transpose)):
-            raise ValueError(f"{name} has skew at a zero diagonal")
-        diagonal_scale = np.sqrt(np.where(zero_diagonal, 1.0, diagonal))
-        with np.errstate(over="ignore", invalid="ignore"):
-            normalized = (covariance / diagonal_scale[..., :, None]) / (
-                diagonal_scale[..., None, :]
-            )
-            skew = np.abs(normalized - np.swapaxes(normalized, -1, -2))
-        if not np.all(np.isfinite(normalized)):
-            raise ValueError(f"{name} must be positive semidefinite")
-        tolerance = 32.0 * covariance.shape[-1] * np.finfo(value.dtype).eps
-        if np.any(skew > tolerance):
-            raise ValueError(f"{name} must be symmetric within roundoff")
-    canonical = _symmetrize(value)
-    _check_covariance(canonical, name, positive_definite=False)
-    return canonical
 
 
 def _validate_dlm_filter_posterior(
@@ -149,7 +113,9 @@ def _validate_dlm_filter_posterior(
         raise ValueError("marginal_loglik must be scalar")
     _check_float_array(marginal, "marginal_loglik", dtype)
     name = names[0]
-    covariance = _canonicalize_dlm_covariances(getattr(posterior, name), name)
+    covariance = _canonicalize_filter_covariances(
+        getattr(posterior, name), name
+    )
     return num_timesteps, state_dim, dtype, covariance
 
 
