@@ -348,7 +348,15 @@ def test_structured_state_composes_and_traced_failure_is_whole_record() -> None:
     _assert_tree_equal(compiled, valid)
     _assert_tree_equal(jax.tree.map(lambda leaf: leaf[0], mapped), valid)
     assert isinstance(valid.smoothed_trajectories, _MixedParticles)
-    assert valid.smoothed_trajectories.continuous.shape == (8, 3, 2)
+    times = jnp.arange(ntime)[None, :]
+    for history, drawn in zip(
+        jax.tree.leaves(particles),
+        jax.tree.leaves(valid.smoothed_trajectories),
+        strict=True,
+    ):
+        np.testing.assert_array_equal(
+            drawn, history[times, valid.backward_indices]
+        )
     invalid = jax.tree.map(lambda leaf: leaf[1], mapped)
     np.testing.assert_array_equal(invalid.backward_indices, -1)
     assert bool(jnp.all(jnp.isnan(invalid.smoothed_trajectories.continuous)))

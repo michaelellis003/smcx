@@ -79,9 +79,7 @@ def _draw_previous(
         try:
             return jnp.asarray(output)
         except (TypeError, ValueError) as error:
-            raise ValueError(
-                "log_transition output must be a scalar"
-            ) from error
+            raise ValueError("log_transition output is not a scalar") from error
 
     over_previous = vmap(_as_transition_array, in_axes=(None, 0, None, None))
     over_draws = vmap(over_previous, in_axes=(0, None, None, None))
