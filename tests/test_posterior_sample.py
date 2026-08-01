@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 import smcx
+import smcx.kalman as kalman_module
 
 _SCALAR_MEANS = jnp.zeros((2, 1))
 _SCALAR_POSTERIOR = smcx.GaussianFilterPosterior(
@@ -74,4 +75,48 @@ def test_posterior_sample_one_time_preserves_zero_variance_coordinate():
 
     assert draws.shape == (1, 1, 2)
     np.testing.assert_array_equal(draws[:, 0, 1], -1.0)
+    assert np.all(np.isfinite(draws))
+
+
+def test_posterior_sample_preserves_joseph_forward_product_order():
+    """A conditioned f32 fixture binds the shared Joseph reconstruction."""
+    dtype = np.float32
+    covariance = jnp.asarray(
+        [[8.0, np.nextafter(dtype(2.0), dtype(np.inf))], [2.0, 10.0]],
+        dtype=jnp.float32,
+    )
+    transition = jnp.asarray([[-1.2, -1.1], [-2.6, -2.2]], dtype=jnp.float32)
+    predicted = kalman_module._symmetrize(
+        (transition @ covariance) @ transition.T
+    )
+
+    _, _, process_noise = kalman_module._backward_gain_terms(
+        covariance, predicted, transition, None
+    )
+    _, conditional = kalman_module._posterior_sample_setup((
+        covariance,
+        predicted,
+        transition,
+    ))
+    tolerance = 32.0 * np.finfo(dtype).eps * float(jnp.max(covariance))
+
+    np.testing.assert_array_equal(process_noise, jnp.zeros_like(covariance))
+    assert float(jnp.max(jnp.abs(conditional))) <= tolerance
+    assert np.linalg.eigvalsh(np.asarray(conditional, dtype=np.float64))[0] >= (
+        -tolerance
+    )
+
+    means = jnp.zeros((2, 2), dtype=jnp.float32)
+    posterior = smcx.GaussianFilterPosterior(
+        jnp.asarray(0.0, dtype=jnp.float32),
+        means,
+        jnp.stack((covariance, predicted)),
+        means,
+        jnp.stack((covariance, jnp.zeros_like(covariance))),
+        jnp.zeros(2, dtype=jnp.float32),
+    )
+    draws = smcx.posterior_sample(
+        jr.key(332), posterior, transition, num_draws=2
+    )
+
     assert np.all(np.isfinite(draws))
