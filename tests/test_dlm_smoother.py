@@ -89,3 +89,9 @@ def test_dlm_smoother_matches_timed_evolution_fraction_oracle():
         posterior.smoothed_scale_free_covariances[-1],
         posterior.filtered_scale_free_covariances[-1],
     )
+    with pytest.raises(ValueError, match="shape"):
+        smcx.dlm_smoother(
+            filtered,
+            jnp.eye(1),
+            scale_free_transition_covariance=jnp.ones(1),
+        )

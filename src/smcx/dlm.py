@@ -532,17 +532,17 @@ def dlm_smoother(
     if scale_free_transition_covariance is not None:
         evolution = scale_free_transition_covariance
         _check_float_array(evolution, "scale_free_transition_covariance", dtype)
-        _check_covariance(
-            evolution,
-            "scale_free_transition_covariance",
-            positive_definite=False,
-        )
         timed_evolution = _time_matrix(
             evolution,
             num_timesteps - 1,
             state_dim,
             state_dim,
             "scale_free_transition_covariance",
+        )
+        _check_covariance(
+            evolution,
+            "scale_free_transition_covariance",
+            positive_definite=False,
         )
         inverse_discount = jnp.asarray(1.0, dtype=dtype)
     else:
