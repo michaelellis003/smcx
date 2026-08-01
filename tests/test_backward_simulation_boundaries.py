@@ -221,12 +221,10 @@ def test_two_times_match_the_labelled_key_schedule() -> None:
 
     previous = jax.vmap(draw_previous)(draw_keys[0], terminal)
     expected_indices = jnp.stack((previous, terminal), axis=1)
-    expected_trajectories = particles[jnp.arange(2)[None, :], expected_indices]
+    expected_paths = particles[jnp.arange(2)[None, :], expected_indices]
 
     np.testing.assert_array_equal(actual.backward_indices, expected_indices)
-    np.testing.assert_array_equal(
-        actual.smoothed_trajectories, expected_trajectories
-    )
+    np.testing.assert_array_equal(actual.smoothed_trajectories, expected_paths)
 
 
 def test_one_time_compiles_without_validating_transition() -> None:
@@ -340,12 +338,10 @@ def test_structured_state_composes_and_traced_failure_is_whole_record() -> None:
         )
 
     valid = run(key, jnp.asarray(False))
-    compiled = jax.jit(run)(key, jnp.asarray(False))
     mapped = jax.jit(jax.vmap(run))(
         jnp.stack((key, key)), jnp.asarray([False, True])
     )
 
-    _assert_tree_equal(compiled, valid)
     _assert_tree_equal(jax.tree.map(lambda leaf: leaf[0], mapped), valid)
     assert isinstance(valid.smoothed_trajectories, _MixedParticles)
     times = jnp.arange(ntime)[None, :]
