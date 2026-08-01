@@ -185,21 +185,33 @@ def test_spectral_factor_clips_covariance_inside_normalized_band():
 
 
 def test_spectral_factor_rescales_state_coordinates_on_left():
-    """A scale-separated singular covariance binds root orientation."""
+    """A rounding-sensitive singular covariance binds normalization order."""
     epsilon = np.finfo(np.float32).eps
-    scales = np.asarray([2.0**20, 2.0**-20], dtype=np.float32)
-    covariance = jnp.asarray(scales[:, None] * scales[None, :])
+    coordinate_scales = jnp.asarray(
+        [3.2212724e-12, 2.3385930e-05, 8.4500571e13],
+        dtype=jnp.float32,
+    )
+    covariance = coordinate_scales[:, None] * coordinate_scales[None, :]
+    diagonal_scales = jnp.sqrt(jnp.diag(covariance))
+    normalized_covariance = kalman_module._symmetrize(
+        (covariance / diagonal_scales[:, None]) / diagonal_scales[None, :]
+    )
 
-    factor = kalman_module._sampling_covariance_factor(covariance)
+    factor = kalman_module._spectral_covariance_factor(covariance)
     reconstructed = np.asarray(factor, dtype=np.float64) @ np.asarray(
         factor.T, dtype=np.float64
     )
-    normalized = (reconstructed / scales[:, None]) / scales[None, :]
+    host_scales = np.asarray(diagonal_scales, dtype=np.float64)
+    normalized = (reconstructed / host_scales[:, None]) / host_scales[None, :]
 
-    # Eight eps covers factor reconstruction plus the two rescaling divisions;
-    # multiplying the eigenvectors on the right differs here by order one.
+    # Four eps covers both supported eigensolvers. Removing symmetrization or
+    # multiplying the two divisors first differs by more than five eps; scaling
+    # eigenvectors on the right still differs by orders of magnitude.
     np.testing.assert_allclose(
-        normalized, np.ones((2, 2)), rtol=0.0, atol=8.0 * epsilon
+        normalized,
+        np.asarray(normalized_covariance, dtype=np.float64),
+        rtol=0.0,
+        atol=4.0 * epsilon,
     )
 
 
