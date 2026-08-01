@@ -314,19 +314,12 @@ def test_dglm_smoother_rejects_invalid_evolution(
             )(jnp.asarray([0.9, 0.8], dtype=dtype))
     if message == "floating dtype" and jax.config.read("jax_enable_x64"):
         is_transition = transition.dtype == jnp.int32
-        mixed_transition = (
-            _F32_EYE_2.astype(jnp.float64) if is_transition else _F32_EYE_2
-        )
-        mixed_options = (
-            {"discount": 1.0}
-            if is_transition
-            else {"transition_covariance": _F32_ZERO_2.astype(jnp.float64)}
-        )
-        name = "transition_matrix" if is_transition else "transition_covariance"
-        with pytest.raises(ValueError, match=name):
-            unwrap(smcx.dglm_smoother)(
-                record, mixed_transition, **mixed_options
-            )
+        if is_transition:
+            transition = _F32_EYE_2.astype(jnp.float64)
+        else:
+            options = {"transition_covariance": _F32_ZERO_2.astype(jnp.float64)}
+        with pytest.raises(ValueError, match="all arrays must have dtype"):
+            unwrap(smcx.dglm_smoother)(record, transition, **options)
 
 
 @pytest.mark.parametrize("evolution", ["static", "timed", "discount"])
@@ -435,39 +428,34 @@ def test_dglm_smoother_factors_only_reconstructed_priors() -> None:
 def test_dglm_smoother_canonicalizes_released_producer_under_jit() -> None:
     """Real filter roundoff needs the dimension-scaled skew allowance."""
     dtype = jnp.float32
-    initial_mean = jnp.asarray(
+
+    def array(values: object) -> jax.Array:
+        return jnp.asarray(values, dtype=dtype)
+
+    initial_mean = array(
         [-0.05465821921825409, -0.06837236881256104, -0.6396454572677612],
-        dtype=dtype,
     )
-    initial_covariance = jnp.asarray(
-        [
-            [1.1717324256896973, 0.33089298009872437, 3.908212900161743],
-            [0.33089298009872437, 0.12562869489192963, 1.4273052215576172],
-            [3.908212900161743, 1.4273052215576172, 24.911808013916016],
-        ],
-        dtype=dtype,
-    )
-    transition = jnp.asarray(
-        [
-            [0.42578643560409546, -0.43568071722984314, 0.2502269446849823],
-            [-0.054558929055929184, 1.1346344947814941, -0.3339521288871765],
-            [0.06975531578063965, -0.4907507300376892, 1.2281440496444702],
-        ],
-        dtype=dtype,
-    )
-    observation = jnp.asarray(
-        [-3.0298609733581543, 1.9809789657592773, 0.4838603734970093],
-        dtype=dtype,
-    )
+    initial_covariance = array([
+        [1.1717324256896973, 0.33089298009872437, 3.908212900161743],
+        [0.33089298009872437, 0.12562869489192963, 1.4273052215576172],
+        [3.908212900161743, 1.4273052215576172, 24.911808013916016],
+    ])
+    transition = array([
+        [0.42578643560409546, -0.43568071722984314, 0.2502269446849823],
+        [-0.054558929055929184, 1.1346344947814941, -0.3339521288871765],
+        [0.06975531578063965, -0.4907507300376892, 1.2281440496444702],
+    ])
+    observation = array([
+        -3.0298609733581543,
+        1.9809789657592773,
+        0.4838603734970093,
+    ])
     evolution = jnp.diag(
-        jnp.asarray(
-            [
-                0.0033386414870619774,
-                0.004689060617238283,
-                0.5420311093330383,
-            ],
-            dtype=dtype,
-        )
+        array([
+            0.0033386414870619774,
+            0.004689060617238283,
+            0.5420311093330383,
+        ])
     )
     filtered = smcx.dglm_filter(
         initial_mean,
