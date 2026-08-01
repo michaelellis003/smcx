@@ -22,6 +22,8 @@ _REFERENCE_TIMES = jnp.asarray([0, 4, 9, 14])
 _NUM_REPLICATES = 16
 _NUM_PARTICLES = 512
 _NUM_DRAWS = 512
+_GUIDED_VARIANCE = 1.0 / (1.0 / _TRANSITION_SD**2 + 1.0 / _OBSERVATION_SD**2)
+_AUXILIARY_SD = 0.65
 
 
 def _initial_sampler(key: jax.Array, count: int) -> jax.Array:
@@ -46,6 +48,61 @@ def _log_transition(
     return jstats.norm.logpdf(state[0], _A * previous[0], scale=_TRANSITION_SD)
 
 
+def _guided_sampler(
+    key: jax.Array,
+    previous: jax.Array,
+    emission: jax.Array,
+) -> jax.Array:
+    mean = _GUIDED_VARIANCE * (
+        _A * previous / _TRANSITION_SD**2 + emission / _OBSERVATION_SD**2
+    )
+    return mean + jnp.sqrt(_GUIDED_VARIANCE) * jr.normal(key, previous.shape)
+
+
+def _log_guided_proposal(
+    emission: jax.Array,
+    state: jax.Array,
+    previous: jax.Array,
+) -> jax.Array:
+    mean = _GUIDED_VARIANCE * (
+        _A * previous[0] / _TRANSITION_SD**2 + emission[0] / _OBSERVATION_SD**2
+    )
+    return jstats.norm.logpdf(state[0], mean, scale=jnp.sqrt(_GUIDED_VARIANCE))
+
+
+def _filter_log_transition(
+    state: jax.Array,
+    previous: jax.Array,
+) -> jax.Array:
+    return _log_transition(state, previous, None, None)
+
+
+def _log_auxiliary(emission: jax.Array, previous: jax.Array) -> jax.Array:
+    # An overconfident normalized look-ahead makes its correction observable.
+    return jstats.norm.logpdf(
+        emission[0], _A * previous[0], scale=_AUXILIARY_SD
+    )
+
+
+def _smoothed_moments(
+    key: jax.Array,
+    posterior: ParticleFilterPosterior,
+    exact_means: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    result = smcx.backward_simulation(
+        key,
+        posterior,
+        _log_transition,
+        None,
+        num_draws=_NUM_DRAWS,
+    )
+    selected = result.smoothed_trajectories[:, _REFERENCE_TIMES, 0]
+    return (
+        jnp.mean(selected, axis=0),
+        jnp.mean(jnp.square(selected - exact_means), axis=0),
+    )
+
+
 def _lgssm_replicate(
     key: jax.Array,
     emissions: jax.Array,
@@ -61,18 +118,64 @@ def _lgssm_replicate(
         _NUM_PARTICLES,
         resampling_threshold=1.1,
     )
-    result = smcx.backward_simulation(
-        smoother_key,
-        posterior,
-        _log_transition,
-        None,
-        num_draws=_NUM_DRAWS,
+    return _smoothed_moments(smoother_key, posterior, exact_means)
+
+
+def _bootstrap_route(
+    key: jax.Array,
+    emissions: jax.Array,
+    exact_means: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    smoother_key, filter_key = jr.split(key)
+    posterior = smcx.bootstrap_filter(
+        filter_key,
+        _initial_sampler,
+        _transition_sampler,
+        _log_observation,
+        emissions,
+        _NUM_PARTICLES,
+        resampling_threshold=1.1,
     )
-    selected = result.smoothed_trajectories[:, _REFERENCE_TIMES, 0]
-    return (
-        jnp.mean(selected, axis=0),
-        jnp.mean(jnp.square(selected - exact_means), axis=0),
+    return _smoothed_moments(smoother_key, posterior, exact_means)
+
+
+def _guided_route(
+    key: jax.Array,
+    emissions: jax.Array,
+    exact_means: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    smoother_key, filter_key = jr.split(key)
+    posterior = smcx.guided_filter(
+        filter_key,
+        _initial_sampler,
+        _guided_sampler,
+        _log_guided_proposal,
+        _filter_log_transition,
+        _log_observation,
+        emissions,
+        _NUM_PARTICLES,
+        resampling_threshold=1.1,
     )
+    return _smoothed_moments(smoother_key, posterior, exact_means)
+
+
+def _auxiliary_route(
+    key: jax.Array,
+    emissions: jax.Array,
+    exact_means: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    smoother_key, filter_key = jr.split(key)
+    posterior = smcx.auxiliary_filter(
+        filter_key,
+        _initial_sampler,
+        _transition_sampler,
+        _log_observation,
+        _log_auxiliary,
+        emissions,
+        _NUM_PARTICLES,
+        resampling_threshold=1.1,
+    )
+    return _smoothed_moments(smoother_key, posterior, exact_means)
 
 
 def _assert_five_se(
@@ -89,6 +192,28 @@ def _assert_five_se(
     # The 2e-5 addend is the explicit f32/Metal arithmetic budget.
     np.testing.assert_array_less(
         np.abs(estimates.mean(axis=0) - expected),
+        five_se + 2e-5,
+    )
+
+
+def _assert_pairwise_five_se(
+    estimates: np.ndarray,
+    *,
+    maximum_band: float,
+) -> None:
+    left = np.asarray([0, 0, 1], dtype=np.intp)
+    right = np.asarray([1, 2, 2], dtype=np.intp)
+    differences = estimates[:, left] - estimates[:, right]
+    # Each row difference contains two complete, independently keyed routes.
+    # Hence SE(mean difference) = sample_sd(differences) / sqrt(R).
+    estimator_se = differences.std(axis=0, ddof=1) / math.sqrt(
+        differences.shape[0]
+    )
+    five_se = 5.0 * estimator_se
+    np.testing.assert_array_less(five_se, maximum_band)
+    # The 2e-5 addend is the explicit f32/Metal arithmetic budget.
+    np.testing.assert_array_less(
+        np.abs(differences.mean(axis=0)),
         five_se + 2e-5,
     )
 
@@ -141,6 +266,51 @@ def test_lgssm_moments_match_rts_at_five_estimator_se(
     _assert_five_se(
         np.asarray(centered_seconds, dtype=np.float64),
         np.asarray(exact_variances, dtype=np.float64),
+        maximum_band=0.10,
+    )
+
+
+def test_filter_routes_give_matching_smoothing_moments_at_five_se(
+    lgssm_params: dict[str, jax.Array],
+    lgssm_data: tuple[jax.Array, jax.Array],
+) -> None:
+    """Bootstrap, guided, and auxiliary records target one smoother."""
+    emissions = lgssm_data[1][:15]
+    filtered = smcx.kalman_filter(
+        lgssm_params["initial_mean"],
+        lgssm_params["initial_cov"],
+        lgssm_params["dynamics_weights"],
+        lgssm_params["dynamics_cov"],
+        lgssm_params["emissions_weights"],
+        lgssm_params["emissions_cov"],
+        emissions,
+    )
+    exact = smcx.rts_smoother(filtered, lgssm_params["dynamics_weights"])
+    exact_means = exact.smoothed_means[_REFERENCE_TIMES, 0]
+    roots = jax.vmap(jr.key)(jnp.arange(1100, 1100 + _NUM_REPLICATES))
+    route_keys = jax.vmap(lambda key: jr.split(key, 3))(roots)
+    in_axes = (0, None, None)
+
+    bootstrap = jax.jit(jax.vmap(_bootstrap_route, in_axes=in_axes))(
+        route_keys[:, 0], emissions, exact_means
+    )
+    guided = jax.jit(jax.vmap(_guided_route, in_axes=in_axes))(
+        route_keys[:, 1], emissions, exact_means
+    )
+    auxiliary = jax.jit(jax.vmap(_auxiliary_route, in_axes=in_axes))(
+        route_keys[:, 2], emissions, exact_means
+    )
+    mean_estimates = jnp.stack((bootstrap[0], guided[0], auxiliary[0]), axis=1)
+    centered_seconds = jnp.stack(
+        (bootstrap[1], guided[1], auxiliary[1]), axis=1
+    )
+
+    _assert_pairwise_five_se(
+        np.asarray(mean_estimates, dtype=np.float64),
+        maximum_band=0.25,
+    )
+    _assert_pairwise_five_se(
+        np.asarray(centered_seconds, dtype=np.float64),
         maximum_band=0.10,
     )
 
