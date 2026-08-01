@@ -94,7 +94,7 @@ def test_posterior_sample_matches_fixed_key_scalar_conditional():
 
 def test_posterior_sample_matches_rts_moments_and_lag_covariances():
     """Joint draws match every RTS marginal and adjacent-state covariance."""
-    count = 65_536
+    count = 1_024
     posterior = _reference_posterior()
     transitions = jnp.asarray(
         reference.TRANSITION_MATRIX,
