@@ -95,6 +95,14 @@ def test_single_time_skips_callback():
     )
 
 
+def test_non_index_draw_count_reaches_public_validation():
+    p = _posterior(jnp.zeros((1, 1, 1)), jnp.zeros((1, 1)))
+    count: Any = 1.5
+    callback: Any = None
+    with pytest.raises(ValueError, match="positive integer"):
+        smcx.backward_simulation(jr.key(4), p, callback, None, num_draws=count)
+
+
 def test_liu_west_parameter_history_is_rejected():
     posterior = _posterior(jnp.zeros((2, 2, 1)), _uniform_log_weights(2, 2))
     liu_west: Any = LiuWestPosterior(

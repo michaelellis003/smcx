@@ -36,19 +36,18 @@ _DrawCloud: TypeAlias = PyTree[Shaped[Array, "num_draws ..."]]
 if TYPE_CHECKING:
     _PosteriorArgument: TypeAlias = ParticleFilterPosterior
     _LogTransitionArgument: TypeAlias = ModelLogTransition
+    _NumDrawsArgument: TypeAlias = SupportsIndex
 else:
     _PosteriorArgument: TypeAlias = Any
     _LogTransitionArgument: TypeAlias = Any
+    _NumDrawsArgument: TypeAlias = Any
 
 
 def _safe_weights(
     logits: Float[Array, "*rows num_particles"],
 ) -> tuple[Array, Bool[Array, " *rows"]]:
-    valid = (
-        jnp.any(jnp.isfinite(logits), axis=-1)
-        & ~jnp.any(jnp.isnan(logits), axis=-1)
-        & ~jnp.any(jnp.isposinf(logits), axis=-1)
-    )
+    invalid = jnp.any(jnp.isnan(logits) | jnp.isposinf(logits), axis=-1)
+    valid = jnp.any(jnp.isfinite(logits), axis=-1) & ~invalid
     safe = jnp.where(valid[..., None], logits, jnp.zeros_like(logits))
     shifted = safe - jnp.max(safe, axis=-1, keepdims=True)
     return jnp.exp(shifted), valid
@@ -83,11 +82,9 @@ def _draw_previous(
     validate: bool = False,
 ) -> tuple[_DrawCloud, Int32[Array, " num_draws"], Bool[Array, ""]]:
     over_previous = vmap(log_transition, in_axes=(None, 0, None, None))
-    transition = jnp.asarray(
-        vmap(over_previous, in_axes=(0, None, None, None))(
-            next_states, particles, params, input_t
-        )
-    )
+    over_draws = vmap(over_previous, in_axes=(0, None, None, None))
+    batch = over_draws(next_states, particles, params, input_t)
+    transition = jnp.asarray(batch)
     if validate:
         shape = (tree.leaves(next_states)[0].shape[0], log_weights.shape[0])
         if transition.shape != shape or not jnp.issubdtype(
@@ -128,20 +125,18 @@ def backward_simulation(
     log_transition: _LogTransitionArgument,
     params: Any,
     *,
-    num_draws: SupportsIndex,
+    num_draws: _NumDrawsArgument,
     inputs: InputSequence | None = None,
 ) -> ParticleSmootherPosterior:
     r"""Draw particle FFBS trajectories from stored filtering clouds.
 
-    Draws are independent and equally weighted under the O(T * num_draws * N)
-    discrete FFBS approximation. Leaves are draw-major; each int32 index
-    selects its value from the matching filtering cloud.
+    Draws are independent and equally weighted in the O(T * num_draws * N)
+    approximation. Leaves are draw-major and index their filtering cloud.
 
     Args:
         key: JAX PRNG key.
         posterior: Fixed-parameter filter result with full history.
-        log_transition: Matching forward transition log density or mass,
-            called as ``(state, prev_state, params, input_t)``.
+        log_transition: Forward-consistent transition log density or mass.
         params: Explicit transition parameters.
         num_draws: Positive trajectory count, static under an outer ``jit``.
         inputs: Optional length-T inputs. Transition ``t`` to ``t+1`` consumes
@@ -152,15 +147,14 @@ def backward_simulation(
 
     Raises:
         ValueError: An argument, history, or callback output is malformed.
-        DegenerateWeightsError: A concrete terminal or backward categorical
-            law cannot be normalized.
+        DegenerateWeightsError: A concrete categorical law cannot normalize.
 
     Note:
         Liu--West needs particle-specific parameters and is excluded. Traced
-        degeneracy uses all ``-1`` indices, inexact NaNs, and exact
-        placeholders; NaN debugging may raise. Gradients cover gathered values,
-        not probabilities or expectations. This is Algorithm 1 of Godsill,
-        Doucet, and West (2004):
+        failure uses all ``-1`` indices, inexact NaNs, and exact placeholders;
+        NaN debugging may raise. Gradients cover realized gathers, not
+        probabilities or expectations. Godsill, Doucet, and West (2004),
+        Algorithm 1:
         https://www2.stat.duke.edu/~mw/MWextrapubs/Godsill2004.pdf
     """
     if isinstance(num_draws, bool):
@@ -177,7 +171,6 @@ def backward_simulation(
         )
     if not isinstance(posterior, ParticleFilterPosterior):
         raise ValueError("posterior must be a ParticleFilterPosterior")
-
     ntime, _ = _validate_particle_result_axes(
         posterior, "backward_simulation", particles=True, full_history=True
     )
@@ -256,7 +249,6 @@ def backward_simulation(
         peeled_indices[None],
         terminal_indices[None],
     ))
-
     trajectories = tree.map(lambda leaf: jnp.swapaxes(leaf, 0, 1), time_major)
     return _finish(
         trajectories,
