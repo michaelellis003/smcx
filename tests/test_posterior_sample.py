@@ -167,6 +167,77 @@ def test_posterior_sample_matches_rts_moments_and_lag_covariances():
     )
 
 
+def test_posterior_sample_composes_with_jit_vmap_and_fallback_factors():
+    """Outer transforms preserve shape, dtype, draws, and debug-mode safety."""
+    dtype = jnp.float32
+    ordinary = _two_time_terminal_posterior(jnp.eye(2, dtype=dtype))
+    delta = np.float32(4.0 * np.finfo(np.float32).eps)
+    fallback = _two_time_terminal_posterior(
+        jnp.asarray(
+            [[1.0, 1.0 + delta], [1.0 + delta, 1.0]],
+            dtype=dtype,
+        )
+    )
+    batched = jax.tree.map(
+        lambda ordinary_value, singular_value: jnp.stack((
+            ordinary_value,
+            singular_value,
+        )),
+        ordinary,
+        fallback,
+    )
+    transitions = jnp.asarray(
+        [
+            [[0.25, 0.05], [-0.10, 0.30]],
+            [[0.15, -0.20], [0.25, 0.10]],
+        ],
+        dtype=dtype,
+    )
+    keys = jr.split(jr.key(338), 2)
+
+    def sample(key, posterior, transition):
+        return smcx.posterior_sample(
+            key,
+            posterior,
+            transition,
+            num_draws=3,
+        )
+
+    expected = jnp.stack((
+        sample(keys[0], ordinary, transitions[0]),
+        sample(keys[1], fallback, transitions[1]),
+    ))
+    mapped_sample = jax.vmap(sample)
+    with jax.disable_jit(True), jax.debug_nans(True):
+        mapped = jax.block_until_ready(
+            mapped_sample(keys, batched, transitions)
+        )
+    with jax.debug_nans(True), jax.debug_infs(True):
+        compiled = jax.block_until_ready(
+            jax.jit(mapped_sample)(keys, batched, transitions)
+        )
+
+    assert expected.shape == (2, 3, 2, 2)
+    assert expected.dtype == dtype
+    assert np.all(np.isfinite(expected))
+    tolerance = (
+        32.0
+        * float(np.finfo(np.float32).eps)
+        * max(1.0, float(jnp.max(jnp.abs(expected))))
+    )
+    for result in (mapped, compiled):
+        np.testing.assert_allclose(
+            result,
+            expected,
+            rtol=0.0,
+            atol=tolerance,
+        )
+    np.testing.assert_array_equal(
+        expected[0],
+        sample(keys[0], ordinary, transitions[0]),
+    )
+
+
 @pytest.mark.parametrize("count", [True, 0, np.asarray(1.0)])
 def test_posterior_sample_rejects_invalid_draw_counts(count):
     """Every nonpositive or non-index count is rejected at the public shell."""
