@@ -11,6 +11,7 @@ import pytest
 
 import smcx
 import smcx.kalman as kalman_module
+from tests import _kalman_reference as reference
 
 _SCALAR_MEANS = jnp.zeros((2, 1))
 _SCALAR_POSTERIOR = smcx.GaussianFilterPosterior(
@@ -21,6 +22,20 @@ _SCALAR_POSTERIOR = smcx.GaussianFilterPosterior(
     jnp.ones((2, 1, 1)),
     jnp.zeros(2),
 )
+
+
+def _reference_posterior() -> smcx.GaussianFilterPosterior:
+    """Build the frozen multivariate filter record used by sampling gates."""
+    predicted_means = jnp.asarray(reference.PREDICTED_MEANS)
+    dtype = predicted_means.dtype
+    return smcx.GaussianFilterPosterior(
+        jnp.asarray(0.0, dtype=dtype),
+        predicted_means,
+        jnp.asarray(reference.PREDICTED_COVARIANCES, dtype=dtype),
+        jnp.asarray(reference.FILTERED_MEANS, dtype=dtype),
+        jnp.asarray(reference.FILTERED_COVARIANCES, dtype=dtype),
+        jnp.zeros(predicted_means.shape[0], dtype=dtype),
+    )
 
 
 def _one_time_posterior(covariance):
@@ -75,6 +90,226 @@ def test_posterior_sample_matches_fixed_key_scalar_conditional():
     tolerance = 16.0 * np.finfo(np.asarray(actual).dtype).eps
     for result in (actual, compiled):
         np.testing.assert_allclose(result, expected, rtol=0.0, atol=tolerance)
+
+
+def test_posterior_sample_matches_rts_moments_and_lag_covariances():
+    """Joint draws match every RTS marginal and adjacent-state covariance."""
+    count = 1_024
+    posterior = _reference_posterior()
+    transitions = jnp.asarray(
+        reference.TRANSITION_MATRIX,
+        dtype=posterior.filtered_means.dtype,
+    )
+    smoothed = smcx.rts_smoother(posterior, transitions)
+    draws = np.asarray(
+        smcx.posterior_sample(
+            jr.key(337),
+            posterior,
+            transitions,
+            num_draws=count,
+        ),
+        dtype=np.float64,
+    )
+    means = np.asarray(smoothed.smoothed_means, dtype=np.float64)
+    covariances = np.asarray(
+        smoothed.smoothed_covariances,
+        dtype=np.float64,
+    )
+    centered = draws - means[None]
+
+    empirical_means = np.mean(draws, axis=0)
+    empirical_covariances = np.einsum(
+        "nti,ntj->tij", centered, centered
+    ) / float(count)
+    empirical_lag_covariances = np.einsum(
+        "nti,ntj->tij", centered[:, :-1], centered[:, 1:]
+    ) / float(count)
+
+    filtered_covariances = np.asarray(
+        posterior.filtered_covariances,
+        dtype=np.float64,
+    )
+    predicted_covariances = np.asarray(
+        posterior.predicted_covariances,
+        dtype=np.float64,
+    )
+    host_transitions = np.asarray(transitions, dtype=np.float64)
+    products = filtered_covariances[:-1] @ np.swapaxes(host_transitions, -1, -2)
+    gains = np.stack([
+        np.linalg.solve(predicted.T, product.T).T
+        for predicted, product in zip(
+            predicted_covariances[1:], products, strict=True
+        )
+    ])
+    lag_covariances = gains @ covariances[1:]
+
+    diagonal = np.diagonal(covariances, axis1=-2, axis2=-1)
+    mean_se = np.sqrt(diagonal / count)
+    # For known-mean Gaussian products, Isserlis' identity gives
+    # Var(X_i X_j) = P_ii P_jj + P_ij^2 (Biometrika 1918,
+    # https://doi.org/10.1093/biomet/12.1-2.134).
+    covariance_se = np.sqrt(
+        (diagonal[:, :, None] * diagonal[:, None, :] + covariances**2) / count
+    )
+    lag_se = np.sqrt(
+        (diagonal[:-1, :, None] * diagonal[1:, None, :] + lag_covariances**2)
+        / count
+    )
+
+    assert np.max(np.abs(empirical_means - means) / mean_se) <= 5.0
+    assert (
+        np.max(np.abs(empirical_covariances - covariances) / covariance_se)
+        <= 5.0
+    )
+    assert (
+        np.max(np.abs(empirical_lag_covariances - lag_covariances) / lag_se)
+        <= 5.0
+    )
+
+
+def test_posterior_sample_composes_with_jit_vmap_and_fallback_factors():
+    """Outer transforms preserve shape, dtype, draws, and debug-mode safety."""
+    dtype = jnp.float32
+    ordinary = _two_time_terminal_posterior(jnp.eye(2, dtype=dtype))
+    delta = np.float32(4.0 * np.finfo(np.float32).eps)
+    fallback = _two_time_terminal_posterior(
+        jnp.asarray(
+            [[1.0, 1.0 + delta], [1.0 + delta, 1.0]],
+            dtype=dtype,
+        )
+    )
+    batched = jax.tree.map(
+        lambda ordinary_value, singular_value: jnp.stack((
+            ordinary_value,
+            singular_value,
+        )),
+        ordinary,
+        fallback,
+    )
+    transitions = jnp.asarray(
+        [
+            [[0.25, 0.05], [-0.10, 0.30]],
+            [[0.15, -0.20], [0.25, 0.10]],
+        ],
+        dtype=dtype,
+    )
+    keys = jr.split(jr.key(338), 2)
+
+    def sample(key, posterior, transition):
+        return smcx.posterior_sample(
+            key,
+            posterior,
+            transition,
+            num_draws=3,
+        )
+
+    expected = jnp.stack((
+        sample(keys[0], ordinary, transitions[0]),
+        sample(keys[1], fallback, transitions[1]),
+    ))
+    mapped_sample = jax.vmap(sample)
+    with jax.disable_jit(True), jax.debug_nans(True):
+        mapped = jax.block_until_ready(
+            mapped_sample(keys, batched, transitions)
+        )
+    with jax.debug_nans(True), jax.debug_infs(True):
+        compiled = jax.block_until_ready(
+            jax.jit(mapped_sample)(keys, batched, transitions)
+        )
+
+    assert expected.shape == (2, 3, 2, 2)
+    assert expected.dtype == dtype
+    assert np.all(np.isfinite(expected))
+    tolerance = (
+        32.0
+        * float(np.finfo(np.float32).eps)
+        * max(1.0, float(jnp.max(jnp.abs(expected))))
+    )
+    for result in (mapped, compiled):
+        np.testing.assert_allclose(
+            result,
+            expected,
+            rtol=0.0,
+            atol=tolerance,
+        )
+    np.testing.assert_array_equal(
+        expected[0],
+        sample(keys[0], ordinary, transitions[0]),
+    )
+
+
+def test_posterior_sample_has_ordinary_path_gradient():
+    """The pathwise gradient traverses gain, factor, and backward scan."""
+    dtype = jnp.float32
+    key = jr.key(339)
+    count = 3
+    process_variance = jnp.asarray(0.7, dtype=dtype)
+    terminal_variance = jnp.asarray(0.6, dtype=dtype)
+    weights = jnp.asarray([0.2, -0.5, 0.3], dtype=dtype)
+
+    def objective(transition):
+        predicted_variance = transition**2 + process_variance
+        means = jnp.zeros((2, 1), dtype=dtype)
+        posterior = smcx.GaussianFilterPosterior(
+            jnp.asarray(0.0, dtype=dtype),
+            means,
+            jnp.stack((
+                jnp.ones((1, 1), dtype=dtype),
+                jnp.reshape(predicted_variance, (1, 1)),
+            )),
+            means,
+            jnp.asarray([[[1.0]], [[0.6]]], dtype=dtype),
+            jnp.zeros(2, dtype=dtype),
+        )
+        draws = smcx.posterior_sample(
+            key,
+            posterior,
+            jnp.reshape(transition, (1, 1)),
+            num_draws=count,
+        )
+        return jnp.sum(weights * draws[:, 0, 0])
+
+    keys = jr.split(key, 2)
+    terminal_draws = jnp.sqrt(terminal_variance) * jr.normal(
+        keys[1], (count,), dtype=dtype
+    )
+    earlier_noise = jr.normal(keys[0], (count,), dtype=dtype)
+
+    def expected_gradient(transition):
+        predicted_variance = transition**2 + process_variance
+        derivative = (
+            process_variance - transition**2
+        ) / predicted_variance**2 * terminal_draws - jnp.sqrt(
+            process_variance
+        ) * transition / predicted_variance**1.5 * earlier_noise
+        return jnp.sum(weights * derivative)
+
+    gradient = jax.grad(objective)
+    transition = jnp.asarray(0.8, dtype=dtype)
+    transitions = jnp.asarray([0.6, 0.8, 1.1], dtype=dtype)
+    expected = expected_gradient(transition)
+    batched_expected = jax.vmap(expected_gradient)(transitions)
+    actual = gradient(transition)
+    compiled = jax.jit(gradient)(transition)
+    batched = jax.jit(jax.vmap(gradient))(transitions)
+    tolerance = 32.0 * float(np.finfo(np.float32).eps)
+
+    assert np.isfinite(actual)
+    assert np.isfinite(compiled)
+    assert np.all(np.isfinite(batched))
+    for result in (actual, compiled):
+        np.testing.assert_allclose(
+            result,
+            expected,
+            rtol=0.0,
+            atol=tolerance,
+        )
+    np.testing.assert_allclose(
+        batched,
+        batched_expected,
+        rtol=0.0,
+        atol=tolerance,
+    )
 
 
 @pytest.mark.parametrize("count", [True, 0, np.asarray(1.0)])
