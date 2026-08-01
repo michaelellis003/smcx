@@ -172,12 +172,15 @@ class ParticleFilterPosterior(NamedTuple):
 
 
 class ParticleSmootherPosterior(NamedTuple):
-    """Equal-weight particle FFBS trajectory draws.
+    """Equal-weight draws from a discrete particle FFBS approximation.
 
     Attributes:
-        smoothed_trajectories: Draw-major latent-state PyTree.
+        smoothed_trajectories: Draw-major latent-state PyTree. Leaf ``[j, t]``
+            is draw ``j`` at time ``t``.
         backward_indices: Int32 filtering-cloud indices with shape
-            ``(num_draws, ntime)``. All ``-1`` marks traced degeneracy.
+            ``(num_draws, ntime)``. All ``-1`` marks traced degeneracy; then
+            inexact trajectory leaves are NaN and exact leaves are
+            placeholders.
     """
 
     smoothed_trajectories: PyTree[Shaped[Array, "num_draws ntime ..."]]
