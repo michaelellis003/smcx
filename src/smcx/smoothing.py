@@ -53,20 +53,13 @@ def _safe_weights(
     return jnp.exp(shifted), valid
 
 
-def _draw_one(
-    key: PRNGKeyT,
-    weights: Float[Array, " num_particles"],
-) -> Int32[Array, ""]:
-    return multinomial(key, weights, 1)[0]
-
-
 def _draw(
     logits: Float[Array, "num_draws num_particles"],
     particles: ParticleCloud,
     keys: Array,
 ) -> tuple[_DrawCloud, Int32[Array, " num_draws"], Bool[Array, ""]]:
     weights, valid = _safe_weights(logits)
-    indices = vmap(_draw_one)(keys, weights)
+    indices = vmap(lambda k, w: multinomial(k, w, 1)[0])(keys, weights)
     return _gather_particles(particles, indices), indices, jnp.all(valid)
 
 
@@ -116,7 +109,9 @@ def _finish(
     indices = jnp.where(valid, indices, jnp.full_like(indices, -1))
     checked = jnp.where(valid, jnp.zeros((), dtype=dtype), -jnp.inf)
     _raise_if_degenerate(checked)
-    return ParticleSmootherPosterior(trajectories, indices)
+    return ParticleSmootherPosterior(
+        smoothed_trajectories=trajectories, backward_indices=indices
+    )
 
 
 def backward_simulation(
@@ -136,7 +131,8 @@ def backward_simulation(
     Args:
         key: JAX PRNG key.
         posterior: Fixed-parameter filter result with full history.
-        log_transition: Forward-consistent transition log density or mass.
+        log_transition: Forward-consistent transition log density or mass,
+            called as ``(state, prev_state, params, input_t) -> scalar``.
         params: Explicit transition parameters.
         num_draws: Positive trajectory count, static under an outer ``jit``.
         inputs: Optional length-T inputs. Transition ``t`` to ``t+1`` consumes
@@ -153,8 +149,10 @@ def backward_simulation(
         Liu--West needs particle-specific parameters and is excluded. Traced
         failure uses all ``-1`` indices, inexact NaNs, and exact placeholders;
         NaN debugging may raise. Gradients cover realized gathers, not
-        probabilities or expectations. Godsill, Doucet, and West (2004),
-        Algorithm 1:
+        probabilities or expectations. Keys split by time, then draw; reuse
+        repeats on the same backend and code path. Cross-backend equality and
+        draw-count prefix stability are not promised. Godsill, Doucet, and
+        West (2004), Algorithm 1:
         https://www2.stat.duke.edu/~mw/MWextrapubs/Godsill2004.pdf
     """
     if isinstance(num_draws, bool):
