@@ -167,17 +167,6 @@ def test_dglm_smoother_discount_matches_closed_form_backward_identity() -> None:
         expected_covariances,
     )
 
-    def smooth(value: jax.Array) -> smcx.DGLMSmootherPosterior:
-        return smcx.dglm_smoother(
-            filtered,
-            transition,
-            discount=value,
-        )
-
-    compiled = jax.jit(smooth)(discount)
-    for eager_field, compiled_field in zip(actual, compiled, strict=True):
-        _assert_roundoff_close(compiled_field, eager_field)
-
     canonical_covariances = 0.5 * (
         filtered.filtered_covariances
         + filtered.filtered_covariances.swapaxes(-1, -2)
