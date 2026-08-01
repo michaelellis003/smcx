@@ -488,7 +488,7 @@ def test_dlm_smoother_discount_matches_closed_form_backward_identity():
             expected_covariances[time] + expected_covariances[time].T
         )
 
-    # CPU/MPS error is <=1 eps; 32 eps covers the four-step solve/scan.
+    # CPU/MPS error is <=1 eps; 32 eps covers the three-step solve/scan.
     eps = np.finfo(means.dtype).eps
     scale = max(
         1.0,
