@@ -1,7 +1,7 @@
 # Copyright 2026 Michael Ellis
 # SPDX-License-Identifier: Apache-2.0
 
-r"""Dynamic generalized linear model filtering (West, Harrison & Migon).
+r"""Dynamic generalized linear filtering and retrospective state moments.
 
 Exponential-family observations over a linear state evolution carried
 by moments only. Each step matches a conjugate prior to the two
@@ -20,11 +20,15 @@ by moments alone, the conjugate form is an assumption matched to two
 moments, and the state feedback is the optimal *linear* Bayes
 estimate (no error bound). Conditional on the matched conjugate
 prior, the one-step forecast density, the conjugate update, and the
-posterior moments are exact. For the normal family both
-approximations vanish and the recursion is exactly the Kalman filter
-[West, Harrison & Migon, 1985, sec. 2.2] — the primary test gate.
-This filter sits between `smcx.dlm_filter` (exact) and the particle
-filters (asymptotically exact), which are the natural accuracy check.
+posterior moments are exact. For the normal family at
+``dispersion_discount=1``, all three approximations vanish and the recursion
+is exactly the Kalman filter [West, Harrison & Migon, 1985, sec. 2.2].
+
+`smcx.dglm_smoother` adds a retrospective Gaussian/Bayes-linear projection of
+the stored state moments. Its normal-family reduction is exact RTS. General
+DGLM output remains an approximate state-moment summary, not a posterior
+distribution or credible interval, and has no error bound. Particle filters
+are the natural accuracy check.
 
 Forecast densities and special functions come from `jax.scipy`; smcx
 implements only the inverse moment-matching solves.
@@ -37,6 +41,10 @@ References:
     West, M., and Harrison, J. (1997). Bayesian Forecasting and
     Dynamic Models, second edition, chapter 14.
     https://doi.org/10.1007/b98971
+    Alves, M. B., Migon, H. S., Santos Jr, S. V., and Marotta, R. (2025).
+    An Efficient Sequential Approach for k-Parametric Dynamic Generalised
+    Linear Models, section 3.2 and Algorithm 2.
+    https://arxiv.org/html/2201.05387v4#S3.SS2
 """
 
 from typing import NamedTuple
@@ -48,13 +56,20 @@ from jax.nn import sigmoid as jax_sigmoid
 from jax.nn import softplus
 from jax.scipy.special import digamma, gammaln, polygamma
 from jax.scipy.stats import betabinom, nbinom
-from jaxtyping import Array, Shaped
+from jaxtyping import Array, Float, Shaped
 
 from smcx._numerics import _neumaier_add
 from smcx._utils import _canonicalize_emissions
-from smcx.containers import DGLMFilterPosterior
+from smcx.containers import DGLMFilterPosterior, DGLMSmootherPosterior
 from smcx.dlm import _validate_positive_scalar
-from smcx.kalman import _check_covariance, _check_float_array
+from smcx.kalman import (
+    _backward_pass,
+    _canonicalize_filter_covariances,
+    _check_covariance,
+    _check_float_array,
+    _symmetrize,
+    _time_matrix,
+)
 from smcx.types import (
     EmissionSequence,
     FamilyConjugateUpdate,
@@ -730,4 +745,169 @@ def dglm_filter(
         conjugate_betas=betas,
         marginal_loglik=final.marginal_loglik + final.log_evidence_compensation,
         log_evidence_increments=increments,
+    )
+
+
+def _validate_dglm_filter_posterior(
+    posterior: DGLMFilterPosterior,
+) -> tuple[int, int, jnp.dtype, Float[Array, "ntime state_dim state_dim"]]:
+    """Validate a DGLM record and canonicalize its covariance history."""
+    means = posterior.filtered_means
+    if means.ndim != 2 or means.shape[0] == 0 or means.shape[1] == 0:
+        raise ValueError("filtered_means must have shape (T, d) with T, d > 0")
+    num_timesteps, state_dim = means.shape
+    dtype = means.dtype
+    _check_float_array(means, "filtered_means")
+    names = (
+        "filtered_covariances",
+        "conjugate_alphas",
+        "conjugate_betas",
+        "log_evidence_increments",
+    )
+    shapes = ((num_timesteps, state_dim, state_dim), *((num_timesteps,),) * 3)
+    for name, shape in zip(names, shapes, strict=True):
+        value = getattr(posterior, name)
+        _check_float_array(value, name, dtype)
+        if value.shape != shape:
+            raise ValueError(f"{name} shape {value.shape} != {shape}")
+    marginal = jnp.asarray(posterior.marginal_loglik)
+    if marginal.ndim != 0:
+        raise ValueError("marginal_loglik must be scalar")
+    _check_float_array(marginal, "marginal_loglik", dtype)
+    name = names[0]
+    covariance = _canonicalize_filter_covariances(
+        getattr(posterior, name), name
+    )
+    return num_timesteps, state_dim, dtype, covariance
+
+
+def dglm_smoother(
+    filtered_posterior: DGLMFilterPosterior,
+    transition_matrix: Shaped[Array, "*transition_shape"],
+    *,
+    transition_covariance: Shaped[Array, "*evolution_shape"] | None = None,
+    discount: Scalar | None = None,
+) -> DGLMSmootherPosterior:
+    r"""Compute retrospective DGLM state moments (Alves et al., 2025).
+
+    Args:
+        filtered_posterior: Result of `smcx.dglm_filter` with full history.
+        transition_matrix: Static state evolution matrix $G$, shape
+            ``(state_dim, state_dim)``.
+        transition_covariance: State evolution covariance $W_t$, positive
+            semidefinite and either static ``(state_dim, state_dim)`` or timed
+            ``(T - 1, state_dim, state_dim)``. Supply exactly one of this and
+            ``discount``.
+        discount: Scalar state discount $\delta \in (0, 1]$. Supply exactly one
+            of this and ``transition_covariance``.
+
+    Returns:
+        `smcx.containers.DGLMSmootherPosterior`. For a general DGLM, its
+        smoothed arrays are approximate retrospective linear-Bayes state
+        moments, not a smoothing distribution or credible intervals.
+
+    Raises:
+        ValueError: Invalid record, evolution shape, dtype, or covariance.
+
+    Note:
+        Resupply the filter's $G$, $W$, or $\delta$. The record cannot verify
+        this fact; a mismatch can silently describe the wrong moments. The
+        smoother needs no observation family, observation vector, emissions,
+        or dispersion discount. Retained conjugate parameters remain
+        filtering-time quantities and are not rematched.
+
+        The result stores a canonical symmetric filtering covariance history;
+        the caller's record is unchanged. Positive-time reconstructed priors
+        must be positive definite because the shared kernel factors them.
+        Filtered covariances may be semidefinite, and $T=1$ takes no
+        factorization. A traced factorization failure can produce NaNs or a
+        JAX debug error. This covariance-form Joseph update is not a
+        square-root method. Reconstructed noise can have roundoff-sized
+        negative modes, and an ill-conditioned transition can amplify error
+        by roughly its squared condition number per step.
+
+        With a normal-family filter record and ``dispersion_discount=1``, the
+        result is the exact RTS posterior. General DGLMs additionally inherit
+        the filter's three approximation layers and add a retrospective
+        Gaussian/Bayes-linear state projection, with no error bound.
+
+    References:
+        Alves, M. B., Migon, H. S., Santos Jr, S. V., and Marotta, R. (2025).
+        An Efficient Sequential Approach for k-Parametric Dynamic Generalised
+        Linear Models, section 3.2 and Algorithm 2.
+        https://arxiv.org/html/2201.05387v4#S3.SS2
+    """
+    if (transition_covariance is None) == (discount is None):
+        raise ValueError(
+            "supply exactly one of transition_covariance and discount"
+        )
+    num_timesteps, state_dim, dtype, canonical_covariances = (
+        _validate_dglm_filter_posterior(filtered_posterior)
+    )
+    _check_float_array(transition_matrix, "transition_matrix", dtype)
+    expected = (state_dim, state_dim)
+    if transition_matrix.shape != expected:
+        raise ValueError(
+            f"transition_matrix shape {transition_matrix.shape} != {expected}"
+        )
+
+    if transition_covariance is not None:
+        evolution = transition_covariance
+        _check_float_array(evolution, "transition_covariance", dtype)
+        timed_evolution = _time_matrix(
+            evolution,
+            num_timesteps - 1,
+            state_dim,
+            state_dim,
+            "transition_covariance",
+        )
+        _check_covariance(
+            evolution, "transition_covariance", positive_definite=False
+        )
+    else:
+        discount_value = _validate_positive_scalar(discount, "discount")
+        if not isinstance(discount_value, core.Tracer) and (
+            float(discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+        ):
+            raise ValueError(f"discount outside (0, 1]: {discount_value}")
+        inverse_discount = 1.0 / jnp.asarray(discount_value, dtype=dtype)
+
+    propagated = (
+        transition_matrix @ canonical_covariances[:-1]
+    ) @ transition_matrix.T
+    if transition_covariance is None:
+        next_predicted_covariances = _symmetrize(propagated * inverse_discount)
+    else:
+        next_predicted_covariances = _symmetrize(propagated + timed_evolution)
+    _check_covariance(
+        next_predicted_covariances,
+        "reconstructed_predicted_covariances",
+        positive_definite=True,
+    )
+    predicted_means = jnp.concatenate((
+        filtered_posterior.filtered_means[:1],
+        filtered_posterior.filtered_means[:-1] @ transition_matrix.T,
+    ))
+    predicted_covariances = jnp.concatenate((
+        canonical_covariances[:1],
+        next_predicted_covariances,
+    ))
+    smoothed_means, smoothed_covariances = _backward_pass(
+        filtered_posterior.filtered_means,
+        canonical_covariances,
+        predicted_means,
+        predicted_covariances,
+        jnp.broadcast_to(
+            transition_matrix, (num_timesteps - 1, state_dim, state_dim)
+        ),
+    )
+    return DGLMSmootherPosterior(
+        filtered_means=filtered_posterior.filtered_means,
+        filtered_covariances=canonical_covariances,
+        conjugate_alphas=filtered_posterior.conjugate_alphas,
+        conjugate_betas=filtered_posterior.conjugate_betas,
+        marginal_loglik=filtered_posterior.marginal_loglik,
+        log_evidence_increments=filtered_posterior.log_evidence_increments,
+        smoothed_means=smoothed_means,
+        smoothed_covariances=smoothed_covariances,
     )

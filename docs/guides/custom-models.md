@@ -153,14 +153,15 @@ them. The caller supplies the matching model pieces to the backward pass:
 | `extended_kalman_filter` or `gaussian_filter(..., method=taylor_order1(...))` | `gaussian_smoother(..., method=taylor_order1(...))` | Transition Jacobian and `inputs[1:]` if used; supply a full length-`T` input array | Approximate extended RTS moments |
 | `unscented_kalman_filter` or `gaussian_filter(..., method=unscented(...))` | `gaussian_smoother(..., method=unscented(...))` | Transition mean, sigma-point rule, and `inputs[1:]` if used; supply a full length-`T` input array | Approximate unscented RTS moments |
 | `dlm_filter` | `dlm_smoother` | Static `G`, the same scale-free `W_tilde` or state discount, and `variance_discount=1` | Exact constant-common-variance Student-t marginals |
+| `dglm_filter` | `dglm_smoother` | Static `G` and the same static or length-`T - 1` `W`, or the same state discount | Approximate retrospective state moments; exact RTS for a normal-family record with `dispersion_discount=1` |
 | Fixed-parameter `ParticleFilterPosterior` | `reconstruct_trajectories` | Full particle and ancestor history; use final filtering weights for path summaries | Approximate genealogy paths; cheap but subject to early coalescence |
 | Fixed-parameter `ParticleFilterPosterior` | `backward_simulation` | Full particle and corrected weight history; the same transition log density or mass, parameters, and full input history | Equal-weight draws from the discrete particle FFBS approximation |
 
 `smoothed_cross_covariances` is the exact linear-RTS companion; nonlinear
 smoother records do not retain the direct cross-covariances for that claim.
 
-smcx cannot compare these model identities at runtime. DLM records use the
-dedicated path above; DGLM records have no shipped retrospective operation.
+smcx cannot compare these model identities at runtime. DLM and DGLM
+retrospective operations cannot verify the resupplied evolution identity.
 For particle backward simulation, every stored log-weight row must be the
 normalized filtering weights of that same stored cloud. The named bootstrap,
 guided, and auxiliary filters and their shared-loop derivations satisfy this
@@ -285,7 +286,7 @@ variance (exact under the implied beta-gamma random walk on the
 precision). Learning several free covariances breaks the conjugacy;
 that is where the particle methods below take over.
 
-## Filter counts and binary outcomes by conjugate steps
+## Filter count or binary observations and smooth state moments
 
 Between the exact conjugate case and the particle methods sits the
 dynamic generalized linear model (West, Harrison, and Migon 1985).
@@ -300,17 +301,28 @@ approximation points, and the particle filters below are the natural
 accuracy check.
 
 ```python
+counts = jnp.array([1, 0, 3, 2])
+transition = jnp.eye(1)
 posterior = smcx.dglm_filter(
     jnp.zeros(1),
     jnp.eye(1),
-    jnp.eye(1),
+    transition,
     jnp.ones(1),
     counts,
     family=smcx.poisson(),
     discount=0.95,
 )
+smoothed = smcx.dglm_smoother(posterior, transition, discount=0.95)
 posterior.marginal_loglik  # sum of exact negative-binomial forecasts
+smoothed.smoothed_means.shape  # (4, 1)
 ```
+
+The smoother takes no observation family, observation vector, emissions, or
+dispersion discount. It does require the same `G`, `W`, or state discount as
+the filter, which the record cannot verify. Its retained conjugate parameters
+remain filtering-time quantities. General smoothed output is a moment-only
+summary, not a distribution or credible interval; a normal-family record with
+`dispersion_discount=1` reduces exactly to RTS.
 
 The observation family is a `smcx.DGLMFamily` record of four pure
 callables (moment matching, forecast log density, conjugate update,

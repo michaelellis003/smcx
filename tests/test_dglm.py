@@ -115,6 +115,87 @@ class TestKalmanReduction:
             dglm.marginal_loglik, kalman.marginal_loglik, rtol=1e3 * eps
         )
 
+    def test_normal_family_smoother_matches_rts(self):
+        """Normal-family retrospective state moments reduce to exact RTS."""
+        transition, observation, mean_0, cov_0, evolution = _trend_model()
+        variance = 0.3
+        emissions = jnp.array([0.2, -0.4, 0.9, 0.1, 0.5])
+        filtered = dglm_filter(
+            mean_0,
+            cov_0,
+            transition,
+            observation,
+            emissions,
+            family=_normal_family(variance),
+            transition_covariance=evolution,
+            dispersion_discount=1.0,
+        )
+
+        actual = smcx.dglm_smoother(
+            filtered,
+            transition,
+            transition_covariance=evolution,
+        )
+        gaussian_filtered = kalman_filter(
+            mean_0,
+            cov_0,
+            transition,
+            evolution,
+            observation[None, :],
+            jnp.array([[variance]]),
+            emissions[:, None],
+        )
+        expected = smcx.rts_smoother(gaussian_filtered, transition)
+
+        assert isinstance(actual, smcx.DGLMSmootherPosterior)
+        assert len(actual) == 8
+        assert type(actual)._fields == (
+            *type(filtered)._fields,
+            "smoothed_means",
+            "smoothed_covariances",
+        )
+        (
+            filtered_means,
+            filtered_covariances,
+            conjugate_alphas,
+            conjugate_betas,
+            marginal_loglik,
+            log_evidence_increments,
+            smoothed_means,
+            smoothed_covariances,
+        ) = actual
+        retained_fields = (
+            filtered_means,
+            filtered_covariances,
+            conjugate_alphas,
+            conjugate_betas,
+            marginal_loglik,
+            log_evidence_increments,
+        )
+        for retained, original in zip(retained_fields, filtered, strict=True):
+            np.testing.assert_array_equal(retained, original)
+        np.testing.assert_array_equal(smoothed_means[-1], filtered_means[-1])
+        np.testing.assert_array_equal(
+            smoothed_covariances[-1], filtered_covariances[-1]
+        )
+
+        for observed, reference in (
+            (smoothed_means, expected.smoothed_means),
+            (smoothed_covariances, expected.smoothed_covariances),
+        ):
+            observed_array = np.asarray(observed)
+            reference_array = np.asarray(reference)
+            scale = max(1.0, float(np.max(np.abs(reference_array))))
+            # Four conditioned backward steps with prediction condition number
+            # below 15: 64 eps covers the solve and Joseph-update roundoff.
+            atol = 64 * np.finfo(observed_array.dtype).eps * scale
+            np.testing.assert_allclose(
+                observed_array,
+                reference_array,
+                rtol=0.0,
+                atol=atol,
+            )
+
 
 @pytest.mark.skipif(not _CPU_X64, reason="frozen CPU/x64 arithmetic contract")
 class TestExactRecursion:
