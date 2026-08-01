@@ -31,9 +31,11 @@ References:
 """
 
 import math
-from typing import TYPE_CHECKING, NamedTuple, TypeAlias, cast
+import operator
+from typing import TYPE_CHECKING, NamedTuple, SupportsIndex, TypeAlias, cast
 
 import jax.numpy as jnp
+import jax.random as jr
 import numpy as np
 from jax import debug_infs, debug_nans, lax, vmap
 from jax.core import Tracer
@@ -52,6 +54,7 @@ from smcx.types import (
     ObservationJacobianFnWithInput,
     ObservationMeanFn,
     ObservationMeanFnWithInput,
+    PRNGKeyT,
     TransitionJacobianFn,
     TransitionJacobianFnWithInput,
     TransitionMeanFn,
@@ -1773,19 +1776,17 @@ def _validate_filter_posterior(
     return num_timesteps, state_dim, dtype
 
 
-def _rts_step(
-    next_state: _SmootherState,
-    args: tuple[Array, Array, Array, Array, Array, Array | None],
-) -> tuple[_SmootherState, _SmootherState]:
-    """Apply one uncompiled Rauch--Tung--Striebel backward step."""
-    (
-        filtered_mean,
-        filtered_covariance,
-        next_predicted_mean,
-        next_predicted_covariance,
-        transition_matrix,
-        cross_covariance,
-    ) = args
+def _backward_gain_terms(
+    filtered_covariance: Float[Array, "state_dim state_dim"],
+    next_predicted_covariance: Float[Array, "state_dim state_dim"],
+    transition_matrix: Float[Array, "state_dim state_dim"],
+    cross_covariance: Float[Array, "state_dim state_dim"] | None,
+) -> tuple[
+    Float[Array, "state_dim state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, "state_dim state_dim"],
+]:
+    """Return the shared gain and Joseph covariance ingredients."""
     if cross_covariance is None:
         cross_covariance = filtered_covariance @ transition_matrix.T
     predicted_cholesky = jnp.linalg.cholesky(
@@ -1802,6 +1803,51 @@ def _rts_step(
         lower_solution,
         lower=False,
     ).T
+    identity = jnp.eye(filtered_covariance.shape[0], dtype=gain.dtype)
+    residual_operator = identity - gain @ transition_matrix
+    # Reproduce the forward product order and symmetrization exactly. This
+    # makes the represented reconstruction bitwise zero when process noise is
+    # zero; changing either operation resurrects the float32 defect from #286.
+    process_noise = next_predicted_covariance - _symmetrize(
+        (transition_matrix @ filtered_covariance) @ transition_matrix.T
+    )
+    return gain, residual_operator, process_noise
+
+
+def _joseph_backward_covariance(
+    filtered_covariance: Float[Array, "state_dim state_dim"],
+    gain: Float[Array, "state_dim state_dim"],
+    residual_operator: Float[Array, "state_dim state_dim"],
+    process_noise: Float[Array, "state_dim state_dim"],
+    next_covariance: Float[Array, "state_dim state_dim"] | None,
+) -> Float[Array, "state_dim state_dim"]:
+    """Evaluate one RTS or backward-conditional covariance stably."""
+    covariance = residual_operator @ filtered_covariance @ residual_operator.T
+    if next_covariance is not None:
+        covariance = covariance + gain @ next_covariance @ gain.T
+    covariance = covariance + gain @ process_noise @ gain.T
+    return _symmetrize(covariance)
+
+
+def _rts_step(
+    next_state: _SmootherState,
+    args: tuple[Array, Array, Array, Array, Array, Array | None],
+) -> tuple[_SmootherState, _SmootherState]:
+    """Apply one uncompiled Rauch--Tung--Striebel backward step."""
+    (
+        filtered_mean,
+        filtered_covariance,
+        next_predicted_mean,
+        next_predicted_covariance,
+        transition_matrix,
+        cross_covariance,
+    ) = args
+    gain, residual_operator, process_noise = _backward_gain_terms(
+        filtered_covariance,
+        next_predicted_covariance,
+        transition_matrix,
+        cross_covariance,
+    )
     smoothed_mean = filtered_mean + gain @ (
         next_state.mean - next_predicted_mean
     )
@@ -1825,15 +1871,12 @@ def _rts_step(
     # posteriors get even that only when their stored predictions are
     # consistent with their filtered moments (documented on
     # rts_smoother).
-    identity = jnp.eye(filtered_mean.shape[0], dtype=filtered_mean.dtype)
-    residual_operator = identity - gain @ transition_matrix
-    process_noise = next_predicted_covariance - _symmetrize(
-        (transition_matrix @ filtered_covariance) @ transition_matrix.T
-    )
-    smoothed_covariance = _symmetrize(
-        residual_operator @ filtered_covariance @ residual_operator.T
-        + gain @ next_state.covariance @ gain.T
-        + gain @ process_noise @ gain.T
+    smoothed_covariance = _joseph_backward_covariance(
+        filtered_covariance,
+        gain,
+        residual_operator,
+        process_noise,
+        next_state.covariance,
     )
     state = _SmootherState(smoothed_mean, smoothed_covariance)
     return state, state
@@ -1881,6 +1924,113 @@ def _backward_pass(
         last_state.covariance[None],
     ))
     return smoothed_means, smoothed_covariances
+
+
+def _posterior_sample_setup(
+    args: tuple[Array, Array, Array],
+) -> tuple[
+    Float[Array, "state_dim state_dim"],
+    Float[Array, "state_dim state_dim"],
+]:
+    """Return one backward gain and Joseph conditional covariance."""
+    filtered_covariance, next_predicted_covariance, transition_matrix = args
+    gain, residual_operator, process_noise = _backward_gain_terms(
+        filtered_covariance,
+        next_predicted_covariance,
+        transition_matrix,
+        None,
+    )
+    covariance = _joseph_backward_covariance(
+        filtered_covariance,
+        gain,
+        residual_operator,
+        process_noise,
+        None,
+    )
+    return gain, covariance
+
+
+def _spectral_covariance_factor(
+    covariance: Float[Array, "state_dim state_dim"],
+) -> Float[Array, "state_dim state_dim"]:
+    """Factor an admitted semidefinite covariance without adding jitter."""
+    diagonal = jnp.diag(covariance)
+    zero_diagonal = jnp.equal(diagonal, 0.0)
+    scales = jnp.where(
+        diagonal > 0.0,
+        jnp.sqrt(jnp.maximum(diagonal, 0.0)),
+        1.0,
+    )
+    normalized = _symmetrize((covariance / scales[:, None]) / scales[None, :])
+    eigenvalues, eigenvectors = jnp.linalg.eigh(
+        normalized,
+        symmetrize_input=False,
+    )
+    tolerance = 8.0 * covariance.shape[0] * jnp.finfo(covariance.dtype).eps
+    root = scales[:, None] * (
+        eigenvectors * jnp.sqrt(jnp.maximum(eigenvalues, 0.0))[None, :]
+    )
+    root = jnp.where(zero_diagonal[:, None], 0.0, root)
+    incompatible_zero = jnp.any(
+        zero_diagonal[:, None] & jnp.not_equal(covariance, 0.0)
+    )
+    valid = (
+        jnp.all(jnp.isfinite(normalized))
+        & jnp.all(diagonal >= 0.0)
+        & ~incompatible_zero
+        & (eigenvalues[0] >= -tolerance)
+        & jnp.all(jnp.isfinite(root))
+    )
+    return lax.cond(
+        valid,
+        lambda _: root,
+        lambda _: jnp.full_like(root, jnp.nan),
+        operand=None,
+    )
+
+
+def _sampling_covariance_factor(
+    covariance: Float[Array, "state_dim state_dim"],
+) -> Float[Array, "state_dim state_dim"]:
+    """Use ordinary Cholesky with a bounded semidefinite fallback."""
+    covariance = _symmetrize(covariance)
+    cholesky = jnp.linalg.cholesky(covariance, symmetrize_input=False)
+    usable = jnp.all(jnp.isfinite(cholesky)) & jnp.all(jnp.diag(cholesky) > 0.0)
+    return lax.cond(
+        usable,
+        lambda _: cholesky,
+        lambda _: _spectral_covariance_factor(covariance),
+        operand=None,
+    )
+
+
+def _check_sampling_factors(
+    factors: Float[Array, "ntime state_dim state_dim"],
+) -> None:
+    """Reject a concrete covariance rejected by the active backend."""
+    if isinstance(factors, Tracer):
+        return
+    if not np.all(np.isfinite(np.asarray(factors))):
+        raise ValueError(
+            "sampling covariances must be factorable on the active backend"
+        )
+
+
+def _posterior_sample_step(
+    next_draws: Float[Array, "num_draws state_dim"],
+    args: tuple[Array, Array, Array, Array, Array],
+) -> tuple[
+    Float[Array, "num_draws state_dim"],
+    Float[Array, "num_draws state_dim"],
+]:
+    """Draw one backward conditional for every retained trajectory."""
+    filtered_mean, next_predicted_mean, gain, factor, key = args
+    conditional_means = (
+        filtered_mean + (next_draws - next_predicted_mean) @ gain.T
+    )
+    noise = jr.normal(key, next_draws.shape, dtype=next_draws.dtype)
+    draws = conditional_means + noise @ factor.T
+    return draws, draws
 
 
 def rts_smoother(
@@ -1952,6 +2102,126 @@ def rts_smoother(
         smoothed_means,
         smoothed_covariances,
     )
+
+
+def posterior_sample(
+    key: PRNGKeyT,
+    filtered_posterior: GaussianFilterPosterior,
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"],
+    *,
+    num_draws: SupportsIndex,
+) -> Float[Array, "num_draws ntime state_dim"]:
+    r"""Draw joint trajectories from a linear-Gaussian posterior.
+
+    The Carter--Kohn backward sampler first draws the terminal filtered state,
+    then draws each earlier state conditional on its successor. It consumes
+    stored filter moments and does not rerun the forward filter.
+
+    Args:
+        key: JAX PRNG key.
+        filtered_posterior: Forward-pass linear-Gaussian moments.
+        transition_matrix: Static ``(state_dim, state_dim)`` matrix or
+            time-varying array with leading length ``ntime - 1``. Entry
+            ``i`` maps state ``i`` to state ``i + 1``.
+        num_draws: Positive integer trajectory count. This controls an output
+            shape and must be closed over or marked static through an outer
+            ``jax.jit`` boundary.
+
+    Returns:
+        Dense trajectories with shape ``(num_draws, ntime, state_dim)``.
+
+    Raises:
+        ValueError: An argument has an invalid shape, dtype, count, covariance
+            domain, or active-backend covariance factor.
+
+    Note:
+        The sampler evaluates the backward conditional covariance with the
+        same Joseph-form update as `rts_smoother`. This avoids the direct
+        Schur subtraction's near-deterministic float32 cancellation. The
+        covariance-form method can still fail for an inconsistent caller-built
+        posterior or an extremely ill-conditioned transition.
+
+        Ordinary positive-definite covariances use unmodified Cholesky.
+        Admitted singular covariances use a diagonal-normalized spectral root;
+        no positive jitter is added. Spectral fallback points are outside the
+        differentiation contract. Concrete invalid factors raise here. Under
+        tracing they produce nonfinite draws when JAX NaN debugging is off.
+
+        The construction follows Carter and Kohn (1994),
+        https://doi.org/10.1093/biomet/81.3.541, and Frühwirth-Schnatter
+        (1994), https://doi.org/10.1111/j.1467-9892.1994.tb00184.x.
+    """
+    if isinstance(num_draws, bool):
+        raise ValueError("num_draws must be a positive integer, not a boolean")
+    try:
+        num_draws = operator.index(num_draws)
+    except TypeError as error:
+        raise ValueError(
+            f"num_draws must be a positive integer; got {num_draws!r}"
+        ) from error
+    if num_draws < 1:
+        raise ValueError(
+            f"num_draws must be a positive integer; got {num_draws}"
+        )
+
+    num_timesteps, state_dim, dtype = _validate_filter_posterior(
+        filtered_posterior
+    )
+    _check_float_array(transition_matrix, "transition_matrix", dtype)
+    transition_matrices = _time_matrix(
+        transition_matrix,
+        num_timesteps - 1,
+        state_dim,
+        state_dim,
+        "transition_matrix",
+    )
+    gains, conditional_covariances = lax.map(
+        _posterior_sample_setup,
+        (
+            filtered_posterior.filtered_covariances[:-1],
+            filtered_posterior.predicted_covariances[1:],
+            transition_matrices,
+        ),
+    )
+    sampling_covariances = jnp.concatenate((
+        conditional_covariances,
+        filtered_posterior.filtered_covariances[-1:],
+    ))
+    _check_covariance(
+        sampling_covariances,
+        "sampling_covariances",
+        positive_definite=False,
+    )
+    with debug_nans(False), debug_infs(False):
+        factors = lax.map(
+            _sampling_covariance_factor,
+            sampling_covariances,
+        )
+    _check_sampling_factors(factors)
+
+    keys = jr.split(key, num_timesteps)
+    terminal_noise = jr.normal(
+        keys[-1],
+        (num_draws, state_dim),
+        dtype=dtype,
+    )
+    terminal_draws = (
+        filtered_posterior.filtered_means[-1] + terminal_noise @ factors[-1].T
+    )
+    _, earlier_draws = lax.scan(
+        _posterior_sample_step,
+        terminal_draws,
+        (
+            filtered_posterior.filtered_means[:-1],
+            filtered_posterior.predicted_means[1:],
+            gains,
+            factors[:-1],
+            keys[:-1],
+        ),
+        reverse=True,
+    )
+    time_major = jnp.concatenate((earlier_draws, terminal_draws[None]))
+    return jnp.swapaxes(time_major, 0, 1)
 
 
 class TaylorOrder1(NamedTuple):
