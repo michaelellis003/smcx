@@ -6,7 +6,7 @@
 import numpy as np
 
 
-def dense_joint_marginals(
+def dense_joint_moments(
     initial_mean: np.ndarray,
     initial_covariance: np.ndarray,
     transition_matrices: np.ndarray,
@@ -16,8 +16,8 @@ def dense_joint_marginals(
     observation_covariances: np.ndarray,
     observation_offsets: np.ndarray,
     emissions: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Solve all state marginals from the joint Gaussian precision.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Solve marginal and adjacent-state moments from joint precision.
 
     The full posterior has information form
     ``exp(-0.5 * x.T @ precision @ x + information.T @ x)``. This
@@ -97,4 +97,12 @@ def dense_joint_marginals(
         joint_covariance[_state_slice(time), _state_slice(time)]
         for time in range(num_timesteps)
     ])
-    return joint_mean.reshape(num_timesteps, state_dim), marginal_covariances
+    cross_covariances = np.stack([
+        joint_covariance[_state_slice(time), _state_slice(time + 1)]
+        for time in range(num_timesteps - 1)
+    ])
+    return (
+        joint_mean.reshape(num_timesteps, state_dim),
+        marginal_covariances,
+        cross_covariances,
+    )

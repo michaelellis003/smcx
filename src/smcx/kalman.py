@@ -1705,7 +1705,7 @@ def unscented_kalman_filter(
 
 
 def _validate_filter_posterior(
-    posterior: GaussianFilterPosterior,
+    posterior: GaussianFilterPosterior | GaussianSmootherPosterior,
     *,
     filtered_positive_definite: bool = False,
 ) -> tuple[int, int, jnp.dtype]:
@@ -1776,17 +1776,44 @@ def _validate_filter_posterior(
     return num_timesteps, state_dim, dtype
 
 
-def _backward_gain_terms(
+def _validate_smoother_posterior(
+    posterior: GaussianSmootherPosterior,
+) -> tuple[int, int, jnp.dtype]:
+    """Validate all retained fields used by a standalone smoother method."""
+    num_timesteps, state_dim, dtype = _validate_filter_posterior(posterior)
+    expected_shapes = (
+        (
+            "smoothed_means",
+            posterior.smoothed_means,
+            (num_timesteps, state_dim),
+        ),
+        (
+            "smoothed_covariances",
+            posterior.smoothed_covariances,
+            (num_timesteps, state_dim, state_dim),
+        ),
+    )
+    for name, value, shape in expected_shapes:
+        _check_float_array(value, name, dtype)
+        if value.shape != shape:
+            raise ValueError(
+                f"{name} must have shape {shape}; got {value.shape}"
+            )
+    _check_covariance(
+        posterior.smoothed_covariances,
+        "smoothed_covariances",
+        positive_definite=False,
+    )
+    return num_timesteps, state_dim, dtype
+
+
+def _backward_gain(
     filtered_covariance: Float[Array, "state_dim state_dim"],
     next_predicted_covariance: Float[Array, "state_dim state_dim"],
     transition_matrix: Float[Array, "state_dim state_dim"],
     cross_covariance: Float[Array, "state_dim state_dim"] | None,
-) -> tuple[
-    Float[Array, "state_dim state_dim"],
-    Float[Array, "state_dim state_dim"],
-    Float[Array, "state_dim state_dim"],
-]:
-    """Return the shared gain and Joseph covariance ingredients."""
+) -> Float[Array, "state_dim state_dim"]:
+    """Solve for one backward gain with the shared Cholesky spine."""
     if cross_covariance is None:
         cross_covariance = filtered_covariance @ transition_matrix.T
     predicted_cholesky = jnp.linalg.cholesky(
@@ -1798,11 +1825,30 @@ def _backward_gain_terms(
         cross_covariance.T,
         lower=True,
     )
-    gain = solve_triangular(
+    return solve_triangular(
         predicted_cholesky.T,
         lower_solution,
         lower=False,
     ).T
+
+
+def _backward_gain_terms(
+    filtered_covariance: Float[Array, "state_dim state_dim"],
+    next_predicted_covariance: Float[Array, "state_dim state_dim"],
+    transition_matrix: Float[Array, "state_dim state_dim"],
+    cross_covariance: Float[Array, "state_dim state_dim"] | None,
+) -> tuple[
+    Float[Array, "state_dim state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, "state_dim state_dim"],
+]:
+    """Return the shared gain and Joseph covariance ingredients."""
+    gain = _backward_gain(
+        filtered_covariance,
+        next_predicted_covariance,
+        transition_matrix,
+        cross_covariance,
+    )
     identity = jnp.eye(filtered_covariance.shape[0], dtype=gain.dtype)
     residual_operator = identity - gain @ transition_matrix
     # Reproduce the forward product order and symmetrization exactly. This
@@ -2102,6 +2148,71 @@ def rts_smoother(
         smoothed_means,
         smoothed_covariances,
     )
+
+
+def smoothed_cross_covariances(
+    smoothed_posterior: GaussianSmootherPosterior,
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"],
+) -> Float[Array, "num_transitions state_dim state_dim"]:
+    r"""Compute adjacent-state covariances from linear RTS output.
+
+    Entry ``t`` is
+    ``Cov(x_t, x_{t + 1} | y) = B_t @ P_s[t + 1]``, where ``B_t`` is
+    the RTS backward gain. Its rows index ``x_t`` and its columns index
+    ``x_{t + 1}``; the matrices are generally not symmetric.
+
+    Args:
+        smoothed_posterior: Linear-Gaussian output from `rts_smoother`.
+        transition_matrix: The same static ``(state_dim, state_dim)`` matrix
+            or length-``ntime - 1`` transition history used to produce the
+            smoother record. Entry ``t`` maps state ``t`` to ``t + 1``.
+
+    Returns:
+        Adjacent-state covariance blocks with shape
+        ``(ntime - 1, state_dim, state_dim)``. A one-time record returns
+        an empty ``(0, state_dim, state_dim)`` array.
+
+    Raises:
+        ValueError: The posterior or transition array has an invalid shape,
+            dtype, or concrete covariance domain.
+
+    Note:
+        This exact identity is a companion to the linear RTS smoother. A
+        `GaussianSmootherPosterior` can also contain approximate nonlinear
+        smoother output, but that record does not retain the direct
+        sigma-point cross-covariances needed for this claim.
+
+        The caller must supply the transition history that produced the
+        stored predictions. Only positive-time predicted covariances are
+        factored; filtered and smoothed covariances may be singular.
+
+        The identity follows Särkkä and Svensson (2023), *Bayesian Filtering
+        and Smoothing*, 2nd ed., equations 12.11--12.13.
+    """
+    num_timesteps, state_dim, dtype = _validate_smoother_posterior(
+        smoothed_posterior
+    )
+    _check_float_array(transition_matrix, "transition_matrix", dtype)
+    transition_matrices = _time_matrix(
+        transition_matrix,
+        num_timesteps - 1,
+        state_dim,
+        state_dim,
+        "transition_matrix",
+    )
+
+    def _gain(args: tuple[Array, Array, Array]) -> Array:
+        return _backward_gain(*args, None)
+
+    gains = lax.map(
+        _gain,
+        (
+            smoothed_posterior.filtered_covariances[:-1],
+            smoothed_posterior.predicted_covariances[1:],
+            transition_matrices,
+        ),
+    )
+    return gains @ smoothed_posterior.smoothed_covariances[1:]
 
 
 def posterior_sample(

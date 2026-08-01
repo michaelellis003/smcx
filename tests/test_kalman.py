@@ -13,7 +13,7 @@ import pytest
 import smcx
 import smcx.kalman as kalman_module
 from tests import _kalman_reference as multivariate_reference
-from tests._gaussian_smoothing_reference import dense_joint_marginals
+from tests._gaussian_smoothing_reference import dense_joint_moments
 from tests._kalman import kalman_1d
 from tests._lgssm_reference import EXACT_LOG_LIKELIHOOD, REFERENCE_TIMES
 from tests._lgssm_reference import FILTERED_MEANS as EXACT_FILTERED_MEANS
@@ -678,16 +678,22 @@ def test_rts_smoother_matches_dense_joint_precision_oracle():
     observation_offsets = reference.OBSERVATION_BIAS + (
         reference.INPUTS @ reference.OBSERVATION_INPUT_MATRIX.T
     )
-    expected_means, expected_covariances = dense_joint_marginals(
-        reference.INITIAL_MEAN,
-        reference.INITIAL_COVARIANCE,
-        reference.TRANSITION_MATRIX,
-        reference.TRANSITION_COVARIANCE,
-        transition_offsets,
-        reference.OBSERVATION_MATRIX,
-        reference.OBSERVATION_COVARIANCE,
-        observation_offsets,
-        reference.EMISSIONS,
+    expected_means, expected_covariances, expected_cross_covariances = (
+        dense_joint_moments(
+            reference.INITIAL_MEAN,
+            reference.INITIAL_COVARIANCE,
+            reference.TRANSITION_MATRIX,
+            reference.TRANSITION_COVARIANCE,
+            transition_offsets,
+            reference.OBSERVATION_MATRIX,
+            reference.OBSERVATION_COVARIANCE,
+            observation_offsets,
+            reference.EMISSIONS,
+        )
+    )
+    cross_covariances = smcx.smoothed_cross_covariances(
+        smoothed,
+        jnp.asarray(reference.TRANSITION_MATRIX),
     )
 
     # The 10x10 joint precision has condition number below 15. The existing
@@ -696,6 +702,14 @@ def test_rts_smoother_matches_dense_joint_precision_oracle():
     _assert_roundoff_close(
         smoothed.smoothed_covariances,
         expected_covariances,
+    )
+    _assert_roundoff_close(cross_covariances, expected_cross_covariances)
+    _assert_roundoff_close(
+        jax.jit(smcx.smoothed_cross_covariances)(
+            smoothed,
+            jnp.asarray(reference.TRANSITION_MATRIX),
+        ),
+        expected_cross_covariances,
     )
 
 

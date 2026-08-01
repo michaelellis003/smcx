@@ -152,6 +152,9 @@ them. The caller supplies the matching model pieces to the backward pass:
 | `extended_kalman_filter` or `gaussian_filter(..., method=taylor_order1(...))` | `gaussian_smoother(..., method=taylor_order1(...))` | Transition Jacobian and `inputs[1:]` if used; supply a full length-`T` input array | Approximate extended RTS moments |
 | `unscented_kalman_filter` or `gaussian_filter(..., method=unscented(...))` | `gaussian_smoother(..., method=unscented(...))` | Transition mean, sigma-point rule, and `inputs[1:]` if used; supply a full length-`T` input array | Approximate unscented RTS moments |
 
+`smoothed_cross_covariances` is the exact linear-RTS companion; nonlinear
+smoother records do not retain the direct cross-covariances for that claim.
+
 smcx cannot compare these model identities at runtime. The remaining records
 have different contracts. DLM and DGLM results use distinct posterior layouts.
 Particle and Liu-West results are weighted-particle records rather than

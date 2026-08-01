@@ -83,6 +83,7 @@ def test_public_api_exports_all_expected_names(package):
         "run_particle_filter",
         "run_smc",
         "simulate",
+        "smoothed_cross_covariances",
         "smc2",
         "stratified",
         "systematic",
