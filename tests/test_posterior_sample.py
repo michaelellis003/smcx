@@ -238,6 +238,80 @@ def test_posterior_sample_composes_with_jit_vmap_and_fallback_factors():
     )
 
 
+def test_posterior_sample_has_ordinary_path_gradient():
+    """The pathwise gradient traverses gain, factor, and backward scan."""
+    dtype = jnp.float32
+    key = jr.key(339)
+    count = 3
+    process_variance = jnp.asarray(0.7, dtype=dtype)
+    terminal_variance = jnp.asarray(0.6, dtype=dtype)
+    weights = jnp.asarray([0.2, -0.5, 0.3], dtype=dtype)
+
+    def objective(transition):
+        predicted_variance = transition**2 + process_variance
+        means = jnp.zeros((2, 1), dtype=dtype)
+        posterior = smcx.GaussianFilterPosterior(
+            jnp.asarray(0.0, dtype=dtype),
+            means,
+            jnp.stack((
+                jnp.ones((1, 1), dtype=dtype),
+                jnp.reshape(predicted_variance, (1, 1)),
+            )),
+            means,
+            jnp.asarray([[[1.0]], [[0.6]]], dtype=dtype),
+            jnp.zeros(2, dtype=dtype),
+        )
+        draws = smcx.posterior_sample(
+            key,
+            posterior,
+            jnp.reshape(transition, (1, 1)),
+            num_draws=count,
+        )
+        return jnp.sum(weights * draws[:, 0, 0])
+
+    keys = jr.split(key, 2)
+    terminal_draws = jnp.sqrt(terminal_variance) * jr.normal(
+        keys[1], (count,), dtype=dtype
+    )
+    earlier_noise = jr.normal(keys[0], (count,), dtype=dtype)
+
+    def expected_gradient(transition):
+        predicted_variance = transition**2 + process_variance
+        derivative = (
+            process_variance - transition**2
+        ) / predicted_variance**2 * terminal_draws - jnp.sqrt(
+            process_variance
+        ) * transition / predicted_variance**1.5 * earlier_noise
+        return jnp.sum(weights * derivative)
+
+    gradient = jax.grad(objective)
+    transition = jnp.asarray(0.8, dtype=dtype)
+    transitions = jnp.asarray([0.6, 0.8, 1.1], dtype=dtype)
+    expected = expected_gradient(transition)
+    batched_expected = jax.vmap(expected_gradient)(transitions)
+    actual = gradient(transition)
+    compiled = jax.jit(gradient)(transition)
+    batched = jax.jit(jax.vmap(gradient))(transitions)
+    tolerance = 32.0 * float(np.finfo(np.float32).eps)
+
+    assert np.isfinite(actual)
+    assert np.isfinite(compiled)
+    assert np.all(np.isfinite(batched))
+    for result in (actual, compiled):
+        np.testing.assert_allclose(
+            result,
+            expected,
+            rtol=0.0,
+            atol=tolerance,
+        )
+    np.testing.assert_allclose(
+        batched,
+        batched_expected,
+        rtol=0.0,
+        atol=tolerance,
+    )
+
+
 @pytest.mark.parametrize("count", [True, 0, np.asarray(1.0)])
 def test_posterior_sample_rejects_invalid_draw_counts(count):
     """Every nonpositive or non-index count is rejected at the public shell."""
