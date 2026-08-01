@@ -262,8 +262,7 @@ scale_matrices = (
 dof = posterior.scale_shapes[:, None, None]
 filtered_covariances = dof / (dof - 2.0) * scale_matrices
 smoothed_scale_matrices = (
-    posterior.scale_estimates[-1]
-    * smoothed.smoothed_scale_free_covariances
+    posterior.scale_estimates[-1] * smoothed.smoothed_scale_free_covariances
 )
 ```
 

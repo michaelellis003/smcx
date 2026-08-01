@@ -430,8 +430,7 @@ smoothed = smcx.dlm_smoother(
     scale_free_transition_covariance=W_tilde,
 )
 smoothed_scale_matrices = (
-    posterior.scale_estimates[-1]
-    * smoothed.smoothed_scale_free_covariances
+    posterior.scale_estimates[-1] * smoothed.smoothed_scale_free_covariances
 )
 print(posterior.scale_estimates[-1])  # 0.32, the truth was 0.3
 print(smoothed_scale_matrices.shape)  # (25, 1, 1)
