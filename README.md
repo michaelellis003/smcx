@@ -2,7 +2,7 @@
 
 Sequential inference for state-space models in JAX: Kalman-family
 and DLM/DGLM filters, smoothers, and SMC methods including particle
-filtering and smoothing, tempered SMC, and SMC². Algorithms consume
+filtering and smoothing, tempered SMC, IBIS, and SMC². Algorithms consume
 plain JAX callables and small typed records, keeping model definitions
 separate from inference. smcx defines no probabilistic programming
 language.
@@ -119,7 +119,7 @@ standard sequential inference methods:
 | General densities | Bootstrap, auxiliary, and guided particle filters | `bootstrap_filter`, `auxiliary_filter`, `guided_filter` |
 | General densities, retrospective | Genealogy paths and particle FFBS trajectory draws, approximate | `reconstruct_trajectories`, `backward_simulation` |
 | Custom particle algorithms | Feynman–Kac derivations over one generic loop | `StateSpaceModel`, `FeynmanKac`, `run_smc`, `run_particle_filter` |
-| Static parameters | Tempered SMC targets a fixed posterior through a temperature path. SMC² nests a particle filter inside parameter-space SMC. Liu-West is approximate online parameter learning through kernel shrinkage | `temper`, `smc2`, `liu_west_filter` |
+| Static parameters | Tempered SMC targets a fixed posterior through a temperature path. IBIS updates an exact-likelihood posterior in data order. SMC² nests a particle filter inside parameter-space SMC. Liu-West is approximate online parameter learning through kernel shrinkage | `temper`, `ibis`, `smc2`, `liu_west_filter` |
 | Simulation and prediction | Model simulation and posterior predictive draws | `simulate`, `posterior_predictive_sample` |
 | Resampling | Systematic, stratified, multinomial, residual | `systematic`, `stratified`, `multinomial`, `residual` |
 | Diagnostics and reporting | ESS, scoring rules, ArviZ export | `diagnose`, `crps`, `to_arviz` |
@@ -214,7 +214,8 @@ The implemented methods draw on these primary sources:
   [Godsill, Doucet, and West (2004)](https://doi.org/10.1198/016214504000000151),
   and [Liu and West (2001)](https://doi.org/10.1007/978-1-4757-3437-9_10).
 - Static and parameter inference:
-  [Del Moral, Doucet, and Jasra (2006)](https://doi.org/10.1111/j.1467-9868.2006.00553.x)
+  [Chopin (2002)](https://doi.org/10.1093/biomet/89.3.539),
+  [Del Moral, Doucet, and Jasra (2006)](https://doi.org/10.1111/j.1467-9868.2006.00553.x),
   and [Chopin, Jacob, and Papaspiliopoulos (2013)](https://doi.org/10.1111/j.1467-9868.2012.01046.x).
 - Resampling and diagnostics:
   [Douc, Cappé, and Moulines (2005)](https://doi.org/10.1109/ISPA.2005.195385),

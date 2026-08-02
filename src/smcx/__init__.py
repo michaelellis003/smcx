@@ -22,6 +22,7 @@ from smcx.containers import (
     DLMSmootherPosterior,
     GaussianFilterPosterior,
     GaussianSmootherPosterior,
+    IBISPosterior,
     LiuWestPosterior,
     ParameterFilterResult,
     ParticleFilterPosterior,
@@ -64,6 +65,7 @@ from smcx.dlm import dlm_filter, dlm_smoother
 from smcx.exceptions import DegenerateWeightsError
 from smcx.fk import CallbackNames, FeynmanKac, run_smc
 from smcx.guided import guided_filter
+from smcx.ibis import ibis
 from smcx.kalman import (
     extended_kalman_filter,
     gaussian_filter,
@@ -115,6 +117,7 @@ __all__ = [
     "FeynmanKac",
     "GaussianFilterPosterior",
     "GaussianSmootherPosterior",
+    "IBISPosterior",
     "LiuWestPosterior",
     "ParameterFilterResult",
     "ParticleFilterPosterior",
@@ -149,6 +152,7 @@ __all__ = [
     "gaussian_smoother",
     "guided_filter",
     "guided_fk",
+    "ibis",
     "kalman_filter",
     "liu_west_filter",
     "log_bayes_factor",
