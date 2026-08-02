@@ -295,25 +295,55 @@ def test_custom_mutation_rebuilds_prefix_cache_after_gradient_moves():
 
 
 def test_default_move_fits_corrected_weighted_cloud_and_moves_selected_seeds():
-    corrected_params = jnp.asarray([[0.0], [2.0], [10.0]], dtype=jnp.float32)
+    corrected_params = jnp.asarray(
+        [[0.0, 0.0], [2.0, 0.0], [0.0, 4.0], [3.0, 5.0]],
+        dtype=jnp.float32,
+    )
     corrected = _IBISPopulation(
         params=corrected_params,
-        log_target=jnp.asarray([0.0, 2.0, 10.0], dtype=jnp.float32),
-        log_target_correction=jnp.asarray([0.0, 0.2, 1.0], dtype=jnp.float32),
+        log_target=jnp.asarray([0.0, 2.0, 4.0, 8.0], dtype=jnp.float32),
+        log_target_correction=jnp.asarray(
+            [0.0, 0.2, 0.4, 0.8],
+            dtype=jnp.float32,
+        ),
     )
     selected = _IBISPopulation(
-        params=jnp.full((3, 1), 2.0, dtype=jnp.float32),
-        log_target=jnp.full(3, 2.0, dtype=jnp.float32),
-        log_target_correction=jnp.full(3, 0.2, dtype=jnp.float32),
+        params=jnp.tile(
+            jnp.asarray([[2.0, 0.0]], dtype=jnp.float32),
+            (4, 1),
+        ),
+        log_target=jnp.full(4, 2.0, dtype=jnp.float32),
+        log_target_correction=jnp.full(4, 0.2, dtype=jnp.float32),
     )
-    weights = jnp.asarray([0.8, 0.15, 0.05], dtype=jnp.float32)
+    weights = jnp.asarray([0.1, 0.2, 0.3, 0.4], dtype=jnp.float32)
     log_weights = jnp.log(weights)
     key = jax.random.key(31)
     time_index = jnp.asarray(2, dtype=jnp.int32)
-    calls = []
+
+    host_weights = np.asarray(weights, dtype=np.float64)
+    host_weights /= host_weights.sum()
+    host_params = np.asarray(corrected_params, dtype=np.float64)
+    centered = host_params - host_weights @ host_params
+    weighted_covariance = (centered * host_weights[:, None]).T @ centered
+    expected_factor = np.linalg.cholesky(
+        (2.38**2 / corrected_params.shape[1]) * weighted_covariance
+    )
 
     def rwm_kernel(move_key, population, index, proposal_factor):
-        calls.append((move_key, population, index, proposal_factor))
+        np.testing.assert_array_equal(
+            jax.random.key_data(move_key),
+            jax.random.key_data(key),
+        )
+        _assert_tree_equal(population, selected)
+        _assert_tree_equal(index, time_index)
+        # Five f32 eps at factor scale admits the host-f64-to-f32 cast and
+        # f32 log/exp round trip, while excluding the missing-dimension scale.
+        np.testing.assert_allclose(
+            proposal_factor,
+            expected_factor,
+            rtol=0.0,
+            atol=float(5 * np.finfo(np.float32).eps * np.max(expected_factor)),
+        )
         return population, jnp.asarray(0.25, dtype=jnp.float32)
 
     result = _ibis_move_population(
@@ -326,24 +356,6 @@ def test_default_move_fits_corrected_weighted_cloud_and_moves_selected_seeds():
         custom_kernel=None,
     )
 
-    assert len(calls) == 1
-    move_key, moved_seed, moved_index, proposal_factor = calls[0]
-    np.testing.assert_array_equal(
-        jax.random.key_data(move_key),
-        jax.random.key_data(key),
-    )
-    _assert_tree_equal(moved_seed, selected)
-    _assert_tree_equal(moved_index, time_index)
-    host_weights = np.asarray(weights, dtype=np.float64)
-    host_params = np.asarray(corrected_params[:, 0], dtype=np.float64)
-    mean = host_weights @ host_params
-    variance = (2.38**2) * np.sum(host_weights * (host_params - mean) ** 2)
-    np.testing.assert_allclose(
-        proposal_factor,
-        [[math.sqrt(variance)]],
-        rtol=0.0,
-        atol=float(5 * np.finfo(np.float32).eps * math.sqrt(variance)),
-    )
     _assert_tree_equal(result.population, selected)
     np.testing.assert_array_equal(result.acceptance_rate, 0.25)
     np.testing.assert_array_equal(result.acceptance_valid, True)
