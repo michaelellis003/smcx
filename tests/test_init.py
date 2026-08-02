@@ -32,6 +32,7 @@ def test_public_api_exports_all_expected_names(package):
         "DGLMFilterPosterior",
         "DGLMSmootherPosterior",
         "LiuWestPosterior",
+        "ParameterFilterResult",
         "ParticleFilterPosterior",
         "ParticleFilterRecord",
         "ParticleFilterResult",
