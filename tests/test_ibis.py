@@ -672,6 +672,8 @@ def test_ibis_driver_matches_sequential_oracle_and_final_only_storage():
     )
     final_log_weights = final_raw_weights - log_normalizer
     expected_weights = np.vstack([np.tile(uniform, (4, 1)), final_log_weights])
+    # Ten f32 eps covers two rounded log-domain operations per stage across
+    # this five-stage oracle; every asserted separation is materially larger.
     f32_atol = float(10 * np.finfo(np.float32).eps)
     np.testing.assert_allclose(
         full.filtered_log_weights,
