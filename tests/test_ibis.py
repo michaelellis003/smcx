@@ -14,6 +14,7 @@ import pytest
 from smcx._ibis import (
     _advance_ibis_target,
     _ibis_expansion_log_ratio,
+    _ibis_move_population,
     _ibis_prefix_expansion,
     _ibis_prefix_logdensity,
     _IBISPopulation,
@@ -291,6 +292,111 @@ def test_custom_mutation_rebuilds_prefix_cache_after_gradient_moves():
     assert bool(jnp.all(jnp.isfinite(next_population.params)))
     np.testing.assert_array_equal(acceptance_rate, 0.75)
     np.testing.assert_array_equal(acceptance_valid, True)
+
+
+def test_default_move_fits_corrected_weighted_cloud_and_moves_selected_seeds():
+    corrected_params = jnp.asarray([[0.0], [2.0], [10.0]], dtype=jnp.float32)
+    corrected = _IBISPopulation(
+        params=corrected_params,
+        log_target=jnp.asarray([0.0, 2.0, 10.0], dtype=jnp.float32),
+        log_target_correction=jnp.asarray([0.0, 0.2, 1.0], dtype=jnp.float32),
+    )
+    selected = _IBISPopulation(
+        params=jnp.full((3, 1), 2.0, dtype=jnp.float32),
+        log_target=jnp.full(3, 2.0, dtype=jnp.float32),
+        log_target_correction=jnp.full(3, 0.2, dtype=jnp.float32),
+    )
+    weights = jnp.asarray([0.8, 0.15, 0.05], dtype=jnp.float32)
+    log_weights = jnp.log(weights)
+    key = jax.random.key(31)
+    time_index = jnp.asarray(2, dtype=jnp.int32)
+    calls = []
+
+    def rwm_kernel(move_key, population, index, proposal_factor):
+        calls.append((move_key, population, index, proposal_factor))
+        return population, jnp.asarray(0.25, dtype=jnp.float32)
+
+    result = _ibis_move_population(
+        key,
+        corrected,
+        log_weights,
+        selected,
+        time_index,
+        rwm_kernel=rwm_kernel,
+        custom_kernel=None,
+    )
+
+    assert len(calls) == 1
+    move_key, moved_seed, moved_index, proposal_factor = calls[0]
+    np.testing.assert_array_equal(
+        jax.random.key_data(move_key),
+        jax.random.key_data(key),
+    )
+    _assert_tree_equal(moved_seed, selected)
+    _assert_tree_equal(moved_index, time_index)
+    host_weights = np.asarray(weights, dtype=np.float64)
+    host_params = np.asarray(corrected_params[:, 0], dtype=np.float64)
+    mean = host_weights @ host_params
+    variance = (2.38**2) * np.sum(host_weights * (host_params - mean) ** 2)
+    np.testing.assert_allclose(
+        proposal_factor,
+        [[math.sqrt(variance)]],
+        rtol=0.0,
+        atol=float(5 * np.finfo(np.float32).eps * math.sqrt(variance)),
+    )
+    _assert_tree_equal(result.population, selected)
+    np.testing.assert_array_equal(result.acceptance_rate, 0.25)
+    np.testing.assert_array_equal(result.acceptance_valid, True)
+
+
+def test_custom_move_propagates_rebuilt_population_and_validity():
+    corrected = _IBISPopulation(
+        params=jnp.asarray([[0.0], [1.0]], dtype=jnp.float32),
+        log_target=jnp.asarray([0.0, 1.0], dtype=jnp.float32),
+        log_target_correction=jnp.asarray([0.0, 0.1], dtype=jnp.float32),
+    )
+    selected = _IBISPopulation(
+        params=jnp.asarray([[1.0], [1.0]], dtype=jnp.float32),
+        log_target=jnp.ones(2, dtype=jnp.float32),
+        log_target_correction=jnp.full(2, 0.1, dtype=jnp.float32),
+    )
+    moved = _IBISPopulation(
+        params=jnp.asarray([[1.5], [2.5]], dtype=jnp.float32),
+        log_target=jnp.asarray([3.0, 5.0], dtype=jnp.float32),
+        log_target_correction=jnp.asarray([0.3, 0.5], dtype=jnp.float32),
+    )
+    key = jax.random.key(41)
+    time_index = jnp.asarray(4, dtype=jnp.int32)
+
+    def rwm_kernel(*_args):
+        raise AssertionError("default RWM must not run for custom mutation")
+
+    def custom_kernel(move_key, population, index):
+        np.testing.assert_array_equal(
+            jax.random.key_data(move_key),
+            jax.random.key_data(key),
+        )
+        _assert_tree_equal(population, selected)
+        _assert_tree_equal(index, time_index)
+        return (
+            moved,
+            jnp.asarray(0.625, dtype=jnp.float32),
+            jnp.asarray(False),
+        )
+
+    result = _ibis_move_population(
+        key,
+        corrected,
+        jnp.log(jnp.asarray([0.75, 0.25], dtype=jnp.float32)),
+        selected,
+        time_index,
+        rwm_kernel=rwm_kernel,
+        custom_kernel=custom_kernel,
+    )
+
+    _assert_tree_equal(result.population, moved)
+    np.testing.assert_array_equal(result.acceptance_rate, 0.625)
+    np.testing.assert_array_equal(result.acceptance_valid, False)
 
 
 def test_prefix_target_value_and_gradient_exclude_future_factor():
