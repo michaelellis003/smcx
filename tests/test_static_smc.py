@@ -42,10 +42,7 @@ _INCREMENT = jnp.log(jnp.linspace(0.5, 2.0, 7, dtype=jnp.float32))
 
 
 def _assert_tree_equal(actual, expected) -> None:
-    for actual_leaf, expected_leaf in zip(
-        jax.tree.leaves(actual), jax.tree.leaves(expected), strict=True
-    ):
-        np.testing.assert_array_equal(actual_leaf, expected_leaf)
+    jax.tree.map(np.testing.assert_array_equal, actual, expected)
 
 
 def _identity_resampling(_key, _weights, count):
@@ -56,14 +53,16 @@ def _identity_move(_key, _source, _log_weights, selected):
     return _StaticMoveResult(selected, jnp.asarray(0.5), jnp.asarray(True))
 
 
-def _run_stage(resampling_fn, move_fn, *, threshold=None, index=None):
+def _run_stage(
+    resampling_fn, move_fn, *, rule=None, index=None, state=None, inc=None
+):
     return _static_smc_stage(
-        _state(),
-        _INCREMENT,
+        _state() if state is None else state,
+        _INCREMENT if inc is None else inc,
         jr.key(17),
         jr.key(23),
         resampling_fn=resampling_fn,
-        resampling_threshold=threshold,
+        resampling_threshold=rule,
         time_index=index,
         move_fn=move_fn,
     )
@@ -71,12 +70,7 @@ def _run_stage(resampling_fn, move_fn, *, threshold=None, index=None):
 
 def test_correction_matches_oracle_and_compiled_execution():
     state, increment = _state(), _INCREMENT
-    args = (
-        state.log_weights,
-        increment,
-        state.log_evidence,
-        state.log_evidence_correction,
-    )
+    args = (state.log_weights, increment, *state[2:])
     eager = _static_smc_correction(*args)
     compiled = jax.jit(_static_smc_correction)(*args)
     # The oracle crosses several f32 log/exp operations; 1e-6 is fewer than
@@ -118,7 +112,7 @@ def test_forced_stage_gathers_population_and_routes_exact_keys():
         _assert_tree_equal(source, state.population)
         _assert_tree_equal(seeds, selected)
         assert_allclose(log_weights, expected_weights, rtol=1e-6)
-        return _StaticMoveResult(seeds, jnp.asarray(0.25), jnp.asarray(True))
+        return _StaticMoveResult(seeds, jnp.asarray(-0.0), jnp.asarray(True))
 
     result, info = _run_stage(resample, move)
     _assert_tree_equal(result.population, selected)
@@ -126,7 +120,8 @@ def test_forced_stage_gathers_population_and_routes_exact_keys():
     np.testing.assert_allclose(result.log_weights, -math.log(7))
     assert_allclose(info.selection_ess, ess(expected_weights), rtol=1e-6)
     assert_allclose(info.log_evidence_increment, expected_increment, rtol=1e-6)
-    np.testing.assert_array_equal([info.ess, info.acceptance_rate], [7.0, 0.25])
+    np.testing.assert_array_equal([info.ess, info.acceptance_rate], [7.0, -0.0])
+    assert np.signbit(np.asarray(info.acceptance_rate))
     assert bool(info.resampled)
 
 
@@ -144,7 +139,7 @@ def test_callable_skip_receives_corrected_diagnostics_and_skips_callbacks():
     def fail(*_args):
         raise AssertionError("skipped callback was invoked")
 
-    result, info = _run_stage(fail, fail, threshold=criterion, index=index)
+    result, info = _run_stage(fail, fail, rule=criterion, index=index)
     _assert_tree_equal(result.population, state.population)
     assert_allclose(result.log_weights, expected_weights, rtol=1e-6)
     np.testing.assert_allclose(info.selection_ess, info.ess)
@@ -154,15 +149,22 @@ def test_callable_skip_receives_corrected_diagnostics_and_skips_callbacks():
 
 def test_stage_gates_degeneracy_and_invalid_ancestors():
     with pytest.raises(DegenerateWeightsError):
-        _static_smc_stage(
-            _state(),
-            jnp.full((7,), -jnp.inf),
-            jr.key(1),
-            jr.key(2),
-            resampling_fn=_identity_resampling,
-            resampling_threshold=None,
-            time_index=None,
-            move_fn=_identity_move,
+        _run_stage(
+            _identity_resampling,
+            _identity_move,
+            inc=jnp.full((7,), -jnp.inf),
+        )
+
+    huge = jnp.asarray(jnp.finfo(jnp.float32).max)
+    overflow = _state()._replace(
+        log_evidence=huge, log_evidence_correction=jnp.zeros_like(huge)
+    )
+    with pytest.raises(DegenerateWeightsError):
+        _run_stage(
+            _identity_resampling,
+            _identity_move,
+            state=overflow,
+            inc=jnp.full((7,), huge),
         )
 
     def invalid(_key, _weights, count):

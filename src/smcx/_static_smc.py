@@ -29,8 +29,6 @@ from smcx.weights import log_normalize
 
 
 class _StaticSMCState(NamedTuple):
-    """Resident population and compensated evidence state."""
-
     population: ParticleCloud
     log_weights: Float[Array, " num_particles"]
     log_evidence: Float[Array, ""]
@@ -61,8 +59,6 @@ class _StaticSMCCorrection(NamedTuple):
 
 @runtime_checkable
 class _StaticMoveFn(Protocol):
-    """Move selected seeds while retaining the corrected source cloud."""
-
     def __call__(
         self,
         key: PRNGKeyT,
@@ -151,7 +147,9 @@ def _static_smc_stage(
         state.log_evidence,
         state.log_evidence_correction,
     )
-    _raise_if_degenerate(corrected.log_evidence_increment)
+    _raise_if_degenerate(
+        corrected.log_evidence + corrected.log_evidence_correction
+    )
     num_particles = state.log_weights.shape[0]
     if resampling_threshold is None:
         do_resample = jnp.asarray(True)
