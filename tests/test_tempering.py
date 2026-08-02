@@ -836,6 +836,74 @@ class TestMechanics:
             atol=frozen_atol,
         )
 
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
+        reason="frozen CPU/f64 arithmetic contract",
+    )
+    def test_rwm_sweep_preserves_frozen_two_stage_output(self):
+        init, log_prior, log_lik = _small_tempering_model()
+        posterior = smcx.temper(
+            jr.key(314159),
+            init,
+            log_prior,
+            log_lik,
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.95,
+        )
+
+        # This uses the same five-binary64-eps backend-rounding budget as the
+        # established one-stage frozen fixture immediately above.
+        frozen_atol = 1e-15
+        np.testing.assert_allclose(
+            np.asarray(posterior.particles),
+            np.array([
+                [0.5566520237390912],
+                [0.42931421610876214],
+                [0.0],
+                [0.3006901431829462],
+                [-0.04198666790556421],
+            ]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.log_weights),
+            np.full(5, -1.6094379124341003),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.marginal_loglik),
+            np.asarray(-0.3510029236122849),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.temperatures),
+            np.array([0.6627762304582339, 1.0]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.ess),
+            np.array([4.75, 4.873686009537485]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.acceptance_rates),
+            np.array([0.4000000134110451, 0.30000000447034836]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.log_evidence_increments),
+            np.array([-0.23537493635122342, -0.1156279872610615]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+
     @pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
     def test_nonfinite_reweight_normalizer_raises(self, value):
         init, log_prior, _ = _model()

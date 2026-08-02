@@ -95,6 +95,27 @@ def _static_smc_correction(
 _compiled_static_smc_correction = jit(_static_smc_correction)
 
 
+def _is_valid_acceptance_rate(
+    rate: Float[Array, ""],
+) -> Bool[Array, ""]:
+    """Return whether a traced move acceptance rate is a probability."""
+    bit_width = jnp.finfo(rate.dtype).bits
+    if bit_width < 16:
+        widened = rate.astype(jnp.float32)
+        return jnp.isfinite(widened) & (widened >= 0.0) & (widened <= 1.0)
+    unsigned_dtype = {
+        16: jnp.uint16,
+        32: jnp.uint32,
+        64: jnp.uint64,
+    }[bit_width]
+    bits = lax.bitcast_convert_type(rate, unsigned_dtype)
+    sign_mask = jnp.asarray(1 << (bit_width - 1), dtype=unsigned_dtype)
+    # Arithmetic comparisons can flush a negative subnormal to zero. Inspect
+    # its sign bit while admitting the sign-only negative-zero encoding.
+    nonnegative = ((bits & sign_mask) == 0) | (bits == sign_mask)
+    return jnp.isfinite(rate) & nonnegative & (rate <= 1.0)
+
+
 def _validated_acceptance_rate(
     result: _StaticMoveResult,
 ) -> Float[Array, ""]:
@@ -109,20 +130,7 @@ def _validated_acceptance_rate(
         acceptance_valid.dtype, jnp.bool_
     ):
         raise ValueError("move acceptance_valid must be a scalar Boolean")
-    bit_width = jnp.finfo(rate.dtype).bits
-    if bit_width < 16:
-        nonnegative = rate.astype(jnp.float32) >= 0.0
-    else:
-        unsigned_dtype = {
-            16: jnp.uint16,
-            32: jnp.uint32,
-            64: jnp.uint64,
-        }[bit_width]
-        bits = lax.bitcast_convert_type(rate, unsigned_dtype)
-        sign_mask = jnp.asarray(1 << (bit_width - 1), dtype=unsigned_dtype)
-        nonnegative = ((bits & sign_mask) == 0) | (bits == sign_mask)
-    in_domain = jnp.isfinite(rate) & nonnegative & (rate <= 1.0)
-    if not bool(acceptance_valid & in_domain):
+    if not bool(acceptance_valid & _is_valid_acceptance_rate(rate)):
         raise ValueError(
             "mutation_step_fn acceptance_rate must be finite and in [0, 1]"
         )
