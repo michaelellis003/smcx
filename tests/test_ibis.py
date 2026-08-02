@@ -20,6 +20,7 @@ from smcx._ibis import (
     _IBISPopulation,
     _run_ibis_custom_mutation_sweep,
     _run_ibis_rwm_sweep,
+    _run_ibis_stages,
 )
 
 
@@ -562,3 +563,197 @@ def test_target_cache_advance_matches_fsum_and_compiled_execution():
         rtol=0.0,
         atol=float(np.finfo(np.float32).eps),
     )
+
+
+def test_ibis_driver_matches_sequential_oracle_and_final_only_storage():
+    params = jnp.asarray([[-1.0], [0.5], [2.0]], dtype=jnp.float32)
+    emissions = jnp.asarray(
+        [[1e8], [1.0], [-1e8], [0.2], [-0.7]],
+        dtype=jnp.float32,
+    )
+    inputs = jnp.asarray(
+        [[0.0], [0.0], [0.0], [0.4], [-0.3]],
+        dtype=jnp.float32,
+    )
+    prior_population = _IBISPopulation(
+        params=params,
+        log_target=jnp.zeros(3, dtype=jnp.float32),
+        log_target_correction=jnp.zeros(3, dtype=jnp.float32),
+    )
+    initial_log_increment = jnp.full(3, 1e8, dtype=jnp.float32)
+    stage_root_key = jax.random.key(71)
+    expected_resampling_key = jax.random.split(
+        jax.random.split(stage_root_key, 5)[3]
+    )[0]
+
+    def log_prior(_position):
+        return jnp.zeros((), dtype=jnp.float32)
+
+    def log_increment(emission, position, input_t):
+        return emission[0] + input_t[0] * position[0]
+
+    def resample_at_fourth(_log_weights, _ess, time_index):
+        return time_index == 3
+
+    def fixed_resampler(key, _weights, _num_samples):
+        np.testing.assert_array_equal(
+            jax.random.key_data(key),
+            jax.random.key_data(expected_resampling_key),
+        )
+        return jnp.asarray([2, 0, 2], dtype=jnp.int32)
+
+    def initialize(position, _target):
+        return _GradientMutationState(position)
+
+    def mutate(_key, state, _target):
+        return state, _GradientMutationInfo(
+            jnp.asarray(0.25, dtype=jnp.float32)
+        )
+
+    def run(store_history):
+        return _run_ibis_stages(
+            stage_root_key,
+            prior_population,
+            initial_log_increment,
+            emissions,
+            inputs=inputs,
+            num_mcmc_steps=1,
+            resampling_threshold=resample_at_fourth,
+            resampling_fn=fixed_resampler,
+            log_prior_fn=log_prior,
+            log_likelihood_increment_fn=log_increment,
+            mutation_init_fn=initialize,
+            mutation_step_fn=mutate,
+            store_history=store_history,
+        )
+
+    full = run(True)
+    final_only = run(False)
+
+    assert full.filtered_params.shape == (5, 3, 1)
+    assert full.filtered_log_weights.shape == (5, 3)
+    assert final_only.filtered_params.shape == (1, 3, 1)
+    assert final_only.filtered_log_weights.shape == (1, 3)
+    for field_name in (
+        "ess",
+        "log_evidence_increments",
+        "acceptance_rates",
+        "selection_ess",
+        "resampled",
+    ):
+        assert getattr(full, field_name).shape == (5,)
+        _assert_tree_equal(
+            getattr(final_only, field_name),
+            getattr(full, field_name),
+        )
+    _assert_tree_equal(final_only.state, full.state)
+    _assert_tree_equal(final_only.filtered_params[0], full.filtered_params[-1])
+    _assert_tree_equal(
+        final_only.filtered_log_weights[0],
+        full.filtered_log_weights[-1],
+    )
+
+    selected_params = params[jnp.asarray([2, 0, 2])]
+    expected_params = jnp.stack([
+        params,
+        params,
+        params,
+        selected_params,
+        selected_params,
+    ])
+    _assert_tree_equal(full.filtered_params, expected_params)
+
+    uniform = np.full(3, -math.log(3.0), dtype=np.float64)
+    final_increment = np.asarray([-1.3, -0.4, -1.3], dtype=np.float64)
+    final_raw_weights = uniform + final_increment
+    maximum = np.max(final_raw_weights)
+    log_normalizer = maximum + np.log(
+        np.sum(np.exp(final_raw_weights - maximum))
+    )
+    final_log_weights = final_raw_weights - log_normalizer
+    expected_weights = np.vstack([np.tile(uniform, (4, 1)), final_log_weights])
+    f32_atol = float(10 * np.finfo(np.float32).eps)
+    np.testing.assert_allclose(
+        full.filtered_log_weights,
+        expected_weights,
+        rtol=0.0,
+        atol=f32_atol,
+    )
+
+    expected_increments = np.asarray(
+        [1e8, 1.0, -1e8, 0.5165765115, -0.9035525151],
+        dtype=np.float64,
+    )
+    np.testing.assert_array_equal(
+        full.log_evidence_increments[:3],
+        expected_increments[:3],
+    )
+    np.testing.assert_allclose(
+        full.log_evidence_increments[3:],
+        expected_increments[3:],
+        rtol=0.0,
+        atol=f32_atol,
+    )
+    np.testing.assert_allclose(
+        full.selection_ess,
+        [3.0, 3.0, 3.0, 2.45886323, 2.47067465],
+        rtol=0.0,
+        atol=f32_atol,
+    )
+    np.testing.assert_allclose(
+        full.ess,
+        [3.0, 3.0, 3.0, 3.0, 2.47067465],
+        rtol=0.0,
+        atol=f32_atol,
+    )
+    np.testing.assert_array_equal(
+        full.acceptance_rates,
+        [0.0, 0.0, 0.0, 0.25, 0.0],
+    )
+    np.testing.assert_array_equal(
+        full.resampled,
+        [False, False, False, True, False],
+    )
+
+    marginal = math.fsum([
+        float(full.state.log_evidence),
+        float(full.state.log_evidence_correction),
+    ])
+    assert marginal == pytest.approx(0.6130239964, abs=f32_atol)
+    naive_increment_sum = float(jnp.sum(full.log_evidence_increments))
+    assert naive_increment_sum == pytest.approx(-0.386976, abs=f32_atol)
+    assert abs(marginal - naive_increment_sum) > 0.9
+
+    final_population = full.state.population
+    fresh_total, fresh_correction = jax.vmap(
+        lambda position: _ibis_prefix_expansion(
+            position,
+            jnp.asarray(4, dtype=jnp.int32),
+            jnp.zeros((), dtype=jnp.float32),
+            emissions=emissions,
+            inputs=inputs,
+            log_prior_fn=log_prior,
+            log_likelihood_increment_fn=log_increment,
+        )
+    )(final_population.params)
+    _assert_tree_equal(final_population.log_target, fresh_total)
+    _assert_tree_equal(
+        final_population.log_target_correction,
+        fresh_correction,
+    )
+    np.testing.assert_allclose(
+        fresh_total,
+        [-0.3, -0.6, -0.3],
+        rtol=0.0,
+        atol=f32_atol,
+    )
+    np.testing.assert_array_equal(fresh_correction, [1.0, 1.0, 1.0])
+    resolved_targets = np.asarray([
+        math.fsum([float(total), float(correction)])
+        for total, correction in zip(
+            fresh_total,
+            fresh_correction,
+            strict=True,
+        )
+    ])
+    assert resolved_targets == pytest.approx([0.7, 0.4, 0.7], abs=f32_atol)
