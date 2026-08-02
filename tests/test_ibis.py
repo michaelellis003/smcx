@@ -4,6 +4,7 @@
 """Product tests for private IBIS kernels before public assembly."""
 
 import math
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -13,15 +14,25 @@ import pytest
 from smcx._ibis import (
     _advance_ibis_target,
     _ibis_expansion_log_ratio,
+    _ibis_move_population,
     _ibis_prefix_expansion,
     _ibis_prefix_logdensity,
     _IBISPopulation,
+    _run_ibis_custom_mutation_sweep,
     _run_ibis_rwm_sweep,
 )
 
 
 def _assert_tree_equal(actual, expected) -> None:
     jax.tree.map(np.testing.assert_array_equal, actual, expected)
+
+
+class _GradientMutationState(NamedTuple):
+    position: jax.Array
+
+
+class _GradientMutationInfo(NamedTuple):
+    acceptance_rate: jax.Array
 
 
 def test_expansion_log_ratio_retains_low_order_difference():
@@ -207,6 +218,197 @@ def test_rwm_keeps_parameter_and_target_arithmetic_dtypes_separate():
     assert next_population.log_target.dtype == jnp.float64
     assert next_population.log_target_correction.dtype == jnp.float64
     assert acceptance_rate.dtype == jnp.float64
+
+
+def test_custom_mutation_rebuilds_prefix_cache_after_gradient_moves():
+    population = _IBISPopulation(
+        params=jnp.asarray([[0.5], [-1.5]], dtype=jnp.float32),
+        log_target=jnp.asarray([123.0, -456.0], dtype=jnp.float32),
+        log_target_correction=jnp.asarray([17.0, -19.0], dtype=jnp.float32),
+    )
+    emissions = jnp.asarray(
+        [[1e8], [1.0], [-1e8], [4.0], [jnp.nan]],
+        dtype=jnp.float32,
+    )
+    time_index = jnp.asarray(3, dtype=jnp.int32)
+    target_template = jnp.zeros((), dtype=jnp.float32)
+
+    def log_prior(position):
+        return -jnp.float32(0.5) * position[0] ** 2
+
+    def log_increment(emission, position, input_t):
+        assert input_t is None
+        return emission[0] * position[0]
+
+    def initialize(position, logdensity_fn):
+        gradient = jax.grad(logdensity_fn)(position)
+        return _GradientMutationState(position + jnp.zeros_like(gradient))
+
+    def mutate(_key, state, logdensity_fn):
+        gradient = jax.grad(logdensity_fn)(state.position)
+        next_position = state.position + jnp.float32(0.125) * gradient
+        return (
+            _GradientMutationState(next_position),
+            _GradientMutationInfo(jnp.asarray(0.75, dtype=jnp.float32)),
+        )
+
+    def sweep(value):
+        return _run_ibis_custom_mutation_sweep(
+            jax.random.key(17),
+            value,
+            time_index,
+            num_steps=2,
+            emissions=emissions,
+            inputs=None,
+            log_prior_fn=log_prior,
+            log_likelihood_increment_fn=log_increment,
+            initialize=initialize,
+            mutate=mutate,
+        )
+
+    eager = sweep(population)
+    compiled = jax.jit(sweep)(population)
+    _assert_tree_equal(compiled, eager)
+
+    next_population, acceptance_rate, acceptance_valid = eager
+    fresh_target, fresh_correction = jax.vmap(
+        lambda position: _ibis_prefix_expansion(
+            position,
+            time_index,
+            target_template,
+            emissions=emissions,
+            inputs=None,
+            log_prior_fn=log_prior,
+            log_likelihood_increment_fn=log_increment,
+        )
+    )(next_population.params)
+    _assert_tree_equal(next_population.log_target, fresh_target)
+    _assert_tree_equal(next_population.log_target_correction, fresh_correction)
+    assert not np.array_equal(next_population.log_target, population.log_target)
+    assert not np.array_equal(
+        next_population.log_target_correction,
+        population.log_target_correction,
+    )
+    assert bool(jnp.all(jnp.isfinite(next_population.params)))
+    np.testing.assert_array_equal(acceptance_rate, 0.75)
+    np.testing.assert_array_equal(acceptance_valid, True)
+
+
+def test_default_move_fits_corrected_weighted_cloud_and_moves_selected_seeds():
+    corrected_params = jnp.asarray(
+        [[0.0, 0.0], [2.0, 0.0], [0.0, 4.0], [3.0, 5.0]],
+        dtype=jnp.float32,
+    )
+    corrected = _IBISPopulation(
+        params=corrected_params,
+        log_target=jnp.asarray([0.0, 2.0, 4.0, 8.0], dtype=jnp.float32),
+        log_target_correction=jnp.asarray(
+            [0.0, 0.2, 0.4, 0.8],
+            dtype=jnp.float32,
+        ),
+    )
+    selected = _IBISPopulation(
+        params=jnp.tile(
+            jnp.asarray([[2.0, 0.0]], dtype=jnp.float32),
+            (4, 1),
+        ),
+        log_target=jnp.full(4, 2.0, dtype=jnp.float32),
+        log_target_correction=jnp.full(4, 0.2, dtype=jnp.float32),
+    )
+    weights = jnp.asarray([0.1, 0.2, 0.3, 0.4], dtype=jnp.float32)
+    log_weights = jnp.log(weights)
+    key = jax.random.key(31)
+    time_index = jnp.asarray(2, dtype=jnp.int32)
+
+    host_weights = np.asarray(weights, dtype=np.float64)
+    host_weights /= host_weights.sum()
+    host_params = np.asarray(corrected_params, dtype=np.float64)
+    centered = host_params - host_weights @ host_params
+    weighted_covariance = (centered * host_weights[:, None]).T @ centered
+    expected_factor = np.linalg.cholesky(
+        (2.38**2 / corrected_params.shape[1]) * weighted_covariance
+    )
+
+    def rwm_kernel(move_key, population, index, proposal_factor):
+        np.testing.assert_array_equal(
+            jax.random.key_data(move_key),
+            jax.random.key_data(key),
+        )
+        _assert_tree_equal(population, selected)
+        _assert_tree_equal(index, time_index)
+        # Five f32 eps at factor scale admits the host-f64-to-f32 cast and
+        # f32 log/exp round trip, while excluding the missing-dimension scale.
+        np.testing.assert_allclose(
+            proposal_factor,
+            expected_factor,
+            rtol=0.0,
+            atol=float(5 * np.finfo(np.float32).eps * np.max(expected_factor)),
+        )
+        return population, jnp.asarray(0.25, dtype=jnp.float32)
+
+    result = _ibis_move_population(
+        key,
+        corrected,
+        log_weights,
+        selected,
+        time_index,
+        rwm_kernel=rwm_kernel,
+        custom_kernel=None,
+    )
+
+    _assert_tree_equal(result.population, selected)
+    np.testing.assert_array_equal(result.acceptance_rate, 0.25)
+    np.testing.assert_array_equal(result.acceptance_valid, True)
+
+
+def test_custom_move_propagates_rebuilt_population_and_validity():
+    corrected = _IBISPopulation(
+        params=jnp.asarray([[0.0], [1.0]], dtype=jnp.float32),
+        log_target=jnp.asarray([0.0, 1.0], dtype=jnp.float32),
+        log_target_correction=jnp.asarray([0.0, 0.1], dtype=jnp.float32),
+    )
+    selected = _IBISPopulation(
+        params=jnp.asarray([[1.0], [1.0]], dtype=jnp.float32),
+        log_target=jnp.ones(2, dtype=jnp.float32),
+        log_target_correction=jnp.full(2, 0.1, dtype=jnp.float32),
+    )
+    moved = _IBISPopulation(
+        params=jnp.asarray([[1.5], [2.5]], dtype=jnp.float32),
+        log_target=jnp.asarray([3.0, 5.0], dtype=jnp.float32),
+        log_target_correction=jnp.asarray([0.3, 0.5], dtype=jnp.float32),
+    )
+    key = jax.random.key(41)
+    time_index = jnp.asarray(4, dtype=jnp.int32)
+
+    def rwm_kernel(*_args):
+        raise AssertionError("default RWM must not run for custom mutation")
+
+    def custom_kernel(move_key, population, index):
+        np.testing.assert_array_equal(
+            jax.random.key_data(move_key),
+            jax.random.key_data(key),
+        )
+        _assert_tree_equal(population, selected)
+        _assert_tree_equal(index, time_index)
+        return (
+            moved,
+            jnp.asarray(0.625, dtype=jnp.float32),
+            jnp.asarray(False),
+        )
+
+    result = _ibis_move_population(
+        key,
+        corrected,
+        jnp.log(jnp.asarray([0.75, 0.25], dtype=jnp.float32)),
+        selected,
+        time_index,
+        rwm_kernel=rwm_kernel,
+        custom_kernel=custom_kernel,
+    )
+
+    _assert_tree_equal(result.population, moved)
+    np.testing.assert_array_equal(result.acceptance_rate, 0.625)
+    np.testing.assert_array_equal(result.acceptance_valid, False)
 
 
 def test_prefix_target_value_and_gradient_exclude_future_factor():

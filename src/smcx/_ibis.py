@@ -3,14 +3,17 @@
 
 """Private numerical kernels for iterated batch importance sampling."""
 
-from typing import NamedTuple
+from typing import NamedTuple, Protocol, runtime_checkable
 
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, vmap
-from jaxtyping import Array, Float, Int, Shaped
+from jaxtyping import Array, Bool, Float, Int, Shaped
 
+from smcx._covariance import _weighted_covariance_factor
 from smcx._numerics import _neumaier_add
+from smcx._static_mutation import _run_custom_mutation_sweep
+from smcx._static_smc import _StaticMoveResult
 from smcx._utils import _validate_log_density_batch
 from smcx.types import (
     Emission,
@@ -18,6 +21,8 @@ from smcx.types import (
     ModelInput,
     PRNGKeyT,
     StaticLogDensity,
+    StaticMutationInitFn,
+    StaticMutationStepFn,
 )
 
 
@@ -27,6 +32,37 @@ class _IBISPopulation(NamedTuple):
     params: Float[Array, "num_particles param_dim"]
     log_target: Float[Array, " num_particles"]
     log_target_correction: Float[Array, " num_particles"]
+
+
+@runtime_checkable
+class _IBISRWMStageKernel(Protocol):
+    """Apply one compiled default mutation stage."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        population: _IBISPopulation,
+        time_index: Int[Array, ""],
+        proposal_factor: Float[Array, "param_dim param_dim"],
+        /,
+    ) -> tuple[_IBISPopulation, Float[Array, ""]]: ...  # pragma: no cover
+
+
+@runtime_checkable
+class _IBISCustomStageKernel(Protocol):
+    """Apply one compiled caller-owned mutation stage."""
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        population: _IBISPopulation,
+        time_index: Int[Array, ""],
+        /,
+    ) -> tuple[
+        _IBISPopulation,
+        Float[Array, ""],
+        Bool[Array, ""],
+    ]: ...  # pragma: no cover
 
 
 def _ibis_expansion_log_ratio(
@@ -211,6 +247,107 @@ def _run_ibis_rwm_sweep(
         sweep_keys,
     )
     return population, jnp.mean(acceptance_rates)
+
+
+def _run_ibis_custom_mutation_sweep(
+    key: PRNGKeyT,
+    population: _IBISPopulation,
+    time_index: Int[Array, ""],
+    *,
+    num_steps: int,
+    emissions: Shaped[Array, "ntime emission_dim"],
+    inputs: Shaped[Array, "ntime input_dim"] | None,
+    log_prior_fn: StaticLogDensity,
+    log_likelihood_increment_fn: IBISLogLikelihoodFn,
+    initialize: StaticMutationInitFn,
+    mutate: StaticMutationStepFn,
+) -> tuple[
+    _IBISPopulation,
+    Float[Array, ""],
+    Bool[Array, ""],
+]:
+    """Run caller mutation and rebuild its current-prefix target caches."""
+    target_template = jnp.zeros((), dtype=population.log_target.dtype)
+
+    def logdensity(params):
+        return _ibis_prefix_logdensity(
+            params,
+            time_index,
+            target_template,
+            emissions=emissions,
+            inputs=inputs,
+            log_prior_fn=log_prior_fn,
+            log_likelihood_increment_fn=log_likelihood_increment_fn,
+        )
+
+    params, acceptance_rate, acceptance_valid = _run_custom_mutation_sweep(
+        key,
+        population.params,
+        logdensity,
+        num_steps=num_steps,
+        initialize=initialize,
+        mutate=mutate,
+    )
+
+    def expansion(position):
+        return _ibis_prefix_expansion(
+            position,
+            time_index,
+            target_template,
+            emissions=emissions,
+            inputs=inputs,
+            log_prior_fn=log_prior_fn,
+            log_likelihood_increment_fn=log_likelihood_increment_fn,
+        )
+
+    log_target, correction = vmap(expansion)(params)
+    return (
+        _IBISPopulation(
+            params=params,
+            log_target=log_target,
+            log_target_correction=correction,
+        ),
+        acceptance_rate,
+        acceptance_valid,
+    )
+
+
+def _ibis_move_population(
+    key: PRNGKeyT,
+    corrected_population: _IBISPopulation,
+    corrected_log_weights: Float[Array, " num_particles"],
+    selected_population: _IBISPopulation,
+    time_index: Int[Array, ""],
+    *,
+    rwm_kernel: _IBISRWMStageKernel,
+    custom_kernel: _IBISCustomStageKernel | None,
+) -> _StaticMoveResult:
+    """Move selected seeds using a proposal fitted to the corrected cloud."""
+    if custom_kernel is None:
+        param_dim = corrected_population.params.shape[1]
+        proposal_factor = _weighted_covariance_factor(
+            corrected_population.params,
+            jnp.exp(corrected_log_weights),
+            scale=2.38**2 / param_dim,
+        )
+        population, acceptance_rate = rwm_kernel(
+            key,
+            selected_population,
+            time_index,
+            proposal_factor,
+        )
+        acceptance_valid = jnp.asarray(True)
+    else:
+        population, acceptance_rate, acceptance_valid = custom_kernel(
+            key,
+            selected_population,
+            time_index,
+        )
+    return _StaticMoveResult(
+        population=population,
+        acceptance_rate=acceptance_rate,
+        acceptance_valid=acceptance_valid,
+    )
 
 
 def _advance_ibis_target(
