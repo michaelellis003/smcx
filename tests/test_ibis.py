@@ -8,6 +8,7 @@ import math
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from smcx._ibis import (
     _advance_ibis_target,
@@ -45,16 +46,24 @@ def test_expansion_log_ratio_retains_low_order_difference():
     np.testing.assert_array_equal(jax.jit(ratio)(), [1.0, 1.0])
 
 
-def test_rwm_sweep_selects_parameters_and_target_cache_atomically():
+def test_rwm_sweep_preserves_keyed_multi_sweep_cache_alignment():
     params = jnp.asarray([[0.0], [2.0], [-2.0]], dtype=jnp.float32)
     population = _IBISPopulation(
         params=params,
-        log_target=-jnp.float32(0.5) * params[:, 0] ** 2,
-        log_target_correction=jnp.zeros(3, dtype=jnp.float32),
+        log_target=jnp.asarray([0.0, 8.0, -8.0], dtype=jnp.float32),
+        log_target_correction=jnp.asarray(
+            [0.0, 0.0, -4.0],
+            dtype=jnp.float32,
+        ),
     )
-    emissions = jnp.asarray([[0.0], [jnp.nan]], dtype=jnp.float32)
+    emissions = jnp.asarray(
+        [[1e8], [1.0], [-1e8], [4.0], [jnp.nan]],
+        dtype=jnp.float32,
+    )
     proposal_factor = jnp.asarray([[0.6]], dtype=jnp.float32)
-    key = jax.random.key(0)
+    key = jax.random.key(2)
+    time_index = jnp.asarray(3, dtype=jnp.int32)
+    target_template = jnp.zeros((), dtype=jnp.float32)
 
     def log_prior(position):
         return -jnp.float32(0.5) * position[0] ** 2
@@ -67,9 +76,9 @@ def test_rwm_sweep_selects_parameters_and_target_cache_atomically():
         return _run_ibis_rwm_sweep(
             key,
             value,
-            jnp.asarray(0, dtype=jnp.int32),
+            time_index,
             proposal_factor,
-            num_steps=1,
+            num_steps=3,
             emissions=emissions,
             inputs=None,
             log_prior_fn=log_prior,
@@ -80,47 +89,47 @@ def test_rwm_sweep_selects_parameters_and_target_cache_atomically():
     compiled = jax.jit(sweep)(population)
     _assert_tree_equal(compiled, eager)
 
-    sweep_key = jax.random.split(key, 1)[0]
-    proposal_key, acceptance_key = jax.random.split(sweep_key)
-    proposal = (
-        params
-        + jax.random.normal(
-            proposal_key,
-            params.shape,
-            dtype=params.dtype,
-        )
-        @ proposal_factor.T
-    )
-    proposal_target = -jnp.float32(0.5) * proposal[:, 0] ** 2
-    log_ratio = proposal_target - population.log_target
-    uniforms = jax.random.uniform(
-        acceptance_key,
-        (3,),
-        dtype=population.log_target.dtype,
-    )
-    expected_accept = (
-        jnp.log(jnp.maximum(uniforms, jnp.finfo(uniforms.dtype).tiny))
-        < log_ratio
-    )
-    np.testing.assert_array_equal(expected_accept, [True, False, True])
-
     next_population, acceptance_rate = eager
-    expected_params = jnp.where(expected_accept[:, None], proposal, params)
-    expected_target = jnp.where(
-        expected_accept,
-        proposal_target,
-        population.log_target,
+    # The committed key fixes all three sweep keys. CPU and Metal lower the
+    # nested f32 matrix/scan arithmetic within five eps at scale ten.
+    atol = float(5 * np.finfo(np.float32).eps * 10.0)
+    np.testing.assert_allclose(
+        next_population.params,
+        [[0.9171013], [2.3219929], [-0.44291916]],
+        rtol=0.0,
+        atol=atol,
     )
-    _assert_tree_equal(next_population.params, expected_params)
-    _assert_tree_equal(next_population.log_target, expected_target)
-    _assert_tree_equal(
+    np.testing.assert_allclose(
+        next_population.log_target,
+        [3.6684053, 9.2879715, -1.7716767],
+        rtol=0.0,
+        atol=atol,
+    )
+    np.testing.assert_allclose(
         next_population.log_target_correction,
-        population.log_target_correction,
+        [0.4965639, -0.37383246, -0.5410079],
+        rtol=0.0,
+        atol=atol,
     )
     np.testing.assert_array_equal(
         acceptance_rate,
-        jnp.mean(expected_accept.astype(population.log_target.dtype)),
+        jnp.asarray(5.0 / 9.0, dtype=population.log_target.dtype),
     )
+
+    fresh_target, fresh_correction = jax.vmap(
+        lambda position: _ibis_prefix_expansion(
+            position,
+            time_index,
+            target_template,
+            emissions=emissions,
+            inputs=None,
+            log_prior_fn=log_prior,
+            log_likelihood_increment_fn=log_increment,
+        )
+    )(next_population.params)
+    _assert_tree_equal(next_population.log_target, fresh_target)
+    _assert_tree_equal(next_population.log_target_correction, fresh_correction)
+    assert bool(jnp.all(jnp.abs(next_population.log_target_correction) > 0.25))
     assert acceptance_rate.dtype == population.log_target.dtype
 
 
@@ -159,6 +168,45 @@ def test_rwm_zero_factor_is_exact_identity_with_unit_acceptance():
         _assert_tree_equal(next_population, population)
         np.testing.assert_array_equal(acceptance_rate, 1.0)
         assert acceptance_rate.dtype == population.log_target.dtype
+
+
+@pytest.mark.skipif(
+    jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
+    reason="mixed f32-parameter/f64-target dtype contract",
+)
+def test_rwm_keeps_parameter_and_target_arithmetic_dtypes_separate():
+    params = jnp.asarray([[1.0], [-2.0]], dtype=jnp.float32)
+    population = _IBISPopulation(
+        params=params,
+        log_target=jnp.asarray([-0.5, -2.0], dtype=jnp.float64),
+        log_target_correction=jnp.zeros(2, dtype=jnp.float64),
+    )
+
+    def log_prior(position):
+        wide_position = position[0].astype(jnp.float64)
+        return -jnp.float64(0.5) * wide_position**2
+
+    def log_increment(_emission, _position, input_t):
+        assert input_t is None
+        return jnp.zeros((), dtype=jnp.float64)
+
+    next_population, acceptance_rate = _run_ibis_rwm_sweep(
+        jax.random.key(7),
+        population,
+        jnp.asarray(0, dtype=jnp.int32),
+        jnp.zeros((1, 1), dtype=jnp.float32),
+        num_steps=1,
+        emissions=jnp.zeros((1, 1), dtype=jnp.float32),
+        inputs=None,
+        log_prior_fn=log_prior,
+        log_likelihood_increment_fn=log_increment,
+    )
+
+    _assert_tree_equal(next_population, population)
+    assert next_population.params.dtype == jnp.float32
+    assert next_population.log_target.dtype == jnp.float64
+    assert next_population.log_target_correction.dtype == jnp.float64
+    assert acceptance_rate.dtype == jnp.float64
 
 
 def test_prefix_target_value_and_gradient_exclude_future_factor():
