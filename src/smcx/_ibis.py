@@ -42,27 +42,28 @@ def _ibis_prefix_expansion(
     log_prior = jnp.asarray(log_prior_fn(params), dtype=target_template.dtype)
     indices = jnp.arange(emissions.shape[0], dtype=time_index.dtype)
 
-    if inputs is None:
-        scan_inputs = jnp.zeros(
-            (emissions.shape[0], 0),
-            dtype=target_template.dtype,
+    def evaluate(index):
+        emission = lax.dynamic_index_in_dim(
+            emissions,
+            index,
+            axis=0,
+            keepdims=False,
         )
-
-        def evaluate(emission, _input_t):
+        if inputs is None:
             return log_likelihood_increment_fn(emission, params, None)
+        input_t = lax.dynamic_index_in_dim(
+            inputs,
+            index,
+            axis=0,
+            keepdims=False,
+        )
+        return log_likelihood_increment_fn(emission, params, input_t)
 
-    else:
-        scan_inputs = inputs
-
-        def evaluate(emission, input_t):
-            return log_likelihood_increment_fn(emission, params, input_t)
-
-    def add_factor(carry, row):
-        index, emission, input_t = row
+    def add_factor(carry, index):
 
         def active(_):
             return jnp.asarray(
-                evaluate(emission, input_t),
+                evaluate(index),
                 dtype=target_template.dtype,
             )
 
@@ -75,10 +76,13 @@ def _ibis_prefix_expansion(
         total, correction = carry
         return _neumaier_add(total, correction, factor), None
 
+    # Scan one index leaf and fetch rows only inside the active branch. This
+    # both excludes future callbacks and avoids the jax-mps multi-leaf scan
+    # corruption tracked by smcx#38.
     expansion, _ = lax.scan(
         add_factor,
         (log_prior, target_zero),
-        (indices, emissions, scan_inputs),
+        indices,
     )
     return expansion
 
