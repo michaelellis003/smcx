@@ -54,7 +54,6 @@ class _StaticSMCCorrection(NamedTuple):
     log_evidence: Float[Array, ""]
     log_evidence_correction: Float[Array, ""]
     log_evidence_increment: Float[Array, ""]
-    selection_ess: Float[Array, ""]
 
 
 @runtime_checkable
@@ -77,7 +76,6 @@ def _static_smc_correction(
 ) -> _StaticSMCCorrection:
     """Correct normalized weights and update compensated evidence."""
     corrected, increment = log_normalize(log_weights + log_increment)
-    selection_ess = jnp.asarray(compute_ess(corrected))
     log_evidence, log_evidence_correction = _neumaier_add(
         log_evidence,
         log_evidence_correction,
@@ -88,7 +86,6 @@ def _static_smc_correction(
         log_evidence=log_evidence,
         log_evidence_correction=log_evidence_correction,
         log_evidence_increment=jnp.asarray(increment),
-        selection_ess=selection_ess,
     )
 
 
@@ -159,13 +156,14 @@ def _static_smc_stage(
     _raise_if_degenerate(
         corrected.log_evidence + corrected.log_evidence_correction
     )
+    selection_ess = jnp.asarray(compute_ess(corrected.log_weights))
     num_particles = state.log_weights.shape[0]
     if resampling_threshold is None:
         do_resample = jnp.asarray(True)
     else:
         do_resample = _resampling_decision(
             corrected.log_weights,
-            corrected.selection_ess,
+            selection_ess,
             resampling_threshold,
             num_particles,
             time_index,
@@ -196,12 +194,12 @@ def _static_smc_stage(
             log_weights = jnp.full_like(corrected.log_weights, uniform)
         else:
             log_weights = uniform_log_weights
-        stage_ess = jnp.asarray(num_particles, corrected.selection_ess.dtype)
+        stage_ess = jnp.asarray(num_particles, selection_ess.dtype)
     else:
         population = state.population
         acceptance_rate = jnp.zeros((), dtype=state.log_weights.dtype)
         log_weights = corrected.log_weights
-        stage_ess = corrected.selection_ess
+        stage_ess = selection_ess
 
     next_state = _StaticSMCState(
         population=population,
@@ -211,7 +209,7 @@ def _static_smc_stage(
     )
     diagnostics = _StaticStageDiagnostics(
         log_evidence_increment=corrected.log_evidence_increment,
-        selection_ess=corrected.selection_ess,
+        selection_ess=selection_ess,
         ess=stage_ess,
         acceptance_rate=acceptance_rate,
         resampled=do_resample,

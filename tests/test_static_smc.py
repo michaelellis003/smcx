@@ -125,6 +125,45 @@ def test_forced_stage_gathers_population_and_routes_exact_keys():
     assert bool(info.resampled)
 
 
+def test_stage_selection_ess_preserves_eager_f32_arithmetic():
+    log_weights = jnp.asarray(
+        [
+            -2.0620966,
+            -1.9704518,
+            -1.906919,
+            -1.9038184,
+            -1.9416447,
+            -1.9227269,
+            -1.9227269,
+        ],
+        dtype=jnp.float32,
+    )
+    state = _state()._replace(
+        log_weights=log_weights,
+        log_evidence=jnp.zeros((), dtype=jnp.float32),
+        log_evidence_correction=jnp.zeros((), dtype=jnp.float32),
+    )
+
+    def skip(_log_weights, _current_ess, _time_index):
+        return jnp.asarray(False)
+
+    def fail(*_args):
+        raise AssertionError("skipped callback was invoked")
+
+    _, info = _run_stage(
+        fail,
+        fail,
+        rule=skip,
+        index=jnp.asarray(0, dtype=jnp.int32),
+        state=state,
+        inc=jnp.zeros(7, dtype=jnp.float32),
+    )
+
+    # This exact vector exposes a one-ulp XLA reduction difference. The host
+    # stage preserves temper's established eager diagnostic at a fixed key.
+    np.testing.assert_array_equal(info.selection_ess, ess(log_weights))
+
+
 def test_callable_skip_receives_corrected_diagnostics_and_skips_callbacks():
     state = _state()
     expected_weights, _ = log_normalize(state.log_weights + _INCREMENT)

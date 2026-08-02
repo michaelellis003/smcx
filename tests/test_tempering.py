@@ -161,6 +161,11 @@ def _bad_mutation_step(key, state, tempered_logdensity_fn):
     return next_state, info._replace(acceptance_rate=jnp.ones(2))
 
 
+def _nonconvertible_mutation_step(key, state, tempered_logdensity_fn):
+    next_state, info = _mutation_step(key, state, tempered_logdensity_fn)
+    return next_state, info._replace(acceptance_rate=object())
+
+
 def _fixed_acceptance_step(rate):
     def step(_key, state, _tempered_logdensity_fn):
         info = _MutationInfo(
@@ -238,6 +243,11 @@ class TestMutationCallback:
         [
             (_bad_mutation_init, _mutation_step, "position must have shape"),
             (_mutation_init, _bad_mutation_step, "must be a scalar float"),
+            (
+                _mutation_init,
+                _nonconvertible_mutation_step,
+                "must be a scalar float",
+            ),
         ],
     )
     def test_malformed_mutation_contract_raises(
