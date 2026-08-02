@@ -759,3 +759,123 @@ def test_ibis_driver_matches_sequential_oracle_and_final_only_storage():
         )
     ])
     assert resolved_targets == pytest.approx([0.7, 0.4, 0.7], abs=f32_atol)
+
+
+def test_ibis_driver_stage_keys_are_exact_and_branch_invariant():
+    params = jnp.asarray([[0.0], [2.0], [4.0]], dtype=jnp.float32)
+    emissions = jnp.ones((3, 1), dtype=jnp.float32)
+    prior_population = _IBISPopulation(
+        params=params,
+        log_target=jnp.zeros(3, dtype=jnp.float32),
+        log_target_correction=jnp.zeros(3, dtype=jnp.float32),
+    )
+    initial_log_increment = jnp.ones(3, dtype=jnp.float32)
+    stage_root_key = jax.random.key(83)
+    stage_keys = jax.random.split(stage_root_key, 3)
+    key_pairs = [jax.random.split(key) for key in stage_keys]
+    expected_resampling = {
+        tuple(np.asarray(jax.random.key_data(key_pairs[0][0]))): jnp.arange(
+            3, dtype=jnp.int32
+        ),
+        tuple(np.asarray(jax.random.key_data(key_pairs[2][0]))): jnp.arange(
+            2, -1, -1, dtype=jnp.int32
+        ),
+    }
+
+    def log_prior(_position):
+        return jnp.zeros((), dtype=jnp.float32)
+
+    def log_increment(emission, position, input_t):
+        assert input_t is None
+        return emission[0] + jnp.zeros_like(position[0])
+
+    def keyed_resampler(key, _weights, _num_samples):
+        key_data = tuple(np.asarray(jax.random.key_data(key)))
+        if key_data not in expected_resampling:
+            raise AssertionError(f"unexpected resampling key {key_data}")
+        return expected_resampling[key_data]
+
+    def initialize(position, _target):
+        return _GradientMutationState(position)
+
+    def mutate(key, state, target):
+        prefix = target(state.position)
+        noise = jax.random.uniform(
+            key,
+            state.position.shape,
+            dtype=state.position.dtype,
+        )
+        position = jnp.where(
+            prefix > 2.5,
+            state.position + noise,
+            state.position,
+        )
+        return _GradientMutationState(position), _GradientMutationInfo(
+            jnp.asarray(0.5, dtype=jnp.float32)
+        )
+
+    def run(resample_at_zero):
+        def criterion(_log_weights, _ess, time_index):
+            return (time_index == 2) | (
+                jnp.asarray(resample_at_zero) & (time_index == 0)
+            )
+
+        return _run_ibis_stages(
+            stage_root_key,
+            prior_population,
+            initial_log_increment,
+            emissions,
+            inputs=None,
+            num_mcmc_steps=1,
+            resampling_threshold=criterion,
+            resampling_fn=keyed_resampler,
+            log_prior_fn=log_prior,
+            log_likelihood_increment_fn=log_increment,
+            mutation_init_fn=initialize,
+            mutation_step_fn=mutate,
+            store_history=True,
+        )
+
+    late_only = run(False)
+    early_and_late = run(True)
+    np.testing.assert_array_equal(
+        late_only.resampled,
+        [False, False, True],
+    )
+    np.testing.assert_array_equal(
+        early_and_late.resampled,
+        [True, False, True],
+    )
+    np.testing.assert_array_equal(
+        late_only.acceptance_rates,
+        [0.0, 0.0, 0.5],
+    )
+    np.testing.assert_array_equal(
+        early_and_late.acceptance_rates,
+        [0.5, 0.0, 0.5],
+    )
+
+    mutation_key = key_pairs[2][1]
+    sweep_key = jax.random.split(mutation_key, 1)[0]
+    particle_keys = jax.random.split(sweep_key, 3)
+    expected_noise = jax.vmap(
+        lambda key: jax.random.uniform(key, (1,), dtype=jnp.float32)
+    )(particle_keys)
+    expected_final = params[::-1] + expected_noise
+    # Five f32 eps at cloud scale covers the separately lowered keyed
+    # addition; any wrong mutation key changes the draw materially.
+    key_atol = float(
+        5 * np.finfo(np.float32).eps * np.max(np.asarray(expected_final))
+    )
+    np.testing.assert_allclose(
+        late_only.filtered_params[-1],
+        expected_final,
+        rtol=0.0,
+        atol=key_atol,
+    )
+    np.testing.assert_allclose(
+        early_and_late.filtered_params[-1],
+        expected_final,
+        rtol=0.0,
+        atol=key_atol,
+    )
