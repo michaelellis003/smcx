@@ -11,6 +11,7 @@ import numpy as np
 
 from smcx._ibis import (
     _advance_ibis_target,
+    _ibis_expansion_log_ratio,
     _ibis_prefix_expansion,
     _ibis_prefix_logdensity,
     _IBISPopulation,
@@ -19,6 +20,28 @@ from smcx._ibis import (
 
 def _assert_tree_equal(actual, expected) -> None:
     jax.tree.map(np.testing.assert_array_equal, actual, expected)
+
+
+def test_expansion_log_ratio_retains_low_order_difference():
+    proposed_total = jnp.asarray([1e8, -1e8], dtype=jnp.float32)
+    proposed_correction = jnp.asarray([1.0, -0.5], dtype=jnp.float32)
+    current_total = jnp.asarray([1e8, -1e8], dtype=jnp.float32)
+    current_correction = jnp.asarray([0.0, -1.5], dtype=jnp.float32)
+
+    def ratio():
+        return _ibis_expansion_log_ratio(
+            proposed_total,
+            proposed_correction,
+            current_total,
+            current_correction,
+        )
+
+    naive = (proposed_total + proposed_correction) - (
+        current_total + current_correction
+    )
+    np.testing.assert_array_equal(naive, [0.0, 0.0])
+    np.testing.assert_array_equal(ratio(), [1.0, 1.0])
+    np.testing.assert_array_equal(jax.jit(ratio)(), [1.0, 1.0])
 
 
 def test_prefix_target_value_and_gradient_exclude_future_factor():

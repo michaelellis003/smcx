@@ -27,6 +27,26 @@ class _IBISPopulation(NamedTuple):
     log_target_correction: Float[Array, " num_particles"]
 
 
+def _ibis_expansion_log_ratio(
+    proposed_total: Float[Array, " num_particles"],
+    proposed_correction: Float[Array, " num_particles"],
+    current_total: Float[Array, " num_particles"],
+    current_correction: Float[Array, " num_particles"],
+) -> Float[Array, " num_particles"]:
+    """Subtract two target expansions without resolving either one first."""
+    total, correction = _neumaier_add(
+        proposed_total,
+        proposed_correction,
+        -current_total,
+    )
+    total, correction = _neumaier_add(
+        total,
+        correction,
+        -current_correction,
+    )
+    return total + correction
+
+
 def _ibis_prefix_expansion(
     params: Float[Array, " param_dim"],
     time_index: Int[Array, ""],
