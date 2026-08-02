@@ -1,9 +1,9 @@
 # Author custom models
 
-Nonlinear Gaussian, particle, and tempered methods represent a model by the
-callbacks needed for one inference algorithm. You do not need to subclass an
-smcx model or wrap distributions in an smcx object. The boundary consists of
-arrays, PyTrees, and, for stochastic algorithms, explicit PRNG keys. Exact
+Nonlinear Gaussian, particle, IBIS, and tempered methods represent a model by
+the callbacks needed for one inference algorithm. You do not need to subclass
+an smcx model or wrap distributions in an smcx object. The boundary consists
+of arrays, PyTrees, and, for stochastic algorithms, explicit PRNG keys. Exact
 linear-Gaussian models instead use the dense-array interface shown in the
 [quickstart](quickstart.md#establish-the-exact-baseline).
 
@@ -205,6 +205,7 @@ Each callback-driven algorithm asks only for behavior it can use:
 | Guided | Initial cloud and proposal | Proposal, transition, and observation |
 | Liu-West | Initial state and parameter clouds; state transition | Observation and look-ahead |
 | Tempered SMC | Initial cloud | Prior and likelihood |
+| IBIS | Initial parameter cloud | Prior and conditional likelihood increment |
 | SMC² | Initial parameter cloud; conditioned inner state cloud and transition | Parameter prior and observation |
 | Caller-owned runner | Initialization and step kernels | Normalized weights and evidence increments |
 
@@ -230,6 +231,14 @@ but retain their documented float32/float64 requirements.
 Callback inputs preserve dtype: `(T,)` becomes `(T, 1)`; rank-two inputs are
 unchanged and empty widths rejected. Callers relying on incremental scalar
 callback shapes must use length-one vectors; sampled emissions do likewise.
+
+### Supply IBIS likelihood increments
+
+`smcx.ibis` calls
+`log_likelihood_increment_fn(emission_t, params, input_t) -> scalar` for one
+parameter vector at a time. The increment must be deterministic and evaluable;
+rank-one sequences reach the callback as length-one vectors. The third argument
+is always present and is `None` when `inputs` is omitted.
 
 Log-weight normalization and ESS are invariant to a finite constant offset
 whenever the relative differences remain representable in the input dtype.
@@ -760,6 +769,7 @@ with a scalar floating `acceptance_rate` that is finite and in `[0, 1]`.
 NamedTuples are a convenient representation, and either object may carry
 extra fields. The target passed to both callbacks is the current stage
 density `log_prior + phi * log_likelihood`.
+`smcx.ibis` accepts the same pair and supplies its current data-prefix target.
 
 ```python
 posterior = smcx.temper(

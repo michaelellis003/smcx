@@ -74,10 +74,10 @@ class ParticleFilterResult(Protocol):
 class ParameterFilterResult(Protocol):
     """Structural type for results with weighted parameter histories.
 
-    `smcx.containers.LiuWestPosterior`, `smcx.containers.SMC2Posterior`, and
-    caller-owned records satisfy this protocol when they provide its two
-    fields. Parameter diagnostics validate array dtypes, shapes, and aligned
-    axes at their public boundary.
+    `smcx.containers.LiuWestPosterior`, `smcx.containers.SMC2Posterior`,
+    `smcx.containers.IBISPosterior`, and caller-owned records satisfy this
+    protocol when they provide its two fields. Parameter diagnostics validate
+    array dtypes, shapes, and aligned axes at their public boundary.
 
     Attributes:
         filtered_params: Parameter particles, shape
@@ -432,3 +432,23 @@ class SMC2Posterior(NamedTuple):
     ess: Float[Array, " ntime"]
     log_evidence_increments: Float[Array, " ntime"]
     acceptance_rates: Float[Array, " ntime"]
+
+
+class IBISPosterior(NamedTuple):
+    """IBIS posterior over a dense static parameter vector.
+
+    Parameter and weight histories contain the post-move cloud at each datum,
+    or only the final row when ``store_history=False``. ``selection_ess`` is
+    measured after correction and before resampling; ``ess`` is implied by the
+    stored weights and is therefore N after resampling. Acceptance is zero
+    where no resampling or invariant move ran.
+    """
+
+    marginal_loglik: Float[Array, ""]
+    filtered_params: Float[Array, "ntime num_particles param_dim"]
+    filtered_log_weights: Float[Array, "ntime num_particles"]
+    ess: Float[Array, " ntime"]
+    log_evidence_increments: Float[Array, " ntime"]
+    acceptance_rates: Float[Array, " ntime"]
+    selection_ess: Float[Array, " ntime"]
+    resampled: Bool[Array, " ntime"]

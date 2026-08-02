@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+import smcx
 from smcx._ibis import (
     _advance_ibis_target,
     _ibis_expansion_log_ratio,
@@ -879,3 +880,126 @@ def test_ibis_driver_stage_keys_are_exact_and_branch_invariant():
         rtol=0.0,
         atol=key_atol,
     )
+
+
+def test_public_ibis_contract_uses_canonical_rows_and_exact_root_children():
+    root_key = jax.random.key(97)
+    prior_key, stage_root_key = jax.random.split(root_key)
+    stage_keys = jax.random.split(stage_root_key, 2)
+    expected_resampling_key = jax.random.split(stage_keys[1])[0]
+    params = jnp.asarray([[-1.0], [0.5], [2.0]], dtype=jnp.float32)
+
+    def sample_prior(key, num_particles):
+        np.testing.assert_array_equal(
+            jax.random.key_data(key),
+            jax.random.key_data(prior_key),
+        )
+        assert num_particles == 3
+        return params
+
+    def log_prior(position):
+        return -jnp.float32(0.5) * position[0] ** 2
+
+    def log_increment(emission, position, input_t):
+        assert emission.shape == (1,)
+        assert input_t.shape == (1,)
+        return (emission[0] + input_t[0]) * position[0]
+
+    def criterion(_log_weights, _selection_ess, time_index):
+        return time_index == 1
+
+    def reverse_resampler(key, _weights, num_samples):
+        np.testing.assert_array_equal(
+            jax.random.key_data(key),
+            jax.random.key_data(expected_resampling_key),
+        )
+        return jnp.arange(num_samples - 1, -1, -1, dtype=jnp.int32)
+
+    def initialize(position, _target):
+        return _GradientMutationState(position)
+
+    def mutate(_key, state, _target):
+        return state, _GradientMutationInfo(jnp.asarray(0.5, dtype=jnp.float32))
+
+    posterior = smcx.ibis(
+        root_key,
+        sample_prior,
+        log_prior,
+        log_increment,
+        jnp.asarray([0.25, -0.5], dtype=jnp.float32),
+        3,
+        inputs=jnp.asarray([0.1, 0.2], dtype=jnp.float32),
+        num_mcmc_steps=1,
+        resampling_threshold=criterion,
+        resampling_fn=reverse_resampler,
+        mutation_init_fn=initialize,
+        mutation_step_fn=mutate,
+    )
+
+    assert isinstance(posterior, smcx.IBISPosterior)
+    assert isinstance(posterior, smcx.ParameterFilterResult)
+    assert posterior._fields == (
+        "marginal_loglik",
+        "filtered_params",
+        "filtered_log_weights",
+        "ess",
+        "log_evidence_increments",
+        "acceptance_rates",
+        "selection_ess",
+        "resampled",
+    )
+    assert posterior.filtered_params.shape == (2, 3, 1)
+    assert posterior.filtered_log_weights.shape == (2, 3)
+    _assert_tree_equal(posterior.filtered_params[0], params)
+    _assert_tree_equal(posterior.filtered_params[1], params[::-1])
+    np.testing.assert_array_equal(posterior.resampled, [False, True])
+    np.testing.assert_array_equal(posterior.acceptance_rates, [0.0, 0.5])
+    np.testing.assert_array_equal(posterior.ess[1], 3.0)
+    assert float(posterior.selection_ess[1]) < 3.0
+    np.testing.assert_array_equal(
+        posterior.filtered_log_weights[1],
+        jnp.full(3, -math.log(3.0), dtype=jnp.float32),
+    )
+
+
+def test_public_ibis_omitted_inputs_and_final_only_storage():
+    params = jnp.asarray([[-1.0], [1.0]], dtype=jnp.float32)
+
+    def sample_prior(_key, _num_particles):
+        return params
+
+    def log_prior(position):
+        return -jnp.float32(0.5) * position[0] ** 2
+
+    def log_increment(emission, position, input_t):
+        assert input_t is None
+        return emission[0] * position[0]
+
+    def unexpected_resampling(*_args):
+        raise AssertionError("zero threshold must skip resampling")
+
+    posterior = smcx.ibis(
+        jax.random.key(101),
+        sample_prior,
+        log_prior,
+        log_increment,
+        jnp.asarray([0.1, -0.2, 0.3], dtype=jnp.float32),
+        2,
+        num_mcmc_steps=1,
+        resampling_threshold=0.0,
+        resampling_fn=unexpected_resampling,
+        store_history=False,
+    )
+
+    assert posterior.filtered_params.shape == (1, 2, 1)
+    assert posterior.filtered_log_weights.shape == (1, 2)
+    for field_name in (
+        "ess",
+        "log_evidence_increments",
+        "acceptance_rates",
+        "selection_ess",
+        "resampled",
+    ):
+        assert getattr(posterior, field_name).shape == (3,)
+    np.testing.assert_array_equal(posterior.resampled, False)
+    np.testing.assert_array_equal(posterior.acceptance_rates, 0.0)

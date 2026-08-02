@@ -20,7 +20,8 @@ general nonlinear or non-Gaussian
 models. Full particle-filter histories support approximate genealogy paths
 and backward-simulated joint trajectories. Broader sequential Monte Carlo
 methods target other distribution sequences, including tempered paths for
-static parameters and nested state-parameter inference.
+static parameters, exact-likelihood IBIS updates, and nested state-parameter
+inference.
 smcx implements all of these methods. The
 [introduction](guides/sequential-inference.md) develops them one
 assumption at a time, with the equations and references.
@@ -29,7 +30,7 @@ Models are supplied as plain JAX callbacks. `StateSpaceModel` groups
 the particle-model callbacks for reuse across the bootstrap, guided,
 and auxiliary Feynman–Kac derivations over one shared loop, while the
 named filters provide the shortest one-call interface; Liu–West,
-tempered SMC, SMC², and the caller-owned runner have their own
+tempered SMC, IBIS, SMC², and the caller-owned runner have their own
 drivers. Resamplers, criteria, proposals, potentials, look-ahead
 twists, mutation kernels, temperature schedules, and Gaussian
 linearization strategies are all caller-replaceable, with parameters

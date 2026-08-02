@@ -317,6 +317,9 @@ parameters
 ([Chopin and Papaspiliopoulos, 2020](https://doi.org/10.1007/978-3-030-47845-2)).
 We can rejuvenate $\phi$ online beside the states
 ([Liu and West, 2001](https://doi.org/10.1007/978-1-4757-3437-9_10)).
+When deterministic conditional likelihood increments are available, IBIS
+updates the parameter posterior in data order
+([Chopin, 2002](https://doi.org/10.1093/biomet/89.3.539)).
 We can run a filter for every parameter particle
 (SMC²: [Chopin, Jacob, and Papaspiliopoulos, 2013](https://doi.org/10.1111/j.1467-9868.2012.01046.x)).
 Or we can temper a fixed-data posterior, moving from prior to
@@ -684,3 +687,8 @@ posterior = smcx.temper(
 weights = smcx.normalize(posterior.log_weights)
 print(weights @ posterior.particles[:, 0])  # 0.87, the truth was 0.8
 ```
+
+Use `ibis` when each ordered datum has a deterministic, evaluable conditional
+likelihood increment. Use `temper` when the fixed-data likelihood is available
+as one function, and `smc2` when an inner particle filter must estimate those
+increments.
