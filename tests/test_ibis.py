@@ -4,12 +4,13 @@
 """Product tests for private IBIS kernels before public assembly."""
 
 import math
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from jaxtyping import config as jaxtyping_config
 
 import smcx
 from smcx._ibis import (
@@ -1003,3 +1004,263 @@ def test_public_ibis_omitted_inputs_and_final_only_storage():
         assert getattr(posterior, field_name).shape == (3,)
     np.testing.assert_array_equal(posterior.resampled, False)
     np.testing.assert_array_equal(posterior.acceptance_rates, 0.0)
+
+
+def _run_public_ibis(**overrides):
+    def sample_prior(_key, count):
+        return jnp.linspace(-1.0, 1.0, count, dtype=jnp.float32)[:, None]
+
+    def log_prior(position):
+        return -jnp.float32(0.5) * position[0] ** 2
+
+    def log_increment(_emission, _position, input_t):
+        assert input_t is None
+        return jnp.asarray(0.0, dtype=jnp.float32)
+
+    arguments: dict[str, Any] = {
+        "key": jax.random.key(103),
+        "param_initial_sampler": sample_prior,
+        "log_prior_fn": log_prior,
+        "log_likelihood_increment_fn": log_increment,
+        "emissions": jnp.zeros((2, 1), dtype=jnp.float32),
+        "num_particles": 3,
+        "num_mcmc_steps": 1,
+        "resampling_threshold": 0.0,
+    }
+    arguments.update(overrides)
+    return smcx.ibis(**arguments)
+
+
+@pytest.mark.parametrize(
+    ("drifting_name", "bad_value", "message"),
+    [
+        ("prior", jnp.zeros(2), "log_prior_fn output must be a scalar"),
+        (
+            "prior",
+            jnp.asarray(0, dtype=jnp.int32),
+            "log_prior_fn output must have a floating dtype",
+        ),
+        (
+            "prior",
+            jnp.asarray(0.0, dtype=jnp.bfloat16),
+            "log_prior_fn output must have at least float32 precision",
+        ),
+        (
+            "likelihood",
+            jnp.zeros(2),
+            "log_likelihood_increment_fn output must be a scalar",
+        ),
+        (
+            "likelihood",
+            jnp.asarray(0, dtype=jnp.int32),
+            "log_likelihood_increment_fn output must have a floating dtype",
+        ),
+        (
+            "likelihood",
+            jnp.asarray(0.0, dtype=jnp.bfloat16),
+            "log_likelihood_increment_fn output must have at least float32",
+        ),
+    ],
+)
+def test_public_ibis_validates_mutation_prefix_density(
+    drifting_name,
+    bad_value,
+    message,
+):
+    outputs = iter((jnp.asarray(0.0, dtype=jnp.float32), bad_value))
+
+    def stable(*_args):
+        return jnp.asarray(0.0, dtype=jnp.float32)
+
+    def drifting(*_args):
+        return next(outputs)
+
+    with pytest.raises(ValueError, match=message):
+        _run_public_ibis(
+            log_prior_fn=drifting if drifting_name == "prior" else stable,
+            log_likelihood_increment_fn=(
+                drifting if drifting_name == "likelihood" else stable
+            ),
+            resampling_threshold=2.0,
+        )
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("num_particles", True, "not a boolean"),
+        ("num_particles", 0, "positive integer"),
+        ("num_particles", 1.5, "positive integer"),
+        ("num_mcmc_steps", True, "not a boolean"),
+        ("num_mcmc_steps", 0, "positive integer"),
+        ("num_mcmc_steps", 1.5, "positive integer"),
+        ("store_history", 1, "store_history must be a boolean"),
+    ],
+)
+def test_public_ibis_validates_counts_and_storage(
+    monkeypatch,
+    name,
+    value,
+    message,
+):
+    monkeypatch.setattr(jaxtyping_config, "jaxtyping_disable", True)
+    with pytest.raises(ValueError, match=message):
+        _run_public_ibis(**{name: value})
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"emissions": jnp.empty((0,), dtype=jnp.float32)},
+            "emissions must contain at least one row",
+        ),
+        (
+            {"inputs": jnp.zeros((3, 1), dtype=jnp.float32)},
+            "inputs must have leading dimension T=2",
+        ),
+    ],
+)
+def test_public_ibis_validates_sequence_alignment(overrides, message):
+    with pytest.raises(ValueError, match=message):
+        _run_public_ibis(**overrides)
+
+
+@pytest.mark.parametrize(
+    ("output", "message"),
+    [
+        (lambda count: [[0.0]] * count, "must be a JAX array"),
+        (lambda count: jnp.zeros(count), "must have shape"),
+        (lambda count: jnp.zeros((count + 1, 1)), "must have shape"),
+        (lambda count: jnp.zeros((count, 0)), "empty param_dim"),
+        (
+            lambda count: jnp.zeros((count, 1), dtype=jnp.int32),
+            "floating dtype",
+        ),
+    ],
+)
+def test_public_ibis_validates_prior_cloud(output, message):
+    def invalid_sampler(_key, count):
+        return output(count)
+
+    with pytest.raises(ValueError, match=message):
+        _run_public_ibis(param_initial_sampler=invalid_sampler)
+
+
+@pytest.mark.parametrize(
+    "callback_name",
+    ["log_prior_fn", "log_likelihood_increment_fn"],
+)
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (jnp.zeros(2), "output must have shape"),
+        (jnp.asarray(0, dtype=jnp.int32), "floating dtype"),
+        (
+            jnp.asarray(0.0, dtype=jnp.bfloat16),
+            "at least float32 precision",
+        ),
+    ],
+)
+def test_public_ibis_validates_initial_density(
+    callback_name,
+    value,
+    message,
+):
+    def invalid(*_args):
+        return value
+
+    with pytest.raises(ValueError, match=f"{callback_name}.*{message}"):
+        _run_public_ibis(**{callback_name: invalid})
+
+
+@pytest.mark.parametrize(
+    "callbacks",
+    [
+        {
+            "mutation_init_fn": lambda position, _target: (
+                _GradientMutationState(position)
+            )
+        },
+        {
+            "mutation_step_fn": lambda _key, state, _target: (
+                state,
+                _GradientMutationInfo(jnp.asarray(0.5)),
+            )
+        },
+    ],
+)
+def test_public_ibis_requires_paired_mutation_callbacks(callbacks):
+    with pytest.raises(ValueError, match="must be supplied together"):
+        _run_public_ibis(**callbacks)
+
+
+@pytest.mark.parametrize("threshold", [-1.0, float("nan"), float("inf")])
+def test_public_ibis_rejects_invalid_numeric_threshold(threshold):
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        _run_public_ibis(resampling_threshold=threshold)
+
+
+def test_public_ibis_validates_later_likelihood_density():
+    outputs = iter((jnp.asarray(0.0), jnp.zeros(2)))
+
+    def drifting(*_args):
+        return next(outputs)
+
+    with pytest.raises(
+        ValueError,
+        match=r"log_likelihood_increment_fn output must have shape \(3,\)",
+    ):
+        _run_public_ibis(log_likelihood_increment_fn=drifting)
+
+
+def test_public_ibis_propagates_later_degeneracy():
+    def increment(emission, _position, _input_t):
+        return emission[0]
+
+    with pytest.raises(smcx.DegenerateWeightsError):
+        _run_public_ibis(
+            log_likelihood_increment_fn=increment,
+            emissions=jnp.asarray([0.0, -jnp.inf], dtype=jnp.float32),
+        )
+
+
+def test_public_ibis_validates_callable_criterion_result():
+    def invalid_criterion(*_args):
+        return jnp.ones(1, dtype=jnp.bool_)
+
+    with pytest.raises(ValueError, match="must return a scalar Boolean"):
+        _run_public_ibis(resampling_threshold=invalid_criterion)
+
+
+def test_public_ibis_rejects_out_of_range_ancestors():
+    def invalid_resampler(_key, _weights, count):
+        return jnp.full((count,), count, dtype=jnp.int32)
+
+    with pytest.raises(ValueError, match=r"entries must be in \[0, 3\)"):
+        _run_public_ibis(
+            resampling_threshold=2.0,
+            resampling_fn=invalid_resampler,
+        )
+
+
+def test_public_ibis_validates_later_mutation_result():
+    def criterion(_log_weights, _selection_ess, time_index):
+        return time_index == 1
+
+    def resample(_key, _weights, count):
+        return jnp.arange(count, dtype=jnp.int32)
+
+    def initialize(position, _target):
+        return _GradientMutationState(position)
+
+    def mutate(_key, state, _target):
+        return state, _GradientMutationInfo(jnp.asarray(1.1))
+
+    with pytest.raises(ValueError, match="must be finite and in"):
+        _run_public_ibis(
+            resampling_threshold=criterion,
+            resampling_fn=resample,
+            mutation_init_fn=initialize,
+            mutation_step_fn=mutate,
+        )

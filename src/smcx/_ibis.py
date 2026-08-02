@@ -13,7 +13,7 @@ from jax import jit, lax, vmap
 from jaxtyping import Array, Bool, Float, Int, Shaped
 
 from smcx._covariance import _weighted_covariance_factor
-from smcx._numerics import _neumaier_add
+from smcx._numerics import _neumaier_add, _validate_minimum_float_precision
 from smcx._static_mutation import _run_custom_mutation_sweep
 from smcx._static_smc import (
     _static_smc_stage,
@@ -87,6 +87,21 @@ class _IBISCustomStageKernel(Protocol):
     ]: ...  # pragma: no cover
 
 
+def _validate_ibis_log_density(
+    value: Shaped[Array, "..."], *, name: str
+) -> None:
+    """Require one scalar floating density with at least f32 precision."""
+    if value.shape != ():
+        raise ValueError(
+            f"{name} output must be a scalar; got shape {value.shape}"
+        )
+    if not jnp.issubdtype(value.dtype, jnp.floating):
+        raise ValueError(
+            f"{name} output must have a floating dtype; got {value.dtype}"
+        )
+    _validate_minimum_float_precision(value, name=f"{name} output")
+
+
 def _ibis_expansion_log_ratio(
     proposed_total: Float[Array, " num_particles"],
     proposed_correction: Float[Array, " num_particles"],
@@ -119,7 +134,9 @@ def _ibis_prefix_expansion(
 ) -> tuple[Float[Array, ""], Float[Array, ""]]:
     """Return a compensated expansion of the target through ``time_index``."""
     target_zero = jnp.zeros_like(target_template)
-    log_prior = jnp.asarray(log_prior_fn(params), dtype=target_template.dtype)
+    log_prior = jnp.asarray(log_prior_fn(params))
+    _validate_ibis_log_density(log_prior, name="log_prior_fn")
+    log_prior = log_prior.astype(target_template.dtype)
     indices = jnp.arange(emissions.shape[0], dtype=time_index.dtype)
 
     def evaluate(index):
@@ -142,10 +159,12 @@ def _ibis_prefix_expansion(
     def add_factor(carry, index):
 
         def active(_):
-            return jnp.asarray(
-                evaluate(index),
-                dtype=target_template.dtype,
+            factor = jnp.asarray(evaluate(index))
+            _validate_ibis_log_density(
+                factor,
+                name="log_likelihood_increment_fn",
             )
+            return factor.astype(target_template.dtype)
 
         factor = lax.cond(
             index <= time_index,
