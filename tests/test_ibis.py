@@ -15,6 +15,7 @@ from smcx._ibis import (
     _ibis_prefix_expansion,
     _ibis_prefix_logdensity,
     _IBISPopulation,
+    _run_ibis_rwm_sweep,
 )
 
 
@@ -42,6 +43,122 @@ def test_expansion_log_ratio_retains_low_order_difference():
     np.testing.assert_array_equal(naive, [0.0, 0.0])
     np.testing.assert_array_equal(ratio(), [1.0, 1.0])
     np.testing.assert_array_equal(jax.jit(ratio)(), [1.0, 1.0])
+
+
+def test_rwm_sweep_selects_parameters_and_target_cache_atomically():
+    params = jnp.asarray([[0.0], [2.0], [-2.0]], dtype=jnp.float32)
+    population = _IBISPopulation(
+        params=params,
+        log_target=-jnp.float32(0.5) * params[:, 0] ** 2,
+        log_target_correction=jnp.zeros(3, dtype=jnp.float32),
+    )
+    emissions = jnp.asarray([[0.0], [jnp.nan]], dtype=jnp.float32)
+    proposal_factor = jnp.asarray([[0.6]], dtype=jnp.float32)
+    key = jax.random.key(0)
+
+    def log_prior(position):
+        return -jnp.float32(0.5) * position[0] ** 2
+
+    def log_increment(emission, position, input_t):
+        assert input_t is None
+        return emission[0] * position[0]
+
+    def sweep(value):
+        return _run_ibis_rwm_sweep(
+            key,
+            value,
+            jnp.asarray(0, dtype=jnp.int32),
+            proposal_factor,
+            num_steps=1,
+            emissions=emissions,
+            inputs=None,
+            log_prior_fn=log_prior,
+            log_likelihood_increment_fn=log_increment,
+        )
+
+    eager = sweep(population)
+    compiled = jax.jit(sweep)(population)
+    _assert_tree_equal(compiled, eager)
+
+    sweep_key = jax.random.split(key, 1)[0]
+    proposal_key, acceptance_key = jax.random.split(sweep_key)
+    proposal = (
+        params
+        + jax.random.normal(
+            proposal_key,
+            params.shape,
+            dtype=params.dtype,
+        )
+        @ proposal_factor.T
+    )
+    proposal_target = -jnp.float32(0.5) * proposal[:, 0] ** 2
+    log_ratio = proposal_target - population.log_target
+    uniforms = jax.random.uniform(
+        acceptance_key,
+        (3,),
+        dtype=population.log_target.dtype,
+    )
+    expected_accept = (
+        jnp.log(jnp.maximum(uniforms, jnp.finfo(uniforms.dtype).tiny))
+        < log_ratio
+    )
+    np.testing.assert_array_equal(expected_accept, [True, False, True])
+
+    next_population, acceptance_rate = eager
+    expected_params = jnp.where(expected_accept[:, None], proposal, params)
+    expected_target = jnp.where(
+        expected_accept,
+        proposal_target,
+        population.log_target,
+    )
+    _assert_tree_equal(next_population.params, expected_params)
+    _assert_tree_equal(next_population.log_target, expected_target)
+    _assert_tree_equal(
+        next_population.log_target_correction,
+        population.log_target_correction,
+    )
+    np.testing.assert_array_equal(
+        acceptance_rate,
+        jnp.mean(expected_accept.astype(population.log_target.dtype)),
+    )
+    assert acceptance_rate.dtype == population.log_target.dtype
+
+
+def test_rwm_zero_factor_is_exact_identity_with_unit_acceptance():
+    params = jnp.asarray([[1.0], [-2.0]], dtype=jnp.float32)
+    population = _IBISPopulation(
+        params=params,
+        log_target=-jnp.float32(0.5) * params[:, 0] ** 2,
+        log_target_correction=jnp.zeros(2, dtype=jnp.float32),
+    )
+
+    def log_prior(position):
+        return -jnp.float32(0.5) * position[0] ** 2
+
+    def log_increment(emission, position, input_t):
+        assert input_t is None
+        return emission[0] * position[0]
+
+    def sweep(value):
+        return _run_ibis_rwm_sweep(
+            jax.random.key(91),
+            value,
+            jnp.asarray(0, dtype=jnp.int32),
+            jnp.zeros((1, 1), dtype=jnp.float32),
+            num_steps=3,
+            emissions=jnp.zeros((1, 1), dtype=jnp.float32),
+            inputs=None,
+            log_prior_fn=log_prior,
+            log_likelihood_increment_fn=log_increment,
+        )
+
+    for next_population, acceptance_rate in (
+        sweep(population),
+        jax.jit(sweep)(population),
+    ):
+        _assert_tree_equal(next_population, population)
+        np.testing.assert_array_equal(acceptance_rate, 1.0)
+        assert acceptance_rate.dtype == population.log_target.dtype
 
 
 def test_prefix_target_value_and_gradient_exclude_future_factor():
