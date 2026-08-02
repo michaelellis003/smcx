@@ -4,6 +4,7 @@
 """Product tests for private IBIS kernels before public assembly."""
 
 import math
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -16,12 +17,21 @@ from smcx._ibis import (
     _ibis_prefix_expansion,
     _ibis_prefix_logdensity,
     _IBISPopulation,
+    _run_ibis_custom_mutation_sweep,
     _run_ibis_rwm_sweep,
 )
 
 
 def _assert_tree_equal(actual, expected) -> None:
     jax.tree.map(np.testing.assert_array_equal, actual, expected)
+
+
+class _GradientMutationState(NamedTuple):
+    position: jax.Array
+
+
+class _GradientMutationInfo(NamedTuple):
+    acceptance_rate: jax.Array
 
 
 def test_expansion_log_ratio_retains_low_order_difference():
@@ -207,6 +217,80 @@ def test_rwm_keeps_parameter_and_target_arithmetic_dtypes_separate():
     assert next_population.log_target.dtype == jnp.float64
     assert next_population.log_target_correction.dtype == jnp.float64
     assert acceptance_rate.dtype == jnp.float64
+
+
+def test_custom_mutation_rebuilds_prefix_cache_after_gradient_moves():
+    population = _IBISPopulation(
+        params=jnp.asarray([[0.5], [-1.5]], dtype=jnp.float32),
+        log_target=jnp.asarray([123.0, -456.0], dtype=jnp.float32),
+        log_target_correction=jnp.asarray([17.0, -19.0], dtype=jnp.float32),
+    )
+    emissions = jnp.asarray(
+        [[1e8], [1.0], [-1e8], [4.0], [jnp.nan]],
+        dtype=jnp.float32,
+    )
+    time_index = jnp.asarray(3, dtype=jnp.int32)
+    target_template = jnp.zeros((), dtype=jnp.float32)
+
+    def log_prior(position):
+        return -jnp.float32(0.5) * position[0] ** 2
+
+    def log_increment(emission, position, input_t):
+        assert input_t is None
+        return emission[0] * position[0]
+
+    def initialize(position, logdensity_fn):
+        gradient = jax.grad(logdensity_fn)(position)
+        return _GradientMutationState(position + jnp.zeros_like(gradient))
+
+    def mutate(_key, state, logdensity_fn):
+        gradient = jax.grad(logdensity_fn)(state.position)
+        next_position = state.position + jnp.float32(0.125) * gradient
+        return (
+            _GradientMutationState(next_position),
+            _GradientMutationInfo(jnp.asarray(0.75, dtype=jnp.float32)),
+        )
+
+    def sweep(value):
+        return _run_ibis_custom_mutation_sweep(
+            jax.random.key(17),
+            value,
+            time_index,
+            num_steps=2,
+            emissions=emissions,
+            inputs=None,
+            log_prior_fn=log_prior,
+            log_likelihood_increment_fn=log_increment,
+            initialize=initialize,
+            mutate=mutate,
+        )
+
+    eager = sweep(population)
+    compiled = jax.jit(sweep)(population)
+    _assert_tree_equal(compiled, eager)
+
+    next_population, acceptance_rate, acceptance_valid = eager
+    fresh_target, fresh_correction = jax.vmap(
+        lambda position: _ibis_prefix_expansion(
+            position,
+            time_index,
+            target_template,
+            emissions=emissions,
+            inputs=None,
+            log_prior_fn=log_prior,
+            log_likelihood_increment_fn=log_increment,
+        )
+    )(next_population.params)
+    _assert_tree_equal(next_population.log_target, fresh_target)
+    _assert_tree_equal(next_population.log_target_correction, fresh_correction)
+    assert not np.array_equal(next_population.log_target, population.log_target)
+    assert not np.array_equal(
+        next_population.log_target_correction,
+        population.log_target_correction,
+    )
+    assert bool(jnp.all(jnp.isfinite(next_population.params)))
+    np.testing.assert_array_equal(acceptance_rate, 0.75)
+    np.testing.assert_array_equal(acceptance_valid, True)
 
 
 def test_prefix_target_value_and_gradient_exclude_future_factor():

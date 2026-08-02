@@ -8,9 +8,10 @@ from typing import NamedTuple
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, vmap
-from jaxtyping import Array, Float, Int, Shaped
+from jaxtyping import Array, Bool, Float, Int, Shaped
 
 from smcx._numerics import _neumaier_add
+from smcx._static_mutation import _run_custom_mutation_sweep
 from smcx._utils import _validate_log_density_batch
 from smcx.types import (
     Emission,
@@ -18,6 +19,8 @@ from smcx.types import (
     ModelInput,
     PRNGKeyT,
     StaticLogDensity,
+    StaticMutationInitFn,
+    StaticMutationStepFn,
 )
 
 
@@ -211,6 +214,69 @@ def _run_ibis_rwm_sweep(
         sweep_keys,
     )
     return population, jnp.mean(acceptance_rates)
+
+
+def _run_ibis_custom_mutation_sweep(
+    key: PRNGKeyT,
+    population: _IBISPopulation,
+    time_index: Int[Array, ""],
+    *,
+    num_steps: int,
+    emissions: Shaped[Array, "ntime emission_dim"],
+    inputs: Shaped[Array, "ntime input_dim"] | None,
+    log_prior_fn: StaticLogDensity,
+    log_likelihood_increment_fn: IBISLogLikelihoodFn,
+    initialize: StaticMutationInitFn,
+    mutate: StaticMutationStepFn,
+) -> tuple[
+    _IBISPopulation,
+    Float[Array, ""],
+    Bool[Array, ""],
+]:
+    """Run caller mutation and rebuild its current-prefix target caches."""
+    target_template = jnp.zeros((), dtype=population.log_target.dtype)
+
+    def logdensity(params):
+        return _ibis_prefix_logdensity(
+            params,
+            time_index,
+            target_template,
+            emissions=emissions,
+            inputs=inputs,
+            log_prior_fn=log_prior_fn,
+            log_likelihood_increment_fn=log_likelihood_increment_fn,
+        )
+
+    params, acceptance_rate, acceptance_valid = _run_custom_mutation_sweep(
+        key,
+        population.params,
+        logdensity,
+        num_steps=num_steps,
+        initialize=initialize,
+        mutate=mutate,
+    )
+
+    def expansion(position):
+        return _ibis_prefix_expansion(
+            position,
+            time_index,
+            target_template,
+            emissions=emissions,
+            inputs=inputs,
+            log_prior_fn=log_prior_fn,
+            log_likelihood_increment_fn=log_likelihood_increment_fn,
+        )
+
+    log_target, correction = vmap(expansion)(params)
+    return (
+        _IBISPopulation(
+            params=params,
+            log_target=log_target,
+            log_target_correction=correction,
+        ),
+        acceptance_rate,
+        acceptance_valid,
+    )
 
 
 def _advance_ibis_target(
