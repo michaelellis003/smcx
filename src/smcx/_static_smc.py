@@ -147,6 +147,7 @@ def _static_smc_stage(
     resampling_threshold: float | ResamplingCriterion | None,
     time_index: Int[Array, ""] | None,
     move_fn: _StaticMoveFn,
+    uniform_log_weights: Float[Array, " num_particles"] | None = None,
 ) -> tuple[_StaticSMCState, _StaticStageDiagnostics]:
     """Apply one host-driven correction-selection-move stage."""
     corrected = _compiled_static_smc_correction(
@@ -190,8 +191,11 @@ def _static_smc_stage(
         )
         population = moved.population
         acceptance_rate = _validated_acceptance_rate(moved)
-        uniform = -math.log(num_particles)
-        log_weights = jnp.full_like(corrected.log_weights, uniform)
+        if uniform_log_weights is None:
+            uniform = -math.log(num_particles)
+            log_weights = jnp.full_like(corrected.log_weights, uniform)
+        else:
+            log_weights = uniform_log_weights
         stage_ess = jnp.asarray(num_particles, corrected.selection_ess.dtype)
     else:
         population = state.population

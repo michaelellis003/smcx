@@ -64,11 +64,11 @@ def _run(seed, n=4000, **kw):
     return smcx.temper(jr.key(seed), init, log_prior, log_lik, n, **kw)
 
 
-def _small_tempering_model():
-    observation = jnp.array([0.25], dtype=jnp.float64)
+def _small_tempering_model(dtype=jnp.float64):
+    observation = jnp.array([0.25], dtype=dtype)
 
     def init(_key, n):
-        return jnp.linspace(-1.0, 1.0, n, dtype=jnp.float64)[:, None]
+        return jnp.linspace(-1.0, 1.0, n, dtype=dtype)[:, None]
 
     def log_prior(x):
         return -0.5 * jnp.sum(x**2)
@@ -903,6 +903,37 @@ class TestMechanics:
             rtol=0.0,
             atol=frozen_atol,
         )
+
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
+        reason="frozen mixed x64/f32 arithmetic contract",
+    )
+    def test_f32_schedule_preserves_uniform_weight_representation(self):
+        init, log_prior, log_lik = _small_tempering_model(jnp.float32)
+        calls = 0
+
+        def schedule(phi, log_weights, _log_likelihoods):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return 0.5
+            if float(log_weights[0]) > -1.60943793:
+                return 1.0
+            return min(1.0, phi + 0.25)
+
+        posterior = smcx.temper(
+            jr.key(314159),
+            init,
+            log_prior,
+            log_lik,
+            5,
+            num_mcmc_steps=2,
+            schedule_fn=schedule,
+        )
+
+        assert posterior.log_weights.dtype == jnp.float64
+        assert calls == 2
+        np.testing.assert_array_equal(posterior.temperatures, [0.5, 1.0])
 
     @pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
     def test_nonfinite_reweight_normalizer_raises(self, value):

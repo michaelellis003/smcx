@@ -504,6 +504,7 @@ def temper(
             resampling_threshold=None,
             time_index=None,
             move_fn=move_population,
+            uniform_log_weights=log_w,
         )
         population = cast(_TemperingPopulation, stage_state.population)
         particles = population.particles
