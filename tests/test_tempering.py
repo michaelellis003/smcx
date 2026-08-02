@@ -64,11 +64,11 @@ def _run(seed, n=4000, **kw):
     return smcx.temper(jr.key(seed), init, log_prior, log_lik, n, **kw)
 
 
-def _small_tempering_model():
-    observation = jnp.array([0.25], dtype=jnp.float64)
+def _small_tempering_model(dtype=jnp.float64):
+    observation = jnp.array([0.25], dtype=dtype)
 
     def init(_key, n):
-        return jnp.linspace(-1.0, 1.0, n, dtype=jnp.float64)[:, None]
+        return jnp.linspace(-1.0, 1.0, n, dtype=dtype)[:, None]
 
     def log_prior(x):
         return -0.5 * jnp.sum(x**2)
@@ -161,6 +161,11 @@ def _bad_mutation_step(key, state, tempered_logdensity_fn):
     return next_state, info._replace(acceptance_rate=jnp.ones(2))
 
 
+def _nonconvertible_mutation_step(key, state, tempered_logdensity_fn):
+    next_state, info = _mutation_step(key, state, tempered_logdensity_fn)
+    return next_state, info._replace(acceptance_rate=object())
+
+
 def _fixed_acceptance_step(rate):
     def step(_key, state, _tempered_logdensity_fn):
         info = _MutationInfo(
@@ -238,6 +243,11 @@ class TestMutationCallback:
         [
             (_bad_mutation_init, _mutation_step, "position must have shape"),
             (_mutation_init, _bad_mutation_step, "must be a scalar float"),
+            (
+                _mutation_init,
+                _nonconvertible_mutation_step,
+                "must be a scalar float",
+            ),
         ],
     )
     def test_malformed_mutation_contract_raises(
@@ -835,6 +845,105 @@ class TestMechanics:
             rtol=0.0,
             atol=frozen_atol,
         )
+
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
+        reason="frozen CPU/f64 arithmetic contract",
+    )
+    def test_rwm_sweep_preserves_frozen_two_stage_output(self):
+        init, log_prior, log_lik = _small_tempering_model()
+        posterior = smcx.temper(
+            jr.key(314159),
+            init,
+            log_prior,
+            log_lik,
+            5,
+            num_mcmc_steps=2,
+            target_ess=0.95,
+        )
+
+        # This uses the same five-binary64-eps backend-rounding budget as the
+        # established one-stage frozen fixture immediately above.
+        frozen_atol = 1e-15
+        np.testing.assert_allclose(
+            np.asarray(posterior.particles),
+            np.array([
+                [0.5566520237390912],
+                [0.42931421610876214],
+                [0.0],
+                [0.3006901431829462],
+                [-0.04198666790556421],
+            ]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.log_weights),
+            np.full(5, -1.6094379124341003),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.marginal_loglik),
+            np.asarray(-0.3510029236122849),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.temperatures),
+            np.array([0.6627762304582339, 1.0]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.ess),
+            np.array([4.75, 4.873686009537485]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.acceptance_rates),
+            np.array([0.4000000134110451, 0.30000000447034836]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+        np.testing.assert_allclose(
+            np.asarray(posterior.log_evidence_increments),
+            np.array([-0.23537493635122342, -0.1156279872610615]),
+            rtol=0.0,
+            atol=frozen_atol,
+        )
+
+    @pytest.mark.skipif(
+        jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
+        reason="frozen mixed x64/f32 arithmetic contract",
+    )
+    def test_f32_schedule_preserves_uniform_weight_representation(self):
+        init, log_prior, log_lik = _small_tempering_model(jnp.float32)
+        calls = 0
+
+        def schedule(phi, log_weights, _log_likelihoods):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return 0.5
+            if float(log_weights[0]) > -1.60943793:
+                return 1.0
+            return min(1.0, phi + 0.25)
+
+        posterior = smcx.temper(
+            jr.key(314159),
+            init,
+            log_prior,
+            log_lik,
+            5,
+            num_mcmc_steps=2,
+            schedule_fn=schedule,
+        )
+
+        assert posterior.log_weights.dtype == jnp.float64
+        assert calls == 2
+        np.testing.assert_array_equal(posterior.temperatures, [0.5, 1.0])
 
     @pytest.mark.parametrize("value", [-jnp.inf, jnp.inf, jnp.nan])
     def test_nonfinite_reweight_normalizer_raises(self, value):

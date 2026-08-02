@@ -32,7 +32,7 @@ The adaptive schedule is host-driven (bisection reads ESS values), so
 """
 
 import math
-from typing import cast
+from typing import NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -42,11 +42,14 @@ from jax import jit, lax, vmap
 from jaxtyping import Array, Bool, Float
 
 from smcx._covariance import _weighted_covariance_factor
-from smcx._numerics import _neumaier_add
+from smcx._static_smc import (
+    _is_valid_acceptance_rate,
+    _static_smc_stage,
+    _StaticMoveResult,
+    _StaticSMCState,
+)
 from smcx._utils import (
     _raise_if_degenerate,
-    _raise_invalid_ancestors,
-    _validate_ancestors,
     _validate_log_density_batch,
 )
 from smcx.containers import TemperedPosterior
@@ -54,6 +57,7 @@ from smcx.exceptions import DegenerateWeightsError
 from smcx.resampling import systematic
 from smcx.types import (
     DenseInitialSampler,
+    ParticleCloud,
     PRNGKeyT,
     ResamplingFn,
     StaticLogDensity,
@@ -69,6 +73,14 @@ from smcx.weights import log_normalize
 _BISECT_ITERS = 60
 _MAX_TARGET_ESS = 1.0 - float(np.finfo(np.float32).eps)
 _RWM_SCALE = 2.38
+
+
+class _TemperingPopulation(NamedTuple):
+    """Particles and aligned target caches owned by the tempering shell."""
+
+    particles: Float[Array, "num_particles state_dim"]
+    log_likelihoods: Float[Array, " num_particles"]
+    log_priors: Float[Array, " num_particles"]
 
 
 def _mutation_position(
@@ -116,34 +128,6 @@ def _mutation_acceptance_rate(info: object) -> Array:
             f"got shape {rate.shape} and dtype {rate.dtype}"
         )
     return rate
-
-
-def _is_valid_acceptance_rate(
-    rate: Float[Array, ""],
-) -> Bool[Array, ""]:
-    """Return whether a traced mutation acceptance rate is a probability."""
-    bit_width = jnp.finfo(rate.dtype).bits
-    if bit_width < 16:
-        widened_rate = rate.astype(jnp.float32)
-        return (
-            jnp.isfinite(widened_rate)
-            & (widened_rate >= 0.0)
-            & (widened_rate <= 1.0)
-        )
-    unsigned_dtype = {
-        16: jnp.uint16,
-        32: jnp.uint32,
-        64: jnp.uint64,
-    }[bit_width]
-    bits = lax.bitcast_convert_type(rate, unsigned_dtype)
-    sign_mask = jnp.asarray(
-        1 << (bit_width - 1),
-        dtype=unsigned_dtype,
-    )
-    # Arithmetic comparisons can flush a negative subnormal to zero. Inspect
-    # its sign bit while admitting the sign-only negative-zero encoding.
-    nonnegative = ((bits & sign_mask) == 0) | (bits == sign_mask)
-    return jnp.isfinite(rate) & nonnegative & (rate <= 1.0)
 
 
 def temper(
@@ -446,69 +430,95 @@ def temper(
                 phi_new = lo if lo > phi else 0.5 * (phi + hi)
         delta = phi_new - phi
 
-        # --- reweight; increment at the reweight stage --------------
-        lw_norm, log_sum = log_normalize(log_w + delta * loglik)
-        _raise_if_degenerate(log_sum)
-        stage_ess = float(compute_ess(lw_norm))
-        total, comp = _neumaier_add(total, comp, log_sum)
-
-        # --- adapt the default proposal from the weighted cloud ------
-        if mutation_sweep is None:
-            l_prop = _weighted_covariance_factor(
-                particles,
-                jnp.exp(lw_norm),
-                scale=scale2,
-            )
-
-        # --- resample (always) + pi_{phi'}-invariant moves ----------
+        # --- shared correction, selection, and invariant move -------
         key, kr, km = jr.split(key, 3)
-        idx, invalid_resampling = _validate_ancestors(
-            resampling_fn(kr, jnp.exp(lw_norm), n),
-            n,
-            n,
-        )
-        _raise_invalid_ancestors(invalid_resampling, n)
-        particles = particles[idx]
-        loglik = loglik[idx]
-        logprior = logprior[idx]
-        if mutation_sweep is None:
-            particles, loglik, logprior, acc = rwm_sweep(
-                km,
-                particles,
-                loglik,
-                logprior,
-                jnp.asarray(phi_new),
-                l_prop,
-            )
-        else:
-            particles, acc, valid_rates = mutation_sweep(
-                km,
-                particles,
-                jnp.asarray(phi_new),
-            )
-            if not bool(valid_rates):
-                raise ValueError(
-                    "mutation_step_fn acceptance_rate must be finite "
-                    "and in [0, 1]"
+        stage_phi = jnp.asarray(phi_new)
+
+        def move_population(
+            move_key: PRNGKeyT,
+            corrected_population: ParticleCloud,
+            corrected_log_weights: Float[Array, " num_particles"],
+            selected_population: ParticleCloud,
+            stage_target: Float[Array, ""] = stage_phi,
+        ) -> _StaticMoveResult:
+            source = cast(_TemperingPopulation, corrected_population)
+            selected = cast(_TemperingPopulation, selected_population)
+            if mutation_sweep is None:
+                l_prop = _weighted_covariance_factor(
+                    source.particles,
+                    jnp.exp(corrected_log_weights),
+                    scale=scale2,
                 )
-            loglik = jnp.asarray(batch_lik(particles))
-            logprior = jnp.asarray(batch_prior(particles))
-            _validate_log_density_batch(
-                loglik,
-                n,
-                name="log_likelihood_fn",
+                moved_particles, moved_loglik, moved_logprior, acc = rwm_sweep(
+                    move_key,
+                    selected.particles,
+                    selected.log_likelihoods,
+                    selected.log_priors,
+                    stage_target,
+                    l_prop,
+                )
+                valid_rates = jnp.asarray(True)
+            else:
+                moved_particles, acc, valid_rates = mutation_sweep(
+                    move_key,
+                    selected.particles,
+                    stage_target,
+                )
+                moved_loglik = jnp.asarray(batch_lik(moved_particles))
+                moved_logprior = jnp.asarray(batch_prior(moved_particles))
+                _validate_log_density_batch(
+                    moved_loglik,
+                    n,
+                    name="log_likelihood_fn",
+                )
+                _validate_log_density_batch(
+                    moved_logprior,
+                    n,
+                    name="log_prior_fn",
+                )
+            return _StaticMoveResult(
+                population=_TemperingPopulation(
+                    moved_particles,
+                    moved_loglik,
+                    moved_logprior,
+                ),
+                acceptance_rate=acc,
+                acceptance_valid=valid_rates,
             )
-            _validate_log_density_batch(
-                logprior,
-                n,
-                name="log_prior_fn",
-            )
-        log_w = jnp.full((n,), -log_n)
+
+        stage_state, stage_info = _static_smc_stage(
+            _StaticSMCState(
+                population=_TemperingPopulation(
+                    particles,
+                    loglik,
+                    logprior,
+                ),
+                log_weights=log_w,
+                log_evidence=total,
+                log_evidence_correction=comp,
+            ),
+            delta * loglik,
+            kr,
+            km,
+            resampling_fn=resampling_fn,
+            resampling_threshold=None,
+            time_index=None,
+            move_fn=move_population,
+            uniform_log_weights=log_w,
+        )
+        population = cast(_TemperingPopulation, stage_state.population)
+        particles = population.particles
+        loglik = population.log_likelihoods
+        logprior = population.log_priors
+        log_w = stage_state.log_weights
+        total = stage_state.log_evidence
+        comp = stage_state.log_evidence_correction
+        stage_ess = float(stage_info.selection_ess)
 
         temps.append(phi_new)
         ess_trace.append(stage_ess)
-        acc_trace.append(acc)
-        increment_trace.append(jnp.asarray(log_sum))
+        acc_trace.append(stage_info.acceptance_rate)
+        increment_trace.append(stage_info.log_evidence_increment)
         phi = phi_new
         if phi >= 1.0:
             break
