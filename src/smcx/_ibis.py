@@ -6,6 +6,7 @@
 from typing import NamedTuple
 
 import jax.numpy as jnp
+import jax.random as jr
 from jax import lax, vmap
 from jaxtyping import Array, Float, Int, Shaped
 
@@ -15,6 +16,7 @@ from smcx.types import (
     Emission,
     IBISLogLikelihoodFn,
     ModelInput,
+    PRNGKeyT,
     StaticLogDensity,
 )
 
@@ -25,6 +27,26 @@ class _IBISPopulation(NamedTuple):
     params: Float[Array, "num_particles param_dim"]
     log_target: Float[Array, " num_particles"]
     log_target_correction: Float[Array, " num_particles"]
+
+
+def _ibis_expansion_log_ratio(
+    proposed_total: Float[Array, " num_particles"],
+    proposed_correction: Float[Array, " num_particles"],
+    current_total: Float[Array, " num_particles"],
+    current_correction: Float[Array, " num_particles"],
+) -> Float[Array, " num_particles"]:
+    """Subtract two target expansions without resolving either one first."""
+    total, correction = _neumaier_add(
+        proposed_total,
+        proposed_correction,
+        -current_total,
+    )
+    total, correction = _neumaier_add(
+        total,
+        correction,
+        -current_correction,
+    )
+    return total + correction
 
 
 def _ibis_prefix_expansion(
@@ -108,6 +130,87 @@ def _ibis_prefix_logdensity(
         log_likelihood_increment_fn=log_likelihood_increment_fn,
     )
     return total + correction
+
+
+def _run_ibis_rwm_sweep(
+    key: PRNGKeyT,
+    population: _IBISPopulation,
+    time_index: Int[Array, ""],
+    proposal_factor: Float[Array, "param_dim param_dim"],
+    *,
+    num_steps: int,
+    emissions: Shaped[Array, "ntime emission_dim"],
+    inputs: Shaped[Array, "ntime input_dim"] | None,
+    log_prior_fn: StaticLogDensity,
+    log_likelihood_increment_fn: IBISLogLikelihoodFn,
+) -> tuple[_IBISPopulation, Float[Array, ""]]:
+    """Run fixed-count RWM sweeps while retaining aligned target caches."""
+    num_particles = population.params.shape[0]
+    target_template = jnp.zeros((), dtype=population.log_target.dtype)
+
+    def evaluate(params):
+        return _ibis_prefix_expansion(
+            params,
+            time_index,
+            target_template,
+            emissions=emissions,
+            inputs=inputs,
+            log_prior_fn=log_prior_fn,
+            log_likelihood_increment_fn=log_likelihood_increment_fn,
+        )
+
+    sweep_keys = jr.split(key, num_steps)
+
+    def apply_sweep(current, sweep_key):
+        proposal_key, acceptance_key = jr.split(sweep_key)
+        noise = jr.normal(
+            proposal_key,
+            current.params.shape,
+            dtype=current.params.dtype,
+        )
+        proposed_params = current.params + noise @ proposal_factor.T
+        proposed_total, proposed_correction = vmap(evaluate)(proposed_params)
+        log_ratio = _ibis_expansion_log_ratio(
+            proposed_total,
+            proposed_correction,
+            current.log_target,
+            current.log_target_correction,
+        )
+        uniforms = jr.uniform(
+            acceptance_key,
+            (num_particles,),
+            dtype=log_ratio.dtype,
+        )
+        log_uniforms = jnp.log(
+            jnp.maximum(uniforms, jnp.finfo(uniforms.dtype).tiny)
+        )
+        accepted = log_uniforms < log_ratio
+        next_population = _IBISPopulation(
+            params=jnp.where(
+                accepted[:, None],
+                proposed_params,
+                current.params,
+            ),
+            log_target=jnp.where(
+                accepted,
+                proposed_total,
+                current.log_target,
+            ),
+            log_target_correction=jnp.where(
+                accepted,
+                proposed_correction,
+                current.log_target_correction,
+            ),
+        )
+        acceptance_rate = jnp.mean(accepted.astype(log_ratio.dtype))
+        return next_population, acceptance_rate
+
+    population, acceptance_rates = lax.scan(
+        apply_sweep,
+        population,
+        sweep_keys,
+    )
+    return population, jnp.mean(acceptance_rates)
 
 
 def _advance_ibis_target(
