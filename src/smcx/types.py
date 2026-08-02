@@ -198,6 +198,19 @@ class StaticLogDensity(Protocol):
 
 
 @runtime_checkable
+class IBISLogLikelihoodFn(Protocol):
+    """Evaluate one deterministic conditional likelihood increment."""
+
+    def __call__(
+        self,
+        emission_t: Emission,
+        params: Float[Array, " param_dim"],
+        input_t: ModelInput | None,
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
 class TemperingMutationState(Protocol):
     """Expose the dense position carried by a tempering mutation kernel."""
 
