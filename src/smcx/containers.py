@@ -70,6 +70,33 @@ class ParticleFilterResult(Protocol):
     def log_evidence_increments(self) -> Float[Array, " ntime"]: ...
 
 
+@runtime_checkable
+class ParameterFilterResult(Protocol):
+    """Structural type for results with weighted parameter histories.
+
+    `smcx.containers.LiuWestPosterior`, `smcx.containers.SMC2Posterior`, and
+    caller-owned records satisfy this protocol when they provide its two
+    fields. Parameter diagnostics validate array dtypes, shapes, and aligned
+    axes at their public boundary.
+
+    Attributes:
+        filtered_params: Parameter particles, shape
+            ``(ntime, num_particles, param_dim)``.
+        filtered_log_weights: Normalized log weights, shape
+            ``(ntime, num_particles)``.
+    """
+
+    @property
+    def filtered_params(
+        self,
+    ) -> Float[Array, "ntime num_particles param_dim"]: ...
+
+    @property
+    def filtered_log_weights(
+        self,
+    ) -> Float[Array, "ntime num_particles"]: ...
+
+
 class ParticleState(NamedTuple):
     r"""State of a particle cloud at a single time step.
 

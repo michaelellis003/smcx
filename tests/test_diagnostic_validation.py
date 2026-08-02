@@ -67,6 +67,21 @@ class _ResearchPosterior(NamedTuple):
     log_evidence_increments: object
 
 
+class _ResearchParameterPosterior(NamedTuple):
+    """Caller-owned container with only parameter-summary fields."""
+
+    filtered_params: object
+    filtered_log_weights: object
+
+
+class _ParametersOnly(NamedTuple):
+    filtered_params: object
+
+
+class _WeightsOnly(NamedTuple):
+    filtered_log_weights: object
+
+
 @pytest.mark.parametrize(
     ("summary", "posterior"),
     [
@@ -387,3 +402,30 @@ def test_valid_caller_owned_posterior_remains_jittable():
     malformed = posterior._replace(filtered_particles=jnp.zeros((3, 3, 1)))
     with pytest.raises(ValueError, match=r"filtered_particles.*axes"):
         jax.jit(smcx.weighted_mean)(malformed)
+
+
+def test_caller_owned_parameter_result_supports_jitted_summaries():
+    reference = _parameter_posterior()
+    posterior = _ResearchParameterPosterior(
+        reference.filtered_params,
+        reference.filtered_log_weights,
+    )
+
+    assert isinstance(posterior, smcx.ParameterFilterResult)
+    assert not isinstance(
+        _ParametersOnly(posterior.filtered_params),
+        smcx.ParameterFilterResult,
+    )
+    assert not isinstance(
+        _WeightsOnly(posterior.filtered_log_weights),
+        smcx.ParameterFilterResult,
+    )
+    assert jnp.array_equal(
+        jax.jit(smcx.param_weighted_mean)(posterior),
+        smcx.param_weighted_mean(reference),
+    )
+    q = jnp.asarray([0.25, 0.75])
+    assert jnp.array_equal(
+        jax.jit(smcx.param_weighted_quantile)(posterior, q),
+        smcx.param_weighted_quantile(reference, q),
+    )

@@ -15,7 +15,7 @@ uncertainty*; McElreath: *always report intervals, not just means*):
 - `smcx.weighted_variance` — weighted posterior variance
 - `smcx.weighted_quantile` — weighted quantiles for credible
   intervals
-- `smcx.param_weighted_mean` — weighted parameter mean (Liu-West)
+- `smcx.param_weighted_mean` — weighted parameter mean
 - `smcx.param_weighted_quantile` — weighted parameter quantiles
 
 Computational faithfulness (Vehtari: *can we trust the computation?*):
@@ -47,9 +47,9 @@ Scoring rules:
 Array-returning functions are pure, stateless, and JIT-compatible for
 static shape and control arguments. Genealogy and predictive operations
 preserve structured latent-state PyTrees; Euclidean summaries require a
-dense ``(T, N, D)`` particle history. Parameter summaries accept
-`smcx.containers.LiuWestPosterior` and
-`smcx.containers.SMC2Posterior`. `smcx.diagnose` converts results to Python
+dense ``(T, N, D)`` particle history. Parameter summaries accept any
+`smcx.containers.ParameterFilterResult`, including Liu-West and SMC²
+posteriors. `smcx.diagnose` converts results to Python
 scalars and strings, so it is intentionally host-only.
 Axis-sensitive state, parameter, predictive, and genealogy diagnostics
 validate the time, particle, and event axes they consume. State, parameter,
@@ -82,9 +82,9 @@ from smcx._utils import (
 )
 from smcx.containers import (
     LiuWestPosterior,
+    ParameterFilterResult,
     ParticleFilterPosterior,
     ParticleFilterResult,
-    SMC2Posterior,
 )
 from smcx.types import (
     EmissionSampler,
@@ -254,7 +254,7 @@ def _require_history_array(
 
 
 def _validate_log_weight_history(
-    posterior: ParticleFilterResult | SMC2Posterior,
+    posterior: ParticleFilterResult | ParameterFilterResult,
     diagnostic: str,
 ) -> tuple[int, int]:
     """Validate the common nonempty ``(T, N)`` log-weight history."""
@@ -300,7 +300,7 @@ def _validate_particle_axes(
 
 
 def _require_parameter_history(
-    posterior: LiuWestPosterior | SMC2Posterior,
+    posterior: ParameterFilterResult,
     diagnostic: str,
 ) -> Float[Array, "ntime num_particles param_dim"]:
     """Validate and return a parameter history aligned with its weights."""
@@ -978,7 +978,7 @@ def replicated_log_ml(
 
 
 def param_weighted_mean(
-    posterior: LiuWestPosterior | SMC2Posterior,
+    posterior: ParameterFilterResult,
 ) -> Float[Array, "ntime param_dim"]:
     r"""Compute the weighted mean of parameter particles at each step.
 
@@ -986,7 +986,8 @@ def param_weighted_mean(
     `weighted_mean`.
 
     Args:
-        posterior: Liu-West or SMC² posterior output.
+        posterior: Any `smcx.containers.ParameterFilterResult`, including
+            Liu-West and SMC² posterior output.
 
     Returns:
         Weighted parameter means, shape ``(ntime, param_dim)``.
@@ -999,7 +1000,7 @@ def param_weighted_mean(
 
 
 def param_weighted_quantile(
-    posterior: LiuWestPosterior | SMC2Posterior,
+    posterior: ParameterFilterResult,
     q: _DiagnosticVector,
 ) -> Float[Array, "ntime num_quantiles param_dim"]:
     r"""Compute weighted quantiles of parameter particles at each step.
@@ -1009,7 +1010,8 @@ def param_weighted_quantile(
     upper-tail preservation.
 
     Args:
-        posterior: Liu-West or SMC² posterior output.
+        posterior: Any `smcx.containers.ParameterFilterResult`, including
+            Liu-West and SMC² posterior output.
         q: Quantile levels in [0, 1], e.g. ``jnp.array([0.025, 0.975])``
             for a 95% credible interval. Values are checked eagerly;
             callers passing traced levels must preserve this domain.
