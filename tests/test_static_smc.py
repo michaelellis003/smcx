@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 import pytest
+from numpy.testing import assert_allclose
 
 from smcx._static_smc import (
     _static_smc_correction,
@@ -30,15 +31,14 @@ class _Population(NamedTuple):
 
 def _state() -> _StaticSMCState:
     return _StaticSMCState(
-        _Population(jnp.arange(3.0)[:, None], jnp.arange(3.0) + 10.0),
-        jnp.log(jnp.asarray([0.2, 0.3, 0.5], dtype=jnp.float32)),
+        _Population(jnp.arange(7.0)[:, None], jnp.arange(7.0) + 10.0),
+        jnp.log(jnp.arange(1, 8, dtype=jnp.float32) / 28),
         jnp.asarray(1.25),
         jnp.asarray(0.125),
     )
 
 
-def _increment() -> jax.Array:
-    return jnp.log(jnp.asarray([2.0, 1.0, 0.5], dtype=jnp.float32))
+_INCREMENT = jnp.log(jnp.linspace(0.5, 2.0, 7, dtype=jnp.float32))
 
 
 def _assert_tree_equal(actual, expected) -> None:
@@ -59,7 +59,7 @@ def _identity_move(_key, _source, _log_weights, selected):
 def _run_stage(resampling_fn, move_fn, *, threshold=None, index=None):
     return _static_smc_stage(
         _state(),
-        _increment(),
+        _INCREMENT,
         jr.key(17),
         jr.key(23),
         resampling_fn=resampling_fn,
@@ -70,7 +70,7 @@ def _run_stage(resampling_fn, move_fn, *, threshold=None, index=None):
 
 
 def test_correction_matches_oracle_and_compiled_execution():
-    state, increment = _state(), _increment()
+    state, increment = _state(), _INCREMENT
     args = (
         state.log_weights,
         increment,
@@ -84,7 +84,7 @@ def test_correction_matches_oracle_and_compiled_execution():
     for actual, expected in zip(compiled, eager, strict=True):
         np.testing.assert_allclose(actual, expected, rtol=1e-6)
 
-    raw = np.log([0.2, 0.3, 0.5]) + np.log([2.0, 1.0, 0.5])
+    raw = np.log(np.arange(1, 8) / 28 * np.linspace(0.5, 2.0, 7))
     increment_oracle = np.log(np.exp(raw).sum())
     np.testing.assert_allclose(
         eager.log_weights, raw - increment_oracle, rtol=1e-6
@@ -102,41 +102,42 @@ def test_correction_matches_oracle_and_compiled_execution():
 def test_forced_stage_gathers_population_and_routes_exact_keys():
     state = _state()
     expected_weights, expected_increment = log_normalize(
-        state.log_weights + _increment()
+        state.log_weights + _INCREMENT
     )
-    ancestors = jnp.asarray([2, 0, 2], dtype=jnp.int32)
+    ancestors = jnp.asarray([6, 0, 6, 3, 1, 5, 2], dtype=jnp.int32)
     selected = jax.tree.map(lambda leaf: leaf[ancestors], state.population)
 
     def resample(key, weights, count):
         np.testing.assert_array_equal(jr.key_data(key), jr.key_data(jr.key(17)))
-        np.testing.assert_allclose(weights, jnp.exp(expected_weights))
-        assert count == 3
+        assert_allclose(weights, jnp.exp(expected_weights), rtol=1e-6)
+        assert count == 7
         return ancestors
 
     def move(key, source, log_weights, seeds):
         np.testing.assert_array_equal(jr.key_data(key), jr.key_data(jr.key(23)))
         _assert_tree_equal(source, state.population)
         _assert_tree_equal(seeds, selected)
-        np.testing.assert_allclose(log_weights, expected_weights)
+        assert_allclose(log_weights, expected_weights, rtol=1e-6)
         return _StaticMoveResult(seeds, jnp.asarray(0.25), jnp.asarray(True))
 
     result, info = _run_stage(resample, move)
     _assert_tree_equal(result.population, selected)
-    np.testing.assert_allclose(result.log_weights, -math.log(3))
-    np.testing.assert_allclose(info.selection_ess, ess(expected_weights))
-    np.testing.assert_allclose(info.log_evidence_increment, expected_increment)
-    np.testing.assert_allclose([info.ess, info.acceptance_rate], [3.0, 0.25])
+    assert result.log_weights.dtype == expected_weights.dtype
+    np.testing.assert_allclose(result.log_weights, -math.log(7))
+    assert_allclose(info.selection_ess, ess(expected_weights), rtol=1e-6)
+    assert_allclose(info.log_evidence_increment, expected_increment, rtol=1e-6)
+    np.testing.assert_array_equal([info.ess, info.acceptance_rate], [7.0, 0.25])
     assert bool(info.resampled)
 
 
 def test_callable_skip_receives_corrected_diagnostics_and_skips_callbacks():
     state = _state()
-    expected_weights, _ = log_normalize(state.log_weights + _increment())
+    expected_weights, _ = log_normalize(state.log_weights + _INCREMENT)
     index = jnp.asarray(4, dtype=jnp.int32)
 
     def criterion(log_weights, current_ess, time_index):
-        np.testing.assert_allclose(log_weights, expected_weights)
-        np.testing.assert_allclose(current_ess, ess(expected_weights))
+        assert_allclose(log_weights, expected_weights, rtol=1e-6)
+        assert_allclose(current_ess, ess(expected_weights), rtol=1e-6)
         np.testing.assert_array_equal(time_index, index)
         return jnp.asarray(False)
 
@@ -145,7 +146,7 @@ def test_callable_skip_receives_corrected_diagnostics_and_skips_callbacks():
 
     result, info = _run_stage(fail, fail, threshold=criterion, index=index)
     _assert_tree_equal(result.population, state.population)
-    np.testing.assert_allclose(result.log_weights, expected_weights)
+    assert_allclose(result.log_weights, expected_weights, rtol=1e-6)
     np.testing.assert_allclose(info.selection_ess, info.ess)
     assert not bool(info.resampled)
     np.testing.assert_array_equal(info.acceptance_rate, 0.0)
@@ -155,7 +156,7 @@ def test_stage_gates_degeneracy_and_invalid_ancestors():
     with pytest.raises(DegenerateWeightsError):
         _static_smc_stage(
             _state(),
-            jnp.full((3,), -jnp.inf),
+            jnp.full((7,), -jnp.inf),
             jr.key(1),
             jr.key(2),
             resampling_fn=_identity_resampling,
@@ -167,7 +168,7 @@ def test_stage_gates_degeneracy_and_invalid_ancestors():
     def invalid(_key, _weights, count):
         return jnp.full((count,), -1, dtype=jnp.int32)
 
-    with pytest.raises(ValueError, match=r"entries must be in \[0, 3\)"):
+    with pytest.raises(ValueError, match=r"entries must be in \[0, 7\)"):
         _run_stage(invalid, _identity_move)
 
 

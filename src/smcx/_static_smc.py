@@ -7,7 +7,7 @@ import math
 from typing import NamedTuple, Protocol, runtime_checkable
 
 import jax.numpy as jnp
-from jax import lax
+from jax import jit, lax
 from jaxtyping import Array, Bool, Float, Int
 
 from smcx._numerics import _neumaier_add
@@ -38,16 +38,12 @@ class _StaticSMCState(NamedTuple):
 
 
 class _StaticMoveResult(NamedTuple):
-    """Target-specific population move output."""
-
     population: ParticleCloud
     acceptance_rate: Float[Array, ""]
     acceptance_valid: Bool[Array, ""]
 
 
 class _StaticStageDiagnostics(NamedTuple):
-    """Diagnostics defined by one correction-selection-move stage."""
-
     log_evidence_increment: Float[Array, ""]
     selection_ess: Float[Array, ""]
     ess: Float[Array, ""]
@@ -56,8 +52,6 @@ class _StaticStageDiagnostics(NamedTuple):
 
 
 class _StaticSMCCorrection(NamedTuple):
-    """Pure correction and compensated-evidence result."""
-
     log_weights: Float[Array, " num_particles"]
     log_evidence: Float[Array, ""]
     log_evidence_correction: Float[Array, ""]
@@ -100,6 +94,9 @@ def _static_smc_correction(
         log_evidence_increment=jnp.asarray(increment),
         selection_ess=selection_ess,
     )
+
+
+_compiled_static_smc_correction = jit(_static_smc_correction)
 
 
 def _validated_acceptance_rate(
@@ -148,7 +145,7 @@ def _static_smc_stage(
     move_fn: _StaticMoveFn,
 ) -> tuple[_StaticSMCState, _StaticStageDiagnostics]:
     """Apply one host-driven correction-selection-move stage."""
-    corrected = _static_smc_correction(
+    corrected = _compiled_static_smc_correction(
         state.log_weights,
         log_increment,
         state.log_evidence,
@@ -187,11 +184,14 @@ def _static_smc_stage(
         )
         population = moved.population
         acceptance_rate = _validated_acceptance_rate(moved)
-        log_weights = jnp.full((num_particles,), -math.log(num_particles))
+        uniform = -math.log(num_particles)
+        log_weights = jnp.full_like(corrected.log_weights, uniform)
+        stage_ess = jnp.asarray(num_particles, corrected.selection_ess.dtype)
     else:
         population = state.population
         acceptance_rate = jnp.zeros((), dtype=state.log_weights.dtype)
         log_weights = corrected.log_weights
+        stage_ess = corrected.selection_ess
 
     next_state = _StaticSMCState(
         population=population,
@@ -202,7 +202,7 @@ def _static_smc_stage(
     diagnostics = _StaticStageDiagnostics(
         log_evidence_increment=corrected.log_evidence_increment,
         selection_ess=corrected.selection_ess,
-        ess=jnp.asarray(compute_ess(log_weights)),
+        ess=stage_ess,
         acceptance_rate=acceptance_rate,
         resampled=do_resample,
     )
