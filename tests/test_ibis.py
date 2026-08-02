@@ -1201,6 +1201,14 @@ def test_public_ibis_rejects_invalid_numeric_threshold(threshold):
         _run_public_ibis(resampling_threshold=threshold)
 
 
+def test_public_ibis_rejects_nonnumeric_threshold(monkeypatch):
+    # The suite's test-only import hook enforces the annotation before the
+    # product boundary that default-config users reach.
+    monkeypatch.setattr(jaxtyping_config, "jaxtyping_disable", True)
+    with pytest.raises(ValueError, match="finite nonnegative number"):
+        _run_public_ibis(resampling_threshold="invalid")
+
+
 def test_public_ibis_validates_later_likelihood_density():
     outputs = iter((jnp.asarray(0.0), jnp.zeros(2)))
 
