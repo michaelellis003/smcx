@@ -251,6 +251,19 @@ class TemperingMutationStepFn(Protocol):
     ) -> tuple[TemperingMutationState, TemperingMutationInfo]: ...
 
 
+StaticMutationState: TypeAlias = TemperingMutationState
+"""Generic static-target mutation state; alias of the tempering contract."""
+
+StaticMutationInfo: TypeAlias = TemperingMutationInfo
+"""Generic static-target mutation diagnostic; alias of tempering info."""
+
+StaticMutationInitFn: TypeAlias = TemperingMutationInitFn
+"""Generic static-target mutation initializer; alias of tempering init."""
+
+StaticMutationStepFn: TypeAlias = TemperingMutationStepFn
+"""Generic static-target mutation step; alias of the tempering step."""
+
+
 @runtime_checkable
 class TransitionSampler(Protocol):
     """Draw one particle from the transition distribution."""

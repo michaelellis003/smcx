@@ -21,6 +21,7 @@ import numpy as np
 import pytest
 
 import smcx
+import smcx.types as smcx_types
 from smcx.types import (
     PRNGKeyT,
     StaticLogDensity,
@@ -40,6 +41,23 @@ LOGZ_TRUE = float(
         * (np.log(2 * np.pi * (S0**2 + SL**2)) + Y_OBS**2 / (S0**2 + SL**2))
     )
 )
+
+
+@pytest.mark.parametrize(
+    ("generic_name", "tempering_name"),
+    [
+        ("StaticMutationState", "TemperingMutationState"),
+        ("StaticMutationInfo", "TemperingMutationInfo"),
+        ("StaticMutationInitFn", "TemperingMutationInitFn"),
+        ("StaticMutationStepFn", "TemperingMutationStepFn"),
+    ],
+)
+def test_static_mutation_protocols_alias_tempering_names(
+    generic_name, tempering_name
+):
+    assert getattr(smcx_types, generic_name) is getattr(
+        smcx_types, tempering_name
+    )
 
 
 def _model():
