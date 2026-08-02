@@ -38,12 +38,12 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
-from jax import jit, lax, vmap
+from jax import jit, vmap
 from jaxtyping import Array, Bool, Float
 
 from smcx._covariance import _weighted_covariance_factor
+from smcx._static_mutation import _run_custom_mutation_sweep
 from smcx._static_smc import (
-    _is_valid_acceptance_rate,
     _static_smc_stage,
     _StaticMoveResult,
     _StaticSMCState,
@@ -61,9 +61,7 @@ from smcx.types import (
     PRNGKeyT,
     ResamplingFn,
     StaticLogDensity,
-    TemperingMutationInfo,
     TemperingMutationInitFn,
-    TemperingMutationState,
     TemperingMutationStepFn,
     TemperingScheduleFn,
 )
@@ -81,53 +79,6 @@ class _TemperingPopulation(NamedTuple):
     particles: Float[Array, "num_particles state_dim"]
     log_likelihoods: Float[Array, " num_particles"]
     log_priors: Float[Array, " num_particles"]
-
-
-def _mutation_position(
-    state: object,
-    expected_shape: tuple[int, ...],
-    expected_dtype: object,
-    *,
-    source: str,
-) -> Array:
-    """Validate and return a structural mutation state's position."""
-    if not hasattr(state, "position"):
-        raise ValueError(f"{source} must return state with a position field")
-    position = cast(TemperingMutationState, state).position
-    if not hasattr(position, "shape") or not hasattr(position, "dtype"):
-        raise ValueError(f"{source} state.position must be a JAX array")
-    if tuple(position.shape) != expected_shape:
-        raise ValueError(
-            f"{source} state.position must have shape {expected_shape}; "
-            f"got {position.shape}"
-        )
-    if position.dtype != expected_dtype:
-        raise ValueError(
-            f"{source} state.position must have dtype {expected_dtype}; "
-            f"got {position.dtype}"
-        )
-    return position
-
-
-def _mutation_acceptance_rate(info: object) -> Array:
-    """Validate and return one structural mutation diagnostic."""
-    if not hasattr(info, "acceptance_rate"):
-        raise ValueError(
-            "mutation_step_fn info must have an acceptance_rate field"
-        )
-    value = cast(TemperingMutationInfo, info).acceptance_rate
-    try:
-        rate: Array = jnp.asarray(value)
-    except (TypeError, ValueError) as error:
-        raise ValueError(
-            "mutation_step_fn acceptance_rate must be a scalar float"
-        ) from error
-    if rate.ndim != 0 or not jnp.issubdtype(rate.dtype, jnp.floating):
-        raise ValueError(
-            "mutation_step_fn acceptance_rate must be a scalar float; "
-            f"got shape {rate.shape} and dtype {rate.dtype}"
-        )
-    return rate
 
 
 def temper(
@@ -318,58 +269,13 @@ def temper(
                     position
                 )
 
-            def initialize_one(position):
-                state = initialize(position, tempered_logdensity)
-                _mutation_position(
-                    state,
-                    (dim,),
-                    particles.dtype,
-                    source="mutation_init_fn",
-                )
-                return state
-
-            states = vmap(initialize_one)(particles)
-            sweep_keys = jr.split(key, num_mcmc_steps)
-
-            def apply_sweep(states, sweep_key):
-                particle_keys = jr.split(sweep_key, n)
-
-                def apply_one(particle_key, state):
-                    next_state, info = mutate(
-                        particle_key, state, tempered_logdensity
-                    )
-                    _mutation_position(
-                        next_state,
-                        (dim,),
-                        particles.dtype,
-                        source="mutation_step_fn",
-                    )
-                    rate = _mutation_acceptance_rate(info)
-                    return next_state, (
-                        rate,
-                        _is_valid_acceptance_rate(rate),
-                    )
-
-                return vmap(apply_one)(particle_keys, states)
-
-            states, (acceptance_rates, valid_rates) = lax.scan(
-                apply_sweep,
-                states,
-                sweep_keys,
-            )
-            positions = cast(TemperingMutationState, states).position
-            mean_dtype = (
-                jnp.float32
-                if jnp.finfo(acceptance_rates.dtype).bits < 32
-                else acceptance_rates.dtype
-            )
-            mean_acceptance_rate = jnp.mean(
-                acceptance_rates.astype(mean_dtype)
-            ).astype(acceptance_rates.dtype)
-            return (
-                positions,
-                mean_acceptance_rate,
-                jnp.all(valid_rates),
+            return _run_custom_mutation_sweep(
+                key,
+                particles,
+                tempered_logdensity,
+                num_steps=num_mcmc_steps,
+                initialize=initialize,
+                mutate=mutate,
             )
 
     def ess_at(phi_new: float, phi: float) -> float:
