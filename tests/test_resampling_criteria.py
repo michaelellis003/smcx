@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 import smcx
+from smcx._utils import _resampling_decision
 
 N = 4
 IDENTITY = np.arange(N, dtype=np.int32)
@@ -94,6 +95,22 @@ def _run_filter(kind, criterion=None, *, concentrated=False):
         emissions,
         N,
         **kwargs,
+    )
+
+
+def test_shared_decision_forwards_precomputed_diagnostics():
+    log_weights = jnp.log(jnp.asarray([0.1, 0.2, 0.3, 0.4]))
+    current_ess = jnp.asarray(smcx.ess(log_weights))
+    time_index = jnp.asarray(7)
+
+    def criterion(weights, ess, index):
+        np.testing.assert_array_equal(weights, log_weights)
+        np.testing.assert_array_equal(ess, current_ess)
+        np.testing.assert_array_equal(index, time_index)
+        return jnp.asarray(True)
+
+    assert bool(
+        _resampling_decision(log_weights, current_ess, criterion, N, time_index)
     )
 
 

@@ -629,36 +629,27 @@ def _init_standard(
     )
 
 
-def _conditional_resample(
-    key: PRNGKeyT,
+def _resampling_decision(
     log_weights: Float[Array, " num_particles"],
     current_ess: Float[Array, ""],
-    resampling_fn: ResamplingFn,
     resampling_threshold: float | ResamplingCriterion,
     num_particles: int,
-    identity: Int[Array, " num_particles"],
     time_index: Int[Array, ""] | None = None,
-) -> tuple[Array, Int[Array, " num_particles"], Bool[Array, ""]]:
-    """Conditionally resample particles using a float or callback rule.
+) -> Bool[Array, ""]:
+    """Evaluate and validate one resampling rule.
 
     A float resamples when the precomputed effective sample size falls
     below that fraction of the particle count.
 
     Args:
-        key: PRNG key for resampling.
         log_weights: Normalised log weights (logsumexp = 0).
         current_ess: Effective sample size of ``log_weights``.
-        resampling_fn: BlackJAX-compatible resampling function.
         resampling_threshold: ESS fraction or caller-owned criterion.
         num_particles: Number of particles N.
-        identity: Identity ancestor indices ``arange(N)``.
         time_index: Zero-based emission index for a callable criterion.
 
     Returns:
-        Tuple of ``(do_resample, ancestors, invalid_ancestors)`` where
-        *do_resample* is a boolean scalar, *ancestors* are the resampled
-        (or identity) indices, and *invalid_ancestors* is a scalar range
-        failure flag for the eager shell.
+        Scalar Boolean resampling decision.
     """
     if callable(resampling_threshold):
         if time_index is None:
@@ -682,6 +673,27 @@ def _conditional_resample(
             "resampling criterion must return a scalar Boolean; "
             f"got shape {do_resample.shape} and dtype {do_resample.dtype}"
         )
+    return do_resample
+
+
+def _conditional_resample(
+    key: PRNGKeyT,
+    log_weights: Float[Array, " num_particles"],
+    current_ess: Float[Array, ""],
+    resampling_fn: ResamplingFn,
+    resampling_threshold: float | ResamplingCriterion,
+    num_particles: int,
+    identity: Int[Array, " num_particles"],
+    time_index: Int[Array, ""] | None = None,
+) -> tuple[Array, Int[Array, " num_particles"], Bool[Array, ""]]:
+    """Conditionally resample particles using a float or callback rule."""
+    do_resample = _resampling_decision(
+        log_weights,
+        current_ess,
+        resampling_threshold,
+        num_particles,
+        time_index,
+    )
 
     def resample() -> tuple[Int32[Array, " num_particles"], Array]:
         output = resampling_fn(key, normalize(log_weights), num_particles)
