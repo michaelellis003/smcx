@@ -142,6 +142,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # diff-cover needs the merge base with the PR's target branch.
+          fetch-depth: 0
 
       - name: Setup uv
         uses: ./.github/actions/setup-uv
@@ -151,6 +154,19 @@ jobs:
 
       - name: Run tests with coverage
         run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
+
+      - name: Enforce changed-line coverage
+        if: github.event_name == 'pull_request'
+        # Coverage-complete slices: public surface never merges below the
+        # patch target; split slices by feature scope, not by deferring
+        # tests (deviations register D8, 2026-08-03). The base ref reaches
+        # the shell through the environment, never template expansion.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: >
+          uv run diff-cover coverage.xml
+          --compare-branch "origin/${BASE_REF}"
+          --fail-under 95
 
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7.0.0
