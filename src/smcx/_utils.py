@@ -92,7 +92,17 @@ def _validate_numeric_ess_threshold(
     name: str,
 ) -> None:
     """Require a finite, nonnegative host-side ESS fraction."""
-    if not math.isfinite(threshold) or threshold < 0.0:
+    if isinstance(threshold, (str, bytes)):
+        raise ValueError(
+            f"{name} must be a finite nonnegative number; got {threshold!r}"
+        )
+    try:
+        numeric = float(threshold)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"{name} must be a finite nonnegative number; got {threshold!r}"
+        ) from error
+    if not math.isfinite(numeric) or numeric < 0.0:
         raise ValueError(
             f"{name} must be finite and nonnegative; got {threshold}"
         )
@@ -102,8 +112,23 @@ def _validate_resampling_threshold(
     threshold: float | ResamplingCriterion,
 ) -> None:
     """Validate a numeric filter threshold without invoking a criterion."""
-    if not callable(threshold):
-        _validate_numeric_ess_threshold(threshold, name="resampling_threshold")
+    if callable(threshold):
+        return
+    # Type failures name the callable alternative; numeric-domain
+    # failures keep the established finite-and-nonnegative message.
+    if isinstance(threshold, (str, bytes)):
+        raise ValueError(
+            "resampling_threshold must be a finite nonnegative number or "
+            "a callable criterion"
+        )
+    try:
+        float(threshold)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "resampling_threshold must be a finite nonnegative number or "
+            "a callable criterion"
+        ) from error
+    _validate_numeric_ess_threshold(threshold, name="resampling_threshold")
 
 
 def _canonicalize_emissions(
