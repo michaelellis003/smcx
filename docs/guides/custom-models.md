@@ -55,15 +55,15 @@ observation_jacobian = jax.jacfwd(observation_mean)
 
 emissions = jnp.array([[0.2], [-0.1], [0.4]])
 posterior = smcx.extended_kalman_filter(
-    jnp.zeros(2),
-    jnp.eye(2),
-    transition_mean,
-    transition_jacobian,
-    0.1 * jnp.eye(2),
-    observation_mean,
-    observation_jacobian,
-    jnp.array([[0.3]]),
-    emissions,
+    initial_mean=jnp.zeros(2),
+    initial_covariance=jnp.eye(2),
+    transition_mean_fn=transition_mean,
+    transition_jacobian_fn=transition_jacobian,
+    transition_covariance=0.1 * jnp.eye(2),
+    observation_mean_fn=observation_mean,
+    observation_jacobian_fn=observation_jacobian,
+    observation_covariance=jnp.array([[0.3]]),
+    emissions=emissions,
 )
 ```
 
@@ -71,13 +71,13 @@ The UKF reuses the two mean functions without Jacobians:
 
 ```python
 unscented = smcx.unscented_kalman_filter(
-    jnp.zeros(2),
-    jnp.eye(2),
-    transition_mean,
-    0.1 * jnp.eye(2),
-    observation_mean,
-    jnp.array([[0.3]]),
-    emissions,
+    initial_mean=jnp.zeros(2),
+    initial_covariance=jnp.eye(2),
+    transition_mean_fn=transition_mean,
+    transition_covariance=0.1 * jnp.eye(2),
+    observation_mean_fn=observation_mean,
+    observation_covariance=jnp.array([[0.3]]),
+    emissions=emissions,
 )
 ```
 
@@ -263,11 +263,11 @@ by a discount factor — a modeling device, not an estimator:
 
 ```python
 posterior = smcx.dlm_filter(
-    jnp.zeros(1),
-    jnp.eye(1),  # prior covariance / V
-    jnp.eye(1),
-    jnp.ones(1),
-    emissions,
+    initial_mean=jnp.zeros(1),
+    initial_scale_free_covariance=jnp.eye(1),  # prior covariance / V
+    transition_matrix=jnp.eye(1),
+    observation_vector=jnp.ones(1),
+    emissions=emissions,
     discount=0.95,
     prior_shape=4.0,  # Inverse-Gamma degrees of freedom
     prior_scale=1.0,  # prior point estimate of V
@@ -313,11 +313,11 @@ accuracy check.
 counts = jnp.array([1, 0, 3, 2])
 transition = jnp.eye(1)
 posterior = smcx.dglm_filter(
-    jnp.zeros(1),
-    jnp.eye(1),
-    transition,
-    jnp.ones(1),
-    counts,
+    initial_mean=jnp.zeros(1),
+    initial_covariance=jnp.eye(1),
+    transition_matrix=transition,
+    observation_vector=jnp.ones(1),
+    emissions=counts,
     family=smcx.poisson(),
     discount=0.95,
 )
