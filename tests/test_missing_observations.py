@@ -264,3 +264,203 @@ def test_jit_matches_eager_on_gapped_series():
             rtol=0.0,
             atol=atol * max(1.0, float(jnp.max(jnp.abs(eager_field)))),
         )
+
+
+def _nonlinear_callbacks(dtype):
+    transition = jnp.asarray([[0.9, 0.1], [0.0, 0.8]], dtype=dtype)
+    observation = jnp.asarray([[1.0, 0.0]], dtype=dtype)
+
+    def transition_mean(state):
+        return transition @ state
+
+    def transition_jacobian(state):
+        del state
+        return transition
+
+    def observation_mean(state):
+        return observation @ state
+
+    def observation_jacobian(state):
+        del state
+        return observation
+
+    return (
+        transition_mean,
+        transition_jacobian,
+        observation_mean,
+        observation_jacobian,
+    )
+
+
+def test_extended_gap_reduces_to_the_linear_gapped_run():
+    """A linear EKF model with a gap matches kalman_filter exactly."""
+    emissions = jnp.asarray([[0.2], [jnp.nan], [0.4]])
+    dtype = emissions.dtype
+    mean0, cov0, _, evolution, _, variance = _model(dtype)
+    means, jacobian, obs_mean, obs_jacobian = _nonlinear_callbacks(dtype)
+
+    extended = smcx.extended_kalman_filter(
+        initial_mean=mean0,
+        initial_covariance=cov0,
+        transition_mean_fn=means,
+        transition_jacobian_fn=jacobian,
+        transition_covariance=evolution,
+        observation_mean_fn=obs_mean,
+        observation_jacobian_fn=obs_jacobian,
+        observation_covariance=variance,
+        emissions=emissions,
+    )
+    linear = _run(emissions)
+
+    np.testing.assert_array_equal(
+        extended.filtered_means[1], extended.predicted_means[1]
+    )
+    np.testing.assert_array_equal(
+        extended.log_evidence_increments[1],
+        jnp.zeros_like(extended.marginal_loglik),
+    )
+    atol = _tolerance(dtype, 4.0)
+    np.testing.assert_allclose(
+        extended.filtered_means, linear.filtered_means, atol=atol
+    )
+    np.testing.assert_allclose(
+        extended.marginal_loglik, linear.marginal_loglik, atol=atol
+    )
+
+
+def test_unscented_gap_step_identity():
+    """The UKF stores the prediction and a zero increment at a gap."""
+    emissions = jnp.asarray([[0.2], [jnp.nan], [0.4]])
+    dtype = emissions.dtype
+    mean0, cov0, _, evolution, _, variance = _model(dtype)
+    means, _, obs_mean, _ = _nonlinear_callbacks(dtype)
+
+    unscented = smcx.unscented_kalman_filter(
+        initial_mean=mean0,
+        initial_covariance=cov0,
+        transition_mean_fn=means,
+        transition_covariance=evolution,
+        observation_mean_fn=obs_mean,
+        observation_covariance=variance,
+        emissions=emissions,
+    )
+    np.testing.assert_array_equal(
+        unscented.filtered_means[1], unscented.predicted_means[1]
+    )
+    np.testing.assert_array_equal(
+        unscented.filtered_covariances[1],
+        unscented.predicted_covariances[1],
+    )
+    np.testing.assert_array_equal(
+        unscented.log_evidence_increments[1],
+        jnp.zeros_like(unscented.marginal_loglik),
+    )
+    assert bool(jnp.isfinite(unscented.marginal_loglik))
+
+
+@pytest.mark.parametrize("method_name", ["taylor", "unscented"])
+def test_gaussian_filter_dispatch_matches_named_on_gaps(method_name):
+    """The strategy entry point inherits missing-data behavior bitwise."""
+    emissions = jnp.asarray([[0.2], [jnp.nan], [0.4]])
+    dtype = emissions.dtype
+    mean0, cov0, _, evolution, _, variance = _model(dtype)
+    means, jacobian, obs_mean, obs_jacobian = _nonlinear_callbacks(dtype)
+
+    if method_name == "taylor":
+        method = smcx.taylor_order1(jacobian, obs_jacobian)
+        named = smcx.extended_kalman_filter(
+            initial_mean=mean0,
+            initial_covariance=cov0,
+            transition_mean_fn=means,
+            transition_jacobian_fn=jacobian,
+            transition_covariance=evolution,
+            observation_mean_fn=obs_mean,
+            observation_jacobian_fn=obs_jacobian,
+            observation_covariance=variance,
+            emissions=emissions,
+        )
+    else:
+        method = smcx.unscented()
+        named = smcx.unscented_kalman_filter(
+            initial_mean=mean0,
+            initial_covariance=cov0,
+            transition_mean_fn=means,
+            transition_covariance=evolution,
+            observation_mean_fn=obs_mean,
+            observation_covariance=variance,
+            emissions=emissions,
+        )
+    strategy = smcx.gaussian_filter(
+        mean0,
+        cov0,
+        means,
+        evolution,
+        obs_mean,
+        variance,
+        emissions,
+        method=method,
+    )
+    for named_field, strategy_field in zip(named, strategy, strict=True):
+        np.testing.assert_array_equal(
+            np.asarray(strategy_field), np.asarray(named_field)
+        )
+
+
+@pytest.mark.parametrize("filter_name", ["extended", "unscented"])
+def test_nonlinear_partial_rows_raise(filter_name):
+    """EKF and UKF reject partially observed rows like the linear filter."""
+    dtype = jnp.float64 if jax.config.read("jax_enable_x64") else jnp.float32
+    emissions = jnp.asarray([[0.1, jnp.nan]], dtype=dtype)
+    mean0 = jnp.zeros(2, dtype=dtype)
+    identity = jnp.eye(2, dtype=dtype)
+
+    def state_mean(state):
+        return state
+
+    with pytest.raises(ValueError, match="fully observed"):
+        if filter_name == "extended":
+            smcx.extended_kalman_filter(
+                initial_mean=mean0,
+                initial_covariance=identity,
+                transition_mean_fn=state_mean,
+                transition_jacobian_fn=lambda s: identity,
+                transition_covariance=0.1 * identity,
+                observation_mean_fn=state_mean,
+                observation_jacobian_fn=lambda s: identity,
+                observation_covariance=0.3 * identity,
+                emissions=emissions,
+            )
+        else:
+            smcx.unscented_kalman_filter(
+                initial_mean=mean0,
+                initial_covariance=identity,
+                transition_mean_fn=state_mean,
+                transition_covariance=0.1 * identity,
+                observation_mean_fn=state_mean,
+                observation_covariance=0.3 * identity,
+                emissions=emissions,
+            )
+
+
+def test_extended_gradient_through_gap_is_finite():
+    """Gaps contribute no NaN to EKF gradients."""
+    emissions = jnp.asarray([[0.2], [jnp.nan], [0.4]])
+    dtype = emissions.dtype
+    mean0, cov0, _, evolution, _, variance = _model(dtype)
+    _, _, obs_mean, obs_jacobian = _nonlinear_callbacks(dtype)
+
+    def marginal(scale):
+        return smcx.extended_kalman_filter(
+            initial_mean=mean0,
+            initial_covariance=cov0,
+            transition_mean_fn=lambda s: scale * s,
+            transition_jacobian_fn=lambda s: scale * jnp.eye(2, dtype=dtype),
+            transition_covariance=evolution,
+            observation_mean_fn=obs_mean,
+            observation_jacobian_fn=obs_jacobian,
+            observation_covariance=variance,
+            emissions=emissions,
+        ).marginal_loglik
+
+    gradient = jax.grad(marginal)(jnp.asarray(0.9, dtype=dtype))
+    assert bool(jnp.isfinite(gradient))
