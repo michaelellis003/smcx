@@ -410,6 +410,10 @@ def temper(
             resampling_threshold=None,
             time_index=None,
             move_fn=move_population,
+            # temper resamples at every stage, so log_w entering a stage
+            # is always the released uniform vector; reusing it as the
+            # reset template preserves its exact dtype and weak-type
+            # representation, which a full_like rebuild would not.
             uniform_log_weights=log_w,
         )
         population = cast(_TemperingPopulation, stage_state.population)

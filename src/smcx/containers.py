@@ -314,6 +314,10 @@ class TemperedPosterior(NamedTuple):
     ``marginal_loglik`` is the Neumaier-compensated log-evidence
     estimate, and ``log_evidence_increments`` holds the per-stage
     reweighting normalizers whose compensated sum it is.
+    ``ess`` is the pre-resampling selection effective sample size at
+    each accepted temperature; `smcx.containers.IBISPosterior` instead
+    stores its post-move implied value under ``ess`` and this selection
+    quantity under ``selection_ess``.
     """
 
     particles: Float[Array, "num_particles dim"]
@@ -441,7 +445,9 @@ class IBISPosterior(NamedTuple):
     or only the final row when ``store_history=False``. ``selection_ess`` is
     measured after correction and before resampling; ``ess`` is implied by the
     stored weights and is therefore N after resampling. Acceptance is zero
-    where no resampling or invariant move ran.
+    where no resampling or invariant move ran. Note that
+    `smcx.containers.TemperedPosterior` reports the selection quantity
+    under ``ess``.
     """
 
     marginal_loglik: Float[Array, ""]
