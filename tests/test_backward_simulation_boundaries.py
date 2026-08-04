@@ -227,14 +227,24 @@ def test_two_times_match_the_labelled_key_schedule() -> None:
     np.testing.assert_array_equal(actual.smoothed_trajectories, expected_paths)
 
 
-def test_one_time_compiles_without_validating_transition() -> None:
+def test_one_time_validates_but_never_invokes_the_transition() -> None:
     particles = jnp.asarray([[[1.0], [2.0], [3.0]]])
     posterior = _posterior(particles, jnp.asarray([[-jnp.inf, 0.0, -jnp.inf]]))
+
+    # The callable contract holds at every sequence length (least-surprise
+    # rule, 2026-08-04, superseding the earlier lazy-validation contract).
     callback: Any = None
+    with pytest.raises(ValueError, match="log_transition must be callable"):
+        smcx.backward_simulation(
+            jr.key(7), posterior, callback, None, num_draws=2
+        )
+
+    def poison(*_args: Any) -> Any:
+        raise AssertionError("transition must not run at ntime == 1")
 
     result = jax.jit(
         lambda key: smcx.backward_simulation(
-            key, posterior, callback, None, num_draws=2
+            key, posterior, poison, None, num_draws=2
         )
     )(jr.key(7))
 

@@ -179,6 +179,8 @@ def backward_simulation(
         )
     if not isinstance(posterior, ParticleFilterPosterior):
         raise ValueError("posterior must be a ParticleFilterPosterior")
+    if not callable(log_transition):
+        raise ValueError("log_transition must be callable")
     ntime, _ = _validate_particle_result_axes(
         posterior, "backward_simulation", particles=True, full_history=True
     )
@@ -204,9 +206,6 @@ def backward_simulation(
             terminal_valid,
             log_weights.dtype,
         )
-    if not callable(log_transition):
-        raise ValueError("log_transition must be callable")
-
     peeled_input = None if inputs is None else inputs[-1]
     peeled_cloud = tree.map(lambda leaf: leaf[-2], particle_history)
     peeled, peeled_indices, peeled_valid = _draw_previous(
