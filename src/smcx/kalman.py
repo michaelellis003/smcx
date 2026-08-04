@@ -165,6 +165,47 @@ def _condition(
     )
 
 
+def _condition_or_missing(
+    predicted_mean: Float[Array, " state_dim"],
+    predicted_covariance: Float[Array, "state_dim state_dim"],
+    observation_matrix: Float[Array, "observation_dim state_dim"],
+    observation_covariance: Float[Array, "observation_dim observation_dim"],
+    observation: Float[Array, " observation_dim"],
+    observation_bias: Float[Array, " observation_dim"],
+) -> tuple[
+    Float[Array, " state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, ""],
+]:
+    """Condition on one observation, or pass a missing datum through.
+
+    An all-NaN observation row marks the datum missing (ADR-0034): the
+    filtered moments equal the predicted moments and the evidence
+    increment is exactly zero. The row is zeroed before conditioning so
+    the unselected branch stays finite and gradients of the selected
+    branch never meet NaN.
+    """
+    missing = jnp.all(jnp.isnan(observation))
+    safe_observation = jnp.where(
+        jnp.isnan(observation),
+        jnp.zeros_like(observation),
+        observation,
+    )
+    filtered_mean, filtered_covariance, increment = _condition(
+        predicted_mean,
+        predicted_covariance,
+        observation_matrix,
+        observation_covariance,
+        safe_observation,
+        observation_bias,
+    )
+    return (
+        jnp.where(missing, predicted_mean, filtered_mean),
+        jnp.where(missing, predicted_covariance, filtered_covariance),
+        jnp.where(missing, jnp.zeros_like(increment), increment),
+    )
+
+
 def _condition_from_residual(
     predicted_mean: Float[Array, " state_dim"],
     predicted_covariance: Float[Array, "state_dim state_dim"],
@@ -260,7 +301,7 @@ def _filter_step(
     predicted_covariance = _symmetrize(
         transition @ state.covariance @ transition.T + transition_noise
     )
-    filtered_mean, filtered_covariance, increment = _condition(
+    filtered_mean, filtered_covariance, increment = _condition_or_missing(
         predicted_mean,
         predicted_covariance,
         observation_operator,
@@ -305,6 +346,30 @@ def _check_float_array(
     if dtype is not None and value.dtype != dtype:
         raise ValueError(
             f"all arrays must have dtype {dtype}; got {name}={value.dtype}"
+        )
+
+
+def _validate_emission_rows(
+    emissions: Shaped[Array, "ntime observation_dim"],
+    name: str = "emissions",
+) -> None:
+    """Reject concrete rows that are neither observed nor missing.
+
+    A row is observed when every entry is finite and missing when every
+    entry is NaN (ADR-0034). Partially NaN or infinite rows are the
+    silent-poisoning class and raise here; traced arrays skip the check
+    per the boundary policy.
+    """
+    if isinstance(emissions, Tracer):
+        return
+    rows = np.asarray(emissions)
+    nan = np.isnan(rows)
+    partial = nan.any(axis=-1) & ~nan.all(axis=-1)
+    infinite = np.isinf(rows).any(axis=-1)
+    if partial.any() or infinite.any():
+        raise ValueError(
+            f"{name} rows must be fully observed finite values or "
+            "entirely NaN (missing)"
         )
 
 
@@ -1087,7 +1152,14 @@ def kalman_filter(
             covariance.
         emissions: Observations with shape ``(ntime,)`` or
             ``(ntime, observation_dim)``. Scalar observations become
-            ``(ntime, 1)``.
+            ``(ntime, 1)``. An entirely-NaN row marks that datum
+            missing: the update is skipped, the stored filtered moments
+            equal the predicted moments, and
+            ``log_evidence_increments`` carries an exact zero there, so
+            the datum contributes nothing to ``marginal_loglik``.
+            Partially NaN or infinite rows are rejected eagerly;
+            missingness is resolved by a traced select, so ``jit``,
+            ``vmap``, and ``grad`` compose unchanged (ADR-0034).
         transition_bias: Optional static or length ``ntime - 1`` affine
             transition term.
         observation_bias: Optional static or length ``ntime`` affine
@@ -1143,6 +1215,7 @@ def kalman_filter(
     for name, value in named_arrays:
         expected_dtype = None if name == "initial_mean" else dtype
         _check_float_array(value, name, expected_dtype)
+    _validate_emission_rows(emissions)
     optional_arrays = (
         ("transition_bias", transition_bias),
         ("observation_bias", observation_bias),
@@ -1249,7 +1322,7 @@ def kalman_filter(
         "observation_covariance",
         positive_definite=True,
     )
-    filtered_mean_0, filtered_covariance_0, increment_0 = _condition(
+    filtered_mean_0, filtered_covariance_0, increment_0 = _condition_or_missing(
         initial_mean,
         initial_covariance,
         observation_matrices[0],
