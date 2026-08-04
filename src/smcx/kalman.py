@@ -40,7 +40,7 @@ import numpy as np
 from jax import debug_infs, debug_nans, lax, vmap
 from jax.core import Tracer
 from jax.scipy.linalg import solve_triangular
-from jaxtyping import Array, Float, Shaped
+from jaxtyping import Array, Bool, Float, Shaped
 
 from smcx._numerics import _neumaier_add
 from smcx._utils import _canonicalize_emissions, _canonicalize_inputs
@@ -165,6 +165,46 @@ def _condition(
     )
 
 
+def _sanitize_missing(
+    observation: Float[Array, " observation_dim"],
+) -> tuple[Bool[Array, ""], Float[Array, " observation_dim"]]:
+    """Detect an all-NaN missing datum and zero-fill it (ADR-0034).
+
+    Zero-filling keeps the unselected conditioning branch finite so
+    gradients of the selected branch never meet NaN.
+    """
+    missing = jnp.all(jnp.isnan(observation))
+    safe_observation = jnp.where(
+        jnp.isnan(observation),
+        jnp.zeros_like(observation),
+        observation,
+    )
+    return missing, safe_observation
+
+
+def _select_missing(
+    missing: Bool[Array, ""],
+    predicted_mean: Float[Array, " state_dim"],
+    predicted_covariance: Float[Array, "state_dim state_dim"],
+    conditioned: tuple[
+        Float[Array, " state_dim"],
+        Float[Array, "state_dim state_dim"],
+        Float[Array, ""],
+    ],
+) -> tuple[
+    Float[Array, " state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, ""],
+]:
+    """Select the identity update and a zero increment at a missing datum."""
+    filtered_mean, filtered_covariance, increment = conditioned
+    return (
+        jnp.where(missing, predicted_mean, filtered_mean),
+        jnp.where(missing, predicted_covariance, filtered_covariance),
+        jnp.where(missing, jnp.zeros_like(increment), increment),
+    )
+
+
 def _condition_or_missing(
     predicted_mean: Float[Array, " state_dim"],
     predicted_covariance: Float[Array, "state_dim state_dim"],
@@ -177,21 +217,9 @@ def _condition_or_missing(
     Float[Array, "state_dim state_dim"],
     Float[Array, ""],
 ]:
-    """Condition on one observation, or pass a missing datum through.
-
-    An all-NaN observation row marks the datum missing (ADR-0034): the
-    filtered moments equal the predicted moments and the evidence
-    increment is exactly zero. The row is zeroed before conditioning so
-    the unselected branch stays finite and gradients of the selected
-    branch never meet NaN.
-    """
-    missing = jnp.all(jnp.isnan(observation))
-    safe_observation = jnp.where(
-        jnp.isnan(observation),
-        jnp.zeros_like(observation),
-        observation,
-    )
-    filtered_mean, filtered_covariance, increment = _condition(
+    """Condition on one observation, or pass a missing datum through."""
+    missing, safe_observation = _sanitize_missing(observation)
+    conditioned = _condition(
         predicted_mean,
         predicted_covariance,
         observation_matrix,
@@ -199,10 +227,8 @@ def _condition_or_missing(
         safe_observation,
         observation_bias,
     )
-    return (
-        jnp.where(missing, predicted_mean, filtered_mean),
-        jnp.where(missing, predicted_covariance, filtered_covariance),
-        jnp.where(missing, jnp.zeros_like(increment), increment),
+    return _select_missing(
+        missing, predicted_mean, predicted_covariance, conditioned
     )
 
 
@@ -566,6 +592,7 @@ def _prepare_nonlinear_filter(
         ("observation_covariance", observation_covariance),
         ("emissions", emissions),
     )
+    _validate_emission_rows(emissions)
     for name, value in named_arrays:
         expected_dtype = None if name == "initial_mean" else dtype
         _check_float_array(value, name, expected_dtype)
@@ -965,14 +992,20 @@ def _unscented_filter_step(
     predicted_covariance = _symmetrize(
         transformed_covariance + args.transition_covariance
     )
-    filtered_mean, filtered_covariance, increment = _unscented_condition(
+    missing, safe_emission = _sanitize_missing(args.emission)
+    filtered_mean, filtered_covariance, increment = _select_missing(
+        missing,
         predicted_mean,
         predicted_covariance,
-        observation_mean_fn,
-        args.observation_covariance,
-        args.emission,
-        rule,
-        input_t,
+        _unscented_condition(
+            predicted_mean,
+            predicted_covariance,
+            observation_mean_fn,
+            args.observation_covariance,
+            safe_emission,
+            rule,
+            input_t,
+        ),
     )
     evidence, compensation = _neumaier_add(
         state.marginal_loglik,
@@ -1084,12 +1117,18 @@ def _extended_filter_step(
         "observation_jacobian_fn output",
         dtype,
     )
-    filtered_mean, filtered_covariance, increment = _condition_from_residual(
+    missing, safe_emission = _sanitize_missing(args.emission)
+    filtered_mean, filtered_covariance, increment = _select_missing(
+        missing,
         transition_mean,
         predicted_covariance,
-        observation_jacobian,
-        args.observation_covariance,
-        args.emission - observation_mean,
+        _condition_from_residual(
+            transition_mean,
+            predicted_covariance,
+            observation_jacobian,
+            args.observation_covariance,
+            safe_emission - observation_mean,
+        ),
     )
     evidence, compensation = _neumaier_add(
         state.marginal_loglik,
@@ -1449,8 +1488,11 @@ def extended_kalman_filter(
         definite. Value checks run eagerly and are skipped for traced
         arrays. Nonzero subnormal covariance entries are rejected;
         positive-definite covariances must also yield a finite,
-        positive-diagonal factor on the active backend. Missing observations
-        are not supported.
+        positive-diagonal factor on the active backend. Missing
+        observations are entirely-NaN emission rows: the update is
+        skipped, the prediction is stored, and the datum contributes
+        an exact zero to ``log_evidence_increments`` (ADR-0034);
+        partially NaN or infinite rows are rejected eagerly.
 
     References:
         Schmidt, S. F. (1966). Application of State-Space Methods to
@@ -1513,14 +1555,18 @@ def extended_kalman_filter(
         "observation_jacobian_fn output",
         dtype,
     )
-    filtered_mean_0, filtered_covariance_0, increment_0 = (
+    missing_0, safe_emission_0 = _sanitize_missing(emissions[0])
+    filtered_mean_0, filtered_covariance_0, increment_0 = _select_missing(
+        missing_0,
+        initial_mean,
+        initial_covariance,
         _condition_from_residual(
             initial_mean,
             initial_covariance,
             observation_jacobian_0,
             observation_covariances[0],
-            emissions[0] - observation_mean_0,
-        )
+            safe_emission_0 - observation_mean_0,
+        ),
     )
     state_0 = _FilterState(
         filtered_mean_0,
@@ -1686,7 +1732,11 @@ def unscented_kalman_filter(
         skipped for traced arrays. Nonzero subnormal entries are
         rejected, and every checked covariance must yield a finite,
         positive-diagonal factor on the active backend.
-        Missing observations are not supported. Smaller ``alpha`` values may
+        Missing observations are entirely-NaN emission rows: the update
+        is skipped, the prediction is stored, and the datum contributes
+        an exact zero to ``log_evidence_increments`` (ADR-0034);
+        partially NaN or infinite rows are rejected eagerly.
+        Smaller ``alpha`` values may
         improve local quadrature but are more cancellation-prone in float32.
 
     References:
@@ -1719,14 +1769,20 @@ def unscented_kalman_filter(
         inputs_arr = _canonicalize_inputs(inputs, setup.num_timesteps)
         _check_float_array(inputs_arr, "inputs", setup.dtype)
         input_0 = inputs_arr[0]
-    filtered_mean_0, filtered_covariance_0, increment_0 = _unscented_condition(
+    missing_0, safe_emission_0 = _sanitize_missing(emissions[0])
+    filtered_mean_0, filtered_covariance_0, increment_0 = _select_missing(
+        missing_0,
         initial_mean,
         initial_covariance,
-        observation_mean_fn,
-        setup.observation_covariances[0],
-        emissions[0],
-        rule,
-        input_0,
+        _unscented_condition(
+            initial_mean,
+            initial_covariance,
+            observation_mean_fn,
+            setup.observation_covariances[0],
+            safe_emission_0,
+            rule,
+            input_0,
+        ),
     )
     state_0 = _FilterState(
         filtered_mean_0,
