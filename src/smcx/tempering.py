@@ -176,7 +176,14 @@ def temper(
     """
     num_particles = _positive_integer(num_particles, name="num_particles")
     num_mcmc_steps = _positive_integer(num_mcmc_steps, name="num_mcmc_steps")
-    if not 0.0 < target_ess <= _MAX_TARGET_ESS:
+    try:
+        valid_target = 0.0 < target_ess <= _MAX_TARGET_ESS
+    except TypeError as error:
+        raise ValueError(
+            "target_ess must be a real number in the interval "
+            f"(0, 1 - eps32]; got {target_ess!r}"
+        ) from error
+    if not valid_target:
         raise ValueError(
             "target_ess must be in the interval "
             f"(0, 1 - eps32] (upper bound {_MAX_TARGET_ESS}); "

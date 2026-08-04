@@ -103,13 +103,7 @@ def ibis(
     num_mcmc_steps = _positive_integer(num_mcmc_steps, name="num_mcmc_steps")
     if not isinstance(store_history, bool):
         raise ValueError("store_history must be a boolean")
-    try:
-        _validate_resampling_threshold(resampling_threshold)
-    except TypeError as error:
-        raise ValueError(
-            "resampling_threshold must be a finite nonnegative number or "
-            "a callable criterion"
-        ) from error
+    _validate_resampling_threshold(resampling_threshold)
     mutation_init_fn, mutation_step_fn = _resolve_static_mutation(
         mutation,
         mutation_init_fn,
