@@ -948,7 +948,8 @@ def replicated_log_ml(
     quantifies Monte Carlo uncertainty in the evidence.
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Split once into ``num_replicates`` keys,
+            one per ``filter_fn`` call.
         filter_fn: Function ``(key) -> scalar`` that runs a particle
             filter and returns the marginal log-likelihood.
         num_replicates: Number of independent filter runs.
@@ -1061,7 +1062,10 @@ def posterior_predictive_sample(
     the transition from retained filtering row ``t`` and its emission.
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Split once into one key per time step;
+            each splits three ways: a resampling key, then
+            ``num_samples`` transition keys, then ``num_samples``
+            emission keys.
         posterior: Particle filter posterior output.
         transition_sampler: Function ``(key, state[, input_t]) -> state``.
             ``state`` may be a latent-state PyTree.
@@ -1621,7 +1625,9 @@ def param_posterior_predictive_sample(
     $$
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Passed unsplit to
+            ``posterior_predictive_sample``, whose per-step schedule
+            applies unchanged.
         posterior: Liu-West posterior with aligned dense state and parameter
             particle histories.
         transition_sampler: Function

@@ -242,7 +242,9 @@ def to_arviz(
 
     Args:
         posteriors: One supported posterior or independent runs.
-        key: Explicit key for equal-weight resampling.
+        key: Explicit key for equal-weight resampling. Split into one
+            systematic-resampling key per chain for static posteriors
+            and one per chain-time pair for filter posteriors.
         num_draws: Output draws per chain. Defaults to the particle count.
         var_names: Optional aliases for unique, unambiguous tree paths.
         dims: Optional variable-to-event-dimensions mapping. Each output group

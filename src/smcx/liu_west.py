@@ -587,7 +587,11 @@ def liu_west_filter(
     parameter propagation.
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Split once for initialization (state
+            cloud, then parameter cloud), then into one key per
+            subsequent step; each step key splits into resampling,
+            kernel-shrinkage, and per-particle transition keys,
+            reserved whether or not resampling triggers.
         initial_sampler: Function ``(key, num_particles[, input_0]) ->
             particles`` that draws a parameter-independent state prior as a
             nonempty floating array of shape ``(num_particles, state_dim)``.

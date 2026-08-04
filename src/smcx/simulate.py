@@ -66,7 +66,9 @@ def simulate(
     r"""Simulate a single trajectory from a state-space model.
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Split into an initial pair (state draw,
+            emission draw) and one key per subsequent step; each step
+            key splits into a transition key and an emission key.
         initial_sampler: Function ``(key[, input_0]) -> state`` that
             draws one state from $p(z_1)$. The state may be a dense
             array or a nonempty PyTree of arrays.

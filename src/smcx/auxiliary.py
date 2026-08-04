@@ -151,7 +151,10 @@ def auxiliary_filter(
     r"""Run an auxiliary particle filter (Pitt & Shephard, 1999).
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Split once for the initial cloud, then
+            into one key per subsequent step; each step key splits
+            into a resampling key and per-particle transition keys
+            (the frozen ``run_smc`` schedule).
         initial_sampler: Function ``(key, num_particles[, input_0]) ->
             particles`` that draws from $p(z_1)$. ``particles`` may
             be a dense array or a nonempty PyTree whose array leaves all
