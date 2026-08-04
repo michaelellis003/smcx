@@ -770,6 +770,9 @@ NamedTuples are a convenient representation, and either object may carry
 extra fields. The target passed to both callbacks is the current stage
 density `log_prior + phi * log_likelihood`.
 `smcx.ibis` accepts the same pair and supplies its current data-prefix target.
+Each contract violation raises a `ValueError`; when one callback return
+violates the contract in more than one way at once, which violation is
+reported first is unspecified.
 
 ```python
 posterior = smcx.temper(
