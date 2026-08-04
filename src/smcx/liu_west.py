@@ -833,10 +833,14 @@ def liu_west_filter(
     all_normalizers_finite = jnp.isfinite(log_ev_0) & jnp.all(
         normalizers_finite
     )
+    # A degenerate stage is a valid zero likelihood, so the traced
+    # sentinel is exactly -inf — the uniform policy of the named
+    # filters (fk.py) — letting outer pseudo-marginal algorithms treat
+    # it as rejection rather than NaN-poisoned acceptance arithmetic.
     checked_log_ml = jnp.where(
         all_normalizers_finite,
         final_log_ml,
-        jnp.nan,
+        -jnp.inf,
     )
     _raise_invalid_ancestors(final_carry.invalid_resampling, num_particles)
     _raise_if_degenerate(checked_log_ml)
