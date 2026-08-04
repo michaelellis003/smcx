@@ -55,7 +55,15 @@ W = 0.2 * jnp.eye(1)
 F = jnp.eye(1)
 V = 0.3 * jnp.eye(1)
 
-kalman = smcx.kalman_filter(m0, C0, G, W, F, V, y)
+kalman = smcx.kalman_filter(
+    initial_mean=m0,
+    initial_covariance=C0,
+    transition_matrix=G,
+    transition_covariance=W,
+    observation_matrix=F,
+    observation_covariance=V,
+    emissions=y,
+)
 print(kalman.marginal_loglik)  # -29.26, exact
 ```
 

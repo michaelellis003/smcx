@@ -388,7 +388,15 @@ W = 0.2 * jnp.eye(1)
 F = jnp.eye(1)
 V = 0.3 * jnp.eye(1)
 
-posterior = smcx.kalman_filter(m0, C0, G, W, F, V, y)
+posterior = smcx.kalman_filter(
+    initial_mean=m0,
+    initial_covariance=C0,
+    transition_matrix=G,
+    transition_covariance=W,
+    observation_matrix=F,
+    observation_covariance=V,
+    emissions=y,
+)
 smoothed = smcx.rts_smoother(posterior, G)
 paths = smcx.posterior_sample(jr.key(7), posterior, G, num_draws=4)
 print(posterior.marginal_loglik)  # -29.26, exact
@@ -448,11 +456,11 @@ n0 = 4.0
 S0 = 0.5
 
 posterior = smcx.dlm_filter(
-    m0,
-    C0_tilde,
-    G,
-    F_vector,
-    y,
+    initial_mean=m0,
+    initial_scale_free_covariance=C0_tilde,
+    transition_matrix=G,
+    observation_vector=F_vector,
+    emissions=y,
     scale_free_transition_covariance=W_tilde,
     prior_shape=n0,
     prior_scale=S0,
@@ -665,7 +673,13 @@ exact filter composed inside an SMC sampler:
 ```python
 def log_likelihood(phi):
     return smcx.kalman_filter(
-        m0, C0, phi.reshape(1, 1), W, F, V, y
+        initial_mean=m0,
+        initial_covariance=C0,
+        transition_matrix=phi.reshape(1, 1),
+        transition_covariance=W,
+        observation_matrix=F,
+        observation_covariance=V,
+        emissions=y,
     ).marginal_loglik
 
 
