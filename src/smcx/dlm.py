@@ -48,8 +48,10 @@ from smcx.kalman import (
     _canonicalize_filter_covariances,
     _check_covariance,
     _check_float_array,
+    _sanitize_missing,
     _symmetrize,
     _time_matrix,
+    _validate_emission_rows,
 )
 from smcx.types import GaussianEmissionSequence, Scalar
 
@@ -145,7 +147,12 @@ def dlm_filter(
         observation_vector: Observation vector $F$, shape
             ``(state_dim,)``; the observation mean is $F' x_t$.
         emissions: Univariate observations shaped ``(ntime,)`` or
-            ``(ntime, 1)``.
+            ``(ntime, 1)``. A NaN entry marks that datum missing: the
+            evolution (including state and variance discounts) still
+            applies, the update is skipped, ``(n_t, S_t)`` gain no
+            observation information, and ``log_evidence_increments``
+            carries an exact zero there (ADR-0034). Infinite entries
+            are rejected eagerly.
         scale_free_transition_covariance: Evolution covariance divided
             by the unknown variance, $\tilde W = W / V$ — static
             ``(state_dim, state_dim)`` or timed
@@ -212,6 +219,7 @@ def dlm_filter(
             f"(ntime,) or (ntime, 1); got {emissions.shape}"
         )
     _check_float_array(emissions, "emissions")
+    _validate_emission_rows(emissions)
     dtype = emissions.dtype
     num_timesteps = emissions.shape[0]
 
@@ -276,11 +284,17 @@ def dlm_filter(
     )
 
     def _update(carry: _DLMCarry, prior_mean, prior_cov, emission_t, dof):
+        # An all-NaN emission marks the datum missing (ADR-0034): the
+        # evolution (including both discounts, applied by the caller of
+        # this update through prior_cov and dof) stands, the update is
+        # the identity, and the increment is exactly zero. The zero-fill
+        # keeps the unselected branch finite for gradients.
+        missing, safe_emission = _sanitize_missing(emission_t)
         forecast = observation_vector @ prior_mean
         forecast_scale_free = (
             observation_vector @ prior_cov @ observation_vector + 1.0
         )
-        residual = emission_t[0] - forecast
+        residual = safe_emission[0] - forecast
         gain = prior_cov @ observation_vector / forecast_scale_free
         # The forecast scale ``carry.scale * forecast_scale_free`` is
         # never materialized: for a representable scale near the dtype
@@ -314,18 +328,28 @@ def dlm_filter(
             - 0.5 * (jnp.log(dof) + log_pi + log_forecast_scale)
             - (dof + 1.0) / 2.0 * log1p_term
         )
-        new_mean = prior_mean + gain * residual
-        new_cov = prior_cov - jnp.outer(gain, gain) * forecast_scale_free
-        new_shape = dof + 1.0
+        new_mean = jnp.where(missing, prior_mean, prior_mean + gain * residual)
+        new_cov = jnp.where(
+            missing,
+            prior_cov,
+            prior_cov - jnp.outer(gain, gain) * forecast_scale_free,
+        )
+        new_shape = jnp.where(missing, dof, dof + 1.0)
         half_width = lax.optimization_barrier(
             (residual / jnp.sqrt(forecast_scale_free)) / jnp.sqrt(dof)
         )
         # Bounded ratio before multiplication: ``dof * (...)`` overflows
         # about ``dof``-fold before the divided result does (R2).
         ratio = dof / new_shape
-        new_scale = lax.optimization_barrier(
-            ratio * carry.scale
-        ) + lax.optimization_barrier(ratio * (half_width * half_width))
+        new_scale = jnp.where(
+            missing,
+            carry.scale,
+            lax.optimization_barrier(ratio * carry.scale)
+            + lax.optimization_barrier(ratio * (half_width * half_width)),
+        )
+        log_density = jnp.where(
+            missing, jnp.zeros_like(log_density), log_density
+        )
         loglik, compensation = _neumaier_add(
             carry.marginal_loglik,
             carry.log_evidence_compensation,
