@@ -35,6 +35,42 @@ final-only result keeps the full ESS and evidence traces but only one particle
 cloud, so those arrays do not share an ArviZ `time` dimension. Rerun with full
 history before exporting.
 
+## Parameter posteriors
+
+`to_arviz` does not consume `LiuWestPosterior`, `SMC2Posterior`, or
+`IBISPosterior`. ArviZ draws are equal-weight by construction — every
+summary and plot treats the `draw` dimension as unweighted — so a
+weighted cloud must be resampled before export. For these records the
+resampling has a second degree of freedom: each time slice is a
+different posterior, with the final slice conditioning on all data and
+earlier slices on `y[:t+1]`. Which slice to export is an analysis
+decision, so smcx keeps both choices explicit instead of resampling on
+your behalf.
+
+To export the full-data parameter posterior, resample the final cloud
+to equal weights and add a chain axis:
+
+```python
+import arviz
+import jax.numpy as jnp
+import jax.random as jr
+import smcx
+
+weights = jnp.exp(posterior.filtered_log_weights[-1])
+indices = smcx.systematic(jr.key(3), weights, 1_000)
+draws = posterior.filtered_params[-1][indices]
+idata = arviz.from_dict({"posterior": {"params": draws[None]}})
+```
+
+Here `draws[None]` supplies the leading chain dimension. The mapping
+form is the ArviZ 1.x signature; on 0.x, pass the group as a keyword
+instead: `arviz.from_dict(posterior={"params": draws[None]})`. For
+several independent
+runs, stack the per-run `draws` along a new first axis so each run
+becomes one chain. This is the same convention PyMC follows for its
+SMC sampler, which resamples to equal weights before constructing
+`InferenceData`.
+
 ## Groups
 
 | Group or attribute | Contents |
