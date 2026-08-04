@@ -1188,8 +1188,9 @@ def kalman_filter(
         definite. Value checks run eagerly and are skipped for traced
         arrays. Nonzero subnormal covariance entries are rejected;
         positive-definite covariances must also yield a finite,
-        positive-diagonal factor on the active backend. Missing observations
-        are not supported.
+        positive-diagonal factor on the active backend. Missing
+        observations are entirely-NaN rows, as documented for
+        ``emissions`` above.
     """
     emissions = _canonicalize_emissions(emissions)
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
