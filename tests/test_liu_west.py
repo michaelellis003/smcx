@@ -1169,3 +1169,36 @@ class TestUnselectedMoveGradients:
         assert np.isfinite(eager)
         np.testing.assert_allclose(eager, reference, rtol=1e-6)
         np.testing.assert_allclose(compiled, reference, rtol=1e-6)
+
+
+def test_degenerate_marginal_is_negative_infinity_under_jit():
+    """The traced degeneracy sentinel is -inf, the family-wide policy."""
+    emissions = jnp.asarray([[0.0], [0.0]])
+
+    def initial_sampler(key, count):
+        return jr.normal(key, (count, 1))
+
+    def transition_sampler(key, state, params):
+        return state + params
+
+    def log_observation(emission, state, params):
+        del emission, state, params
+        return -jnp.inf
+
+    def param_sampler(key, count):
+        return jr.normal(key, (count, 1))
+
+    def run(key):
+        return liu_west_filter(
+            key,
+            initial_sampler,
+            transition_sampler,
+            log_observation,
+            log_observation,
+            param_sampler,
+            emissions,
+            8,
+        ).marginal_loglik
+
+    marginal = jax.jit(run)(jr.key(3))
+    np.testing.assert_array_equal(marginal, -jnp.inf)
