@@ -698,7 +698,7 @@ def liu_west_filter(
         and not isinstance(resampling_threshold, core.Tracer)
         # Exact zero is the documented disables-resampling sentinel,
         # so exact comparison is intended here.
-        and float(resampling_threshold) == 0.0  # noqa: RUF069
+        and float(resampling_threshold) == 0.0  # ruff: ignore[float-equality-comparison]
     )
     emissions, num_timesteps = _validate_filter_inputs(
         emissions,
