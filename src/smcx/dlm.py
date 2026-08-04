@@ -187,7 +187,8 @@ def dlm_filter(
     Raises:
         ValueError: Malformed arrays or domains, multivariate
             emissions, or an evolution specification that is not
-            exactly one of the two forms.
+            exactly one of the two forms. Value checks run eagerly
+            and are skipped for traced arrays.
     """
     if (scale_free_transition_covariance is None) == (discount is None):
         raise ValueError("supply exactly one evolution covariance or discount")

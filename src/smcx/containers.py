@@ -340,8 +340,9 @@ class DLMFilterPosterior(NamedTuple):
     default unit prior shape it does not exist at the first step.
     ``scale_shapes`` and ``scale_estimates`` are the Inverse-Gamma
     posterior degrees of freedom and point estimate of the unknown
-    observational variance; ``marginal_loglik`` is the exact sum of
-    Student-t one-step forecast log densities.
+    observational variance; ``marginal_loglik`` is the
+    Neumaier-compensated sum of the exact Student-t one-step forecast
+    log densities in ``log_evidence_increments``.
     """
 
     filtered_means: Float[Array, "ntime state_dim"]
@@ -447,7 +448,10 @@ class IBISPosterior(NamedTuple):
     stored weights and is therefore N after resampling. Acceptance is zero
     where no resampling or invariant move ran. Note that
     `smcx.containers.TemperedPosterior` reports the selection quantity
-    under ``ess``.
+    under ``ess`` and `smcx.containers.SMC2Posterior` follows this
+    record's post-move convention. ``marginal_loglik`` is the
+    Neumaier-compensated sum of ``log_evidence_increments``;
+    E[exp(marginal_loglik)] = Z, while the log itself is Jensen-biased.
     """
 
     marginal_loglik: Float[Array, ""]

@@ -559,7 +559,8 @@ def dglm_filter(
             whose prior variance at the first step is zero — the
             conjugate moment match divides by that variance — or
             concrete emissions outside a built-in family's
-            documented support.
+            documented support. Value checks run eagerly and are
+            skipped for traced arrays.
 
     Note:
         Only the first step's predictor variance is checkable at the

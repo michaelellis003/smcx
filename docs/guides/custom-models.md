@@ -145,7 +145,10 @@ than silently.
 
 With `inputs=...`, every supplied callback accepts `(state, input_t)`.
 `inputs[t]` reaches the observation at `t` and the transition into `t`;
-`inputs[0]` does not transform the supplied prior. A rank-one input sequence
+`inputs[0]` does not transform the supplied prior. The particle family
+follows a different convention: there `inputs[0]` does reach the
+initial sampler, because the particle prior is a callback rather than
+supplied moments. A rank-one input sequence
 is presented to callbacks as a length-one vector. When compiling a complete
 filter, close the callbacks over in a `jax.jit` wrapper rather
 than passing them as dynamic array arguments.

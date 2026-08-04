@@ -48,8 +48,8 @@ Array-returning functions are pure, stateless, and JIT-compatible for
 static shape and control arguments. Genealogy and predictive operations
 preserve structured latent-state PyTrees; Euclidean summaries require a
 dense ``(T, N, D)`` particle history. Parameter summaries accept any
-`smcx.containers.ParameterFilterResult`, including Liu-West and SMC²
-posteriors. `smcx.diagnose` converts results to Python
+`smcx.containers.ParameterFilterResult`, including the Liu-West, SMC²,
+and IBIS posteriors. `smcx.diagnose` converts results to Python
 scalars and strings, so it is intentionally host-only.
 Axis-sensitive state, parameter, predictive, and genealogy diagnostics
 validate the time, particle, and event axes they consume. State, parameter,

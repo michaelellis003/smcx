@@ -2352,6 +2352,7 @@ def smoothed_cross_covariances(
         The caller must supply the transition history that produced the
         stored predictions. Only positive-time predicted covariances are
         factored; filtered and smoothed covariances may be singular.
+        Value checks run eagerly and are skipped for traced arrays.
 
         The identity follows Särkkä and Svensson (2023), *Bayesian Filtering
         and Smoothing*, 2nd ed., equations 12.11--12.13.
@@ -2634,6 +2635,10 @@ def gaussian_filter(
     Raises:
         ValueError: ``method`` is not a linearization strategy record,
             or the selected filter rejects an argument.
+
+    Note:
+        Value checks run eagerly and are skipped for traced arrays,
+        exactly as in the selected named filter.
     """
     if isinstance(method, TaylorOrder1):
         return extended_kalman_filter(

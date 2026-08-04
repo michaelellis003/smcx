@@ -1,17 +1,20 @@
 # The reproducibility contract
 
-Every stochastic smcx function takes an explicit JAX PRNG key and
-documents how it splits that key. This page states the library-wide
-contract in one place; the per-function Notes restate only what is
-specific to each entry point.
+Every stochastic smcx function takes an explicit JAX PRNG key, and
+every key-split schedule is frozen by tests. Entry points with
+intricate schedules (`run_smc`, `run_particle_filter`,
+`posterior_sample`, `backward_simulation`) document their trees
+inline; for the rest, this page is the citable statement of the
+library-wide contract.
 
 ## Keys are contracts
 
-A function's key-split tree is part of its public behavior. When a
-docstring says the root key "splits once into the prior and stage
-roots" or "splits by time, then draw", that schedule is frozen by
-tests: an implementation change that reroutes a subkey is a breaking
-change, not an internal detail. Two consequences follow.
+A function's key-split tree is part of its public behavior. When
+`posterior_sample` says it "splits ``key`` once into ``ntime`` keys",
+or `backward_simulation` says "keys split by time, then draw", those
+schedules are frozen by tests: an implementation change that reroutes
+a subkey is a breaking change, not an internal detail. Two
+consequences follow.
 
 The same key reproduces the same result on the same backend and code
 path. Rerunning `bootstrap_filter` with the same key, data, and
