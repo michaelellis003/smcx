@@ -14,11 +14,30 @@ from smcx._static_smc import _is_valid_acceptance_rate
 from smcx.types import (
     PRNGKeyT,
     StaticLogDensity,
+    StaticMutation,
     StaticMutationInfo,
     StaticMutationInitFn,
     StaticMutationState,
     StaticMutationStepFn,
 )
+
+
+def _resolve_static_mutation(
+    mutation: StaticMutation | None,
+    mutation_init_fn: StaticMutationInitFn | None,
+    mutation_step_fn: StaticMutationStepFn | None,
+) -> tuple[StaticMutationInitFn | None, StaticMutationStepFn | None]:
+    """Resolve the mutation record and the legacy pair into one pair."""
+    if mutation is None:
+        return mutation_init_fn, mutation_step_fn
+    if mutation_init_fn is not None or mutation_step_fn is not None:
+        raise ValueError(
+            "supply mutation or the mutation_init_fn/mutation_step_fn "
+            "pair, not both"
+        )
+    if mutation.init is None or mutation.step is None:
+        raise ValueError("StaticMutation members must both be callables")
+    return mutation.init, mutation.step
 
 
 def _mutation_position(

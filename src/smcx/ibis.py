@@ -12,6 +12,7 @@ import jax.random as jr
 from jax import vmap
 
 from smcx._ibis import _IBISPopulation, _run_ibis_stages
+from smcx._static_mutation import _resolve_static_mutation
 from smcx._utils import (
     _canonicalize_emissions,
     _canonicalize_inputs,
@@ -29,6 +30,7 @@ from smcx.types import (
     ResamplingCriterion,
     ResamplingFn,
     StaticLogDensity,
+    StaticMutation,
     StaticMutationInitFn,
     StaticMutationStepFn,
 )
@@ -61,6 +63,7 @@ def ibis(
     num_mcmc_steps: int = 5,
     resampling_threshold: float | ResamplingCriterion = 0.5,
     resampling_fn: ResamplingFn = systematic,
+    mutation: StaticMutation | None = None,
     mutation_init_fn: StaticMutationInitFn | None = None,
     mutation_step_fn: StaticMutationStepFn | None = None,
     store_history: bool = True,
@@ -95,6 +98,9 @@ def ibis(
             ``(log_weights, selection_ess, time_index) -> bool`` criterion.
             Zero disables resampling and values above one force it.
         resampling_fn: Resampler used when the criterion fires.
+        mutation: Optional `smcx.StaticMutation` record carrying the
+            initializer and step together; the primary form of the
+            legacy pair below. Supply the record or the pair, not both.
         mutation_init_fn: Optional caller mutation initializer.
         mutation_step_fn: Optional paired caller mutation step.
         store_history: If false, retain only the final cloud and weights;
@@ -121,6 +127,11 @@ def ibis(
             "resampling_threshold must be a finite nonnegative number or "
             "a callable criterion"
         ) from error
+    mutation_init_fn, mutation_step_fn = _resolve_static_mutation(
+        mutation,
+        mutation_init_fn,
+        mutation_step_fn,
+    )
     if (mutation_init_fn is None) != (mutation_step_fn is None):
         raise ValueError(
             "mutation_init_fn and mutation_step_fn must be supplied together"
