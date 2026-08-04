@@ -23,7 +23,7 @@ not jittable; the batched inner kernels are jitted.
 """
 
 import math
-from typing import cast
+from typing import TYPE_CHECKING, Any, SupportsIndex, TypeAlias, cast
 
 import jax
 import jax.numpy as jnp
@@ -36,6 +36,8 @@ from smcx._covariance import _weighted_covariance_factor
 from smcx._numerics import _neumaier_add
 from smcx._utils import (
     _canonicalize_emissions,
+    _nonnegative_integer,
+    _positive_integer,
     _raise_invalid_ancestors,
     _validate_ancestors,
     _validate_initial_state,
@@ -62,6 +64,11 @@ from smcx.weights import _log_normalize_axis_parts, _LogExpansion
 from smcx.weights import ess as compute_ess
 
 _RWM_SCALE = 2.38
+
+if TYPE_CHECKING:
+    _CountArgument: TypeAlias = SupportsIndex
+else:
+    _CountArgument: TypeAlias = Any
 
 
 def _normalize_rows(log_w: Array) -> tuple[Array, _LogExpansion]:
@@ -166,11 +173,11 @@ def smc2(
     transition_sampler: ParamTransitionSampler,
     log_observation_fn: ParamLogObservationFn,
     emissions: EmissionSequence,
-    num_theta: int,
-    num_x: int,
+    num_theta: _CountArgument,
+    num_x: _CountArgument,
     *,
     ess_threshold: float = 0.5,
-    num_pmmh_steps: int = 1,
+    num_pmmh_steps: _CountArgument = 1,
     resampling_fn: ResamplingFn = systematic,
     store_history: bool = True,
 ) -> SMC2Posterior:
@@ -217,12 +224,9 @@ def smc2(
     """
     _validate_numeric_ess_threshold(ess_threshold, name="ess_threshold")
     emissions = _canonicalize_emissions(emissions)
-    if num_theta < 1:
-        raise ValueError(f"num_theta must be >= 1; got {num_theta}")
-    if num_x < 1:
-        raise ValueError(f"num_x must be >= 1; got {num_x}")
-    if num_pmmh_steps < 0:
-        raise ValueError(f"num_pmmh_steps must be >= 0; got {num_pmmh_steps}")
+    num_theta = _positive_integer(num_theta, name="num_theta")
+    num_x = _positive_integer(num_x, name="num_x")
+    num_pmmh_steps = _nonnegative_integer(num_pmmh_steps, name="num_pmmh_steps")
     n_time = emissions.shape[0]
     log_n_theta = math.log(num_theta)
 

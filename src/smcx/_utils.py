@@ -12,6 +12,7 @@ eliminate duplication.  They are not part of the public API.
 """
 
 import math
+import operator
 from typing import Any, NamedTuple, TypeAlias, cast
 
 import jax
@@ -149,14 +150,43 @@ def _canonicalize_emission(
     return emission
 
 
+def _positive_integer(value: object, *, name: str) -> int:
+    """Return one positive integer while rejecting Boolean aliases."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a positive integer, not a boolean")
+    try:
+        integer = operator.index(cast(Any, value))
+    except TypeError as error:
+        raise ValueError(
+            f"{name} must be a positive integer; got {value!r}"
+        ) from error
+    if integer < 1:
+        raise ValueError(f"{name} must be a positive integer; got {integer}")
+    return integer
+
+
+def _nonnegative_integer(value: object, *, name: str) -> int:
+    """Return one nonnegative integer while rejecting Boolean aliases."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a nonnegative integer, not a boolean")
+    try:
+        integer = operator.index(cast(Any, value))
+    except TypeError as error:
+        raise ValueError(
+            f"{name} must be a nonnegative integer; got {value!r}"
+        ) from error
+    if integer < 0:
+        raise ValueError(f"{name} must be a nonnegative integer; got {integer}")
+    return integer
+
+
 def _validate_filter_inputs(
     emissions: EmissionSequence,
-    num_particles: int,
+    num_particles: Any,
 ) -> tuple[Shaped[Array, "ntime emission_dim"], int]:
     """Validate the common structural inputs of a particle filter."""
     emissions_arr = _canonicalize_emissions(emissions)
-    if num_particles < 1:
-        raise ValueError(f"num_particles must be >= 1; got {num_particles}")
+    num_particles = _positive_integer(num_particles, name="num_particles")
     return emissions_arr, emissions_arr.shape[0]
 
 

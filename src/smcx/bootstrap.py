@@ -19,7 +19,14 @@ MPS uses a sequence of one-step scans; other platforms use one full scan.
 """
 
 import math
-from typing import NamedTuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    NamedTuple,
+    SupportsIndex,
+    TypeAlias,
+    cast,
+)
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -39,6 +46,7 @@ from smcx._utils import (
     _gather_particles,
     _init_standard,
     _particle_time_axis,
+    _positive_integer,
     _raise_if_degenerate,
     _raise_invalid_ancestors,
     _TreeSignature,
@@ -77,6 +85,11 @@ from smcx.types import (
 )
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
+
+if TYPE_CHECKING:
+    _CountArgument: TypeAlias = SupportsIndex
+else:
+    _CountArgument: TypeAlias = Any
 
 
 def _checkpoint_tolerance(dtype: object, num_particles: int) -> float:
@@ -171,7 +184,7 @@ def bootstrap_init(
     initial_sampler: InitialSampler | InitialSamplerWithInput,
     log_observation_fn: LogObservationFn | LogObservationFnWithInput,
     first_emission: EmissionValue,
-    num_particles: int,
+    num_particles: _CountArgument,
     *,
     input_t: InputValue | None = None,
 ) -> tuple[BootstrapCheckpoint, BootstrapStepInfo]:
@@ -195,8 +208,7 @@ def bootstrap_init(
             cloud is invalid.
         DegenerateWeightsError: Initial importance weights cannot normalize.
     """
-    if num_particles < 1:
-        raise ValueError(f"num_particles must be >= 1; got {num_particles}")
+    num_particles = _positive_integer(num_particles, name="num_particles")
     first_emission = _canonicalize_emission(
         first_emission,
         name="first_emission",

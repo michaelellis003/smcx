@@ -16,7 +16,7 @@ draw one trajectory rather than a particle cloud or log-density.
 The implementation expresses the full time-loop as one `jax.lax.scan`.
 """
 
-from typing import cast
+from typing import TYPE_CHECKING, Any, SupportsIndex, TypeAlias, cast
 
 import jax.random as jr
 from jax import lax
@@ -25,6 +25,7 @@ from jaxtyping import Array, Shaped
 from smcx._utils import (
     _canonicalize_emission,
     _canonicalize_inputs,
+    _positive_integer,
     _prepend,
     _prepend_state_history,
     _validate_initial_state,
@@ -44,13 +45,18 @@ from smcx.types import (
     TransitionSamplerWithInput,
 )
 
+if TYPE_CHECKING:
+    _CountArgument: TypeAlias = SupportsIndex
+else:
+    _CountArgument: TypeAlias = Any
+
 
 def simulate(
     key: PRNGKeyT,
     initial_sampler: SingleInitialSampler | SingleInitialSamplerWithInput,
     transition_sampler: TransitionSampler | TransitionSamplerWithInput,
     emission_sampler: EmissionSampler | EmissionSamplerWithInput,
-    num_timesteps: int,
+    num_timesteps: _CountArgument,
     *,
     inputs: InputSequence | None = None,
 ) -> tuple[
@@ -89,8 +95,7 @@ def simulate(
             the initial state tree is empty, a transition changes the state
             structure, or an emission has an invalid shape or changes dtype.
     """
-    if num_timesteps < 1:
-        raise ValueError(f"num_timesteps must be >= 1; got {num_timesteps}")
+    num_timesteps = _positive_integer(num_timesteps, name="num_timesteps")
     inputs_arr = (
         None if inputs is None else _canonicalize_inputs(inputs, num_timesteps)
     )
