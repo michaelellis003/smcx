@@ -389,3 +389,34 @@ def test_gradient_follows_the_realized_inexact_gathers() -> None:
     expected = objective(one)
     np.testing.assert_array_equal(jax.grad(objective)(one), expected)
     np.testing.assert_array_equal(jax.jit(jax.grad(objective))(one), expected)
+
+
+class _ResearchFilterResult(NamedTuple):
+    """Caller-owned record carrying exactly the protocol fields."""
+
+    marginal_loglik: Any
+    filtered_particles: Any
+    filtered_log_weights: Any
+    ancestors: Any
+    ess: Any
+    log_evidence_increments: Any
+
+
+def test_accepts_caller_owned_structural_posterior() -> None:
+    """A conforming caller-owned record works like the nominal one."""
+    nominal = _dense_posterior()
+    research = _ResearchFilterResult(*nominal)
+
+    def log_transition(state, prev_state, params, input_t):
+        del params, input_t
+        return -0.5 * (state[0] - prev_state[0]) ** 2
+
+    from_nominal = _sample(nominal, log_transition)
+    from_research = _sample(research, log_transition)
+    _assert_tree_equal(
+        from_research.smoothed_trajectories,
+        from_nominal.smoothed_trajectories,
+    )
+    np.testing.assert_array_equal(
+        from_research.backward_indices, from_nominal.backward_indices
+    )

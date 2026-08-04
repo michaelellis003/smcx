@@ -19,7 +19,7 @@ from smcx._utils import (
 )
 from smcx.containers import (
     LiuWestPosterior,
-    ParticleFilterPosterior,
+    ParticleFilterResult,
     ParticleSmootherPosterior,
 )
 from smcx.diagnostics import _validate_particle_result_axes
@@ -34,7 +34,7 @@ from smcx.types import (
 
 _DrawCloud: TypeAlias = PyTree[Shaped[Array, "num_draws ..."]]
 if TYPE_CHECKING:
-    _PosteriorArgument: TypeAlias = ParticleFilterPosterior
+    _PosteriorArgument: TypeAlias = ParticleFilterResult
     _LogTransitionArgument: TypeAlias = ModelLogTransition
     _NumDrawsArgument: TypeAlias = SupportsIndex
 else:
@@ -138,8 +138,11 @@ def backward_simulation(
 
     Args:
         key: JAX PRNG key.
-        posterior: Fixed-parameter ``ParticleFilterPosterior`` with full
-            history.
+        posterior: Fixed-parameter filter result with full history — the
+            nominal ``ParticleFilterPosterior`` or any caller-owned
+            record satisfying `smcx.containers.ParticleFilterResult`
+            whose stored log-weight rows are the normalized filtering
+            weights of their stored clouds.
         log_transition: Forward-consistent transition log density or mass,
             called as ``(state, prev_state, params, input_t) -> scalar``.
         params: Explicit transition parameters.
@@ -177,8 +180,12 @@ def backward_simulation(
         raise ValueError(
             "backward_simulation cannot ignore LiuWestPosterior.filtered_params"
         )
-    if not isinstance(posterior, ParticleFilterPosterior):
-        raise ValueError("posterior must be a ParticleFilterPosterior")
+    if not isinstance(posterior, ParticleFilterResult):
+        raise ValueError(
+            "posterior must be a ParticleFilterResult: a record with "
+            "marginal_loglik, filtered_particles, filtered_log_weights, "
+            "ancestors, ess, and log_evidence_increments fields"
+        )
     if not callable(log_transition):
         raise ValueError("log_transition must be callable")
     ntime, _ = _validate_particle_result_axes(
