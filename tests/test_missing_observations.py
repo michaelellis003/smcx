@@ -608,3 +608,108 @@ def test_dlm_smoother_consumes_gapped_record():
     )
     assert bool(jnp.all(jnp.isfinite(smoothed.smoothed_means)))
     assert bool(jnp.all(jnp.isfinite(smoothed.smoothed_scale_free_covariances)))
+
+
+def _dglm_run(emissions, family=None, **kwargs):
+    dtype = jnp.float64 if jax.config.read("jax_enable_x64") else jnp.float32
+    defaults = {
+        "initial_mean": jnp.zeros(1, dtype=dtype),
+        "initial_covariance": jnp.eye(1, dtype=dtype),
+        "transition_matrix": jnp.eye(1, dtype=dtype),
+        "observation_vector": jnp.ones(1, dtype=dtype),
+        "transition_covariance": 0.1 * jnp.eye(1, dtype=dtype),
+    }
+    defaults.update(kwargs)
+    return smcx.dglm_filter(
+        emissions=emissions,
+        family=family or smcx.poisson(),
+        **defaults,
+    )
+
+
+def test_dglm_gap_bypasses_family_validation_and_stores_prior():
+    """An all-NaN datum skips the family check and the update."""
+    emissions = jnp.asarray([1.0, jnp.nan, 3.0])
+    posterior = _dglm_run(emissions)
+
+    prior_mean = posterior.filtered_means[0]
+    prior_cov = posterior.filtered_covariances[0] + 0.1 * jnp.eye(
+        1, dtype=posterior.filtered_means.dtype
+    )
+    np.testing.assert_array_equal(posterior.filtered_means[1], prior_mean)
+    np.testing.assert_allclose(
+        posterior.filtered_covariances[1],
+        prior_cov,
+        atol=_tolerance(posterior.filtered_means.dtype),
+    )
+    np.testing.assert_array_equal(
+        posterior.log_evidence_increments[1],
+        jnp.zeros_like(posterior.marginal_loglik),
+    )
+    assert bool(jnp.isfinite(posterior.marginal_loglik))
+    assert bool(jnp.all(jnp.isfinite(posterior.conjugate_alphas)))
+    assert bool(jnp.all(jnp.isfinite(posterior.conjugate_betas)))
+
+
+def test_dglm_normal_family_gap_reduces_to_gapped_kalman():
+    """The normal-family reduction holds through gaps."""
+    emissions = jnp.asarray([0.2, jnp.nan, 0.4])
+    dtype = jnp.float64 if jax.config.read("jax_enable_x64") else jnp.float32
+    variance = 0.3
+
+    def normal_family():
+        return smcx.DGLMFamily(
+            match_moments=lambda f, q: (f, q + variance),
+            log_forecast=lambda y, alpha, beta: (
+                -0.5 * (jnp.log(2.0 * jnp.pi * beta) + (y - alpha) ** 2 / beta)
+            ),
+            update=lambda y, alpha, beta: (
+                alpha + (beta - variance) / beta * (y - alpha),
+                (beta - variance) - (beta - variance) ** 2 / beta + variance,
+            ),
+            posterior_moments=lambda alpha, beta: (alpha, beta - variance),
+        )
+
+    dglm = _dglm_run(emissions, family=normal_family())
+    kalman = smcx.kalman_filter(
+        initial_mean=jnp.zeros(1, dtype=dtype),
+        initial_covariance=jnp.eye(1, dtype=dtype),
+        transition_matrix=jnp.eye(1, dtype=dtype),
+        transition_covariance=0.1 * jnp.eye(1, dtype=dtype),
+        observation_matrix=jnp.ones((1, 1), dtype=dtype),
+        observation_covariance=variance * jnp.eye(1, dtype=dtype),
+        emissions=emissions[:, None],
+    )
+    atol = _tolerance(dtype, 8.0)
+    np.testing.assert_allclose(
+        dglm.filtered_means, kalman.filtered_means, atol=atol
+    )
+    np.testing.assert_allclose(
+        dglm.marginal_loglik, kalman.marginal_loglik, atol=atol
+    )
+
+
+def test_dglm_rejects_infinite_and_keeps_family_check_for_observed():
+    """The row rule precedes the family check for observed entries.
+
+    Infinite entries get the shared rejection; an invalid observed
+    value beside a missing one still faces the family.
+    """
+    with pytest.raises(ValueError, match="fully observed"):
+        _dglm_run(jnp.asarray([1.0, jnp.inf]))
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        _dglm_run(jnp.asarray([1.0, jnp.nan, 2.5]))
+
+
+def test_dglm_smoother_consumes_gapped_record():
+    """Retrospective state moments accept a gapped filter record."""
+    emissions = jnp.asarray([1.0, jnp.nan, 3.0])
+    dtype = jnp.float64 if jax.config.read("jax_enable_x64") else jnp.float32
+    posterior = _dglm_run(emissions)
+    smoothed = smcx.dglm_smoother(
+        posterior,
+        jnp.eye(1, dtype=dtype),
+        transition_covariance=0.1 * jnp.eye(1, dtype=dtype),
+    )
+    assert bool(jnp.all(jnp.isfinite(smoothed.smoothed_means)))
+    assert bool(jnp.all(jnp.isfinite(smoothed.smoothed_covariances)))

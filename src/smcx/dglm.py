@@ -67,8 +67,10 @@ from smcx.kalman import (
     _canonicalize_filter_covariances,
     _check_covariance,
     _check_float_array,
+    _sanitize_missing,
     _symmetrize,
     _time_matrix,
+    _validate_emission_rows,
 )
 from smcx.types import (
     EmissionSequence,
@@ -517,7 +519,15 @@ def dglm_filter(
             ``(state_dim,)``; the linear predictor is $F' x_t$.
         emissions: Univariate observations shaped ``(ntime,)`` or
             ``(ntime, 1)``; the family documents its domain (counts
-            for `smcx.poisson`).
+            for `smcx.poisson`). A NaN entry marks that datum missing:
+            it bypasses the family support check, the update is
+            skipped while the prior construction (including the
+            dispersion inflation) stands, the stored conjugates are
+            the matched prior pair, and ``log_evidence_increments``
+            carries an exact zero there (ADR-0034). NaN needs a float
+            dtype, so integer emission arrays remain
+            fully-observed-only; infinite entries are rejected
+            eagerly.
         family: `DGLMFamily` record of the four conjugate callables.
             Required; there is no default because a mismatched family
             fails silently, not loudly.
@@ -597,9 +607,17 @@ def dglm_filter(
     # to float32 1.0 and a float64 -1e-50 to negative zero, which
     # would defeat integer- and nonnegativity-support checks
     # (follow-up review R8).
+    if not isinstance(emissions, core.Tracer):
+        _validate_emission_rows(emissions)
     validator = getattr(family.log_forecast, _VALIDATOR_ATTRIBUTE, None)
     if validator is not None and not isinstance(emissions, core.Tracer):
-        validator(emissions)
+        # Missing (all-NaN) rows bypass the family support check
+        # (ADR-0034); every observed entry still faces it. Integer
+        # emission arrays cannot encode NaN, so they remain
+        # fully-observed-only.
+        observed = emissions[~jnp.isnan(emissions)]
+        if observed.size:
+            validator(observed)
     emission_values = emissions.astype(dtype)
     num_timesteps = emissions.shape[0]
 
@@ -653,15 +671,22 @@ def dglm_filter(
     inverse_dispersion = 1.0 / jnp.asarray(dispersion_value, dtype=dtype)
 
     def _update(carry: _DGLMCarry, prior_mean, prior_cov, emission_t):
+        # An all-NaN emission marks the datum missing (ADR-0034): the
+        # prior construction (including the dispersion inflation inside
+        # the moment match) stands, the observation update is skipped,
+        # the stored conjugates are the matched prior pair, and the
+        # increment is exactly zero. Zero-filling keeps the unselected
+        # branch finite for every shipped family.
+        missing, safe_emission = _sanitize_missing(emission_t)
         forecast_mean = observation_vector @ prior_mean
         forecast_variance = (
             observation_vector @ prior_cov @ observation_vector
         ) * inverse_dispersion
         alpha, beta = family.match_moments(forecast_mean, forecast_variance)
         log_density = jnp.asarray(
-            family.log_forecast(emission_t[0], alpha, beta), dtype=dtype
+            family.log_forecast(safe_emission[0], alpha, beta), dtype=dtype
         )
-        alpha_post, beta_post = family.update(emission_t[0], alpha, beta)
+        alpha_post, beta_post = family.update(safe_emission[0], alpha, beta)
         post_mean, post_variance = family.posterior_moments(
             alpha_post, beta_post
         )
@@ -674,9 +699,25 @@ def dglm_filter(
         # unchanged.
         matched_mean, matched_variance = family.posterior_moments(alpha, beta)
         gain = prior_cov @ observation_vector / forecast_variance
-        new_mean = prior_mean + gain * (post_mean - matched_mean)
-        new_cov = prior_cov - jnp.outer(gain, gain) * (
-            matched_variance - post_variance
+        new_mean = jnp.where(
+            missing,
+            prior_mean,
+            prior_mean + gain * (post_mean - matched_mean),
+        )
+        new_cov = jnp.where(
+            missing,
+            prior_cov,
+            prior_cov
+            - jnp.outer(gain, gain) * (matched_variance - post_variance),
+        )
+        alpha_post = jnp.where(
+            missing, jnp.asarray(alpha, dtype=dtype), alpha_post
+        )
+        beta_post = jnp.where(
+            missing, jnp.asarray(beta, dtype=dtype), beta_post
+        )
+        log_density = jnp.where(
+            missing, jnp.zeros_like(log_density), log_density
         )
         loglik, compensation = _neumaier_add(
             carry.marginal_loglik,
