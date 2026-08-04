@@ -156,7 +156,7 @@ def test_particle_filters_accept_scalar_discrete_emissions(run_filter, dtype):
     ("emissions", "num_particles", "message"),
     [
         (jnp.zeros((0, 1)), 4, "must contain at least one row"),
-        (jnp.zeros((2, 1)), 0, "num_particles must be >= 1"),
+        (jnp.zeros((2, 1)), 0, "num_particles must be a positive integer"),
         (jnp.zeros((2, 0)), 4, "emission_dim >= 1"),
         (jnp.zeros((2, 1, 1)), 4, r"shape \(T,\) or \(T, emission_dim\)"),
         ([0.0, 1.0], 4, "must be a JAX array"),
@@ -459,7 +459,9 @@ def test_liu_west_validates_shrinkage_before_callbacks():
 
 
 def test_simulate_requires_at_least_one_timestep():
-    with pytest.raises(ValueError, match="num_timesteps must be >= 1"):
+    with pytest.raises(
+        ValueError, match="num_timesteps must be a positive integer"
+    ):
         smcx.simulate(
             jr.key(0),
             lambda _key: jnp.zeros(1),
@@ -501,9 +503,17 @@ def test_temper_rejects_unsupported_upper_target_before_initialization(
 @pytest.mark.parametrize(
     ("initial_sampler", "kwargs", "message"),
     [
-        (_initial_sampler, {"num_particles": 0}, "num_particles must be >= 1"),
+        (
+            _initial_sampler,
+            {"num_particles": 0},
+            "num_particles must be a positive integer",
+        ),
         (_initial_sampler, {"target_ess": 0.0}, "target_ess must be in"),
-        (_initial_sampler, {"max_stages": 0}, "max_stages must be >= 1"),
+        (
+            _initial_sampler,
+            {"max_stages": 0},
+            "max_stages must be a positive integer",
+        ),
         (
             lambda _key, count: jnp.zeros(count),
             {},
@@ -600,14 +610,14 @@ def _run_smc2(emissions, num_theta=2, num_x=2, **kwargs):
     ),
     [
         (jnp.zeros((0, 1)), 2, 2, {}, "must contain at least one row"),
-        (jnp.zeros((2, 1)), 0, 2, {}, "num_theta must be >= 1"),
-        (jnp.zeros((2, 1)), 2, 0, {}, "num_x must be >= 1"),
+        (jnp.zeros((2, 1)), 0, 2, {}, "num_theta must be a positive integer"),
+        (jnp.zeros((2, 1)), 2, 0, {}, "num_x must be a positive integer"),
         (
             jnp.zeros((2, 1)),
             2,
             2,
             {"num_pmmh_steps": -1},
-            "num_pmmh_steps must be >= 0",
+            "num_pmmh_steps must be a nonnegative integer",
         ),
         (
             jnp.zeros((2, 1)),

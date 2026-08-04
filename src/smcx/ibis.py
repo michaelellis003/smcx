@@ -3,9 +3,6 @@
 
 """Iterated batch importance sampling for static parameters."""
 
-import operator
-from typing import Any, cast
-
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -16,6 +13,7 @@ from smcx._static_mutation import _resolve_static_mutation
 from smcx._utils import (
     _canonicalize_emissions,
     _canonicalize_inputs,
+    _positive_integer,
     _validate_log_density_batch,
     _validate_resampling_threshold,
 )
@@ -34,21 +32,6 @@ from smcx.types import (
     StaticMutationInitFn,
     StaticMutationStepFn,
 )
-
-
-def _positive_integer(value: object, *, name: str) -> int:
-    """Return one positive integer while rejecting Boolean aliases."""
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be a positive integer, not a boolean")
-    try:
-        integer = operator.index(cast(Any, value))
-    except TypeError as error:
-        raise ValueError(
-            f"{name} must be a positive integer; got {value!r}"
-        ) from error
-    if integer < 1:
-        raise ValueError(f"{name} must be a positive integer; got {integer}")
-    return integer
 
 
 def ibis(

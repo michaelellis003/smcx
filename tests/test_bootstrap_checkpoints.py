@@ -244,7 +244,8 @@ def test_init_rejects_nonpositive_particle_count_before_callbacks(
 
     with pytest.raises(
         ValueError,
-        match=rf"^num_particles must be >= 1; got {num_particles}$",
+        match=rf"^num_particles must be a positive integer; "
+        rf"got {num_particles}$",
     ):
         smcx.bootstrap_init(
             jr.key(1),

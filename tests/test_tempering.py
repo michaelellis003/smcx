@@ -480,7 +480,9 @@ class TestMutationCallback:
 
     def test_requires_at_least_one_mutation_step(self):
         init, log_prior, log_lik = _small_tempering_model()
-        with pytest.raises(ValueError, match="num_mcmc_steps must be >= 1"):
+        with pytest.raises(
+            ValueError, match="num_mcmc_steps must be a positive integer"
+        ):
             smcx.temper(
                 jr.key(44),
                 init,

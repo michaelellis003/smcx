@@ -32,7 +32,14 @@ The adaptive schedule is host-driven (bisection reads ESS values), so
 """
 
 import math
-from typing import NamedTuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    NamedTuple,
+    SupportsIndex,
+    TypeAlias,
+    cast,
+)
 
 import jax
 import jax.numpy as jnp
@@ -52,6 +59,7 @@ from smcx._static_smc import (
     _StaticSMCState,
 )
 from smcx._utils import (
+    _positive_integer,
     _raise_if_degenerate,
     _validate_log_density_batch,
 )
@@ -72,6 +80,11 @@ from smcx.types import (
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize
 
+if TYPE_CHECKING:
+    _CountArgument: TypeAlias = SupportsIndex
+else:
+    _CountArgument: TypeAlias = Any
+
 _BISECT_ITERS = 60
 _MAX_TARGET_ESS = 1.0 - float(np.finfo(np.float32).eps)
 _RWM_SCALE = 2.38
@@ -90,16 +103,16 @@ def temper(
     initial_sampler: DenseInitialSampler,
     log_prior_fn: StaticLogDensity,
     log_likelihood_fn: StaticLogDensity,
-    num_particles: int,
+    num_particles: _CountArgument,
     *,
-    num_mcmc_steps: int = 5,
+    num_mcmc_steps: _CountArgument = 5,
     target_ess: float = 0.5,
     resampling_fn: ResamplingFn = systematic,
     mutation: StaticMutation | None = None,
     mutation_init_fn: TemperingMutationInitFn | None = None,
     mutation_step_fn: TemperingMutationStepFn | None = None,
     schedule_fn: TemperingScheduleFn | None = None,
-    max_stages: int = 1000,
+    max_stages: _CountArgument = 1000,
 ) -> TemperedPosterior:
     r"""Sample a static target by adaptive tempered SMC.
 
@@ -161,18 +174,15 @@ def temper(
         RuntimeError: ``max_stages`` exceeded before reaching
             ``phi = 1``.
     """
-    if num_particles < 1:
-        raise ValueError(f"num_particles must be >= 1; got {num_particles}")
-    if num_mcmc_steps < 1:
-        raise ValueError(f"num_mcmc_steps must be >= 1; got {num_mcmc_steps}")
+    num_particles = _positive_integer(num_particles, name="num_particles")
+    num_mcmc_steps = _positive_integer(num_mcmc_steps, name="num_mcmc_steps")
     if not 0.0 < target_ess <= _MAX_TARGET_ESS:
         raise ValueError(
             "target_ess must be in the interval "
             f"(0, 1 - eps32] (upper bound {_MAX_TARGET_ESS}); "
             f"got {target_ess}"
         )
-    if max_stages < 1:
-        raise ValueError(f"max_stages must be >= 1; got {max_stages}")
+    max_stages = _positive_integer(max_stages, name="max_stages")
     mutation_init_fn, mutation_step_fn = _resolve_static_mutation(
         mutation,
         mutation_init_fn,

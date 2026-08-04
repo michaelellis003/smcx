@@ -44,7 +44,14 @@ References:
 
 import math
 import warnings
-from typing import NamedTuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    NamedTuple,
+    SupportsIndex,
+    TypeAlias,
+    cast,
+)
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -56,6 +63,7 @@ from smcx._utils import (
     _canonicalize_inputs,
     _conditional_resample,
     _filter_scan,
+    _positive_integer,
     _prepend,
     _raise_if_degenerate,
     _raise_invalid_ancestors,
@@ -88,6 +96,11 @@ from smcx.types import (
 )
 from smcx.weights import ess as compute_ess
 from smcx.weights import log_normalize, normalize
+
+if TYPE_CHECKING:
+    _CountArgument: TypeAlias = SupportsIndex
+else:
+    _CountArgument: TypeAlias = Any
 
 
 class _LiuWestStepCarry(NamedTuple):
@@ -555,7 +568,7 @@ def liu_west_filter(
     log_auxiliary_fn: ParamLogObservationFn | ParamLogObservationFnWithInput,
     param_initial_sampler: ParamInitialSampler,
     emissions: EmissionSequence,
-    num_particles: int,
+    num_particles: _CountArgument,
     *,
     shrinkage: float = 0.95,
     resampling_fn: ResamplingFn = systematic,
@@ -700,6 +713,7 @@ def liu_west_filter(
         # so exact comparison is intended here.
         and float(resampling_threshold) == 0.0  # ruff: ignore[float-equality-comparison]
     )
+    num_particles = _positive_integer(num_particles, name="num_particles")
     emissions, num_timesteps = _validate_filter_inputs(
         emissions,
         num_particles,
