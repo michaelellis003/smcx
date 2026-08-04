@@ -22,6 +22,7 @@ def test_public_api_exports_all_expected_names(package):
         "CallbackNames",
         "FeynmanKac",
         "StateSpaceModel",
+        "StaticMutation",
         "BootstrapStepInfo",
         "DLMFilterPosterior",
         "DLMSmootherPosterior",

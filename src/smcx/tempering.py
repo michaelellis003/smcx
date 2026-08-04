@@ -42,7 +42,10 @@ from jax import jit, vmap
 from jaxtyping import Array, Bool, Float
 
 from smcx._covariance import _weighted_covariance_factor
-from smcx._static_mutation import _run_custom_mutation_sweep
+from smcx._static_mutation import (
+    _resolve_static_mutation,
+    _run_custom_mutation_sweep,
+)
 from smcx._static_smc import (
     _static_smc_stage,
     _StaticMoveResult,
@@ -61,6 +64,7 @@ from smcx.types import (
     PRNGKeyT,
     ResamplingFn,
     StaticLogDensity,
+    StaticMutation,
     TemperingMutationInitFn,
     TemperingMutationStepFn,
     TemperingScheduleFn,
@@ -91,6 +95,7 @@ def temper(
     num_mcmc_steps: int = 5,
     target_ess: float = 0.5,
     resampling_fn: ResamplingFn = systematic,
+    mutation: StaticMutation | None = None,
     mutation_init_fn: TemperingMutationInitFn | None = None,
     mutation_step_fn: TemperingMutationStepFn | None = None,
     schedule_fn: TemperingScheduleFn | None = None,
@@ -120,6 +125,9 @@ def temper(
             for heterogeneous likelihoods.
         resampling_fn: Resampler applied at every
             stage.
+        mutation: Optional `smcx.StaticMutation` record carrying the
+            initializer and step together; the primary form of the
+            legacy pair below. Supply the record or the pair, not both.
         mutation_init_fn: Optional
             ``(position, tempered_logdensity_fn) -> state`` callback.
             State must be a JAX PyTree with a dense ``position`` field.
@@ -165,6 +173,11 @@ def temper(
         )
     if max_stages < 1:
         raise ValueError(f"max_stages must be >= 1; got {max_stages}")
+    mutation_init_fn, mutation_step_fn = _resolve_static_mutation(
+        mutation,
+        mutation_init_fn,
+        mutation_step_fn,
+    )
     if (mutation_init_fn is None) != (mutation_step_fn is None):
         raise ValueError(
             "mutation_init_fn and mutation_step_fn must be supplied together"

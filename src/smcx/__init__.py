@@ -97,6 +97,7 @@ from smcx.simulate import simulate
 from smcx.smc2 import smc2
 from smcx.smoothing import backward_simulation
 from smcx.tempering import temper
+from smcx.types import StaticMutation
 from smcx.weights import ess, log_ess, log_normalize, normalize
 
 try:
@@ -127,6 +128,7 @@ __all__ = [
     "ParticleState",
     "SMC2Posterior",
     "StateSpaceModel",
+    "StaticMutation",
     "TemperedPosterior",
     "__version__",
     "auxiliary_filter",

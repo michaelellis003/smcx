@@ -11,7 +11,14 @@ Core array and key aliases follow the conventions used by Dynamax
 (``dynamax.types``); callback protocols describe smcx's public boundaries.
 """
 
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    NamedTuple,
+    Protocol,
+    TypeAlias,
+    runtime_checkable,
+)
 
 from jaxtyping import (
     Array,
@@ -275,6 +282,26 @@ StaticMutationInitFn: TypeAlias = TemperingMutationInitFn
 
 StaticMutationStepFn: TypeAlias = TemperingMutationStepFn
 """Generic static-target mutation step; alias of the tempering step."""
+
+
+class StaticMutation(NamedTuple):
+    """Paired invariant-mutation callbacks for static-target samplers.
+
+    One value carrying the initializer and step together, so the two
+    cannot be supplied apart. `smcx.temper` and `smcx.ibis` accept it
+    through their ``mutation`` argument as the primary form of the
+    legacy ``mutation_init_fn``/``mutation_step_fn`` pair.
+
+    Attributes:
+        init: ``(position, logdensity_fn) -> state`` initializer; the
+            state is a JAX PyTree with a dense ``position`` field.
+        step: ``(key, state, logdensity_fn) -> (state, info)`` invariant
+            step; info exposes a scalar floating ``acceptance_rate`` in
+            ``[0, 1]``.
+    """
+
+    init: StaticMutationInitFn
+    step: StaticMutationStepFn
 
 
 @runtime_checkable
