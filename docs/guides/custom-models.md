@@ -102,6 +102,47 @@ a finite, positive-diagonal Cholesky factor on the active backend, as described
 in the [filtering quickstart](quickstart.md). These eager checks do not
 guarantee endpoint behavior under an outer JAX transformation.
 
+### Missing observations
+
+Every exact filter — `kalman_filter`, `extended_kalman_filter`,
+`unscented_kalman_filter`, `gaussian_filter`, `dlm_filter`, and
+`dglm_filter` — treats an entirely-NaN emission row as a missing datum
+under one uniform contract: the update is skipped, the stored filtered
+moments equal the predicted moments, and `log_evidence_increments`
+carries an exact zero there, so the datum contributes nothing to
+`marginal_loglik`. Evolution is time-driven, so discounts still apply
+at a gap: the DLM's degrees of freedom decay by the variance discount
+without the observation's `+1`, and the DGLM's dispersion inflation
+still enters its matched prior, while its NaN row bypasses the family
+support check. Missingness resolves inside the compiled step, so
+`jit`, `vmap`, and `grad` compose unchanged, and the smoothers,
+`posterior_sample`, and `smoothed_cross_covariances` consume gapped
+records without change.
+
+```python
+gapped = jnp.array([[0.2], [jnp.nan], [0.4]])
+with_gap = smcx.kalman_filter(
+    initial_mean=jnp.zeros(2),
+    initial_covariance=jnp.eye(2),
+    transition_matrix=jnp.eye(2),
+    transition_covariance=0.1 * jnp.eye(2),
+    observation_matrix=jnp.array([[1.0, 0.0]]),
+    observation_covariance=jnp.array([[0.3]]),
+    emissions=gapped,
+)
+print(with_gap.log_evidence_increments[1])  # 0.0 exactly
+```
+
+Two classes of nonfinite rows are never meaningful and are rejected
+eagerly: partially NaN rows (neither observed nor missing) and rows
+with infinities. NaN needs a floating dtype, so an integer emission
+array for `dglm_filter` remains fully-observed-only. The particle
+filters are outside this contract because their emissions are opaque
+callback inputs; encode a missing datum in your own observation
+potential by returning zero log mass for it, and note that a NaN
+reaching the potential fails loudly through the degeneracy gate rather
+than silently.
+
 With `inputs=...`, every supplied callback accepts `(state, input_t)`.
 `inputs[t]` reaches the observation at `t` and the transition into `t`;
 `inputs[0]` does not transform the supplied prior. A rank-one input sequence
