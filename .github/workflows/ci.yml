@@ -159,10 +159,13 @@ jobs:
         if: github.event_name == 'pull_request'
         # Coverage-complete slices: public surface never merges below the
         # patch target; split slices by feature scope, not by deferring
-        # tests (deviations register D8, 2026-08-03).
+        # tests (deviations register D8, 2026-08-03). The base ref reaches
+        # the shell through the environment, never template expansion.
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: >
           uv run diff-cover coverage.xml
-          --compare-branch origin/${{ github.base_ref }}
+          --compare-branch "origin/${BASE_REF}"
           --fail-under 95
 
       - name: Upload Coverage to Codecov
