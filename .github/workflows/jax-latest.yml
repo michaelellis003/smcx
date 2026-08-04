@@ -1,0 +1,41 @@
+name: jax-latest
+
+# Informational early warning for jax releases beyond the locked
+# version. The core jax dependency is uncapped, so upstream breakage
+# should surface here first, not in a user install report. A failure
+# here is a signal to fix forward or add a truthful, temporary cap —
+# never to ignore.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  latest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          version: '0.11.32'
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Upgrade jax to the latest release
+        run: |
+          uv lock --upgrade-package jax --upgrade-package jaxlib
+          uv sync
+
+      - name: Report resolved versions
+        run: uv run --no-sync python -c "import jax; print('jax', jax.__version__)"
+
+      - name: Run tests against latest jax
+        run: uv run --no-sync pytest -q
