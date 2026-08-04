@@ -464,3 +464,147 @@ def test_extended_gradient_through_gap_is_finite():
 
     gradient = jax.grad(marginal)(jnp.asarray(0.9, dtype=dtype))
     assert bool(jnp.isfinite(gradient))
+
+
+def _dlm_run(emissions, **kwargs):
+    dtype = emissions.dtype
+    defaults = {
+        "initial_mean": jnp.zeros(1, dtype=dtype),
+        "initial_scale_free_covariance": jnp.eye(1, dtype=dtype),
+        "transition_matrix": jnp.eye(1, dtype=dtype),
+        "observation_vector": jnp.ones(1, dtype=dtype),
+        "scale_free_transition_covariance": 0.2 * jnp.eye(1, dtype=dtype),
+        "prior_shape": 4.0,
+        "prior_scale": 1.0,
+    }
+    defaults.update(kwargs)
+    return smcx.dlm_filter(emissions=emissions, **defaults)
+
+
+def test_dlm_gap_preserves_conjugate_state_and_zero_increment():
+    """A missing datum leaves (n, S) unobserved and stores the prior."""
+    emissions = jnp.asarray([0.2, jnp.nan, 0.4])
+    posterior = _dlm_run(emissions)
+
+    np.testing.assert_array_equal(
+        posterior.scale_shapes,
+        jnp.asarray([5.0, 5.0, 6.0], dtype=emissions.dtype),
+    )
+    np.testing.assert_array_equal(
+        posterior.scale_estimates[1], posterior.scale_estimates[0]
+    )
+    np.testing.assert_array_equal(
+        posterior.log_evidence_increments[1],
+        jnp.zeros_like(posterior.marginal_loglik),
+    )
+    prior_mean = posterior.filtered_means[0]
+    prior_cov = posterior.filtered_scale_free_covariances[0] + 0.2 * jnp.eye(
+        1, dtype=emissions.dtype
+    )
+    np.testing.assert_array_equal(posterior.filtered_means[1], prior_mean)
+    np.testing.assert_allclose(
+        posterior.filtered_scale_free_covariances[1],
+        prior_cov,
+        atol=_tolerance(emissions.dtype),
+    )
+
+
+def test_dlm_gap_matches_composed_evolution():
+    """A gap under identity dynamics equals doubling the evolution noise."""
+    emissions = jnp.asarray([0.2, jnp.nan, 0.4])
+    dtype = emissions.dtype
+    evolution = 0.2 * jnp.eye(1, dtype=dtype)
+    gapped = _dlm_run(emissions)
+    composed = _dlm_run(
+        jnp.asarray([0.2, 0.4]),
+        scale_free_transition_covariance=(2.0 * evolution)[None],
+    )
+    atol = _tolerance(dtype, 4.0)
+    np.testing.assert_allclose(
+        gapped.filtered_means[2], composed.filtered_means[1], atol=atol
+    )
+    np.testing.assert_allclose(
+        gapped.filtered_scale_free_covariances[2],
+        composed.filtered_scale_free_covariances[1],
+        atol=atol,
+    )
+    np.testing.assert_array_equal(
+        gapped.scale_shapes[2], composed.scale_shapes[1]
+    )
+    np.testing.assert_allclose(
+        gapped.scale_estimates[2], composed.scale_estimates[1], atol=atol
+    )
+    np.testing.assert_allclose(
+        gapped.marginal_loglik, composed.marginal_loglik, atol=atol
+    )
+
+
+def test_dlm_variance_discount_still_decays_at_a_gap():
+    """The variance discount still applies when the datum is missing.
+
+    Discounting is evolution, not update: only the +1 observation
+    step is skipped at a gap.
+    """
+    emissions = jnp.asarray([0.2, jnp.nan, 0.4])
+    discount_v = 0.9
+    posterior = _dlm_run(emissions, variance_discount=discount_v)
+
+    n0 = 4.0
+    n1 = n0 + 1.0
+    n_gap = discount_v * n1
+    n2 = discount_v * n_gap + 1.0
+    np.testing.assert_allclose(
+        posterior.scale_shapes,
+        jnp.asarray([n1, n_gap, n2], dtype=emissions.dtype),
+        atol=_tolerance(emissions.dtype),
+    )
+    np.testing.assert_array_equal(
+        posterior.scale_estimates[1], posterior.scale_estimates[0]
+    )
+
+
+@pytest.mark.skipif(
+    jax.default_backend() != "cpu" or not jax.config.read("jax_enable_x64"),
+    reason="the 1e8-dof flat-prior reduction needs float64 headroom",
+)
+def test_dlm_gapped_kalman_reduction():
+    """The flat-prior reduction to kalman_filter holds through gaps."""
+    emissions = jnp.asarray([0.2, jnp.nan, 0.4])
+    dtype = emissions.dtype
+    dlm = _dlm_run(emissions, prior_shape=1e8, prior_scale=0.3)
+    kalman = smcx.kalman_filter(
+        initial_mean=jnp.zeros(1, dtype=dtype),
+        initial_covariance=0.3 * jnp.eye(1, dtype=dtype),
+        transition_matrix=jnp.eye(1, dtype=dtype),
+        transition_covariance=0.3 * 0.2 * jnp.eye(1, dtype=dtype),
+        observation_matrix=jnp.ones((1, 1), dtype=dtype),
+        observation_covariance=0.3 * jnp.eye(1, dtype=dtype),
+        emissions=emissions[:, None],
+    )
+    atol = 1e-3 if dtype == jnp.float32 else 1e-6
+    np.testing.assert_allclose(
+        dlm.filtered_means, kalman.filtered_means, atol=atol
+    )
+    np.testing.assert_allclose(
+        dlm.marginal_loglik, kalman.marginal_loglik, atol=atol
+    )
+
+
+def test_dlm_rejects_infinite_emissions():
+    """Infinite entries stay rejected under the shared row rule."""
+    with pytest.raises(ValueError, match="fully observed"):
+        _dlm_run(jnp.asarray([0.2, jnp.inf]))
+
+
+def test_dlm_smoother_consumes_gapped_record():
+    """Constant-V retrospection accepts a gapped filter record."""
+    emissions = jnp.asarray([0.2, jnp.nan, 0.4])
+    dtype = emissions.dtype
+    posterior = _dlm_run(emissions)
+    smoothed = smcx.dlm_smoother(
+        posterior,
+        jnp.eye(1, dtype=dtype),
+        scale_free_transition_covariance=0.2 * jnp.eye(1, dtype=dtype),
+    )
+    assert bool(jnp.all(jnp.isfinite(smoothed.smoothed_means)))
+    assert bool(jnp.all(jnp.isfinite(smoothed.smoothed_scale_free_covariances)))
