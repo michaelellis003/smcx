@@ -198,6 +198,47 @@ class ParticleFilterPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " ntime"]
 
 
+class ParticleForecastPaths(NamedTuple):
+    """Simulated forecast paths from a particle filtering frontier.
+
+    Row ``i`` resamples one terminal particle to equal weight and
+    iterates the model's samplers forward, so the rows are draws from
+    the particle approximation to the joint forecast law. Horizon
+    slices are equal-weight draws from the per-horizon forecast
+    marginals.
+
+    Attributes:
+        state_paths: Draw-major latent-state PyTree; every leaf has
+            shape ``(num_draws, num_steps, ...)``.
+        emission_paths: Emission trajectories with the model-owned
+            dtype, shape ``(num_draws, num_steps, emission_dim)``.
+    """
+
+    state_paths: ParticleHistory
+    emission_paths: Shaped[Array, "num_draws num_steps emission_dim"]
+
+
+class ParamForecastPaths(NamedTuple):
+    """Joint state and parameter forecast paths from a Liu-West fit.
+
+    Each draw carries one parameter vector, constant along its own
+    trajectory: parameter uncertainty widens the fan across draws
+    while each path evolves under its own fixed parameters.
+
+    Attributes:
+        state_paths: State trajectories, shape
+            ``(num_draws, num_steps, state_dim)``.
+        emission_paths: Emission trajectories with the model-owned
+            dtype, shape ``(num_draws, num_steps, emission_dim)``.
+        parameter_draws: The parameter vector riding each path, shape
+            ``(num_draws, param_dim)``.
+    """
+
+    state_paths: Float[Array, "num_draws num_steps state_dim"]
+    emission_paths: Shaped[Array, "num_draws num_steps emission_dim"]
+    parameter_draws: Float[Array, "num_draws param_dim"]
+
+
 class ParticleSmootherPosterior(NamedTuple):
     """Equal-weight draws from a discrete particle FFBS approximation.
 
