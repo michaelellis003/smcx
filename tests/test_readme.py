@@ -16,6 +16,7 @@ _ROOT = Path(__file__).parent.parent
     [
         ("README.md", 1),
         ("docs/guides/sequential-inference.md", 4),
+        ("docs/guides/parameter-estimation.md", 3),
     ],
 )
 def test_python_blocks_execute(path, minimum_blocks):
@@ -31,4 +32,7 @@ def test_python_blocks_execute(path, minimum_blocks):
     assert len(blocks) >= minimum_blocks
     namespace: dict[str, object] = {}
     exec(compile("\n".join(blocks), path, "exec"), namespace)
-    assert any(name in namespace for name in ("posterior", "score", "particle"))
+    assert any(
+        name in namespace
+        for name in ("posterior", "score", "particle", "history")
+    )
