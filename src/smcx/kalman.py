@@ -2461,7 +2461,8 @@ def rts_smoother(
 
 def smoothed_cross_covariances(
     smoothed_posterior: GaussianSmootherPosterior,
-    transition_matrix: Shaped[Array, "*transition_matrix_shape"],
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"]
+    | LinearGaussianModel,
 ) -> Float[Array, "num_transitions state_dim state_dim"]:
     r"""Compute adjacent-state covariances from linear RTS output.
 
@@ -2475,6 +2476,8 @@ def smoothed_cross_covariances(
         transition_matrix: The same static ``(state_dim, state_dim)`` matrix
             or length-``ntime - 1`` transition history used to produce the
             smoother record. Entry ``t`` maps state ``t`` to ``t + 1``.
+            Alternatively the `smcx.model.LinearGaussianModel` used by
+            the filter, whose ``transition_matrix`` field is read.
 
     Returns:
         Adjacent-state covariance blocks with shape
@@ -2499,6 +2502,8 @@ def smoothed_cross_covariances(
         The identity follows Särkkä and Svensson (2023), *Bayesian Filtering
         and Smoothing*, 2nd ed., equations 12.11--12.13.
     """
+    if isinstance(transition_matrix, LinearGaussianModel):
+        transition_matrix = transition_matrix.transition_matrix
     num_timesteps, state_dim, dtype = _validate_smoother_posterior(
         smoothed_posterior
     )
@@ -2528,7 +2533,8 @@ def smoothed_cross_covariances(
 def posterior_sample(
     key: PRNGKeyT,
     filtered_posterior: GaussianFilterPosterior,
-    transition_matrix: Shaped[Array, "*transition_matrix_shape"],
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"]
+    | LinearGaussianModel,
     *,
     num_draws: SupportsIndex,
 ) -> Float[Array, "num_draws ntime state_dim"]:
@@ -2543,7 +2549,9 @@ def posterior_sample(
         filtered_posterior: Forward-pass linear-Gaussian moments.
         transition_matrix: Static ``(state_dim, state_dim)`` matrix or
             time-varying array with leading length ``ntime - 1``. Entry
-            ``i`` maps state ``i`` to state ``i + 1``.
+            ``i`` maps state ``i`` to state ``i + 1``. Alternatively the
+            `smcx.model.LinearGaussianModel` used by the filter, whose
+            ``transition_matrix`` field is read.
         num_draws: Positive integer trajectory count. This controls an output
             shape and must be closed over or marked static through an outer
             ``jax.jit`` boundary.
@@ -2577,6 +2585,8 @@ def posterior_sample(
         https://doi.org/10.1093/biomet/81.3.541, and Frühwirth-Schnatter
         (1994), https://doi.org/10.1111/j.1467-9892.1994.tb00184.x.
     """
+    if isinstance(transition_matrix, LinearGaussianModel):
+        transition_matrix = transition_matrix.transition_matrix
     if isinstance(num_draws, bool):
         raise ValueError("num_draws must be a positive integer, not a boolean")
     try:
