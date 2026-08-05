@@ -22,7 +22,7 @@ FILTERED_W = smcx.dlm_filter(
     M0, C0, G, F, Y, scale_free_transition_covariance=W, prior_shape=5.0
 )
 NUM_STEPS = 3
-NUM_DRAWS = 40_000
+NUM_DRAWS = 15_000
 PATHS = smcx.dlm_forecast_sample(
     jr.key(5),
     FILTERED_W,
