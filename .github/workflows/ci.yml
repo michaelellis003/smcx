@@ -112,7 +112,9 @@ jobs:
         run: uv run python -m benchmarks.profiling.check_locking
 
       - name: Run tests
-        run: uv run pytest -v --durations=0
+        # Two workers: the serial suite reached the 25-minute budget
+        # on the 3.11 leg (canceled at the ceiling, tests passing).
+        run: uv run pytest -v --durations=0 -n 2
 
   pytest-float32:
     # The float32 configuration is what a default-config user runs;
@@ -129,7 +131,7 @@ jobs:
           python-version: "3.13"
 
       - name: Run tests in the float32 default configuration
-        run: uv run pytest -v --durations=0
+        run: uv run pytest -v --durations=0 -n 2
         env:
           SMCX_TEST_X64: "0"
 
@@ -280,7 +282,11 @@ jobs:
         run: uv run python -m benchmarks.profiling.check_locking
 
       - name: Run tests
-        run: uv run pytest -v --durations=0
+        # Two workers: the serial suite outgrew the 30-minute budget
+        # (runs were canceled at the ceiling with every test passing).
+        # The Metal leg stays serial - worker processes contending for
+        # one GPU device is a known jax-mps hazard.
+        run: uv run pytest -v --durations=0 -n 2
 
   # Exercise the jax-mps path when the hosted runner exposes Metal.
   # The configured release-environment reviewer attests the authoritative
