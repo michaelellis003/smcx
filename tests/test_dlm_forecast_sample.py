@@ -172,3 +172,70 @@ def test_count_boundary_matrix():
             _sample_with(num_steps=bad)
         with pytest.raises(ValueError, match="num_draws"):
             _sample_with(num_draws=bad)
+
+
+def test_discount_path_marginals_match_the_closed_form():
+    """The frozen-frontier discount path reproduces its Student-t."""
+    filtered = smcx.dlm_filter(
+        M0, C0, G, F, Y, discount=DISCOUNT, prior_shape=5.0
+    )
+    closed = smcx.dlm_forecast(filtered, G, F, num_steps=2, discount=DISCOUNT)
+    paths = smcx.dlm_forecast_sample(
+        jr.key(21),
+        filtered,
+        G,
+        F,
+        num_steps=2,
+        num_draws=NUM_DRAWS,
+        discount=DISCOUNT,
+    )
+    emissions = np.asarray(paths.emission_paths, dtype=np.float64)
+    dof = np.asarray(closed.scale_shapes, dtype=np.float64)
+    for k in range(2):
+        location = float(closed.observation_means[k])
+        t_var = float(closed.observation_scales[k]) * dof[k] / (dof[k] - 2.0)
+        se_mean = np.sqrt(t_var / NUM_DRAWS)
+        assert abs(emissions[:, k].mean() - location) < 6.0 * se_mean
+
+
+def test_bad_transition_matrix_shape_is_rejected():
+    """A mis-shaped transition matrix raises at the boundary."""
+    with pytest.raises(ValueError, match="transition_matrix"):
+        smcx.dlm_forecast_sample(
+            jr.key(0),
+            FILTERED_W,
+            jnp.eye(3),
+            F,
+            num_steps=1,
+            num_draws=8,
+            scale_free_transition_covariance=W,
+        )
+
+
+def test_discount_above_one_is_rejected():
+    """The sampler validates the discount like the filter."""
+    with pytest.raises(ValueError, match="discount"):
+        smcx.dlm_forecast_sample(
+            jr.key(0),
+            FILTERED_W,
+            G,
+            F,
+            num_steps=1,
+            num_draws=8,
+            discount=1.5,
+        )
+
+
+def test_variance_discount_above_one_is_rejected():
+    """The sampler validates the variance discount like the filter."""
+    with pytest.raises(ValueError, match="variance_discount"):
+        smcx.dlm_forecast_sample(
+            jr.key(0),
+            FILTERED_W,
+            G,
+            F,
+            num_steps=1,
+            num_draws=8,
+            scale_free_transition_covariance=W,
+            variance_discount=1.5,
+        )
