@@ -120,7 +120,10 @@ from them do not form coherent state paths. For a linear-Gaussian model,
 sampling the terminal filtering distribution and then its backward
 conditionals. The returned shape is `(num_draws, ntime, state_dim)`, so each
 row is one joint path. The call needs an explicit random key and the same
-transition history as the filter. This linear-only construction follows
+transition history as the filter — most simply the same
+`LinearGaussianModel` record, which `kalman_filter`, `rts_smoother`,
+`posterior_sample`, and `smoothed_cross_covariances` all accept in
+place of loose arrays. This linear-only construction follows
 [Carter and Kohn (1994)](https://doi.org/10.1093/biomet/81.3.541) and
 [Frühwirth-Schnatter (1994)](https://doi.org/10.1111/j.1467-9892.1994.tb00184.x).
 

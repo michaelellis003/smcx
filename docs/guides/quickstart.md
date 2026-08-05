@@ -82,24 +82,31 @@ filtered moments at every time step plus the exact marginal likelihood.
 The separately callable smoother consumes that result rather than
 rerunning the model:
 
+Define the model once as a `LinearGaussianModel` and pass the same
+record to the filter and to every retrospective operation:
+
 ```python
-transition = jnp.array([[rho]])
-exact = smcx.kalman_filter(
+model = smcx.LinearGaussianModel(
     initial_mean=jnp.array([0.0]),
     initial_covariance=jnp.array([[1.0]]),
-    transition_matrix=transition,
+    transition_matrix=jnp.array([[rho]]),
     transition_covariance=jnp.array([[q_sd**2]]),
     observation_matrix=jnp.array([[1.0]]),
     observation_covariance=jnp.array([[r_sd**2]]),
-    emissions=observations,
 )
-smoothed = smcx.rts_smoother(exact, transition)
-cross_covariances = smcx.smoothed_cross_covariances(smoothed, transition)
+exact = smcx.kalman_filter(model, observations)
+smoothed = smcx.rts_smoother(exact, model)
+cross_covariances = smcx.smoothed_cross_covariances(smoothed, model)
 
 exact.filtered_means.shape
 smoothed.smoothed_means.shape
 cross_covariances.shape
 ```
+
+The record is plain data — a PyTree of arrays that `jax.grad` and
+`jax.vmap` traverse — and every entry point equally accepts the model
+arrays as separate arguments; the two forms produce bitwise-identical
+output.
 
 Entry `t` of `cross_covariances` is
 `Cov(x_t, x_{t + 1} | observations)`; its shape is `(ntime - 1, 1, 1)` here.
