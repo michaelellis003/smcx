@@ -47,6 +47,7 @@ References:
     https://arxiv.org/html/2201.05387v4#S3.SS2
 """
 
+import math
 from typing import TYPE_CHECKING, Any, NamedTuple, SupportsIndex, TypeAlias
 
 import jax
@@ -483,6 +484,79 @@ def binomial(*, trials: int) -> DGLMFamily:
         ):
             raise ValueError(
                 f"binomial emissions must be integers in [0, {trials}]"
+            )
+
+    setattr(log_forecast, _VALIDATOR_ATTRIBUTE, validate_emissions)
+    return DGLMFamily(
+        match_moments=match_moments,
+        log_forecast=log_forecast,
+        update=update,
+        posterior_moments=posterior_moments,
+    )
+
+
+def gamma(*, shape: Scalar) -> DGLMFamily:
+    r"""Gamma observations with a log link and known shape.
+
+    The response is $y_t \mid \mu_t \sim
+    \mathrm{Gamma}(\nu, \nu/\mu_t)$ with known shape $\nu$ and
+    mean $\mu_t = e^{\lambda_t}$, the positive-continuous member of
+    the West--Harrison exponential-family programme (1997, chapter
+    14). The conjugate Gamma analysis lives on the rate
+    $\theta_t = \nu/\mu_t$: matching the linear predictor's
+    moments gives $\alpha$ from the inverse trigamma (the Poisson
+    family's solve) and
+    $\beta = e^{\psi(\alpha) + f - \log\nu}$; observing $y$
+    updates $(\alpha, \beta)$ to $(\alpha + \nu, \beta + y)$
+    exactly; and the one-step forecast is the exact compound gamma.
+    Emissions must be finite and strictly positive. For
+    `smcx.dglm_forecast_sample`, the log-link commitment is
+    ``lambda key, lam: jr.gamma(key, nu) * jnp.exp(lam) / nu``.
+
+    Args:
+        shape: Known positive observation shape $\nu$. Larger values
+            mean less dispersed responses around the mean.
+
+    Returns:
+        The family record for `smcx.dglm_filter`.
+    """
+    shape_value = _validate_positive_scalar(shape, "shape")
+    if not isinstance(shape_value, core.Tracer):
+        shape_value = float(shape_value)  # ty: ignore[invalid-argument-type]
+    nu = shape_value
+    log_nu = jnp.log(nu) if isinstance(nu, core.Tracer) else math.log(nu)
+
+    def match_moments(forecast_mean, forecast_variance):
+        alpha = _inverse_trigamma(forecast_variance)
+        beta = jnp.exp(_digamma_safe(alpha) + forecast_mean - log_nu)
+        return alpha, beta
+
+    def log_forecast(emission, alpha, beta):
+        # The exact compound-gamma density. Its gammaln difference
+        # stays well conditioned through the small-variance boundary:
+        # the alpha = 1e6 golden reproduces at 1e-8 relative, so no
+        # limit branch is needed (unlike the Poisson family's #309).
+        return (
+            gammaln(nu + alpha)
+            - gammaln(jnp.asarray(nu, dtype=jnp.result_type(alpha)))
+            - gammaln(alpha)
+            + alpha * jnp.log(beta)
+            + (nu - 1.0) * jnp.log(emission)
+            - (nu + alpha) * jnp.log(beta + emission)
+        )
+
+    def update(emission, alpha, beta):
+        return alpha + nu, beta + emission
+
+    def posterior_moments(alpha, beta):
+        predictor_mean = log_nu - _digamma_minus_log_safe(alpha, beta)
+        return predictor_mean, _trigamma_safe(alpha)
+
+    def validate_emissions(emissions):
+        values = np.asarray(emissions)
+        if not (np.all(np.isfinite(values)) and np.all(values > 0)):
+            raise ValueError(
+                "gamma emissions must be finite and strictly positive"
             )
 
     setattr(log_forecast, _VALIDATOR_ATTRIBUTE, validate_emissions)

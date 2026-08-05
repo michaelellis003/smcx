@@ -49,6 +49,7 @@ from smcx.dglm import (
     dglm_forecast,
     dglm_forecast_sample,
     dglm_smoother,
+    gamma,
     poisson,
 )
 from smcx.diagnostics import (
@@ -187,6 +188,7 @@ __all__ = [
     "ess",
     "extended_kalman_filter",
     "forecast_sample",
+    "gamma",
     "gauss_hermite",
     "gaussian_filter",
     "gaussian_smoother",
