@@ -32,7 +32,7 @@ References:
 """
 
 import math
-from typing import NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, SupportsIndex, TypeAlias
 
 import jax.numpy as jnp
 import numpy as np
@@ -41,8 +41,12 @@ from jax.scipy.special import gammaln
 from jaxtyping import Array, Float, Shaped
 
 from smcx._numerics import _neumaier_add
-from smcx._utils import _canonicalize_emissions
-from smcx.containers import DLMFilterPosterior, DLMSmootherPosterior
+from smcx._utils import _canonicalize_emissions, _positive_integer
+from smcx.containers import (
+    DLMFilterPosterior,
+    DLMForecast,
+    DLMSmootherPosterior,
+)
 from smcx.kalman import (
     _backward_pass,
     _canonicalize_filter_covariances,
@@ -54,6 +58,11 @@ from smcx.kalman import (
     _validate_emission_rows,
 )
 from smcx.types import GaussianEmissionSequence, Scalar
+
+if TYPE_CHECKING:
+    _CountArgument: TypeAlias = SupportsIndex
+else:
+    _CountArgument: TypeAlias = Any
 
 
 class _DLMCarry(NamedTuple):
@@ -542,4 +551,192 @@ def dlm_smoother(
         log_evidence_increments=filtered_posterior.log_evidence_increments,
         smoothed_means=smoothed_means,
         smoothed_scale_free_covariances=smoothed_covariances,
+    )
+
+
+def dlm_forecast(
+    filtered_posterior: DLMFilterPosterior,
+    transition_matrix: Shaped[Array, "*transition_shape"],
+    observation_vector: Shaped[Array, "*observation_shape"],
+    *,
+    num_steps: _CountArgument,
+    scale_free_transition_covariance: (
+        Shaped[Array, "*evolution_shape"] | None
+    ) = None,
+    discount: Scalar | None = None,
+    variance_discount: Scalar = 1.0,
+) -> DLMForecast:
+    r"""Iterate k-step DLM forecast distributions from the frontier.
+
+    Starting at the terminal conjugate state $(m_T, C_T, n_T, S_T)$,
+    each horizon applies the West--Harrison prediction recursions
+    (1997, section 4.4): $a(k) = G\,a(k-1)$ and
+    $R(k) = G\,R(k-1)\,G^\top + W_{T+k}$ in scale-free form, with the
+    univariate Student-t observation forecast
+    $y_{T+k} \mid y_{1:T} \sim \mathrm{T}_{n(k)}
+    \bigl(F^\top a(k),\, S_T\,(F^\top R(k)\,F + 1)\bigr)$.
+
+    Under a ``discount`` specification the evolution variance is
+    frozen at its frontier value
+    $W = G\,C_T\,G^\top (1 - \delta)/\delta$ for every horizon, the
+    practical strategy of West and Harrison, section 6.3.3. Filtering
+    through a run of all-NaN emissions instead reapplies the discount
+    at each data-free step (ADR-0034's time-driven decay), so with a
+    discount the two agree at horizon one and diverge beyond it; with
+    an explicit evolution covariance they agree at every horizon.
+
+    Args:
+        filtered_posterior: Output of `smcx.dlm_filter`. The forecast
+            cannot verify that the resupplied pieces below match the
+            filter run.
+        transition_matrix: Static state evolution matrix $G$, shape
+            ``(state_dim, state_dim)``.
+        observation_vector: Observation vector $F$, shape
+            ``(state_dim,)``.
+        num_steps: Positive integer forecast horizon. This controls an
+            output shape and must be closed over or marked static
+            through an outer ``jax.jit`` boundary.
+        scale_free_transition_covariance: Static ``(state_dim,
+            state_dim)`` or per-horizon ``(num_steps, state_dim,
+            state_dim)`` evolution covariance divided by the unknown
+            observation variance. Supply exactly one of this and
+            ``discount``.
+        discount: State discount $\delta \in (0, 1]$ used by the
+            filter.
+        variance_discount: Variance discount $\delta_V \in (0, 1]$
+            used by the filter. Each horizon decays the Student-t
+            degrees of freedom once, continuing the filter's
+            time-driven evolution; with the default constant-variance
+            model the degrees of freedom stay $n_T$ at every horizon.
+
+    Returns:
+        Per-horizon state and Student-t observation forecast moments.
+
+    Raises:
+        ValueError: The posterior or a model piece has an invalid
+            shape, dtype, count, or domain, or the evolution
+            specification is not exactly one of covariance and
+            discount.
+
+    Note:
+        No data enter a forecast: the conjugate pair $(n, S)$ is never
+        updated, only decayed by ``variance_discount``, and the
+        horizon-one forecast density evaluated at a realized emission
+        reproduces the filter's evidence increment.
+    """
+    if (scale_free_transition_covariance is None) == (discount is None):
+        raise ValueError(
+            "supply exactly one of scale_free_transition_covariance "
+            "and discount"
+        )
+    num_steps = _positive_integer(num_steps, name="num_steps")
+    _, state_dim, dtype, canonical_covariances = _validate_dlm_filter_posterior(
+        filtered_posterior
+    )
+    for name, value, expected in (
+        ("transition_matrix", transition_matrix, (state_dim, state_dim)),
+        ("observation_vector", observation_vector, (state_dim,)),
+    ):
+        _check_float_array(value, name, dtype)
+        if value.shape != expected:
+            raise ValueError(
+                f"{name} must have shape {expected}; got {value.shape}"
+            )
+    use_discount = discount is not None
+    if use_discount:
+        discount_value = _validate_positive_scalar(discount, "discount")
+        if not isinstance(discount_value, core.Tracer) and (
+            float(discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+        ):
+            raise ValueError(
+                f"discount must be in (0, 1]; got {discount_value}"
+            )
+        inverse_discount = 1.0 / jnp.asarray(discount_value, dtype=dtype)
+    else:
+        value = scale_free_transition_covariance
+        assert value is not None  # XOR-checked above
+        _check_float_array(value, "scale_free_transition_covariance", dtype)
+        timed_evolution = _time_matrix(
+            value,
+            num_steps,
+            state_dim,
+            state_dim,
+            "scale_free_transition_covariance",
+        )
+        _check_covariance(
+            value,
+            "scale_free_transition_covariance",
+            positive_definite=False,
+        )
+    variance_discount_value = _validate_positive_scalar(
+        variance_discount, "variance_discount"
+    )
+    if not isinstance(variance_discount_value, core.Tracer) and (
+        float(variance_discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+    ):
+        raise ValueError(
+            f"variance_discount must be in (0, 1]; got "
+            f"{variance_discount_value}"
+        )
+    variance_discount_array = jnp.asarray(variance_discount_value, dtype=dtype)
+
+    del canonical_covariances
+    mean = filtered_posterior.filtered_means[-1]
+    # The raw stored covariance IS the filter's carry; symmetrizing it
+    # here would break the exact agreement with a continued filter run.
+    covariance = filtered_posterior.filtered_scale_free_covariances[-1]
+    shape = filtered_posterior.scale_shapes[-1]
+    scale = filtered_posterior.scale_estimates[-1]
+
+    propagated_frontier = (transition_matrix @ covariance) @ transition_matrix.T
+    if use_discount:
+        first_covariance = propagated_frontier * inverse_discount
+        frontier_w = propagated_frontier * (inverse_discount - 1.0)
+        rest_evolution = jnp.broadcast_to(
+            frontier_w, (num_steps - 1, state_dim, state_dim)
+        )
+    else:
+        first_covariance = propagated_frontier + timed_evolution[0]
+        rest_evolution = timed_evolution[1:]
+    first_mean = transition_matrix @ mean
+    first_shape = variance_discount_array * shape
+
+    def _horizon(carry, evolution_k):
+        mean_k, covariance_k, shape_k = carry
+        next_mean = transition_matrix @ mean_k
+        next_covariance = (
+            transition_matrix @ covariance_k
+        ) @ transition_matrix.T + evolution_k
+        next_shape = variance_discount_array * shape_k
+        return (next_mean, next_covariance, next_shape), (
+            next_mean,
+            next_covariance,
+            next_shape,
+        )
+
+    _, rest = lax.scan(
+        _horizon,
+        (first_mean, first_covariance, first_shape),
+        rest_evolution,
+    )
+    state_means = jnp.concatenate((first_mean[None], rest[0]))
+    state_covariances = jnp.concatenate((first_covariance[None], rest[1]))
+    shapes = jnp.concatenate((first_shape[None], rest[2]))
+    observation_means = state_means @ observation_vector
+    observation_scale_free = (
+        jnp.einsum(
+            "d,kde,e->k",
+            observation_vector,
+            state_covariances,
+            observation_vector,
+        )
+        + 1.0
+    )
+    return DLMForecast(
+        state_means=state_means,
+        state_scale_free_covariances=state_covariances,
+        observation_means=observation_means,
+        observation_scales=scale * observation_scale_free,
+        scale_shapes=shapes,
+        scale_estimates=jnp.broadcast_to(scale, (num_steps,)),
     )
