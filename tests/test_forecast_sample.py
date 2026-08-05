@@ -258,3 +258,24 @@ class TestParamForecastSample:
                 num_steps=0,
                 num_draws=8,
             )
+
+
+def test_param_forecast_sample_with_future_inputs():
+    """Input-aware Liu-West callbacks receive each horizon's input."""
+    posterior = TestParamForecastSample()._fit()
+    future_inputs = jnp.asarray([[0.5], [-0.5]])
+    paths = smcx.param_forecast_sample(
+        jr.key(47),
+        posterior,
+        lambda key, state, params, input_t: (
+            params[0] * state + input_t + Q_SD * jr.normal(key, state.shape)
+        ),
+        lambda key, state, params, input_t: (
+            state + input_t + R_SD * jr.normal(key, state.shape)
+        ),
+        num_steps=2,
+        num_draws=64,
+        future_inputs=future_inputs,
+    )
+    assert paths.state_paths.shape == (64, 2, 1)
+    assert paths.parameter_draws.shape == (64, 1)
