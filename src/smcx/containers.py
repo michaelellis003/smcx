@@ -339,6 +339,27 @@ class GaussianForecast(NamedTuple):
     ]
 
 
+class DGLMForecastPaths(NamedTuple):
+    """Simulated DGLM forecast paths from the filtering frontier.
+
+    Row ``i`` simulates one state trajectory through the Gaussian
+    evolution and samples each horizon's emission through the
+    family's link (``DGLMFamily.sample_emission``). Honest as an
+    approximation with exactly the filter's linear-Bayes caveats;
+    state-path horizon slices reproduce `DGLMForecast`'s Gaussian
+    state marginals.
+
+    Attributes:
+        state_paths: State trajectories, shape
+            ``(num_draws, num_steps, state_dim)``.
+        emission_paths: Univariate emission trajectories in the
+            family's emission dtype, shape ``(num_draws, num_steps)``.
+    """
+
+    state_paths: Float[Array, "num_draws num_steps state_dim"]
+    emission_paths: Shaped[Array, "num_draws num_steps"]
+
+
 class DLMForecastPaths(NamedTuple):
     r"""Exact joint DLM forecast paths from the filtering frontier.
 

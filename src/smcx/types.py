@@ -865,6 +865,23 @@ class FamilyLogForecast(Protocol):
 
 
 @runtime_checkable
+class FamilyEmissionSampler(Protocol):
+    """Draw one emission given a realized linear predictor.
+
+    The family's link commitment for path simulation: the callable
+    maps the linear predictor through the family's link and samples
+    one emission from the implied observation distribution.
+    """
+
+    def __call__(
+        self,
+        key: PRNGKeyT,
+        linear_predictor: Scalar,
+        /,
+    ) -> Scalar: ...
+
+
+@runtime_checkable
 class FamilyConjugateUpdate(Protocol):
     """Exact conjugate posterior parameters of a family."""
 

@@ -75,6 +75,10 @@ the exceptions catalogued in the alignment list.*
 14. The streaming `bootstrap_step`/`bootstrap_update` criterion
     restriction (no callable criteria without a time index) is either
     lifted or recorded as a permanent contract.
+15. `DGLMFamily` gains the optional `sample_emission` capability
+    field (added 2026-08-05 by the ADR-0036 amendment; blocked in
+    2.x by the released four-field-sequence contract, so
+    `dglm_forecast_sample` takes it standalone until then).
 
 Nothing on this list may be implemented before the 3.0 cut, and the
 list may only grow through a dated decision record.

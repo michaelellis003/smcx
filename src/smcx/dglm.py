@@ -49,9 +49,11 @@ References:
 
 from typing import TYPE_CHECKING, Any, NamedTuple, SupportsIndex, TypeAlias
 
+import jax
 import jax.numpy as jnp
+import jax.random as jr
 import numpy as np
-from jax import core, lax
+from jax import core, debug_infs, debug_nans, lax
 from jax.nn import sigmoid as jax_sigmoid
 from jax.nn import softplus
 from jax.scipy.special import digamma, gammaln, polygamma
@@ -63,6 +65,7 @@ from smcx._utils import _canonicalize_emissions, _positive_integer
 from smcx.containers import (
     DGLMFilterPosterior,
     DGLMForecast,
+    DGLMForecastPaths,
     DGLMSmootherPosterior,
 )
 from smcx.dlm import _validate_positive_scalar
@@ -71,6 +74,8 @@ from smcx.kalman import (
     _canonicalize_filter_covariances,
     _check_covariance,
     _check_float_array,
+    _check_sampling_factors,
+    _sampling_covariance_factor,
     _sanitize_missing,
     _symmetrize,
     _time_matrix,
@@ -79,9 +84,11 @@ from smcx.kalman import (
 from smcx.types import (
     EmissionSequence,
     FamilyConjugateUpdate,
+    FamilyEmissionSampler,
     FamilyLogForecast,
     FamilyMomentMatch,
     FamilyPosteriorMoments,
+    PRNGKeyT,
     Scalar,
 )
 
@@ -120,7 +127,10 @@ class DGLMFamily(NamedTuple):
         concrete emissions at its boundary (#283). The check lives
         outside the record because the record's released contract is
         this four-field sequence (#317). Emissions of a user-defined
-        family are not support-checked.
+        family are not support-checked. Path simulation
+        (`smcx.dglm_forecast_sample`) takes a standalone
+        ``sample_emission`` callable; the capability joins the record
+        at 3.0 (ADR-0036 amendment).
     """
 
     match_moments: FamilyMomentMatch
@@ -1154,4 +1164,191 @@ def dglm_forecast(
         linear_predictor_variances=predictor_variances,
         conjugate_alphas=alphas,
         conjugate_betas=betas,
+    )
+
+
+def dglm_forecast_sample(
+    key: PRNGKeyT,
+    filtered_posterior: DGLMFilterPosterior,
+    transition_matrix: Shaped[Array, "*transition_shape"],
+    observation_vector: Shaped[Array, "*observation_shape"],
+    *,
+    sample_emission: FamilyEmissionSampler,
+    num_steps: _CountArgument,
+    num_draws: _CountArgument,
+    transition_covariance: Shaped[Array, "*evolution_shape"] | None = None,
+    discount: Scalar | None = None,
+    dispersion_discount: Scalar = 1.0,
+) -> DGLMForecastPaths:
+    r"""Simulate joint DGLM forecast paths from the filtering frontier.
+
+    Each path draws a terminal state from the Gaussian frontier,
+    iterates the state equation with per-horizon evolution noise
+    (frozen at its frontier value under a ``discount``, matching
+    `smcx.dglm_forecast`), and samples each horizon's emission through
+    the family's link via the standalone ``sample_emission``. The construction
+    is honest as an approximation with exactly the filter's
+    linear-Bayes caveats: state-path marginals reproduce
+    `dglm_forecast`'s Gaussians, while emission marginals follow the
+    link-mixture rather than the moment-matched conjugate forecast.
+
+    Under a ``dispersion_discount`` $\rho < 1$ each horizon adds an
+    independent Gaussian shock to the linear predictor with variance
+    $(1/\rho - 1)\,F^\top R(k)\,F$ — the Berry--West random-effects
+    reading of unpredictable extra dispersion — so the predictor
+    variance reproduces the closed-form inflation exactly.
+
+    Args:
+        key: JAX PRNG key. Split once into a terminal-state key and
+            one key per horizon; each horizon key splits into a
+            transition-noise key, a dispersion-shock key, and a
+            per-draw emission key root.
+        filtered_posterior: Output of `smcx.dglm_filter`. The forecast
+            cannot verify that the resupplied pieces below match the
+            filter run.
+        transition_matrix: Static state evolution matrix $G$, shape
+            ``(state_dim, state_dim)``.
+        observation_vector: Observation vector $F$, shape
+            ``(state_dim,)``.
+        sample_emission: ``(key, linear_predictor) -> emission`` —
+            the family's link commitment for simulation, for example
+            ``lambda key, lam: jr.poisson(key, jnp.exp(lam))`` for the
+            Poisson log link. Standalone by design: the released
+            `smcx.DGLMFamily` contract is a four-field sequence, so
+            the capability joins the record only at 3.0.
+        num_steps: Positive integer forecast horizon. This controls an
+            output shape and must be closed over or marked static
+            through an outer ``jax.jit`` boundary.
+        num_draws: Positive integer path count; also an output shape.
+        transition_covariance: Static ``(state_dim, state_dim)`` or
+            per-horizon ``(num_steps, state_dim, state_dim)``
+            evolution covariance. Supply exactly one of this and
+            ``discount``.
+        discount: State discount $\delta \in (0, 1]$ used by the
+            filter.
+        dispersion_discount: Berry--West random-effects discount
+            $\rho \in (0, 1]$ used by the filter.
+
+    Returns:
+        Draw-major state and emission trajectories.
+
+    Raises:
+        ValueError: The posterior or a model piece has an invalid
+            shape, dtype, count, or domain, the evolution
+            specification is not exactly one of covariance and
+            discount, or a concrete covariance is not factorable on
+            the active backend.
+    """
+    if (transition_covariance is None) == (discount is None):
+        raise ValueError(
+            "supply exactly one of transition_covariance and discount"
+        )
+    num_steps = _positive_integer(num_steps, name="num_steps")
+    num_draws = _positive_integer(num_draws, name="num_draws")
+    _, state_dim, dtype, canonical_covariances = (
+        _validate_dglm_filter_posterior(filtered_posterior)
+    )
+    del canonical_covariances
+    for name, value, expected in (
+        ("transition_matrix", transition_matrix, (state_dim, state_dim)),
+        ("observation_vector", observation_vector, (state_dim,)),
+    ):
+        _check_float_array(value, name, dtype)
+        if value.shape != expected:
+            raise ValueError(
+                f"{name} must have shape {expected}; got {value.shape}"
+            )
+    use_discount = discount is not None
+    if use_discount:
+        discount_value = _validate_positive_scalar(discount, "discount")
+        if not isinstance(discount_value, core.Tracer) and (
+            float(discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+        ):
+            raise ValueError(
+                f"discount must be in (0, 1]; got {discount_value}"
+            )
+        inverse_discount = 1.0 / jnp.asarray(discount_value, dtype=dtype)
+    else:
+        value = transition_covariance
+        assert value is not None  # XOR-checked above
+        _check_float_array(value, "transition_covariance", dtype)
+        timed_evolution = _time_matrix(
+            value,
+            num_steps,
+            state_dim,
+            state_dim,
+            "transition_covariance",
+        )
+        _check_covariance(
+            value,
+            "transition_covariance",
+            positive_definite=False,
+        )
+    dispersion_value = _validate_positive_scalar(
+        dispersion_discount, "dispersion_discount"
+    )
+    if not isinstance(dispersion_value, core.Tracer) and (
+        float(dispersion_value) > 1.0  # ty: ignore[invalid-argument-type]
+    ):
+        raise ValueError(
+            f"dispersion_discount must be in (0, 1]; got {dispersion_value}"
+        )
+    excess_dispersion = 1.0 / jnp.asarray(
+        dispersion_value, dtype=dtype
+    ) - jnp.asarray(1.0, dtype=dtype)
+
+    mean = filtered_posterior.filtered_means[-1]
+    # The raw stored covariance IS the filter's carry; symmetrizing it
+    # here would break coherence with a continued filter run.
+    covariance = filtered_posterior.filtered_covariances[-1]
+
+    propagated_frontier = (transition_matrix @ covariance) @ transition_matrix.T
+    if use_discount:
+        frontier_w = propagated_frontier * (inverse_discount - 1.0)
+        noise_covariances = jnp.broadcast_to(
+            frontier_w, (num_steps, state_dim, state_dim)
+        )
+    else:
+        noise_covariances = timed_evolution
+    with debug_nans(False), debug_infs(False):
+        terminal_factor = _sampling_covariance_factor(_symmetrize(covariance))
+        noise_factors = lax.map(_sampling_covariance_factor, noise_covariances)
+    _check_sampling_factors(terminal_factor[None])
+    _check_sampling_factors(noise_factors)
+
+    keys = jr.split(key, num_steps + 1)
+    terminal_noise = jr.normal(keys[0], (num_draws, state_dim), dtype=dtype)
+    states_0 = mean + terminal_noise @ terminal_factor.T
+
+    def _path_step(carry, args):
+        states, closed_covariance = carry
+        step_key, transition_noise_cov, noise_factor = args
+        state_key, shock_key, emission_root = jr.split(step_key, 3)
+        state_noise = jr.normal(state_key, (num_draws, state_dim), dtype=dtype)
+        next_states = states @ transition_matrix.T + (
+            state_noise @ noise_factor.T
+        )
+        next_closed = (
+            transition_matrix @ closed_covariance
+        ) @ transition_matrix.T + transition_noise_cov
+        predictors = next_states @ observation_vector
+        shock_variance = excess_dispersion * (
+            observation_vector @ next_closed @ observation_vector
+        )
+        shock = jnp.sqrt(shock_variance) * jr.normal(
+            shock_key, (num_draws,), dtype=dtype
+        )
+        predictors = predictors + shock
+        emission_keys = jr.split(emission_root, num_draws)
+        emissions = jax.vmap(sample_emission)(emission_keys, predictors)
+        return (next_states, next_closed), (next_states, emissions)
+
+    _, (state_paths, emission_paths) = lax.scan(
+        _path_step,
+        (states_0, covariance),
+        (keys[1:], noise_covariances, noise_factors),
+    )
+    return DGLMForecastPaths(
+        state_paths=jnp.swapaxes(state_paths, 0, 1),
+        emission_paths=jnp.swapaxes(emission_paths, 0, 1),
     )
