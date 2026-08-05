@@ -535,7 +535,10 @@ def dglm_filter(
             only — no distributional form is assumed.
         transition_matrix: State evolution matrix $G$.
         observation_vector: Observation vector $F$, shape
-            ``(state_dim,)``; the linear predictor is $F' x_t$.
+            ``(state_dim,)``, or a time-varying history with shape
+            ``(ntime, state_dim)`` (dynamic regression: row ``t`` is
+            the covariate vector at ``t``); the linear predictor is
+            $F_t' x_t$.
         emissions: Univariate observations shaped ``(ntime,)`` or
             ``(ntime, 1)``; the family documents its domain (counts
             for `smcx.poisson`). A NaN entry marks that datum missing:
@@ -644,13 +647,25 @@ def dglm_filter(
     for name, value, expected in (
         ("initial_covariance", initial_covariance, (state_dim, state_dim)),
         ("transition_matrix", transition_matrix, (state_dim, state_dim)),
-        ("observation_vector", observation_vector, (state_dim,)),
     ):
         _check_float_array(value, name, dtype)
         if value.shape != expected:
             raise ValueError(
                 f"{name} must have shape {expected}; got {value.shape}"
             )
+    _check_float_array(observation_vector, "observation_vector", dtype)
+    if observation_vector.shape == (state_dim,):
+        timed_observation = jnp.broadcast_to(
+            observation_vector, (num_timesteps, state_dim)
+        )
+    elif observation_vector.shape == (num_timesteps, state_dim):
+        timed_observation = observation_vector
+    else:
+        raise ValueError(
+            f"observation_vector must have shape ({state_dim},) or "
+            f"({num_timesteps}, {state_dim}); got "
+            f"{observation_vector.shape}"
+        )
     _check_covariance(
         initial_covariance, "initial_covariance", positive_definite=False
     )
@@ -690,7 +705,13 @@ def dglm_filter(
 
     inverse_dispersion = 1.0 / jnp.asarray(dispersion_value, dtype=dtype)
 
-    def _update(carry: _DGLMCarry, prior_mean, prior_cov, emission_t):
+    def _update(
+        carry: _DGLMCarry,
+        prior_mean,
+        prior_cov,
+        emission_t,
+        observation_vector,
+    ):
         # An all-NaN emission marks the datum missing (ADR-0034): the
         # prior construction (including the dispersion inflation inside
         # the moment match) stands, the observation update is skipped,
@@ -754,7 +775,7 @@ def dglm_filter(
         )
 
     def _step(carry: _DGLMCarry, args):
-        emission_t, evolution_t = args
+        emission_t, evolution_t, observation_t = args
         prior_mean = transition_matrix @ carry.mean
         propagated = (
             transition_matrix @ carry.covariance
@@ -763,7 +784,7 @@ def dglm_filter(
             prior_cov = propagated * inverse_discount
         else:
             prior_cov = propagated + evolution_t
-        return _update(carry, prior_mean, prior_cov, emission_t)
+        return _update(carry, prior_mean, prior_cov, emission_t, observation_t)
 
     init = _DGLMCarry(
         initial_mean.astype(dtype),
@@ -776,7 +797,9 @@ def dglm_filter(
     # conjugate moment match divides by the predictor's prior
     # variance, so a direction with zero initial variance is rejected
     # here rather than surfacing as NaN throughout the run (#282).
-    first_variance = observation_vector @ init.covariance @ observation_vector
+    first_variance = (
+        timed_observation[0] @ init.covariance @ timed_observation[0]
+    )
     if not isinstance(first_variance, core.Tracer) and (
         float(first_variance) <= 0.0
     ):
@@ -788,10 +811,16 @@ def dglm_filter(
             "positive initial covariance"
         )
     carry_0, first = _update(
-        init, init.mean, init.covariance, emission_values[0]
+        init,
+        init.mean,
+        init.covariance,
+        emission_values[0],
+        timed_observation[0],
     )
     final, rest = lax.scan(
-        _step, carry_0, (emission_values[1:], timed_evolution)
+        _step,
+        carry_0,
+        (emission_values[1:], timed_evolution, timed_observation[1:]),
     )
     outputs = tuple(
         jnp.concatenate([first_leaf[None], rest_leaf])

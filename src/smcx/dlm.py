@@ -158,7 +158,10 @@ def dlm_filter(
             semidefinite, shape ``(state_dim, state_dim)``.
         transition_matrix: State evolution matrix $G$.
         observation_vector: Observation vector $F$, shape
-            ``(state_dim,)``; the observation mean is $F' x_t$.
+            ``(state_dim,)``, or a time-varying history with shape
+            ``(ntime, state_dim)`` (dynamic regression: row ``t`` is
+            the covariate vector at ``t``); the observation mean is
+            $F_t' x_t$.
         emissions: Univariate observations shaped ``(ntime,)`` or
             ``(ntime, 1)``. A NaN entry marks that datum missing: the
             evolution (including state and variance discounts) still
@@ -247,13 +250,25 @@ def dlm_filter(
             (state_dim, state_dim),
         ),
         ("transition_matrix", transition_matrix, (state_dim, state_dim)),
-        ("observation_vector", observation_vector, (state_dim,)),
     ):
         _check_float_array(value, name, dtype)
         if value.shape != expected:
             raise ValueError(
                 f"{name} must have shape {expected}; got {value.shape}"
             )
+    _check_float_array(observation_vector, "observation_vector", dtype)
+    if observation_vector.shape == (state_dim,):
+        timed_observation = jnp.broadcast_to(
+            observation_vector, (num_timesteps, state_dim)
+        )
+    elif observation_vector.shape == (num_timesteps, state_dim):
+        timed_observation = observation_vector
+    else:
+        raise ValueError(
+            f"observation_vector must have shape ({state_dim},) or "
+            f"({num_timesteps}, {state_dim}); got "
+            f"{observation_vector.shape}"
+        )
     _check_covariance(
         initial_scale_free_covariance,
         "initial_scale_free_covariance",
@@ -297,7 +312,14 @@ def dlm_filter(
         else jnp.asarray(1.0, dtype=dtype)
     )
 
-    def _update(carry: _DLMCarry, prior_mean, prior_cov, emission_t, dof):
+    def _update(
+        carry: _DLMCarry,
+        prior_mean,
+        prior_cov,
+        emission_t,
+        dof,
+        observation_vector,
+    ):
         # An all-NaN emission marks the datum missing (ADR-0034): the
         # evolution (including both discounts, applied by the caller of
         # this update through prior_cov and dof) stands, the update is
@@ -381,7 +403,7 @@ def dlm_filter(
         )
 
     def _step(carry: _DLMCarry, args):
-        emission_t, evolution_t = args
+        emission_t, evolution_t, observation_t = args
         prior_mean = transition_matrix @ carry.mean
         propagated = (
             transition_matrix @ carry.scale_free_covariance
@@ -394,7 +416,9 @@ def dlm_filter(
         # observation raises the degrees of freedom by one (W&H's
         # ordering, n_t = delta_V n_{t-1} + 1).
         dof = variance_discount_array * carry.shape
-        return _update(carry, prior_mean, prior_cov, emission_t, dof)
+        return _update(
+            carry, prior_mean, prior_cov, emission_t, dof, observation_t
+        )
 
     init = _DLMCarry(
         initial_mean.astype(dtype),
@@ -407,9 +431,18 @@ def dlm_filter(
     # Library convention: emissions[0] conditions the prior directly;
     # evolution (or discounting) applies between observations.
     carry_0, first = _update(
-        init, init.mean, init.scale_free_covariance, emissions[0], init.shape
+        init,
+        init.mean,
+        init.scale_free_covariance,
+        emissions[0],
+        init.shape,
+        timed_observation[0],
     )
-    final, rest = lax.scan(_step, carry_0, (emissions[1:], timed_evolution))
+    final, rest = lax.scan(
+        _step,
+        carry_0,
+        (emissions[1:], timed_evolution, timed_observation[1:]),
+    )
     outputs = tuple(
         jnp.concatenate([first_leaf[None], rest_leaf])
         for first_leaf, rest_leaf in zip(first, rest, strict=True)
