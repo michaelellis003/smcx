@@ -50,8 +50,16 @@ from jax.scipy.linalg import solve_triangular
 from jaxtyping import Array, Bool, Float, Shaped
 
 from smcx._numerics import _neumaier_add
-from smcx._utils import _canonicalize_emissions, _canonicalize_inputs
-from smcx.containers import GaussianFilterPosterior, GaussianSmootherPosterior
+from smcx._utils import (
+    _canonicalize_emissions,
+    _canonicalize_inputs,
+    _positive_integer,
+)
+from smcx.containers import (
+    GaussianFilterPosterior,
+    GaussianForecast,
+    GaussianSmootherPosterior,
+)
 from smcx.model import LinearGaussianModel
 from smcx.types import (
     GaussianEmission,
@@ -68,6 +76,11 @@ from smcx.types import (
     TransitionMeanFn,
     TransitionMeanFnWithInput,
 )
+
+if TYPE_CHECKING:
+    _CountArgument: TypeAlias = SupportsIndex
+else:
+    _CountArgument: TypeAlias = Any
 
 
 class _FilterState(NamedTuple):
@@ -2658,6 +2671,326 @@ def posterior_sample(
     )
     time_major = jnp.concatenate((earlier_draws, terminal_draws[None]))
     return jnp.swapaxes(time_major, 0, 1)
+
+
+def _resolve_forecast_model_arguments(
+    transition_matrix: Any,
+    transition_covariance: Any,
+    observation_matrix: Any,
+    observation_covariance: Any,
+    transition_bias: Any,
+    observation_bias: Any,
+    transition_input_matrix: Any,
+    observation_input_matrix: Any,
+) -> tuple[Any, ...]:
+    """Normalize record-or-arrays input to the eight model pieces."""
+    if not isinstance(transition_matrix, LinearGaussianModel):
+        required = (
+            transition_covariance,
+            observation_matrix,
+            observation_covariance,
+        )
+        if any(value is None for value in required):
+            raise ValueError(
+                "kalman_forecast requires transition_matrix, "
+                "transition_covariance, observation_matrix, and "
+                "observation_covariance unless a LinearGaussianModel "
+                "is passed first"
+            )
+        return (
+            transition_matrix,
+            transition_covariance,
+            observation_matrix,
+            observation_covariance,
+            transition_bias,
+            observation_bias,
+            transition_input_matrix,
+            observation_input_matrix,
+        )
+    model = transition_matrix
+    loose_names = (
+        ("transition_covariance", transition_covariance),
+        ("observation_matrix", observation_matrix),
+        ("observation_covariance", observation_covariance),
+        ("transition_bias", transition_bias),
+        ("observation_bias", observation_bias),
+        ("transition_input_matrix", transition_input_matrix),
+        ("observation_input_matrix", observation_input_matrix),
+    )
+    for name, value in loose_names:
+        if value is not None:
+            raise ValueError(
+                "kalman_forecast received a LinearGaussianModel and a "
+                f"separate {name}; supply model arrays through the "
+                "record only"
+            )
+    return (
+        model.transition_matrix,
+        model.transition_covariance,
+        model.observation_matrix,
+        model.observation_covariance,
+        model.transition_bias,
+        model.observation_bias,
+        model.transition_input_matrix,
+        model.observation_input_matrix,
+    )
+
+
+def kalman_forecast(
+    filtered_posterior: GaussianFilterPosterior,
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"]
+    | LinearGaussianModel,
+    transition_covariance: Shaped[Array, "*transition_covariance_shape"]
+    | None = None,
+    observation_matrix: Shaped[Array, "*observation_matrix_shape"]
+    | None = None,
+    observation_covariance: Shaped[Array, "*observation_covariance_shape"]
+    | None = None,
+    *,
+    num_steps: _CountArgument,
+    transition_bias: Shaped[Array, "*transition_bias_shape"] | None = None,
+    observation_bias: Shaped[Array, "*observation_bias_shape"] | None = None,
+    transition_input_matrix: Shaped[Array, "*transition_input_matrix_shape"]
+    | None = None,
+    observation_input_matrix: Shaped[Array, "*observation_input_matrix_shape"]
+    | None = None,
+    future_inputs: GaussianInputSequence | None = None,
+) -> GaussianForecast:
+    r"""Iterate k-step forecast distributions from the filtering frontier.
+
+    Starting at the terminal filtered moments $(m_T, C_T)$, each
+    horizon applies the prediction recursions
+
+    $$
+    \begin{aligned}
+    a_k &= F a_{k-1} + b + B u_k, &
+    R_k &= F R_{k-1} F^\top + Q, \\
+    f_k &= H a_k + d + D u_k, &
+    Q_k &= H R_k H^\top + R,
+    \end{aligned}
+    $$
+
+    with $(a_0, R_0) = (m_T, C_T)$, the West--Harrison
+    $a_t(k), R_t(k), f_t(k), Q_t(k)$ presentation (1997, section 4.4).
+    Forecasts issue from the filtering frontier only. The horizon-one
+    state forecast reproduces the filter's next stored prediction
+    bitwise, and evaluating the horizon-one observation forecast
+    density at the realized emission reproduces the filter's evidence
+    increment.
+
+    The model pieces may arrive individually, or once as the
+    `smcx.model.LinearGaussianModel` used by the filter:
+    ``kalman_forecast(posterior, model, num_steps=...)``. The record's
+    initial moments are unused here — the frontier comes from the
+    posterior. Supplying both the record and a separate model array
+    raises ``ValueError``. As with the smoothers, the record cannot
+    verify that the resupplied pieces match the filter run.
+
+    Args:
+        filtered_posterior: Forward-pass linear-Gaussian moments.
+        transition_matrix: Static ``(state_dim, state_dim)`` matrix or
+            per-horizon array with leading length ``num_steps``, or a
+            `smcx.model.LinearGaussianModel` carrying every model
+            piece.
+        transition_covariance: Static or per-horizon transition-noise
+            covariance.
+        observation_matrix: Static ``(observation_dim, state_dim)``
+            matrix or per-horizon array.
+        observation_covariance: Static or per-horizon observation-noise
+            covariance.
+        num_steps: Positive integer forecast horizon. This controls an
+            output shape and must be closed over or marked static
+            through an outer ``jax.jit`` boundary.
+        transition_bias: Optional static or per-horizon state offset.
+        observation_bias: Optional static or per-horizon emission
+            offset.
+        transition_input_matrix: Optional matrix mapping each future
+            input into the state equation.
+        observation_input_matrix: Optional matrix mapping each future
+            input into the observation equation.
+        future_inputs: Exogenous inputs for the forecast horizons,
+            shape ``(num_steps,)`` or ``(num_steps, input_dim)``.
+            Required exactly when an input matrix is supplied; entry
+            ``k`` reaches the transition into and the observation at
+            horizon ``k + 1``.
+
+    Returns:
+        Per-horizon state and observation forecast moments.
+
+    Raises:
+        ValueError: An argument has an invalid shape, dtype, count, or
+            covariance domain, model pieces arrive both in a record and
+            loosely, or the future-input contract is violated.
+
+    Note:
+        Covariance domains match `kalman_filter`: the transition
+        covariance must be positive semidefinite and the observation
+        covariance positive definite, checked eagerly and skipped for
+        traced arrays. Missing-data handling does not apply — no data
+        enters a forecast.
+    """
+    (
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        transition_bias,
+        observation_bias,
+        transition_input_matrix,
+        observation_input_matrix,
+    ) = _resolve_forecast_model_arguments(
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        transition_bias,
+        observation_bias,
+        transition_input_matrix,
+        observation_input_matrix,
+    )
+    num_steps = _positive_integer(num_steps, name="num_steps")
+    _, state_dim, dtype = _validate_filter_posterior(filtered_posterior)
+    _check_float_array(transition_matrix, "transition_matrix", dtype)
+    _check_float_array(transition_covariance, "transition_covariance", dtype)
+    _check_float_array(observation_matrix, "observation_matrix", dtype)
+    _check_float_array(observation_covariance, "observation_covariance", dtype)
+    observation_dim = observation_matrix.shape[-2]
+    transition_matrices = _time_matrix(
+        transition_matrix,
+        num_steps,
+        state_dim,
+        state_dim,
+        "transition_matrix",
+    )
+    transition_covariances = _time_matrix(
+        transition_covariance,
+        num_steps,
+        state_dim,
+        state_dim,
+        "transition_covariance",
+    )
+    observation_matrices = _time_matrix(
+        observation_matrix,
+        num_steps,
+        observation_dim,
+        state_dim,
+        "observation_matrix",
+    )
+    observation_covariances = _time_matrix(
+        observation_covariance,
+        num_steps,
+        observation_dim,
+        observation_dim,
+        "observation_covariance",
+    )
+    transition_biases = _time_vector(
+        transition_bias,
+        num_steps,
+        state_dim,
+        dtype,
+        "transition_bias",
+    )
+    observation_biases = _time_vector(
+        observation_bias,
+        num_steps,
+        observation_dim,
+        dtype,
+        "observation_bias",
+    )
+    if future_inputs is None:
+        if (
+            transition_input_matrix is not None
+            or observation_input_matrix is not None
+        ):
+            raise ValueError("input matrices require future_inputs")
+    else:
+        try:
+            future_inputs = _canonicalize_inputs(future_inputs, num_steps)
+        except ValueError as error:
+            raise ValueError(f"future_inputs is invalid: {error}") from error
+        _check_float_array(future_inputs, "future_inputs", dtype)
+        input_dim = future_inputs.shape[1]
+        if transition_input_matrix is not None:
+            transition_controls = _time_matrix(
+                transition_input_matrix,
+                num_steps,
+                state_dim,
+                input_dim,
+                "transition_input_matrix",
+            )
+            transition_biases = transition_biases + jnp.einsum(
+                "tdu,tu->td", transition_controls, future_inputs
+            )
+        if observation_input_matrix is not None:
+            observation_controls = _time_matrix(
+                observation_input_matrix,
+                num_steps,
+                observation_dim,
+                input_dim,
+                "observation_input_matrix",
+            )
+            observation_biases = observation_biases + jnp.einsum(
+                "tdu,tu->td", observation_controls, future_inputs
+            )
+    _check_covariance(
+        transition_covariance,
+        "transition_covariance",
+        positive_definite=False,
+    )
+    _check_covariance(
+        observation_covariance,
+        "observation_covariance",
+        positive_definite=True,
+    )
+
+    def _forecast_step(
+        carry: tuple[Array, Array],
+        args: tuple[Array, Array, Array, Array, Array, Array],
+    ) -> tuple[tuple[Array, Array], tuple[Array, Array, Array, Array]]:
+        mean, covariance = carry
+        (
+            transition,
+            transition_noise,
+            transition_offset,
+            observation_operator,
+            observation_noise,
+            observation_offset,
+        ) = args
+        predicted_mean = transition @ mean + transition_offset
+        predicted_covariance = _symmetrize(
+            transition @ covariance @ transition.T + transition_noise
+        )
+        observation_mean = (
+            observation_operator @ predicted_mean + observation_offset
+        )
+        observation_covariance_k = _symmetrize(
+            observation_operator @ predicted_covariance @ observation_operator.T
+            + observation_noise
+        )
+        outputs = (
+            predicted_mean,
+            predicted_covariance,
+            observation_mean,
+            observation_covariance_k,
+        )
+        return (predicted_mean, predicted_covariance), outputs
+
+    _, outputs = lax.scan(
+        _forecast_step,
+        (
+            filtered_posterior.filtered_means[-1],
+            filtered_posterior.filtered_covariances[-1],
+        ),
+        (
+            transition_matrices,
+            transition_covariances,
+            transition_biases,
+            observation_matrices,
+            observation_covariances,
+            observation_biases,
+        ),
+    )
+    return GaussianForecast(*outputs)
 
 
 class TaylorOrder1(NamedTuple):

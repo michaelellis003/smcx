@@ -240,6 +240,34 @@ class GaussianFilterPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " ntime"]
 
 
+class GaussianForecast(NamedTuple):
+    r"""Linear-Gaussian k-step forecast distributions.
+
+    Entry ``k`` (zero-indexed) describes horizon ``k + 1`` from the
+    filtering frontier: the state forecast
+    $x_{T+k+1} \mid y_{1:T} \sim N(a_{k}, R_{k})$ and the observation
+    forecast $y_{T+k+1} \mid y_{1:T} \sim N(f_{k}, Q_{k})$, in the
+    West--Harrison $a_t(k), R_t(k), f_t(k), Q_t(k)$ presentation.
+
+    Attributes:
+        state_means: State forecast means, shape
+            ``(num_steps, state_dim)``.
+        state_covariances: State forecast covariances, shape
+            ``(num_steps, state_dim, state_dim)``.
+        observation_means: Observation forecast means, shape
+            ``(num_steps, observation_dim)``.
+        observation_covariances: Observation forecast covariances,
+            shape ``(num_steps, observation_dim, observation_dim)``.
+    """
+
+    state_means: Float[Array, "num_steps state_dim"]
+    state_covariances: Float[Array, "num_steps state_dim state_dim"]
+    observation_means: Float[Array, "num_steps observation_dim"]
+    observation_covariances: Float[
+        Array, "num_steps observation_dim observation_dim"
+    ]
+
+
 class GaussianSmootherPosterior(NamedTuple):
     r"""Gaussian filtering and smoothing output.
 
