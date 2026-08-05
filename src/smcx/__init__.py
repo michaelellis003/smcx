@@ -80,6 +80,7 @@ from smcx.kalman import (
 )
 from smcx.liu_west import liu_west_filter
 from smcx.model import (
+    LinearGaussianModel,
     StateSpaceModel,
     auxiliary_fk,
     bootstrap_fk,
@@ -119,6 +120,7 @@ __all__ = [
     "GaussianFilterPosterior",
     "GaussianSmootherPosterior",
     "IBISPosterior",
+    "LinearGaussianModel",
     "LiuWestPosterior",
     "ParameterFilterResult",
     "ParticleFilterPosterior",

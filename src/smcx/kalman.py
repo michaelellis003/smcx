@@ -32,7 +32,14 @@ References:
 
 import math
 import operator
-from typing import TYPE_CHECKING, NamedTuple, SupportsIndex, TypeAlias, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    NamedTuple,
+    SupportsIndex,
+    TypeAlias,
+    cast,
+)
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -45,6 +52,7 @@ from jaxtyping import Array, Bool, Float, Shaped
 from smcx._numerics import _neumaier_add
 from smcx._utils import _canonicalize_emissions, _canonicalize_inputs
 from smcx.containers import GaussianFilterPosterior, GaussianSmootherPosterior
+from smcx.model import LinearGaussianModel
 from smcx.types import (
     GaussianEmission,
     GaussianEmissionSequence,
@@ -1151,14 +1159,110 @@ def _extended_filter_step(
     return next_state, output
 
 
+def _resolve_kalman_model_arguments(
+    initial_mean: Any,
+    initial_covariance: Any,
+    transition_matrix: Any,
+    transition_covariance: Any,
+    observation_matrix: Any,
+    observation_covariance: Any,
+    emissions: Any,
+    transition_bias: Any,
+    observation_bias: Any,
+    transition_input_matrix: Any,
+    observation_input_matrix: Any,
+) -> tuple[Any, ...]:
+    """Normalize record-or-arrays input to the eleven model arguments.
+
+    When the first argument is a `LinearGaussianModel`, the second
+    positional slot carries the emissions and every other model
+    argument must be left unset.
+    """
+    if not isinstance(initial_mean, LinearGaussianModel):
+        loose = (
+            initial_covariance,
+            transition_matrix,
+            transition_covariance,
+            observation_matrix,
+            observation_covariance,
+            emissions,
+        )
+        if any(value is None for value in loose):
+            raise ValueError(
+                "kalman_filter requires all six model arrays and the "
+                "emissions unless a LinearGaussianModel is passed first"
+            )
+        return (
+            initial_mean,
+            initial_covariance,
+            transition_matrix,
+            transition_covariance,
+            observation_matrix,
+            observation_covariance,
+            emissions,
+            transition_bias,
+            observation_bias,
+            transition_input_matrix,
+            observation_input_matrix,
+        )
+    model = initial_mean
+    loose_names = (
+        ("transition_matrix", transition_matrix),
+        ("transition_covariance", transition_covariance),
+        ("observation_matrix", observation_matrix),
+        ("observation_covariance", observation_covariance),
+        ("transition_bias", transition_bias),
+        ("observation_bias", observation_bias),
+        ("transition_input_matrix", transition_input_matrix),
+        ("observation_input_matrix", observation_input_matrix),
+    )
+    for name, value in loose_names:
+        if value is not None:
+            raise ValueError(
+                "kalman_filter received a LinearGaussianModel and a "
+                f"separate {name}; supply model arrays through the "
+                "record only"
+            )
+    if initial_covariance is not None and emissions is not None:
+        raise ValueError(
+            "kalman_filter received emissions both positionally and by "
+            "keyword; pass them once"
+        )
+    resolved_emissions = (
+        emissions if initial_covariance is None else initial_covariance
+    )
+    if resolved_emissions is None:
+        raise ValueError(
+            "kalman_filter received a LinearGaussianModel but no "
+            "emissions; pass them second or by keyword"
+        )
+    return (
+        model.initial_mean,
+        model.initial_covariance,
+        model.transition_matrix,
+        model.transition_covariance,
+        model.observation_matrix,
+        model.observation_covariance,
+        resolved_emissions,
+        model.transition_bias,
+        model.observation_bias,
+        model.transition_input_matrix,
+        model.observation_input_matrix,
+    )
+
+
 def kalman_filter(
-    initial_mean: Shaped[Array, "*initial_mean_shape"],
-    initial_covariance: Shaped[Array, "*initial_covariance_shape"],
-    transition_matrix: Shaped[Array, "*transition_matrix_shape"],
-    transition_covariance: Shaped[Array, "*transition_covariance_shape"],
-    observation_matrix: Shaped[Array, "*observation_matrix_shape"],
-    observation_covariance: Shaped[Array, "*observation_covariance_shape"],
-    emissions: GaussianEmissionSequence,
+    initial_mean: Shaped[Array, "*initial_mean_shape"] | LinearGaussianModel,
+    initial_covariance: Shaped[Array, "*initial_covariance_shape"]
+    | None = None,
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"] | None = None,
+    transition_covariance: Shaped[Array, "*transition_covariance_shape"]
+    | None = None,
+    observation_matrix: Shaped[Array, "*observation_matrix_shape"]
+    | None = None,
+    observation_covariance: Shaped[Array, "*observation_covariance_shape"]
+    | None = None,
+    emissions: GaussianEmissionSequence | None = None,
     *,
     transition_bias: Shaped[Array, "*transition_bias_shape"] | None = None,
     observation_bias: Shaped[Array, "*observation_bias_shape"] | None = None,
@@ -1178,8 +1282,16 @@ def kalman_filter(
     y_t &= H x_t + d + D u_t + r_t. \end{aligned}
     $$
 
+    The model arrays may arrive individually, or once as a
+    `smcx.model.LinearGaussianModel` whose fields mirror these
+    arguments: ``kalman_filter(model, emissions, inputs=...)``. The two
+    forms produce bitwise-identical output; supplying both the record
+    and a separate model array raises ``ValueError``.
+
     Args:
-        initial_mean: Prior mean for ``x[0]``, shape ``(state_dim,)``.
+        initial_mean: Prior mean for ``x[0]``, shape ``(state_dim,)``,
+            or a `smcx.model.LinearGaussianModel` carrying every model
+            array (the emissions then arrive second or by keyword).
         initial_covariance: Prior covariance for ``x[0]``.
         transition_matrix: Static ``(state_dim, state_dim)`` matrix or
             time-varying array with leading length ``ntime - 1``.
@@ -1231,6 +1343,31 @@ def kalman_filter(
         observations are entirely-NaN rows, as documented for
         ``emissions`` above.
     """
+    (
+        initial_mean,
+        initial_covariance,
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        emissions,
+        transition_bias,
+        observation_bias,
+        transition_input_matrix,
+        observation_input_matrix,
+    ) = _resolve_kalman_model_arguments(
+        initial_mean,
+        initial_covariance,
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        emissions,
+        transition_bias,
+        observation_bias,
+        transition_input_matrix,
+        observation_input_matrix,
+    )
     emissions = _canonicalize_emissions(emissions)
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
         raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
@@ -2248,7 +2385,8 @@ def _posterior_sample_step(
 
 def rts_smoother(
     filtered_posterior: GaussianFilterPosterior,
-    transition_matrix: Shaped[Array, "*transition_matrix_shape"],
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"]
+    | LinearGaussianModel,
 ) -> GaussianSmootherPosterior:
     r"""Run a Rauch--Tung--Striebel backward smoother.
 
@@ -2261,7 +2399,9 @@ def rts_smoother(
         filtered_posterior: Forward-pass Gaussian moments.
         transition_matrix: Static ``(state_dim, state_dim)`` matrix or
             time-varying array with leading length ``ntime - 1``. Entry
-            ``i`` maps state ``i`` to state ``i + 1``.
+            ``i`` maps state ``i`` to state ``i + 1``. Alternatively the
+            `smcx.model.LinearGaussianModel` used by the filter, whose
+            ``transition_matrix`` field is read.
 
     Returns:
         The retained forward-pass fields plus smoothed means and
@@ -2292,6 +2432,8 @@ def rts_smoother(
         that reason alone, which a square-root smoother would be needed
         to prevent.
     """
+    if isinstance(transition_matrix, LinearGaussianModel):
+        transition_matrix = transition_matrix.transition_matrix
     num_timesteps, state_dim, dtype = _validate_filter_posterior(
         filtered_posterior
     )

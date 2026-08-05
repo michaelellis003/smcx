@@ -31,6 +31,7 @@ from typing import Any, NamedTuple
 import jax.numpy as jnp
 import jax.random as jr
 from jax import vmap
+from jaxtyping import Array, Shaped
 
 from smcx._utils import (
     _canonicalize_emissions,
@@ -50,6 +51,55 @@ from smcx.types import (
     ModelProposalSampler,
     ModelTransitionSampler,
 )
+
+
+class LinearGaussianModel(NamedTuple):
+    """One linear-Gaussian state-space model as a record of arrays.
+
+    The fields mirror `kalman_filter`'s model arguments exactly: same
+    names, same shapes, same optionality. The record is a PyTree of
+    array leaves — ``jax.grad`` through any leaf and ``jax.vmap`` over
+    batched leaves work — and it carries no behavior: validation
+    happens where the record is consumed. Define the model once and
+    pass the same object to `kalman_filter`, `rts_smoother`,
+    `posterior_sample`, and `smoothed_cross_covariances`.
+
+    Attributes:
+        initial_mean: Prior mean with shape ``(state_dim,)``.
+        initial_covariance: Prior covariance with shape
+            ``(state_dim, state_dim)``.
+        transition_matrix: Static ``(state_dim, state_dim)`` matrix or
+            time-varying ``(ntime - 1, state_dim, state_dim)`` array.
+        transition_covariance: Static or time-varying transition noise
+            covariance, shaped like ``transition_matrix``.
+        observation_matrix: Static ``(observation_dim, state_dim)``
+            matrix or time-varying array with leading length ``ntime``.
+        observation_covariance: Static
+            ``(observation_dim, observation_dim)`` matrix or
+            time-varying array with leading length ``ntime``.
+        transition_bias: Optional static or time-varying state offset.
+        observation_bias: Optional static or time-varying emission
+            offset.
+        transition_input_matrix: Optional matrix mapping ``input_t``
+            into the state equation.
+        observation_input_matrix: Optional matrix mapping ``input_t``
+            into the observation equation.
+    """
+
+    initial_mean: Shaped[Array, " state_dim"]
+    initial_covariance: Shaped[Array, "state_dim state_dim"]
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"]
+    transition_covariance: Shaped[Array, "*transition_covariance_shape"]
+    observation_matrix: Shaped[Array, "*observation_matrix_shape"]
+    observation_covariance: Shaped[Array, "*observation_covariance_shape"]
+    transition_bias: Shaped[Array, "*transition_bias_shape"] | None = None
+    observation_bias: Shaped[Array, "*observation_bias_shape"] | None = None
+    transition_input_matrix: (
+        Shaped[Array, "*transition_input_matrix_shape"] | None
+    ) = None
+    observation_input_matrix: (
+        Shaped[Array, "*observation_input_matrix_shape"] | None
+    ) = None
 
 
 class StateSpaceModel(NamedTuple):

@@ -33,6 +33,7 @@ def test_public_api_exports_all_expected_names(package):
         "DGLMFamily",
         "DGLMFilterPosterior",
         "DGLMSmootherPosterior",
+        "LinearGaussianModel",
         "LiuWestPosterior",
         "ParameterFilterResult",
         "ParticleFilterPosterior",
