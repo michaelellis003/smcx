@@ -19,6 +19,7 @@ from smcx.containers import (
     DGLMFilterPosterior,
     DGLMSmootherPosterior,
     DLMFilterPosterior,
+    DLMForecast,
     DLMSmootherPosterior,
     GaussianFilterPosterior,
     GaussianForecast,
@@ -62,7 +63,7 @@ from smcx.diagnostics import (
     weighted_quantile,
     weighted_variance,
 )
-from smcx.dlm import dlm_filter, dlm_smoother
+from smcx.dlm import dlm_filter, dlm_forecast, dlm_smoother
 from smcx.exceptions import DegenerateWeightsError
 from smcx.fk import CallbackNames, FeynmanKac, run_smc
 from smcx.guided import guided_filter
@@ -116,6 +117,7 @@ __all__ = [
     "DGLMFilterPosterior",
     "DGLMSmootherPosterior",
     "DLMFilterPosterior",
+    "DLMForecast",
     "DLMSmootherPosterior",
     "DegenerateWeightsError",
     "FeynmanKac",
@@ -152,6 +154,7 @@ __all__ = [
     "dglm_smoother",
     "diagnose",
     "dlm_filter",
+    "dlm_forecast",
     "dlm_smoother",
     "ess",
     "extended_kalman_filter",

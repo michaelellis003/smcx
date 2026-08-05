@@ -240,6 +240,43 @@ class GaussianFilterPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " ntime"]
 
 
+class DLMForecast(NamedTuple):
+    r"""DLM k-step forecast distributions in scale-free form.
+
+    Entry ``k`` (zero-indexed) describes horizon ``k + 1`` from the
+    filtering frontier. The observation forecast is Student-t:
+    $y_{T+k+1} \mid y_{1:T} \sim
+    \mathrm{T}_{n}(f, Q)$ with ``n = scale_shapes[k]``,
+    ``f = observation_means[k]``, and squared scale
+    ``Q = observation_scales[k]``, the West--Harrison
+    $a_t(k), R_t(k), f_t(k), Q_t(k)$ presentation (1997, section 4.4)
+    under the frozen-frontier evolution variance of section 6.3.3.
+
+    Attributes:
+        state_means: State forecast means $a(k)$, shape
+            ``(num_steps, state_dim)``.
+        state_scale_free_covariances: State forecast covariances
+            divided by the unknown observation variance, shape
+            ``(num_steps, state_dim, state_dim)``.
+        observation_means: Observation forecast locations $f(k)$,
+            shape ``(num_steps,)``.
+        observation_scales: Squared Student-t scales $Q(k)$ on the
+            observation scale, shape ``(num_steps,)``.
+        scale_shapes: Per-horizon Student-t degrees of freedom; the
+            terminal shape decayed once per horizon by the variance
+            discount, shape ``(num_steps,)``.
+        scale_estimates: The terminal scale estimate repeated per
+            horizon, shape ``(num_steps,)``.
+    """
+
+    state_means: Float[Array, "num_steps state_dim"]
+    state_scale_free_covariances: Float[Array, "num_steps state_dim state_dim"]
+    observation_means: Float[Array, " num_steps"]
+    observation_scales: Float[Array, " num_steps"]
+    scale_shapes: Float[Array, " num_steps"]
+    scale_estimates: Float[Array, " num_steps"]
+
+
 class GaussianForecast(NamedTuple):
     r"""Linear-Gaussian k-step forecast distributions.
 
