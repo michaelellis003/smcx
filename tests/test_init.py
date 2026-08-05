@@ -70,6 +70,7 @@ def test_public_api_exports_all_expected_names(package):
         "kalman_forecast_sample",
         "crps",
         "cubature",
+        "gamma",
         "gauss_hermite",
         "cumulative_log_score",
         "dglm_filter",
