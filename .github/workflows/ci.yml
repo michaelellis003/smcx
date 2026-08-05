@@ -155,7 +155,10 @@ jobs:
           python-version: "3.12"
 
       - name: Run tests with coverage
-        run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
+        # Two workers, like the other serial legs (#423): the
+        # instrumented run reached its 30-minute budget. pytest-cov
+        # combines worker data files automatically under xdist.
+        run: uv run pytest -n 2 --cov --cov-report=term-missing --cov-report=xml
 
       - name: Enforce changed-line coverage
         if: github.event_name == 'pull_request'
