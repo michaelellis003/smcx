@@ -339,6 +339,29 @@ class GaussianForecast(NamedTuple):
     ]
 
 
+class DLMForecastPaths(NamedTuple):
+    r"""Exact joint DLM forecast paths from the filtering frontier.
+
+    Row ``i`` is one draw from the joint forecast law under the
+    conjugate unknown-variance model: one precision draw per path
+    from the terminal Gamma posterior (evolved by the beta-gamma walk
+    when the variance discount is below one), then a scaled Gaussian
+    ancestral pass. Horizon slices are equal-weight draws from the
+    matching `DLMForecast` Student-t marginals; the shared variance
+    draw makes the joint multivariate Student-t rather than a product
+    of its marginals.
+
+    Attributes:
+        state_paths: State trajectories, shape
+            ``(num_draws, num_steps, state_dim)``.
+        emission_paths: Univariate emission trajectories, shape
+            ``(num_draws, num_steps)``.
+    """
+
+    state_paths: Float[Array, "num_draws num_steps state_dim"]
+    emission_paths: Float[Array, "num_draws num_steps"]
+
+
 class GaussianForecastPaths(NamedTuple):
     r"""Exact joint forecast paths from a linear-Gaussian frontier.
 

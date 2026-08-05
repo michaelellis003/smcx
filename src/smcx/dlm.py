@@ -35,8 +35,9 @@ import math
 from typing import TYPE_CHECKING, Any, NamedTuple, SupportsIndex, TypeAlias
 
 import jax.numpy as jnp
+import jax.random as jr
 import numpy as np
-from jax import core, lax
+from jax import core, debug_infs, debug_nans, lax
 from jax.scipy.special import gammaln
 from jaxtyping import Array, Float, Shaped
 
@@ -45,6 +46,7 @@ from smcx._utils import _canonicalize_emissions, _positive_integer
 from smcx.containers import (
     DLMFilterPosterior,
     DLMForecast,
+    DLMForecastPaths,
     DLMSmootherPosterior,
 )
 from smcx.kalman import (
@@ -52,12 +54,14 @@ from smcx.kalman import (
     _canonicalize_filter_covariances,
     _check_covariance,
     _check_float_array,
+    _check_sampling_factors,
+    _sampling_covariance_factor,
     _sanitize_missing,
     _symmetrize,
     _time_matrix,
     _validate_emission_rows,
 )
-from smcx.types import GaussianEmissionSequence, Scalar
+from smcx.types import GaussianEmissionSequence, PRNGKeyT, Scalar
 
 if TYPE_CHECKING:
     _CountArgument: TypeAlias = SupportsIndex
@@ -739,4 +743,208 @@ def dlm_forecast(
         observation_scales=scale * observation_scale_free,
         scale_shapes=shapes,
         scale_estimates=jnp.broadcast_to(scale, (num_steps,)),
+    )
+
+
+def dlm_forecast_sample(
+    key: PRNGKeyT,
+    filtered_posterior: DLMFilterPosterior,
+    transition_matrix: Shaped[Array, "*transition_shape"],
+    observation_vector: Shaped[Array, "*observation_shape"],
+    *,
+    num_steps: _CountArgument,
+    num_draws: _CountArgument,
+    scale_free_transition_covariance: (
+        Shaped[Array, "*evolution_shape"] | None
+    ) = None,
+    discount: Scalar | None = None,
+    variance_discount: Scalar = 1.0,
+) -> DLMForecastPaths:
+    r"""Draw exact joint DLM forecast paths from the frontier.
+
+    Each path draws one observational precision from the terminal
+    Gamma posterior, a terminal state from the correspondingly scaled
+    Gaussian, and then iterates the state equation with per-horizon
+    evolution noise and emission noise, all scaled by that path's
+    variance. Sharing the variance draw across a path is what makes
+    the joint law multivariate Student-t; horizon slices reproduce
+    `dlm_forecast`'s marginals (ADR-0036, issue #415).
+
+    Under a ``discount`` specification the evolution noise uses the
+    frozen frontier variance of `dlm_forecast` at every horizon.
+    Under a ``variance_discount`` below one, each horizon applies one
+    beta-gamma shock to the precision (the walk whose marginals carry
+    the discounted degrees of freedom), so the per-horizon Student-t
+    marginals again match the closed forms.
+
+    Args:
+        key: JAX PRNG key. Split once into a precision key, a
+            terminal-state key, and one key per horizon; each horizon
+            key splits into a variance-shock key, a transition-noise
+            key, and an emission-noise key.
+        filtered_posterior: Output of `smcx.dlm_filter`. The forecast
+            cannot verify that the resupplied pieces below match the
+            filter run.
+        transition_matrix: Static state evolution matrix $G$, shape
+            ``(state_dim, state_dim)``.
+        observation_vector: Observation vector $F$, shape
+            ``(state_dim,)``.
+        num_steps: Positive integer forecast horizon. This controls an
+            output shape and must be closed over or marked static
+            through an outer ``jax.jit`` boundary.
+        num_draws: Positive integer path count; also an output shape.
+        scale_free_transition_covariance: Static ``(state_dim,
+            state_dim)`` or per-horizon ``(num_steps, state_dim,
+            state_dim)`` evolution covariance divided by the unknown
+            variance. Supply exactly one of this and ``discount``.
+        discount: State discount $\delta \in (0, 1]$ used by the
+            filter.
+        variance_discount: Variance discount $\delta_V \in (0, 1]$
+            used by the filter.
+
+    Returns:
+        Draw-major state and univariate emission trajectories.
+
+    Raises:
+        ValueError: The posterior or a model piece has an invalid
+            shape, dtype, count, or domain, the evolution
+            specification is not exactly one of covariance and
+            discount, or a concrete covariance is not factorable on
+            the active backend.
+
+    Note:
+        Scale-free covariances factor through ordinary Cholesky with
+        the same bounded semidefinite spectral fallback as
+        `posterior_sample`; a zero frontier evolution variance
+        (``discount=1``) factors to zero noise.
+    """
+    if (scale_free_transition_covariance is None) == (discount is None):
+        raise ValueError(
+            "supply exactly one of scale_free_transition_covariance "
+            "and discount"
+        )
+    num_steps = _positive_integer(num_steps, name="num_steps")
+    num_draws = _positive_integer(num_draws, name="num_draws")
+    _, state_dim, dtype, canonical_covariances = _validate_dlm_filter_posterior(
+        filtered_posterior
+    )
+    del canonical_covariances
+    for name, value, expected in (
+        ("transition_matrix", transition_matrix, (state_dim, state_dim)),
+        ("observation_vector", observation_vector, (state_dim,)),
+    ):
+        _check_float_array(value, name, dtype)
+        if value.shape != expected:
+            raise ValueError(
+                f"{name} must have shape {expected}; got {value.shape}"
+            )
+    use_discount = discount is not None
+    if use_discount:
+        discount_value = _validate_positive_scalar(discount, "discount")
+        if not isinstance(discount_value, core.Tracer) and (
+            float(discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+        ):
+            raise ValueError(
+                f"discount must be in (0, 1]; got {discount_value}"
+            )
+        inverse_discount = 1.0 / jnp.asarray(discount_value, dtype=dtype)
+    else:
+        value = scale_free_transition_covariance
+        assert value is not None  # XOR-checked above
+        _check_float_array(value, "scale_free_transition_covariance", dtype)
+        timed_evolution = _time_matrix(
+            value,
+            num_steps,
+            state_dim,
+            state_dim,
+            "scale_free_transition_covariance",
+        )
+        _check_covariance(
+            value,
+            "scale_free_transition_covariance",
+            positive_definite=False,
+        )
+    variance_discount_value = _validate_positive_scalar(
+        variance_discount, "variance_discount"
+    )
+    if not isinstance(variance_discount_value, core.Tracer) and (
+        float(variance_discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+    ):
+        raise ValueError(
+            f"variance_discount must be in (0, 1]; got "
+            f"{variance_discount_value}"
+        )
+    variance_discount_array = jnp.asarray(variance_discount_value, dtype=dtype)
+
+    mean = filtered_posterior.filtered_means[-1]
+    # The raw stored covariance IS the filter's carry; symmetrizing it
+    # here would break coherence with a continued filter run.
+    covariance = filtered_posterior.filtered_scale_free_covariances[-1]
+    shape = filtered_posterior.scale_shapes[-1]
+    scale = filtered_posterior.scale_estimates[-1]
+
+    propagated_frontier = (transition_matrix @ covariance) @ transition_matrix.T
+    if use_discount:
+        frontier_w = propagated_frontier * (inverse_discount - 1.0)
+        noise_covariances = jnp.broadcast_to(
+            frontier_w, (num_steps, state_dim, state_dim)
+        )
+    else:
+        noise_covariances = timed_evolution
+    with debug_nans(False), debug_infs(False):
+        terminal_factor = _sampling_covariance_factor(_symmetrize(covariance))
+        noise_factors = lax.map(_sampling_covariance_factor, noise_covariances)
+    _check_sampling_factors(terminal_factor[None])
+    _check_sampling_factors(noise_factors)
+
+    keys = jr.split(key, num_steps + 2)
+    precision = jr.gamma(keys[0], shape / 2.0, (num_draws,), dtype=dtype) / (
+        shape * scale / 2.0
+    )
+    root_variance = jnp.sqrt(1.0 / precision)
+    terminal_noise = jr.normal(keys[1], (num_draws, state_dim), dtype=dtype)
+    states_0 = mean + root_variance[:, None] * (
+        terminal_noise @ terminal_factor.T
+    )
+
+    def _path_step(carry, args):
+        states, precision_k, dof_k = carry
+        step_key, noise_factor = args
+        shock_key, state_key, emission_key = jr.split(step_key, 3)
+        # One beta-gamma shock per horizon: the walk whose precision
+        # marginal is Gamma with the discounted degrees of freedom.
+        # The double-where keeps the delta_V = 1 branch NaN-free.
+        beta_b = (1.0 - variance_discount_array) * dof_k / 2.0
+        degenerate = beta_b <= 0.0
+        safe_b = jnp.where(degenerate, jnp.ones_like(beta_b), beta_b)
+        shock = jr.beta(
+            shock_key,
+            variance_discount_array * dof_k / 2.0,
+            safe_b,
+            (num_draws,),
+            dtype=dtype,
+        )
+        shock = jnp.where(degenerate, jnp.ones_like(shock), shock)
+        next_precision = precision_k * shock / variance_discount_array
+        next_dof = variance_discount_array * dof_k
+        root = jnp.sqrt(1.0 / next_precision)
+        state_noise = jr.normal(state_key, (num_draws, state_dim), dtype=dtype)
+        next_states = states @ transition_matrix.T + root[:, None] * (
+            state_noise @ noise_factor.T
+        )
+        emission_noise = jr.normal(emission_key, (num_draws,), dtype=dtype)
+        emissions = next_states @ observation_vector + root * emission_noise
+        return (next_states, next_precision, next_dof), (
+            next_states,
+            emissions,
+        )
+
+    _, (state_paths, emission_paths) = lax.scan(
+        _path_step,
+        (states_0, precision, shape),
+        (keys[2:], noise_factors),
+    )
+    return DLMForecastPaths(
+        state_paths=jnp.swapaxes(state_paths, 0, 1),
+        emission_paths=jnp.swapaxes(emission_paths, 0, 1),
     )
