@@ -1,11 +1,10 @@
 # The reproducibility contract
 
 Every stochastic smcx function takes an explicit JAX PRNG key, and
-every key-split schedule is frozen by tests. Entry points with
-intricate schedules (`run_smc`, `run_particle_filter`,
-`posterior_sample`, `backward_simulation`) document their trees
-inline; for the rest, this page is the citable statement of the
-library-wide contract.
+every key-split schedule is frozen by tests. Each entry point's
+docstring states its own split tree under the `key` argument; this
+page is the citable statement of the library-wide contract those
+trees satisfy.
 
 ## Keys are contracts
 

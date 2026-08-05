@@ -187,7 +187,10 @@ def guided_filter(
     r"""Run a guided particle filter.
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Split once for the initial cloud, then
+            into one key per subsequent step; each step key splits
+            into a resampling key and per-particle proposal keys
+            (the frozen ``run_smc`` schedule).
         initial_sampler: ``(key, num_particles[, input_0]) -> particles``
             drawing from $p(z_1)$. ``particles`` may be a dense
             array or a nonempty PyTree whose array leaves all have leading

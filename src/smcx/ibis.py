@@ -68,7 +68,11 @@ def ibis(
     https://doi.org/10.1111/j.1467-9868.2012.01046.x.
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Split into a prior-sampling key and a
+            stage root yielding one key per observation; each stage
+            key splits into a resampling key and a move key, reserved
+            whether or not the stage resamples. The default move
+            splits per sweep into proposal and acceptance keys.
         param_initial_sampler: ``(key, N) -> (N, d)`` normalized-prior draw.
         log_prior_fn: Per-parameter scalar log-prior.
         log_likelihood_increment_fn: Three-argument conditional increment

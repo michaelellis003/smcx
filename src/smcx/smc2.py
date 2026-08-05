@@ -184,7 +184,11 @@ def smc2(
     r"""Run SMC² for joint state-and-parameter inference.
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Split into a parameter-cloud key and a
+            loop key; the loop key yields one key per time step, and
+            each step key splits into inner-filter resampling and
+            transition keys plus a rejuvenation key reserved whether
+            or not rejuvenation triggers.
         param_initial_sampler: ``(key, num_theta) -> (num_theta,
             param_dim)`` floating prior draw over the static parameters.
         log_prior_fn: ``(theta) -> scalar`` parameter log-prior;

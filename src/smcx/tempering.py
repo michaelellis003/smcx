@@ -117,7 +117,10 @@ def temper(
     r"""Sample a static target by adaptive tempered SMC.
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Split once for the initial cloud, then
+            three ways per adaptive stage (carry, resampling, move
+            root); the move root splits three ways per MCMC step
+            (proposal noise, acceptance draw, carry).
         initial_sampler: ``(key, num_particles) -> (N, d)`` drawing
             from the prior.
         log_prior_fn: Per-particle ``(state) -> scalar`` log-prior;

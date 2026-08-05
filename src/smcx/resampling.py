@@ -141,7 +141,8 @@ def systematic(
     """Systematic resampling: one shared uniform, evenly spaced grid.
 
     Args:
-        key: PRNG key.
+        key: PRNG key, consumed whole in a single scalar uniform
+            draw (no split).
         weights: Finite, nonnegative probability-space weights with positive
             total mass and at least float32 precision, on any positive scale.
         num_samples: Number of ancestors to draw.
@@ -168,7 +169,8 @@ def stratified(
     """Stratified resampling: one uniform per stratum.
 
     Args:
-        key: PRNG key.
+        key: PRNG key, consumed whole in one uniform draw of
+            ``num_samples`` stratum offsets (no split).
         weights: Finite, nonnegative probability-space weights with positive
             total mass and at least float32 precision, on any positive scale.
         num_samples: Number of ancestors to draw.
@@ -202,7 +204,8 @@ def multinomial(
     Sorted queries keep the ancestor gather monotone.
 
     Args:
-        key: PRNG key.
+        key: PRNG key, consumed whole in one uniform draw of
+            ``num_samples + 1`` exponential spacings (no split).
         weights: Finite, nonnegative probability-space weights with positive
             total mass and at least float32 precision, on any positive scale.
         num_samples: Number of ancestors to draw.
@@ -239,7 +242,8 @@ def residual(
     schedule so the output size stays ``num_samples`` under jit.
 
     Args:
-        key: PRNG key.
+        key: PRNG key, consumed whole in one uniform draw for the
+            residual multinomial stage (no split).
         weights: Finite, nonnegative probability-space weights with positive
             total mass and at least float32 precision, on any positive scale.
         num_samples: Number of ancestors to draw.

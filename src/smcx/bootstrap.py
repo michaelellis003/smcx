@@ -191,7 +191,8 @@ def bootstrap_init(
     """Initialize a resumable bootstrap filter at observation zero.
 
     Args:
-        init_key: Explicit key for sampling the initial particle cloud.
+        init_key: Explicit key for sampling the initial particle
+            cloud, passed unsplit to ``initial_sampler``.
         initial_sampler: Initial-state callback, optionally input-aware.
         log_observation_fn: Observation log-density callback returning a
             scalar with at least float32 precision.
@@ -370,7 +371,9 @@ def bootstrap_step(
     """Advance a resumable bootstrap filter by one observation.
 
     Args:
-        step_key: Explicit key for resampling and propagation.
+        step_key: Explicit key for resampling and propagation. Split
+            into a resampling key and per-particle transition keys,
+            reserved whether or not resampling triggers.
         checkpoint: State returned by initialization or a prior step. Its
             log weights must be normalized and its stored ESS must agree
             with them.
@@ -448,7 +451,9 @@ def bootstrap_update(
     public-step loop; other platforms use a compiled scan.
 
     Args:
-        step_keys: One explicit PRNG key per chunk observation.
+        step_keys: One explicit PRNG key per chunk observation, each
+            consumed by the single-step schedule (a resampling key
+            plus per-particle transition keys).
         checkpoint: State returned by initialization or an earlier update.
             Its log weights must be normalized and its stored ESS must agree
             with them.
@@ -633,7 +638,10 @@ def bootstrap_filter(
     r"""Run a bootstrap (SIR) particle filter.
 
     Args:
-        key: JAX PRNG key.
+        key: JAX PRNG key. Split once for the initial cloud, then
+            into one key per subsequent step; each step key splits
+            into a resampling key and per-particle transition keys
+            (the frozen ``run_smc`` schedule).
         initial_sampler: Function ``(key, num_particles[, input_0]) ->
             particles`` that draws from $p(z_1)$. ``particles`` may
             be a dense array or a nonempty PyTree whose array leaves all
