@@ -47,7 +47,7 @@ References:
     https://arxiv.org/html/2201.05387v4#S3.SS2
 """
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, SupportsIndex, TypeAlias
 
 import jax.numpy as jnp
 import numpy as np
@@ -59,8 +59,12 @@ from jax.scipy.stats import betabinom, nbinom
 from jaxtyping import Array, Float, Shaped
 
 from smcx._numerics import _neumaier_add
-from smcx._utils import _canonicalize_emissions
-from smcx.containers import DGLMFilterPosterior, DGLMSmootherPosterior
+from smcx._utils import _canonicalize_emissions, _positive_integer
+from smcx.containers import (
+    DGLMFilterPosterior,
+    DGLMForecast,
+    DGLMSmootherPosterior,
+)
 from smcx.dlm import _validate_positive_scalar
 from smcx.kalman import (
     _backward_pass,
@@ -80,6 +84,11 @@ from smcx.types import (
     FamilyPosteriorMoments,
     Scalar,
 )
+
+if TYPE_CHECKING:
+    _CountArgument: TypeAlias = SupportsIndex
+else:
+    _CountArgument: TypeAlias = Any
 
 _NEWTON_ITERATIONS = 12
 _NEWTON_ITERATIONS_2D = 25
@@ -952,4 +961,197 @@ def dglm_smoother(
         log_evidence_increments=filtered_posterior.log_evidence_increments,
         smoothed_means=smoothed_means,
         smoothed_covariances=smoothed_covariances,
+    )
+
+
+def dglm_forecast(
+    filtered_posterior: DGLMFilterPosterior,
+    transition_matrix: Shaped[Array, "*transition_shape"],
+    observation_vector: Shaped[Array, "*observation_shape"],
+    *,
+    family: DGLMFamily,
+    num_steps: _CountArgument,
+    transition_covariance: Shaped[Array, "*evolution_shape"] | None = None,
+    discount: Scalar | None = None,
+    dispersion_discount: Scalar = 1.0,
+) -> DGLMForecast:
+    r"""Iterate k-step DGLM forecast states from the filtering frontier.
+
+    Starting at the terminal linear-Bayes moments $(m_T, C_T)$, each
+    horizon applies the Gaussian state prediction
+    $a(k) = G\,a(k-1)$ and $R(k) = G\,R(k-1)\,G^\top + W_{T+k}$, maps
+    to the linear predictor $f(k) = F^\top a(k)$ with variance
+    $q(k) = F^\top R(k)\,F / \rho$ (the dispersion inflation), and
+    moment-matches the family's conjugate pair at $(f(k), q(k))$ —
+    the filter's own one-step forecast construction applied at each
+    horizon, honest as an approximation with exactly the filter's
+    linear-Bayes caveats. The observation forecast at horizon $k$ is
+    the family's conjugate forecast at the matched pair (its density
+    is ``family.log_forecast``).
+
+    Under a ``discount`` specification the evolution variance is
+    frozen at its frontier value
+    $W = G\,C_T\,G^\top (1 - \delta)/\delta$ for every horizon (West
+    and Harrison 1997, section 6.3.3), matching `smcx.dlm_forecast`:
+    a discount forecast agrees with filtering through an all-NaN gap
+    at horizon one and diverges beyond it, while an explicit
+    evolution covariance agrees at every horizon.
+
+    Args:
+        filtered_posterior: Output of `smcx.dglm_filter`. The
+            forecast cannot verify that the resupplied pieces below
+            match the filter run.
+        transition_matrix: Static state evolution matrix $G$, shape
+            ``(state_dim, state_dim)``.
+        observation_vector: Observation vector $F$, shape
+            ``(state_dim,)``.
+        family: The `smcx.DGLMFamily` used by the filter.
+        num_steps: Positive integer forecast horizon. This controls an
+            output shape and must be closed over or marked static
+            through an outer ``jax.jit`` boundary.
+        transition_covariance: Static ``(state_dim, state_dim)`` or
+            per-horizon ``(num_steps, state_dim, state_dim)``
+            evolution covariance. Supply exactly one of this and
+            ``discount``.
+        discount: State discount $\delta \in (0, 1]$ used by the
+            filter.
+        dispersion_discount: Berry--West random-effects discount
+            $\rho \in (0, 1]$ used by the filter; each horizon's
+            linear-predictor variance is inflated by $1/\rho$ inside
+            the moment match, exactly as in the filter.
+
+    Returns:
+        Per-horizon Gaussian state moments, linear-predictor moments,
+        and moment-matched conjugate pairs.
+
+    Raises:
+        ValueError: The posterior or a model piece has an invalid
+            shape, dtype, count, or domain, or the evolution
+            specification is not exactly one of covariance and
+            discount.
+
+    Note:
+        No data enter a forecast: the conjugate pairs are matched
+        priors, never updated, and the horizon-one pair reproduces the
+        pair a continued filter run would match, so
+        ``family.log_forecast`` at that pair reproduces the filter's
+        evidence increment for a realized emission.
+    """
+    if (transition_covariance is None) == (discount is None):
+        raise ValueError(
+            "supply exactly one of transition_covariance and discount"
+        )
+    num_steps = _positive_integer(num_steps, name="num_steps")
+    _, state_dim, dtype, canonical_covariances = (
+        _validate_dglm_filter_posterior(filtered_posterior)
+    )
+    del canonical_covariances
+    for name, value, expected in (
+        ("transition_matrix", transition_matrix, (state_dim, state_dim)),
+        ("observation_vector", observation_vector, (state_dim,)),
+    ):
+        _check_float_array(value, name, dtype)
+        if value.shape != expected:
+            raise ValueError(
+                f"{name} must have shape {expected}; got {value.shape}"
+            )
+    use_discount = discount is not None
+    if use_discount:
+        discount_value = _validate_positive_scalar(discount, "discount")
+        if not isinstance(discount_value, core.Tracer) and (
+            float(discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+        ):
+            raise ValueError(
+                f"discount must be in (0, 1]; got {discount_value}"
+            )
+        inverse_discount = 1.0 / jnp.asarray(discount_value, dtype=dtype)
+    else:
+        value = transition_covariance
+        assert value is not None  # XOR-checked above
+        _check_float_array(value, "transition_covariance", dtype)
+        timed_evolution = _time_matrix(
+            value,
+            num_steps,
+            state_dim,
+            state_dim,
+            "transition_covariance",
+        )
+        _check_covariance(
+            value,
+            "transition_covariance",
+            positive_definite=False,
+        )
+    dispersion_value = _validate_positive_scalar(
+        dispersion_discount, "dispersion_discount"
+    )
+    if not isinstance(dispersion_value, core.Tracer) and (
+        float(dispersion_value) > 1.0  # ty: ignore[invalid-argument-type]
+    ):
+        raise ValueError(
+            f"dispersion_discount must be in (0, 1]; got {dispersion_value}"
+        )
+    inverse_dispersion = 1.0 / jnp.asarray(dispersion_value, dtype=dtype)
+
+    mean = filtered_posterior.filtered_means[-1]
+    # The raw stored covariance IS the filter's carry; symmetrizing it
+    # here would break the exact agreement with a continued filter run.
+    covariance = filtered_posterior.filtered_covariances[-1]
+
+    propagated_frontier = (transition_matrix @ covariance) @ transition_matrix.T
+    if use_discount:
+        first_covariance = propagated_frontier * inverse_discount
+        frontier_w = propagated_frontier * (inverse_discount - 1.0)
+        rest_evolution = jnp.broadcast_to(
+            frontier_w, (num_steps - 1, state_dim, state_dim)
+        )
+    else:
+        first_covariance = propagated_frontier + timed_evolution[0]
+        rest_evolution = timed_evolution[1:]
+    first_mean = transition_matrix @ mean
+
+    def _match(mean_k, covariance_k):
+        # Scalar ops in the filter's exact order, so the horizon-one
+        # pair reproduces a continued filter run bitwise.
+        forecast_mean = observation_vector @ mean_k
+        forecast_variance = (
+            observation_vector @ covariance_k @ observation_vector
+        ) * inverse_dispersion
+        alpha, beta = family.match_moments(forecast_mean, forecast_variance)
+        return forecast_mean, forecast_variance, alpha, beta
+
+    first_match = _match(first_mean, first_covariance)
+
+    def _horizon(carry, evolution_k):
+        mean_k, covariance_k = carry
+        next_mean = transition_matrix @ mean_k
+        next_covariance = (
+            transition_matrix @ covariance_k
+        ) @ transition_matrix.T + evolution_k
+        return (next_mean, next_covariance), (
+            next_mean,
+            next_covariance,
+            *_match(next_mean, next_covariance),
+        )
+
+    _, rest = lax.scan(_horizon, (first_mean, first_covariance), rest_evolution)
+    first_row = (first_mean, first_covariance, *first_match)
+    outputs = tuple(
+        jnp.concatenate([jnp.asarray(first_leaf)[None], rest_leaf])
+        for first_leaf, rest_leaf in zip(first_row, rest, strict=True)
+    )
+    (
+        state_means,
+        state_covariances,
+        predictor_means,
+        predictor_variances,
+        alphas,
+        betas,
+    ) = outputs
+    return DGLMForecast(
+        state_means=state_means,
+        state_covariances=state_covariances,
+        linear_predictor_means=predictor_means,
+        linear_predictor_variances=predictor_variances,
+        conjugate_alphas=alphas,
+        conjugate_betas=betas,
     )

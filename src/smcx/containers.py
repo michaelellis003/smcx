@@ -240,6 +240,40 @@ class GaussianFilterPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " ntime"]
 
 
+class DGLMForecast(NamedTuple):
+    r"""DGLM k-step forecast state in linear-Bayes conjugate form.
+
+    Entry ``k`` (zero-indexed) describes horizon ``k + 1`` from the
+    filtering frontier: Gaussian state-forecast moments, the implied
+    linear-predictor moments, and the family's moment-matched
+    conjugate pair. The observation forecast at horizon ``k + 1`` is
+    the family's one-step conjugate forecast evaluated at
+    ``(conjugate_alphas[k], conjugate_betas[k])`` — approximate with
+    exactly the filter's linear-Bayes caveats.
+
+    Attributes:
+        state_means: State forecast means, shape
+            ``(num_steps, state_dim)``.
+        state_covariances: State forecast covariances, shape
+            ``(num_steps, state_dim, state_dim)``.
+        linear_predictor_means: Forecast linear predictors
+            $F^\top a(k)$, shape ``(num_steps,)``.
+        linear_predictor_variances: Linear-predictor variances
+            including the dispersion inflation, shape ``(num_steps,)``.
+        conjugate_alphas: First moment-matched conjugate parameter per
+            horizon, shape ``(num_steps,)``.
+        conjugate_betas: Second moment-matched conjugate parameter per
+            horizon, shape ``(num_steps,)``.
+    """
+
+    state_means: Float[Array, "num_steps state_dim"]
+    state_covariances: Float[Array, "num_steps state_dim state_dim"]
+    linear_predictor_means: Float[Array, " num_steps"]
+    linear_predictor_variances: Float[Array, " num_steps"]
+    conjugate_alphas: Float[Array, " num_steps"]
+    conjugate_betas: Float[Array, " num_steps"]
+
+
 class DLMForecast(NamedTuple):
     r"""DLM k-step forecast distributions in scale-free form.
 
