@@ -3323,6 +3323,25 @@ def unscented(
     return Unscented(alpha, beta, kappa)
 
 
+def cubature() -> Unscented:
+    """Build the third-degree spherical-radial cubature strategy.
+
+    The cubature Kalman filter's ``2 * state_dim`` equally weighted
+    sigma points coincide with the scaled unscented rule at
+    ``alpha=1, beta=0, kappa=0``: those parameters give the center
+    point zero weight and every symmetric point weight
+    ``1 / (2 * state_dim)`` (Sarkka and Svensson 2023, chapter 8).
+    The factory therefore returns that `Unscented` preset — the
+    equivalence is an identity, not an approximation — and every
+    `gaussian_filter` and `gaussian_smoother` path composes
+    unchanged.
+
+    Returns:
+        A strategy record for `gaussian_filter` or `gaussian_smoother`.
+    """
+    return Unscented(1.0, 0.0, 0.0)
+
+
 # Static checkers see the strategy union. At runtime, beartype must
 # admit any value so the documented ValueError below reports a wrong
 # method instead of a wrapper-specific type-check error.

@@ -84,6 +84,7 @@ from smcx.fk import CallbackNames, FeynmanKac, run_smc
 from smcx.guided import guided_filter
 from smcx.ibis import ibis
 from smcx.kalman import (
+    cubature,
     extended_kalman_filter,
     gaussian_filter,
     gaussian_smoother,
@@ -171,6 +172,7 @@ __all__ = [
     "bootstrap_step",
     "bootstrap_update",
     "crps",
+    "cubature",
     "cumulative_log_score",
     "dglm_filter",
     "dglm_forecast",
