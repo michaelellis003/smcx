@@ -165,3 +165,27 @@ def test_array_path_with_missing_model_array_is_rejected():
     """Omitting a model array without a record raises at the boundary."""
     with pytest.raises(ValueError, match="LinearGaussianModel"):
         smcx.kalman_filter(MU0, P0, A, Q, H, emissions=Y)
+
+
+def test_posterior_sample_accepts_the_record():
+    """A record in the sampler's transition slot means its matrix."""
+    filtered = smcx.kalman_filter(MODEL, Y)
+    from_array = smcx.posterior_sample(
+        jax.random.key(11), filtered, A, num_draws=8
+    )
+    from_record = smcx.posterior_sample(
+        jax.random.key(11), filtered, MODEL, num_draws=8
+    )
+    np.testing.assert_array_equal(
+        np.asarray(from_record), np.asarray(from_array)
+    )
+
+
+def test_smoothed_cross_covariances_accepts_the_record():
+    """A record in the cross-covariance slot means its matrix."""
+    smoothed = smcx.rts_smoother(smcx.kalman_filter(MODEL, Y), MODEL)
+    from_array = smcx.smoothed_cross_covariances(smoothed, A)
+    from_record = smcx.smoothed_cross_covariances(smoothed, MODEL)
+    np.testing.assert_array_equal(
+        np.asarray(from_record), np.asarray(from_array)
+    )
