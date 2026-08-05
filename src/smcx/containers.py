@@ -339,6 +339,26 @@ class GaussianForecast(NamedTuple):
     ]
 
 
+class GaussianForecastPaths(NamedTuple):
+    r"""Exact joint forecast paths from a linear-Gaussian frontier.
+
+    Row ``i`` is one draw from the joint law of
+    $(x_{T+1..T+K}, y_{T+1..T+K}) \mid y_{1:T}$, produced by
+    ancestral sampling from the terminal filtered Gaussian. Horizon
+    slices (``state_paths[:, k]``) are equal-weight draws from the
+    matching `GaussianForecast` marginal.
+
+    Attributes:
+        state_paths: State trajectories, shape
+            ``(num_draws, num_steps, state_dim)``.
+        emission_paths: Emission trajectories, shape
+            ``(num_draws, num_steps, observation_dim)``.
+    """
+
+    state_paths: Float[Array, "num_draws num_steps state_dim"]
+    emission_paths: Float[Array, "num_draws num_steps observation_dim"]
+
+
 class GaussianSmootherPosterior(NamedTuple):
     r"""Gaussian filtering and smoothing output.
 
