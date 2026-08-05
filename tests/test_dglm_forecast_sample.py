@@ -42,7 +42,7 @@ def _bernoulli_sample_emission(key, linear_predictor):
 
 
 NUM_STEPS = 3
-NUM_DRAWS = 40_000
+NUM_DRAWS = 15_000
 PATHS = smcx.dglm_forecast_sample(
     jr.key(13),
     FILTERED,

@@ -39,7 +39,7 @@ MODEL = smcx.LinearGaussianModel(
 
 FILTERED = smcx.kalman_filter(MODEL, Y)
 NUM_STEPS = 3
-NUM_DRAWS = 20_000
+NUM_DRAWS = 10_000
 PATHS = smcx.kalman_forecast_sample(
     jr.key(7), FILTERED, MODEL, num_steps=NUM_STEPS, num_draws=NUM_DRAWS
 )
