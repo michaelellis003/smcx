@@ -76,6 +76,7 @@ from smcx._utils import (
     _canonicalize_inputs,
     _coalesce_positive_weight_support,
     _gather_particles,
+    _positive_integer,
     _validate_particle_cloud,
     _validate_state_tree,
     _weighted_quantile_1d,
@@ -83,9 +84,12 @@ from smcx._utils import (
 from smcx.containers import (
     LiuWestPosterior,
     ParameterFilterResult,
+    ParamForecastPaths,
     ParticleFilterPosterior,
     ParticleFilterResult,
+    ParticleForecastPaths,
 )
+from smcx.resampling import systematic
 from smcx.types import (
     EmissionSampler,
     EmissionSamplerWithInput,
@@ -2406,3 +2410,258 @@ def diagnose(
         "ess_below_threshold": ess_count,
         "warnings": warnings,
     }
+
+
+def forecast_sample(
+    key: PRNGKeyT,
+    posterior: ParticleFilterResult,
+    transition_sampler: TransitionSampler | TransitionSamplerWithInput,
+    emission_sampler: EmissionSampler | EmissionSamplerWithInput,
+    *,
+    num_steps: _IntegerArgument,
+    num_draws: _IntegerArgument,
+    future_inputs: InputSequence | None = None,
+) -> ParticleForecastPaths:
+    r"""Simulate joint forecast paths from a particle frontier.
+
+    The terminal particle cloud is systematically resampled to
+    ``num_draws`` equal-weight starting states, and each draw iterates
+    ``transition_sampler`` and ``emission_sampler`` for ``num_steps``
+    horizons (ADR-0036, issue #414). Rows are draws from the particle
+    approximation to the joint forecast law; horizon slices are
+    equal-weight draws from the per-horizon marginals, so no separate
+    marginal operation exists.
+
+    Args:
+        key: JAX PRNG key. Split once into a resampling key and one
+            key per horizon; each horizon key splits into a transition
+            root and an emission root, each split per draw.
+        posterior: Any particle filter result; only the terminal
+            weighted cloud is consumed. The forecast cannot verify
+            that the resupplied samplers match the filter run.
+        transition_sampler: Function ``(key, state[, input_t]) ->
+            state``; ``state`` may be a latent-state PyTree.
+        emission_sampler: Function ``(key, state[, input_t]) ->
+            emission`` returning a scalar or nonempty vector.
+        num_steps: Positive integer forecast horizon. This controls an
+            output shape and must be closed over or marked static
+            through an outer ``jax.jit`` boundary.
+        num_draws: Positive integer path count; also an output shape.
+        future_inputs: Exogenous inputs for the forecast horizons,
+            shape ``(num_steps,)`` or ``(num_steps, input_dim)``.
+            Required exactly when the callbacks are input-aware; row
+            ``k`` reaches both callbacks at horizon ``k + 1``.
+
+    Returns:
+        Draw-major state and emission trajectories.
+
+    Raises:
+        ValueError: A count, the posterior histories, the future
+            inputs, or a callback output violates its contract, or the
+            posterior is a Liu-West result.
+    """
+    num_steps = _positive_integer(num_steps, name="num_steps")
+    num_draws = _positive_integer(num_draws, name="num_draws")
+    _validate_particle_result_axes(
+        posterior,
+        "forecast_sample",
+        particles=True,
+    )
+    if isinstance(posterior, LiuWestPosterior):
+        raise ValueError(
+            "forecast_sample cannot represent a fitted Liu-West model: "
+            "it would ignore filtered_params. Use param_forecast_sample "
+            "for joint state and parameter paths"
+        )
+    if future_inputs is None:
+        future_inputs_arr = None
+    else:
+        try:
+            future_inputs_arr = _canonicalize_inputs(future_inputs, num_steps)
+        except ValueError as error:
+            raise ValueError(f"future_inputs is invalid: {error}") from error
+    log_weights = posterior.filtered_log_weights[-1]
+    terminal = jax.tree.map(lambda leaf: leaf[-1], posterior.filtered_particles)
+    n_particles = log_weights.shape[0]
+    state_signature = _validate_particle_cloud(
+        terminal,
+        n_particles,
+        name="posterior.filtered_particles terminal slice",
+    )
+    keys = jr.split(key, num_steps + 1)
+    weights = jnp.exp(log_weights - jnp.max(log_weights))
+    weights = weights / jnp.sum(weights)
+    indices = systematic(keys[0], weights, num_draws)
+    initial_states = _gather_particles(terminal, indices)
+
+    def _horizon(states, args):
+        if future_inputs_arr is None:
+            step_key = args
+            input_t = None
+        else:
+            step_key, input_t = args
+        transition_root, emission_root = jr.split(step_key)
+
+        def _transition(key_i, state_i):
+            if input_t is None:
+                transition_fn = cast(TransitionSampler, transition_sampler)
+                next_state = transition_fn(key_i, state_i)
+            else:
+                transition_fn_u = cast(
+                    TransitionSamplerWithInput,
+                    transition_sampler,
+                )
+                next_state = transition_fn_u(key_i, state_i, input_t)
+            _validate_state_tree(
+                next_state,
+                state_signature,
+                name="transition_sampler output",
+            )
+            return next_state
+
+        transition_keys = jr.split(transition_root, num_draws)
+        next_states = vmap(_transition)(transition_keys, states)
+
+        def _emit(key_i, state_i):
+            if input_t is None:
+                emission_fn = cast(EmissionSampler, emission_sampler)
+                emission = emission_fn(key_i, state_i)
+            else:
+                emission_fn_u = cast(
+                    EmissionSamplerWithInput,
+                    emission_sampler,
+                )
+                emission = emission_fn_u(key_i, state_i, input_t)
+            return _canonicalize_emission(
+                emission,
+                name="emission_sampler output",
+            )
+
+        emission_keys = jr.split(emission_root, num_draws)
+        emissions = vmap(_emit)(emission_keys, next_states)
+        return next_states, (next_states, emissions)
+
+    scan_inputs = (
+        keys[1:] if future_inputs_arr is None else (keys[1:], future_inputs_arr)
+    )
+    _, (state_paths, emission_paths) = lax.scan(
+        _horizon, initial_states, scan_inputs
+    )
+    return ParticleForecastPaths(
+        state_paths=jax.tree.map(
+            lambda leaf: jnp.swapaxes(leaf, 0, 1), state_paths
+        ),
+        emission_paths=jnp.swapaxes(emission_paths, 0, 1),
+    )
+
+
+def param_forecast_sample(
+    key: PRNGKeyT,
+    posterior: LiuWestPosterior,
+    transition_sampler: ParamTransitionSampler
+    | ParamTransitionSamplerWithInput,
+    emission_sampler: ParamEmissionSampler | ParamEmissionSamplerWithInput,
+    *,
+    num_steps: _IntegerArgument,
+    num_draws: _IntegerArgument,
+    future_inputs: InputSequence | None = None,
+) -> ParamForecastPaths:
+    r"""Simulate joint state and parameter forecast paths.
+
+    The Liu-West terminal cloud is resampled jointly over states and
+    parameters, and each draw's parameters ride its own trajectory
+    unchanged: parameter uncertainty widens the fan across draws while
+    each path evolves under fixed parameters (ADR-0036, issue #414).
+    The key schedule and callback contracts match `forecast_sample`
+    with ``params`` inserted after the state argument.
+
+    Args:
+        key: JAX PRNG key, consumed by `forecast_sample`'s documented
+            schedule over the paired state-parameter cloud.
+        posterior: Liu-West posterior with aligned dense state and
+            parameter histories.
+        transition_sampler: Function
+            ``(key, state, params[, input_t]) -> state``.
+        emission_sampler: Function
+            ``(key, state, params[, input_t]) -> emission``.
+        num_steps: Positive integer forecast horizon.
+        num_draws: Positive integer path count.
+        future_inputs: Exogenous inputs for the forecast horizons,
+            required exactly when the callbacks are input-aware.
+
+    Returns:
+        Draw-major state and emission trajectories plus each path's
+        parameter vector.
+
+    Raises:
+        TypeError: The state history is not a dense floating array.
+        ValueError: A count, the posterior histories, the future
+            inputs, or a callback output violates its contract.
+    """
+    diagnostic = "param_forecast_sample"
+    particles = _require_dense_particle_history(
+        posterior,
+        diagnostic=diagnostic,
+    )
+    params = _require_parameter_history(posterior, diagnostic)
+    paired_posterior = ParticleFilterPosterior(
+        marginal_loglik=posterior.marginal_loglik,
+        filtered_particles=(particles, params),
+        filtered_log_weights=posterior.filtered_log_weights,
+        ancestors=posterior.ancestors,
+        ess=posterior.ess,
+        log_evidence_increments=posterior.log_evidence_increments,
+    )
+
+    if future_inputs is None:
+        transition_fn = cast(ParamTransitionSampler, transition_sampler)
+        emission_fn = cast(ParamEmissionSampler, emission_sampler)
+
+        def paired_transition(key_i, pair):
+            state_i, params_i = pair
+            return transition_fn(key_i, state_i, params_i), params_i
+
+        def paired_emission(key_i, pair):
+            state_i, params_i = pair
+            return emission_fn(key_i, state_i, params_i)
+
+        paths = forecast_sample(
+            key,
+            paired_posterior,
+            paired_transition,
+            paired_emission,
+            num_steps=num_steps,
+            num_draws=num_draws,
+        )
+    else:
+        transition_fn_u = cast(
+            ParamTransitionSamplerWithInput, transition_sampler
+        )
+        emission_fn_u = cast(ParamEmissionSamplerWithInput, emission_sampler)
+
+        def paired_transition_u(key_i, pair, input_t):
+            state_i, params_i = pair
+            return (
+                transition_fn_u(key_i, state_i, params_i, input_t),
+                params_i,
+            )
+
+        def paired_emission_u(key_i, pair, input_t):
+            state_i, params_i = pair
+            return emission_fn_u(key_i, state_i, params_i, input_t)
+
+        paths = forecast_sample(
+            key,
+            paired_posterior,
+            paired_transition_u,
+            paired_emission_u,
+            num_steps=num_steps,
+            num_draws=num_draws,
+            future_inputs=future_inputs,
+        )
+    state_paths, parameter_paths = paths.state_paths
+    return ParamForecastPaths(
+        state_paths=state_paths,
+        emission_paths=paths.emission_paths,
+        parameter_draws=parameter_paths[:, 0],
+    )
