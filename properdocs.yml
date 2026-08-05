@@ -87,6 +87,7 @@ nav:
       - ArviZ reporting: guides/arviz.md
       - Custom models: guides/custom-models.md
       - Parameter estimation: guides/parameter-estimation.md
+      - Rao-Blackwellized PF: guides/rao-blackwellized-pf.md
       - Reproducibility: guides/reproducibility.md
       - Stochastic volatility: guides/stochastic-volatility.md
   - API reference: api/

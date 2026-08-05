@@ -17,6 +17,7 @@ _ROOT = Path(__file__).parent.parent
         ("README.md", 1),
         ("docs/guides/sequential-inference.md", 4),
         ("docs/guides/parameter-estimation.md", 3),
+        ("docs/guides/rao-blackwellized-pf.md", 4),
     ],
 )
 def test_python_blocks_execute(path, minimum_blocks):
