@@ -86,6 +86,7 @@ nav:
   - Guides:
       - ArviZ reporting: guides/arviz.md
       - Custom models: guides/custom-models.md
+      - Parameter estimation: guides/parameter-estimation.md
       - Reproducibility: guides/reproducibility.md
       - Stochastic volatility: guides/stochastic-volatility.md
   - API reference: api/
