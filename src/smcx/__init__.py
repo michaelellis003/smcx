@@ -86,6 +86,7 @@ from smcx.ibis import ibis
 from smcx.kalman import (
     cubature,
     extended_kalman_filter,
+    gauss_hermite,
     gaussian_filter,
     gaussian_smoother,
     kalman_filter,
@@ -186,6 +187,7 @@ __all__ = [
     "ess",
     "extended_kalman_filter",
     "forecast_sample",
+    "gauss_hermite",
     "gaussian_filter",
     "gaussian_smoother",
     "guided_filter",

@@ -3281,6 +3281,17 @@ class Unscented(NamedTuple):
     kappa: float = 0.0
 
 
+class GaussHermite(NamedTuple):
+    """Gauss-Hermite product-quadrature strategy.
+
+    Attributes:
+        order: Points per dimension; the rule evaluates
+            ``order ** state_dim`` sigma points.
+    """
+
+    order: int = 3
+
+
 def taylor_order1(
     transition_jacobian_fn: (
         TransitionJacobianFn | TransitionJacobianFnWithInput
@@ -3342,15 +3353,478 @@ def cubature() -> Unscented:
     return Unscented(1.0, 0.0, 0.0)
 
 
+def gauss_hermite(order: _CountArgument = 3) -> GaussHermite:
+    """Build the Gauss-Hermite product-quadrature strategy.
+
+    The rule places ``order`` probabilists' Hermite nodes per
+    dimension and takes their product, so a filter step evaluates
+    ``order ** state_dim`` sigma points — exponential in the state
+    dimension, which is the price of polynomial exactness to degree
+    ``2 * order - 1`` per dimension (Sarkka and Svensson 2023,
+    chapter 8). Consumers reject runs whose point count exceeds
+    100000; higher-dimensional states should use `unscented` or
+    `cubature`, whose cost is linear in the dimension.
+
+    Args:
+        order: Positive integer points per dimension.
+
+    Returns:
+        A strategy record for `gaussian_filter` or `gaussian_smoother`.
+    """
+    return GaussHermite(_positive_integer(order, name="order"))
+
+
+class _QuadratureRule(NamedTuple):
+    """Host-fixed weighted unit sigma points for product quadrature."""
+
+    unit_points: Float[Array, "num_points state_dim"]
+    weights: Float[Array, " num_points"]
+
+
+_QUADRATURE_POINT_CEILING = 100_000
+
+
+def _gauss_hermite_rule(
+    state_dim: int,
+    dtype: jnp.dtype,
+    order: int,
+) -> _QuadratureRule:
+    """Construct the normalized Gauss-Hermite product rule."""
+    num_points = order**state_dim
+    if num_points > _QUADRATURE_POINT_CEILING:
+        raise ValueError(
+            f"gauss_hermite(order={order}) generates {num_points} sigma "
+            f"points for state_dim={state_dim}, above the "
+            f"{_QUADRATURE_POINT_CEILING} ceiling; use unscented() or "
+            "cubature() for high-dimensional states"
+        )
+    nodes, weights = np.polynomial.hermite_e.hermegauss(order)
+    weights = weights / weights.sum()
+    node_grids = np.meshgrid(*([nodes] * state_dim), indexing="ij")
+    unit_points = np.stack([grid.reshape(-1) for grid in node_grids], axis=-1)
+    weight_grids = np.meshgrid(*([weights] * state_dim), indexing="ij")
+    joint_weights = np.ones(num_points)
+    for grid in weight_grids:
+        joint_weights = joint_weights * grid.reshape(-1)
+    return _QuadratureRule(
+        jnp.asarray(unit_points, dtype=dtype),
+        jnp.asarray(joint_weights, dtype=dtype),
+    )
+
+
+def _quadrature_points_and_cholesky(
+    mean: Float[Array, " state_dim"],
+    covariance: Float[Array, "state_dim state_dim"],
+    rule: _QuadratureRule,
+) -> tuple[
+    Float[Array, "num_points state_dim"],
+    Float[Array, "state_dim state_dim"],
+]:
+    """Generate weighted sigma points and their covariance factor."""
+    factor = jnp.linalg.cholesky(
+        _symmetrize(covariance),
+        symmetrize_input=False,
+    )
+    points = mean[None] + rule.unit_points @ factor.T
+    return points, factor
+
+
+def _quadrature_moments(
+    values: Float[Array, "num_points value_dim"],
+    rule: _QuadratureRule,
+) -> tuple[
+    Float[Array, " value_dim"],
+    Float[Array, "value_dim value_dim"],
+]:
+    """Evaluate weighted quadrature moments."""
+    mean = rule.weights @ values
+    deltas = values - mean[None]
+    covariance = jnp.einsum("p,pi,pj->ij", rule.weights, deltas, deltas)
+    return mean, _symmetrize(covariance)
+
+
+def _quadrature_cross_covariance(
+    state_points: Float[Array, "num_points state_dim"],
+    value_points: Float[Array, "num_points value_dim"],
+    rule: _QuadratureRule,
+) -> Float[Array, "state_dim value_dim"]:
+    """Evaluate the weighted quadrature cross moment."""
+    state_mean = rule.weights @ state_points
+    value_mean = rule.weights @ value_points
+    return jnp.einsum(
+        "p,pi,pj->ij",
+        rule.weights,
+        state_points - state_mean[None],
+        value_points - value_mean[None],
+    )
+
+
+def _quadrature_condition(
+    predicted_mean: Float[Array, " state_dim"],
+    predicted_covariance: Float[Array, "state_dim state_dim"],
+    observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
+    observation_covariance: Float[Array, "observation_dim observation_dim"],
+    observation: Float[Array, " observation_dim"],
+    rule: _QuadratureRule,
+    input_t: GaussianInput | None = None,
+) -> tuple[
+    Float[Array, " state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, ""],
+]:
+    """Condition one Gaussian using a weighted quadrature observation."""
+    state_points, _ = _quadrature_points_and_cholesky(
+        predicted_mean,
+        predicted_covariance,
+        rule,
+    )
+    if input_t is None:
+        observation_fn = cast(ObservationMeanFn, observation_mean_fn)
+        observation_points = vmap(observation_fn)(state_points)
+    else:
+        observation_fn_u = cast(
+            ObservationMeanFnWithInput,
+            observation_mean_fn,
+        )
+        observation_points = vmap(
+            observation_fn_u,
+            in_axes=(0, None),
+        )(state_points, input_t)
+    _check_callback_array(
+        observation_points,
+        (state_points.shape[0], observation.shape[0]),
+        "observation_mean_fn output",
+        predicted_mean.dtype,
+    )
+    observation_mean, transformed_covariance = _quadrature_moments(
+        observation_points,
+        rule,
+    )
+    cross_covariance = _quadrature_cross_covariance(
+        state_points,
+        observation_points,
+        rule,
+    )
+    innovation_covariance = _symmetrize(
+        transformed_covariance + observation_covariance
+    )
+    innovation_cholesky = jnp.linalg.cholesky(
+        innovation_covariance,
+        symmetrize_input=False,
+    )
+    lower_solution = solve_triangular(
+        innovation_cholesky,
+        cross_covariance.T,
+        lower=True,
+    )
+    gain = solve_triangular(
+        innovation_cholesky.T,
+        lower_solution,
+        lower=False,
+    ).T
+    residual = observation - observation_mean
+    filtered_mean = predicted_mean + gain @ residual
+    corrected_points = state_points - observation_points @ gain.T
+    _, residual_covariance = _quadrature_moments(corrected_points, rule)
+    filtered_covariance = _symmetrize(
+        residual_covariance + gain @ observation_covariance @ gain.T
+    )
+    whitened_residual = solve_triangular(
+        innovation_cholesky,
+        residual,
+        lower=True,
+    )
+    log_evidence_increment = _gaussian_log_evidence(
+        innovation_cholesky, whitened_residual
+    )
+    return filtered_mean, filtered_covariance, log_evidence_increment
+
+
+def _quadrature_filter_step(
+    state: _FilterState,
+    args: _NonlinearFilterStepInput,
+    transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
+    observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
+    rule: _QuadratureRule,
+    input_t: GaussianInput | None = None,
+) -> tuple[_FilterState, _FilterStepOutput]:
+    """Apply one pure quadrature predict-and-condition step."""
+    state_points, _ = _quadrature_points_and_cholesky(
+        state.mean, state.covariance, rule
+    )
+    if input_t is None:
+        transition_fn = cast(TransitionMeanFn, transition_mean_fn)
+        transition_points = vmap(transition_fn)(state_points)
+    else:
+        transition_fn_u = cast(
+            TransitionMeanFnWithInput,
+            transition_mean_fn,
+        )
+        transition_points = vmap(
+            transition_fn_u,
+            in_axes=(0, None),
+        )(state_points, input_t)
+    _check_callback_array(
+        transition_points,
+        state_points.shape,
+        "transition_mean_fn output",
+        state.mean.dtype,
+    )
+    predicted_mean, transformed_covariance = _quadrature_moments(
+        transition_points,
+        rule,
+    )
+    predicted_covariance = _symmetrize(
+        transformed_covariance + args.transition_covariance
+    )
+    missing, safe_emission = _sanitize_missing(args.emission)
+    filtered_mean, filtered_covariance, increment = _select_missing(
+        missing,
+        predicted_mean,
+        predicted_covariance,
+        _quadrature_condition(
+            predicted_mean,
+            predicted_covariance,
+            observation_mean_fn,
+            args.observation_covariance,
+            safe_emission,
+            rule,
+            input_t,
+        ),
+    )
+    evidence, compensation = _neumaier_add(
+        state.marginal_loglik,
+        state.log_evidence_compensation,
+        increment,
+    )
+    next_state = _FilterState(
+        filtered_mean,
+        filtered_covariance,
+        evidence,
+        compensation,
+    )
+    output = _FilterStepOutput(
+        predicted_mean,
+        predicted_covariance,
+        filtered_mean,
+        filtered_covariance,
+        increment,
+    )
+    return next_state, output
+
+
+def _quadrature_transition_linearization(
+    filtered_mean: Float[Array, " state_dim"],
+    filtered_covariance: Float[Array, "state_dim state_dim"],
+    transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
+    rule: _QuadratureRule,
+    input_t: GaussianInput | None = None,
+) -> tuple[
+    Float[Array, "state_dim state_dim"],
+    Float[Array, "state_dim state_dim"],
+]:
+    """Return a quadrature effective transition and direct cross moment."""
+    state_dim = filtered_mean.shape[0]
+    state_points, factor = _quadrature_points_and_cholesky(
+        filtered_mean,
+        filtered_covariance,
+        rule,
+    )
+    if input_t is None:
+        transition_fn = cast(TransitionMeanFn, transition_mean_fn)
+
+        def checked_transition(
+            state: Float[Array, " state_dim"],
+        ) -> Float[Array, " state_dim"]:
+            value = transition_fn(state)
+            _check_callback_array(
+                value,
+                (state_dim,),
+                "transition_mean_fn output",
+                filtered_mean.dtype,
+            )
+            return value
+
+        transition_points = vmap(checked_transition)(state_points)
+    else:
+        transition_fn_u = cast(
+            TransitionMeanFnWithInput,
+            transition_mean_fn,
+        )
+
+        def checked_transition_with_input(
+            state: Float[Array, " state_dim"],
+        ) -> Float[Array, " state_dim"]:
+            value = transition_fn_u(state, input_t)
+            _check_callback_array(
+                value,
+                (state_dim,),
+                "transition_mean_fn output",
+                filtered_mean.dtype,
+            )
+            return value
+
+        transition_points = vmap(checked_transition_with_input)(state_points)
+    cross_covariance = _quadrature_cross_covariance(
+        state_points,
+        transition_points,
+        rule,
+    )
+    lower_solution = solve_triangular(
+        factor,
+        cross_covariance,
+        lower=True,
+    )
+    effective_transition = solve_triangular(
+        factor.T,
+        lower_solution,
+        lower=False,
+    ).T
+    return effective_transition, cross_covariance
+
+
 # Static checkers see the strategy union. At runtime, beartype must
 # admit any value so the documented ValueError below reports a wrong
 # method instead of a wrapper-specific type-check error.
 if TYPE_CHECKING:
-    _GaussianLinearization: TypeAlias = TaylorOrder1 | Unscented
-    _GaussianSmootherLinearization: TypeAlias = TaylorOrder1 | Unscented
+    _GaussianLinearization: TypeAlias = TaylorOrder1 | Unscented | GaussHermite
+    _GaussianSmootherLinearization: TypeAlias = (
+        TaylorOrder1 | Unscented | GaussHermite
+    )
 else:
     _GaussianLinearization: TypeAlias = object
     _GaussianSmootherLinearization: TypeAlias = object
+
+
+def _gauss_hermite_kalman_filter(
+    initial_mean: Any,
+    initial_covariance: Any,
+    transition_mean_fn: TransitionMeanFn | TransitionMeanFnWithInput,
+    transition_covariance: Any,
+    observation_mean_fn: ObservationMeanFn | ObservationMeanFnWithInput,
+    observation_covariance: Any,
+    emissions: Any,
+    order: int,
+    inputs: Any = None,
+) -> GaussianFilterPosterior:
+    """Run the Gauss-Hermite quadrature filter (gaussian_filter path)."""
+    emissions = _canonicalize_emissions(emissions)
+    setup = _prepare_nonlinear_filter(
+        initial_mean,
+        initial_covariance,
+        transition_covariance,
+        observation_covariance,
+        emissions,
+        initial_covariance_positive_definite=True,
+    )
+    rule = _gauss_hermite_rule(setup.state_dim, setup.dtype, order)
+    if inputs is None:
+        inputs_arr = None
+        input_0 = None
+    else:
+        inputs_arr = _canonicalize_inputs(inputs, setup.num_timesteps)
+        _check_float_array(inputs_arr, "inputs", setup.dtype)
+        input_0 = inputs_arr[0]
+    missing_0, safe_emission_0 = _sanitize_missing(emissions[0])
+    filtered_mean_0, filtered_covariance_0, increment_0 = _select_missing(
+        missing_0,
+        initial_mean,
+        initial_covariance,
+        _quadrature_condition(
+            initial_mean,
+            initial_covariance,
+            observation_mean_fn,
+            setup.observation_covariances[0],
+            safe_emission_0,
+            rule,
+            input_0,
+        ),
+    )
+    state_0 = _FilterState(
+        filtered_mean_0,
+        filtered_covariance_0,
+        increment_0,
+        jnp.zeros_like(increment_0),
+    )
+    if inputs_arr is None:
+        scan_inputs = _NonlinearFilterStepInput(
+            emissions[1:],
+            setup.transition_covariances,
+            setup.observation_covariances[1:],
+        )
+
+        def _step(
+            state: _FilterState,
+            args: _NonlinearFilterStepInput,
+        ) -> tuple[_FilterState, _FilterStepOutput]:
+            return _quadrature_filter_step(
+                state,
+                args,
+                transition_mean_fn,
+                observation_mean_fn,
+                rule,
+            )
+
+        final_state, rest = lax.scan(_step, state_0, scan_inputs)
+    else:
+        scan_inputs_u = _NonlinearFilterStepInputWithInput(
+            emissions[1:],
+            setup.transition_covariances,
+            setup.observation_covariances[1:],
+            inputs_arr[1:],
+        )
+
+        def _step_with_input(
+            state: _FilterState,
+            args: _NonlinearFilterStepInputWithInput,
+        ) -> tuple[_FilterState, _FilterStepOutput]:
+            step_args = _NonlinearFilterStepInput(
+                args.emission,
+                args.transition_covariance,
+                args.observation_covariance,
+            )
+            return _quadrature_filter_step(
+                state,
+                step_args,
+                transition_mean_fn,
+                observation_mean_fn,
+                rule,
+                args.input_t,
+            )
+
+        final_state, rest = lax.scan(
+            _step_with_input,
+            state_0,
+            scan_inputs_u,
+        )
+    predicted_means = jnp.concatenate((
+        initial_mean[None],
+        rest.predicted_mean,
+    ))
+    predicted_covariances = jnp.concatenate((
+        initial_covariance[None],
+        rest.predicted_covariance,
+    ))
+    filtered_means = jnp.concatenate((
+        filtered_mean_0[None],
+        rest.filtered_mean,
+    ))
+    filtered_covariances = jnp.concatenate((
+        filtered_covariance_0[None],
+        rest.filtered_covariance,
+    ))
+    increments = jnp.concatenate((
+        increment_0[None],
+        rest.log_evidence_increment,
+    ))
+    return GaussianFilterPosterior(
+        final_state.marginal_loglik + final_state.log_evidence_compensation,
+        predicted_means,
+        predicted_covariances,
+        filtered_means,
+        filtered_covariances,
+        increments,
+    )
 
 
 def gaussian_filter(
@@ -3428,9 +3902,22 @@ def gaussian_filter(
             kappa=method.kappa,
             inputs=inputs,
         )
+    if isinstance(method, GaussHermite):
+        return _gauss_hermite_kalman_filter(
+            initial_mean,
+            initial_covariance,
+            transition_mean_fn,
+            transition_covariance,
+            observation_mean_fn,
+            observation_covariance,
+            emissions,
+            method.order,
+            inputs,
+        )
     raise ValueError(
         "method must be a linearization strategy built by "
-        "smcx.taylor_order1(...) or smcx.unscented(...); got "
+        "smcx.taylor_order1(...), smcx.unscented(...), "
+        "smcx.cubature(), or smcx.gauss_hermite(...); got "
         f"{type(method).__name__}"
     )
 
@@ -3495,18 +3982,22 @@ def gaussian_smoother(
         Smoothing, second edition, chapter 13 and section 14.4.
         https://doi.org/10.1017/9781108917407
     """
-    if not isinstance(method, (TaylorOrder1, Unscented)):
+    if not isinstance(method, (TaylorOrder1, Unscented, GaussHermite)):
         raise ValueError(
             "method must be a linearization strategy built by "
-            "smcx.taylor_order1(...) or smcx.unscented(...); got "
+            "smcx.taylor_order1(...), smcx.unscented(...), "
+            "smcx.cubature(), or smcx.gauss_hermite(...); got "
             f"{type(method).__name__}"
         )
 
     num_timesteps, state_dim, dtype = _validate_filter_posterior(
         filtered_posterior,
-        filtered_positive_definite=isinstance(method, Unscented),
+        filtered_positive_definite=isinstance(
+            method, (Unscented, GaussHermite)
+        ),
     )
-    rule = None
+    rule: Any = None
+    linearization: Any = _unscented_transition_linearization
     if isinstance(method, Unscented):
         rule = _scaled_unscented_rule(
             state_dim,
@@ -3515,6 +4006,9 @@ def gaussian_smoother(
             method.beta,
             method.kappa,
         )
+    elif isinstance(method, GaussHermite):
+        rule = _gauss_hermite_rule(state_dim, dtype, method.order)
+        linearization = _quadrature_transition_linearization
     inputs_arr = None
     if inputs is not None:
         inputs_arr = _canonicalize_inputs(inputs, num_timesteps)
@@ -3581,7 +4075,7 @@ def gaussian_smoother(
             Float[Array, "state_dim state_dim"],
             Float[Array, "state_dim state_dim"],
         ]:
-            return _unscented_transition_linearization(
+            return cast(Any, linearization)(
                 mean,
                 covariance,
                 transition_mean_fn,
@@ -3603,7 +4097,7 @@ def gaussian_smoother(
             Float[Array, "state_dim state_dim"],
             Float[Array, "state_dim state_dim"],
         ]:
-            return _unscented_transition_linearization(
+            return cast(Any, linearization)(
                 mean,
                 covariance,
                 transition_mean_fn,
