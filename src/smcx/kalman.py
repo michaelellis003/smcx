@@ -60,6 +60,7 @@ from smcx.containers import (
     GaussianForecast,
     GaussianForecastPaths,
     GaussianSmootherPosterior,
+    SqrtGaussianFilterPosterior,
 )
 from smcx.model import LinearGaussianModel
 from smcx.types import (
@@ -1174,6 +1175,7 @@ def _extended_filter_step(
 
 
 def _resolve_kalman_model_arguments(
+    caller: str,
     initial_mean: Any,
     initial_covariance: Any,
     transition_matrix: Any,
@@ -1203,7 +1205,7 @@ def _resolve_kalman_model_arguments(
         )
         if any(value is None for value in loose):
             raise ValueError(
-                "kalman_filter requires all six model arrays and the "
+                f"{caller} requires all six model arrays and the "
                 "emissions unless a LinearGaussianModel is passed first"
             )
         return (
@@ -1233,13 +1235,13 @@ def _resolve_kalman_model_arguments(
     for name, value in loose_names:
         if value is not None:
             raise ValueError(
-                "kalman_filter received a LinearGaussianModel and a "
+                f"{caller} received a LinearGaussianModel and a "
                 f"separate {name}; supply model arrays through the "
                 "record only"
             )
     if initial_covariance is not None and emissions is not None:
         raise ValueError(
-            "kalman_filter received emissions both positionally and by "
+            f"{caller} received emissions both positionally and by "
             "keyword; pass them once"
         )
     resolved_emissions = (
@@ -1247,7 +1249,7 @@ def _resolve_kalman_model_arguments(
     )
     if resolved_emissions is None:
         raise ValueError(
-            "kalman_filter received a LinearGaussianModel but no "
+            f"{caller} received a LinearGaussianModel but no "
             "emissions; pass them second or by keyword"
         )
     return (
@@ -1265,123 +1267,26 @@ def _resolve_kalman_model_arguments(
     )
 
 
-def kalman_filter(
-    initial_mean: Shaped[Array, "*initial_mean_shape"] | LinearGaussianModel,
-    initial_covariance: Shaped[Array, "*initial_covariance_shape"]
-    | None = None,
-    transition_matrix: Shaped[Array, "*transition_matrix_shape"] | None = None,
-    transition_covariance: Shaped[Array, "*transition_covariance_shape"]
-    | None = None,
-    observation_matrix: Shaped[Array, "*observation_matrix_shape"]
-    | None = None,
-    observation_covariance: Shaped[Array, "*observation_covariance_shape"]
-    | None = None,
-    emissions: GaussianEmissionSequence | None = None,
-    *,
-    transition_bias: Shaped[Array, "*transition_bias_shape"] | None = None,
-    observation_bias: Shaped[Array, "*observation_bias_shape"] | None = None,
-    transition_input_matrix: Shaped[Array, "*transition_input_matrix_shape"]
-    | None = None,
-    observation_input_matrix: Shaped[Array, "*observation_input_matrix_shape"]
-    | None = None,
-    inputs: GaussianInputSequence | None = None,
-) -> GaussianFilterPosterior:
-    r"""Run an exact Kalman filter.
+def _prepare_linear_operators(
+    initial_mean: Any,
+    initial_covariance: Any,
+    transition_matrix: Any,
+    transition_covariance: Any,
+    observation_matrix: Any,
+    observation_covariance: Any,
+    emissions: Any,
+    transition_bias: Any,
+    observation_bias: Any,
+    transition_input_matrix: Any,
+    observation_input_matrix: Any,
+    inputs: Any,
+) -> tuple[Any, ...]:
+    """Validate and broadcast the linear filter's per-step operators.
 
-    The model is
-
-    $$
-    \begin{aligned} x_0 &\sim N(m_0, P_0),\\
-    x_t &= F x_{t-1} + b + B u_t + q_t,\\
-    y_t &= H x_t + d + D u_t + r_t. \end{aligned}
-    $$
-
-    The model arrays may arrive individually, or once as a
-    `smcx.model.LinearGaussianModel` whose fields mirror these
-    arguments: ``kalman_filter(model, emissions, inputs=...)``. The two
-    forms produce bitwise-identical output; supplying both the record
-    and a separate model array raises ``ValueError``.
-
-    Args:
-        initial_mean: Prior mean for ``x[0]``, shape ``(state_dim,)``,
-            or a `smcx.model.LinearGaussianModel` carrying every model
-            array (the emissions then arrive second or by keyword).
-        initial_covariance: Prior covariance for ``x[0]``.
-        transition_matrix: Static ``(state_dim, state_dim)`` matrix or
-            time-varying array with leading length ``ntime - 1``.
-        transition_covariance: Static or time-varying transition-noise
-            covariance.
-        observation_matrix: Static ``(observation_dim, state_dim)`` matrix
-            or time-varying array with leading length ``ntime``.
-        observation_covariance: Static or time-varying observation-noise
-            covariance.
-        emissions: Observations with shape ``(ntime,)`` or
-            ``(ntime, observation_dim)``. Scalar observations become
-            ``(ntime, 1)``. An entirely-NaN row marks that datum
-            missing: the update is skipped, the stored filtered moments
-            equal the predicted moments, and
-            ``log_evidence_increments`` carries an exact zero there, so
-            the datum contributes nothing to ``marginal_loglik``.
-            Partially NaN or infinite rows are rejected eagerly;
-            missingness is resolved by a traced select, so ``jit``,
-            ``vmap``, and ``grad`` compose unchanged (ADR-0034).
-        transition_bias: Optional static or length ``ntime - 1`` affine
-            transition term.
-        observation_bias: Optional static or length ``ntime`` affine
-            observation term.
-        transition_input_matrix: Optional static or length ``ntime - 1``
-            transition control matrix.
-        observation_input_matrix: Optional static or length ``ntime``
-            observation control matrix.
-        inputs: Optional controls with shape ``(ntime,)`` or
-            ``(ntime, input_dim)``. ``inputs[t]`` reaches observation
-            ``t`` and the transition into ``t``; ``inputs[0]`` does not
-            alter the supplied prior.
-
-    Returns:
-        Predicted and filtered Gaussian moments and exact log evidence.
-
-    Raises:
-        ValueError: An array has an invalid shape or dtype, timed terms
-            are misaligned, a concrete covariance is outside its domain,
-            or control matrices are supplied without inputs.
-
-    Note:
-        Arrays must use float32 or float64. Initial and transition
-        covariances must be finite, symmetric, and positive semidefinite;
-        observation covariances must be finite, symmetric, and positive
-        definite. Value checks run eagerly and are skipped for traced
-        arrays. Nonzero subnormal covariance entries are rejected;
-        positive-definite covariances must also yield a finite,
-        positive-diagonal factor on the active backend. Missing
-        observations are entirely-NaN rows, as documented for
-        ``emissions`` above.
+    Shared verbatim between `kalman_filter` and `sqrt_kalman_filter`
+    so the two forms accept exactly the same inputs with exactly the
+    same errors.
     """
-    (
-        initial_mean,
-        initial_covariance,
-        transition_matrix,
-        transition_covariance,
-        observation_matrix,
-        observation_covariance,
-        emissions,
-        transition_bias,
-        observation_bias,
-        transition_input_matrix,
-        observation_input_matrix,
-    ) = _resolve_kalman_model_arguments(
-        initial_mean,
-        initial_covariance,
-        transition_matrix,
-        transition_covariance,
-        observation_matrix,
-        observation_covariance,
-        emissions,
-        transition_bias,
-        observation_bias,
-        transition_input_matrix,
-        observation_input_matrix,
-    )
     emissions = _canonicalize_emissions(emissions)
     if initial_mean.ndim != 1 or initial_mean.shape[0] == 0:
         raise ValueError("initial_mean must have shape (state_dim,) with d > 0")
@@ -1513,6 +1418,165 @@ def kalman_filter(
         "observation_covariance",
         positive_definite=True,
     )
+    return (
+        emissions,
+        num_timesteps,
+        observation_dim,
+        state_dim,
+        dtype,
+        transition_matrices,
+        transition_covariances,
+        observation_matrices,
+        observation_covariances,
+        transition_biases,
+        observation_biases,
+    )
+
+
+def kalman_filter(
+    initial_mean: Shaped[Array, "*initial_mean_shape"] | LinearGaussianModel,
+    initial_covariance: Shaped[Array, "*initial_covariance_shape"]
+    | None = None,
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"] | None = None,
+    transition_covariance: Shaped[Array, "*transition_covariance_shape"]
+    | None = None,
+    observation_matrix: Shaped[Array, "*observation_matrix_shape"]
+    | None = None,
+    observation_covariance: Shaped[Array, "*observation_covariance_shape"]
+    | None = None,
+    emissions: GaussianEmissionSequence | None = None,
+    *,
+    transition_bias: Shaped[Array, "*transition_bias_shape"] | None = None,
+    observation_bias: Shaped[Array, "*observation_bias_shape"] | None = None,
+    transition_input_matrix: Shaped[Array, "*transition_input_matrix_shape"]
+    | None = None,
+    observation_input_matrix: Shaped[Array, "*observation_input_matrix_shape"]
+    | None = None,
+    inputs: GaussianInputSequence | None = None,
+) -> GaussianFilterPosterior:
+    r"""Run an exact Kalman filter.
+
+    The model is
+
+    $$
+    \begin{aligned} x_0 &\sim N(m_0, P_0),\\
+    x_t &= F x_{t-1} + b + B u_t + q_t,\\
+    y_t &= H x_t + d + D u_t + r_t. \end{aligned}
+    $$
+
+    The model arrays may arrive individually, or once as a
+    `smcx.model.LinearGaussianModel` whose fields mirror these
+    arguments: ``kalman_filter(model, emissions, inputs=...)``. The two
+    forms produce bitwise-identical output; supplying both the record
+    and a separate model array raises ``ValueError``.
+
+    Args:
+        initial_mean: Prior mean for ``x[0]``, shape ``(state_dim,)``,
+            or a `smcx.model.LinearGaussianModel` carrying every model
+            array (the emissions then arrive second or by keyword).
+        initial_covariance: Prior covariance for ``x[0]``.
+        transition_matrix: Static ``(state_dim, state_dim)`` matrix or
+            time-varying array with leading length ``ntime - 1``.
+        transition_covariance: Static or time-varying transition-noise
+            covariance.
+        observation_matrix: Static ``(observation_dim, state_dim)`` matrix
+            or time-varying array with leading length ``ntime``.
+        observation_covariance: Static or time-varying observation-noise
+            covariance.
+        emissions: Observations with shape ``(ntime,)`` or
+            ``(ntime, observation_dim)``. Scalar observations become
+            ``(ntime, 1)``. An entirely-NaN row marks that datum
+            missing: the update is skipped, the stored filtered moments
+            equal the predicted moments, and
+            ``log_evidence_increments`` carries an exact zero there, so
+            the datum contributes nothing to ``marginal_loglik``.
+            Partially NaN or infinite rows are rejected eagerly;
+            missingness is resolved by a traced select, so ``jit``,
+            ``vmap``, and ``grad`` compose unchanged (ADR-0034).
+        transition_bias: Optional static or length ``ntime - 1`` affine
+            transition term.
+        observation_bias: Optional static or length ``ntime`` affine
+            observation term.
+        transition_input_matrix: Optional static or length ``ntime - 1``
+            transition control matrix.
+        observation_input_matrix: Optional static or length ``ntime``
+            observation control matrix.
+        inputs: Optional controls with shape ``(ntime,)`` or
+            ``(ntime, input_dim)``. ``inputs[t]`` reaches observation
+            ``t`` and the transition into ``t``; ``inputs[0]`` does not
+            alter the supplied prior.
+
+    Returns:
+        Predicted and filtered Gaussian moments and exact log evidence.
+
+    Raises:
+        ValueError: An array has an invalid shape or dtype, timed terms
+            are misaligned, a concrete covariance is outside its domain,
+            or control matrices are supplied without inputs.
+
+    Note:
+        Arrays must use float32 or float64. Initial and transition
+        covariances must be finite, symmetric, and positive semidefinite;
+        observation covariances must be finite, symmetric, and positive
+        definite. Value checks run eagerly and are skipped for traced
+        arrays. Nonzero subnormal covariance entries are rejected;
+        positive-definite covariances must also yield a finite,
+        positive-diagonal factor on the active backend. Missing
+        observations are entirely-NaN rows, as documented for
+        ``emissions`` above.
+    """
+    (
+        initial_mean,
+        initial_covariance,
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        emissions,
+        transition_bias,
+        observation_bias,
+        transition_input_matrix,
+        observation_input_matrix,
+    ) = _resolve_kalman_model_arguments(
+        "kalman_filter",
+        initial_mean,
+        initial_covariance,
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        emissions,
+        transition_bias,
+        observation_bias,
+        transition_input_matrix,
+        observation_input_matrix,
+    )
+    (
+        emissions,
+        _num_timesteps,
+        _observation_dim,
+        _state_dim,
+        _dtype,
+        transition_matrices,
+        transition_covariances,
+        observation_matrices,
+        observation_covariances,
+        transition_biases,
+        observation_biases,
+    ) = _prepare_linear_operators(
+        initial_mean,
+        initial_covariance,
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        emissions,
+        transition_bias,
+        observation_bias,
+        transition_input_matrix,
+        observation_input_matrix,
+        inputs,
+    )
     filtered_mean_0, filtered_covariance_0, increment_0 = _condition_or_missing(
         initial_mean,
         initial_covariance,
@@ -1565,6 +1629,318 @@ def kalman_filter(
         filtered_means,
         filtered_covariances,
         increments,
+    )
+
+
+def _sign_normalized_r(matrix: Float[Array, "rows cols"]) -> Array:
+    """QR triangle with every diagonal entry pinned nonnegative."""
+    upper = jnp.linalg.qr(matrix, mode="r")
+    signs = jnp.sign(jnp.diagonal(upper))
+    signs = jnp.where(signs == 0, jnp.ones_like(signs), signs)
+    return upper * signs[:, None]
+
+
+def _sqrt_predict(
+    mean: Float[Array, " state_dim"],
+    factor: Float[Array, "state_dim state_dim"],
+    transition: Float[Array, "state_dim state_dim"],
+    transition_factor: Float[Array, "state_dim state_dim"],
+    transition_offset: Float[Array, " state_dim"],
+) -> tuple[Float[Array, " state_dim"], Float[Array, "state_dim state_dim"]]:
+    """Propagate one square-root prediction through a QR stack."""
+    predicted_mean = transition @ mean + transition_offset
+    stacked = jnp.vstack(((transition @ factor).T, transition_factor.T))
+    return predicted_mean, _sign_normalized_r(stacked).T
+
+
+def _sqrt_condition(
+    predicted_mean: Float[Array, " state_dim"],
+    predicted_factor: Float[Array, "state_dim state_dim"],
+    observation_operator: Float[Array, "observation_dim state_dim"],
+    observation_factor: Float[Array, "observation_dim observation_dim"],
+    observation: Float[Array, " observation_dim"],
+    observation_offset: Float[Array, " observation_dim"],
+) -> tuple[
+    Float[Array, " state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, ""],
+]:
+    """Condition one square-root prediction through the blocked QR."""
+    observation_dim = observation.shape[0]
+    state_dim = predicted_mean.shape[0]
+    top = jnp.hstack((
+        observation_factor.T,
+        jnp.zeros((observation_dim, state_dim), predicted_mean.dtype),
+    ))
+    bottom = jnp.hstack((
+        (observation_operator @ predicted_factor).T,
+        predicted_factor.T,
+    ))
+    blocked = _sign_normalized_r(jnp.vstack((top, bottom)))
+    innovation_cholesky = blocked[:observation_dim, :observation_dim].T
+    gain_transposed = blocked[:observation_dim, observation_dim:]
+    filtered_factor = blocked[observation_dim:, observation_dim:].T
+    residual = observation - (
+        observation_operator @ predicted_mean + observation_offset
+    )
+    whitened_residual = solve_triangular(
+        innovation_cholesky,
+        residual,
+        lower=True,
+    )
+    filtered_mean = predicted_mean + gain_transposed.T @ whitened_residual
+    log_evidence_increment = _gaussian_log_evidence(
+        innovation_cholesky, whitened_residual
+    )
+    return filtered_mean, filtered_factor, log_evidence_increment
+
+
+def sqrt_kalman_filter(
+    initial_mean: Shaped[Array, "*initial_mean_shape"] | LinearGaussianModel,
+    initial_covariance: Shaped[Array, "*initial_covariance_shape"]
+    | None = None,
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"] | None = None,
+    transition_covariance: Shaped[Array, "*transition_covariance_shape"]
+    | None = None,
+    observation_matrix: Shaped[Array, "*observation_matrix_shape"]
+    | None = None,
+    observation_covariance: Shaped[Array, "*observation_covariance_shape"]
+    | None = None,
+    emissions: GaussianEmissionSequence | None = None,
+    *,
+    transition_bias: Shaped[Array, "*transition_bias_shape"] | None = None,
+    observation_bias: Shaped[Array, "*observation_bias_shape"] | None = None,
+    transition_input_matrix: Shaped[Array, "*transition_input_matrix_shape"]
+    | None = None,
+    observation_input_matrix: Shaped[Array, "*observation_input_matrix_shape"]
+    | None = None,
+    inputs: GaussianInputSequence | None = None,
+) -> SqrtGaussianFilterPosterior:
+    r"""Run the exact Kalman recursion in square-root (array) form.
+
+    The same model, inputs, validation, and missing-observation
+    contract as `kalman_filter` — the two forms accept identical
+    arguments and reject identical inputs — but the covariance state
+    is carried as a triangular factor propagated by QR (Sarkka and
+    Svensson 2023, chapter 6): positive semidefiniteness holds by
+    construction at every step, which is the opt-in robustness escape
+    for ill-conditioned float32 work. The covariance form remains the
+    default and is 10-20 percent cheaper per step; on well-conditioned
+    problems the two agree to floating-point roundoff.
+
+    The result is a `SqrtGaussianFilterPosterior`, deliberately not
+    interchangeable with `GaussianFilterPosterior`: the square-root
+    smoother consumes the stored factors, and covariance-form
+    consumers take the explicit ``as_covariance`` conversion.
+
+    Args:
+        initial_mean: Prior mean, or a `smcx.model.LinearGaussianModel`
+            carrying every model array (the emissions then arrive
+            second or by keyword), exactly as in `kalman_filter`.
+        initial_covariance: Prior covariance for ``x[0]``.
+        transition_matrix: Static ``(state_dim, state_dim)`` matrix or
+            time-varying array with leading length ``ntime - 1``.
+        transition_covariance: Static or time-varying transition-noise
+            covariance; positive semidefinite (singular and exactly
+            zero noise are supported through the spectral factor
+            fallback, whose fallback points are outside the
+            differentiation contract).
+        observation_matrix: Static ``(observation_dim, state_dim)``
+            matrix or time-varying array with leading length ``ntime``.
+        observation_covariance: Static or time-varying positive
+            definite observation-noise covariance.
+        emissions: Observations shaped ``(ntime, observation_dim)``.
+            An all-NaN row marks the datum missing (ADR-0034): the
+            update is the identity on the factor, and the increment is
+            exactly zero.
+        transition_bias: Optional static or timed state offset.
+        observation_bias: Optional static or timed emission offset.
+        transition_input_matrix: Optional input-to-state matrix.
+        observation_input_matrix: Optional input-to-emission matrix.
+        inputs: Optional exogenous inputs, as in `kalman_filter`.
+
+    Returns:
+        `SqrtGaussianFilterPosterior` with factor-form second moments.
+
+    Raises:
+        ValueError: Any input `kalman_filter` would reject, or a
+            concrete covariance is not factorable on the active
+            backend.
+    """
+    (
+        initial_mean,
+        initial_covariance,
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        emissions,
+        transition_bias,
+        observation_bias,
+        transition_input_matrix,
+        observation_input_matrix,
+    ) = _resolve_kalman_model_arguments(
+        "sqrt_kalman_filter",
+        initial_mean,
+        initial_covariance,
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        emissions,
+        transition_bias,
+        observation_bias,
+        transition_input_matrix,
+        observation_input_matrix,
+    )
+    (
+        emissions,
+        _num_timesteps,
+        _observation_dim,
+        _state_dim,
+        _dtype,
+        transition_matrices,
+        transition_covariances,
+        observation_matrices,
+        observation_covariances,
+        transition_biases,
+        observation_biases,
+    ) = _prepare_linear_operators(
+        initial_mean,
+        initial_covariance,
+        transition_matrix,
+        transition_covariance,
+        observation_matrix,
+        observation_covariance,
+        emissions,
+        transition_bias,
+        observation_bias,
+        transition_input_matrix,
+        observation_input_matrix,
+        inputs,
+    )
+    with debug_nans(False), debug_infs(False):
+        initial_factor = _sampling_covariance_factor(
+            _symmetrize(initial_covariance)
+        )
+        transition_factors = lax.map(
+            _sampling_covariance_factor, transition_covariances
+        )
+        observation_factors = lax.map(
+            lambda value: jnp.linalg.cholesky(
+                _symmetrize(value), symmetrize_input=False
+            ),
+            observation_covariances,
+        )
+    _check_sampling_factors(initial_factor[None])
+    _check_sampling_factors(transition_factors)
+    _check_sampling_factors(observation_factors)
+
+    missing_0, safe_emission_0 = _sanitize_missing(emissions[0])
+    filtered_mean_0, filtered_factor_0, increment_0 = _select_missing(
+        missing_0,
+        initial_mean,
+        initial_factor,
+        _sqrt_condition(
+            initial_mean,
+            initial_factor,
+            observation_matrices[0],
+            observation_factors[0],
+            safe_emission_0,
+            observation_biases[0],
+        ),
+    )
+
+    def _step(carry, args):
+        mean, factor, loglik, compensation = carry
+        (
+            emission,
+            transition,
+            transition_factor,
+            transition_offset,
+            observation_operator,
+            observation_factor,
+            observation_offset,
+        ) = args
+        predicted_mean, predicted_factor = _sqrt_predict(
+            mean, factor, transition, transition_factor, transition_offset
+        )
+        missing, safe_emission = _sanitize_missing(emission)
+        filtered_mean, filtered_factor, increment = _select_missing(
+            missing,
+            predicted_mean,
+            predicted_factor,
+            _sqrt_condition(
+                predicted_mean,
+                predicted_factor,
+                observation_operator,
+                observation_factor,
+                safe_emission,
+                observation_offset,
+            ),
+        )
+        evidence, new_compensation = _neumaier_add(
+            loglik, compensation, increment
+        )
+        outputs = (
+            predicted_mean,
+            predicted_factor,
+            filtered_mean,
+            filtered_factor,
+            increment,
+        )
+        return (
+            filtered_mean,
+            filtered_factor,
+            evidence,
+            new_compensation,
+        ), outputs
+
+    carry_0 = (
+        filtered_mean_0,
+        filtered_factor_0,
+        increment_0,
+        jnp.zeros_like(increment_0),
+    )
+    scan_inputs = (
+        emissions[1:],
+        transition_matrices,
+        transition_factors,
+        transition_biases,
+        observation_matrices[1:],
+        observation_factors[1:],
+        observation_biases[1:],
+    )
+    (_, _, loglik, compensation), rest = lax.scan(_step, carry_0, scan_inputs)
+    (
+        rest_predicted_means,
+        rest_predicted_factors,
+        rest_filtered_means,
+        rest_filtered_factors,
+        rest_increments,
+    ) = rest
+    return SqrtGaussianFilterPosterior(
+        marginal_loglik=loglik + compensation,
+        predicted_means=jnp.concatenate((
+            initial_mean[None],
+            rest_predicted_means,
+        )),
+        predicted_factors=jnp.concatenate((
+            initial_factor[None],
+            rest_predicted_factors,
+        )),
+        filtered_means=jnp.concatenate((
+            filtered_mean_0[None],
+            rest_filtered_means,
+        )),
+        filtered_factors=jnp.concatenate((
+            filtered_factor_0[None],
+            rest_filtered_factors,
+        )),
+        log_evidence_increments=jnp.concatenate((
+            increment_0[None],
+            rest_increments,
+        )),
     )
 
 

@@ -39,6 +39,7 @@ from smcx.containers import (
     ParticleSmootherPosterior,
     ParticleState,
     SMC2Posterior,
+    SqrtGaussianFilterPosterior,
     TemperedPosterior,
 )
 from smcx.dglm import (
@@ -96,6 +97,7 @@ from smcx.kalman import (
     posterior_sample,
     rts_smoother,
     smoothed_cross_covariances,
+    sqrt_kalman_filter,
     taylor_order1,
     unscented,
     unscented_kalman_filter,
@@ -159,6 +161,7 @@ __all__ = [
     "ParticleSmootherPosterior",
     "ParticleState",
     "SMC2Posterior",
+    "SqrtGaussianFilterPosterior",
     "StateSpaceModel",
     "StaticMutation",
     "TemperedPosterior",
@@ -225,6 +228,7 @@ __all__ = [
     "smc2",
     "smoothed_cross_covariances",
     "smoothing_weights",
+    "sqrt_kalman_filter",
     "stratified",
     "systematic",
     "tail_ess",
