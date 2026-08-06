@@ -198,3 +198,42 @@ def test_infinite_entries_are_still_rejected():
 
 # The nonlinear family's partial-row behavior is gated in
 # tests/test_partial_missing_nonlinear.py (the second #433 slice).
+
+
+def test_degeneracy_error_points_at_the_recipe_when_nan_present():
+    """A NaN-poisoned particle run names the missingness recipes."""
+    import jax.random as jr
+
+    def naive_potential(emission, state):
+        return -0.5 * (emission[0] - state[0]) ** 2
+
+    with pytest.raises(
+        smcx.DegenerateWeightsError, match="custom-models guide"
+    ):
+        smcx.bootstrap_filter(
+            jr.key(0),
+            lambda key, n: jr.normal(key, (n, 1)),
+            lambda key, state: state,
+            naive_potential,
+            jnp.asarray([[0.2], [jnp.nan], [0.4]]),
+            16,
+        )
+
+
+def test_degeneracy_error_stays_plain_without_nan():
+    """A NaN-free degenerate run keeps the unadorned message."""
+    import jax.random as jr
+
+    def impossible_potential(emission, state):
+        return jnp.where(emission[0] > 0, -jnp.inf, -jnp.inf)
+
+    with pytest.raises(smcx.DegenerateWeightsError) as excinfo:
+        smcx.bootstrap_filter(
+            jr.key(0),
+            lambda key, n: jr.normal(key, (n, 1)),
+            lambda key, state: state,
+            impossible_potential,
+            jnp.asarray([[0.2], [0.1]]),
+            16,
+        )
+    assert "custom-models" not in str(excinfo.value)

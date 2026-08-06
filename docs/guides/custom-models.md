@@ -104,9 +104,10 @@ guarantee endpoint behavior under an outer JAX transformation.
 
 ### Missing observations
 
-Every exact filter — `kalman_filter`, `extended_kalman_filter`,
-`unscented_kalman_filter`, `gaussian_filter`, `dlm_filter`, and
-`dglm_filter` — treats an entirely-NaN emission row as a missing datum
+Every exact filter — `kalman_filter`, `sqrt_kalman_filter`,
+`extended_kalman_filter`, `unscented_kalman_filter`,
+`gaussian_filter`, `dlm_filter`, and `dglm_filter` — treats an
+entirely-NaN emission row as a missing datum
 under one uniform contract: the update is skipped, the stored filtered
 moments equal the predicted moments, and `log_evidence_increments`
 carries an exact zero there, so the datum contributes nothing to
@@ -133,15 +134,62 @@ with_gap = smcx.kalman_filter(
 print(with_gap.log_evidence_increments[1])  # 0.0 exactly
 ```
 
-Two classes of nonfinite rows are never meaningful and are rejected
-eagerly: partially NaN rows (neither observed nor missing) and rows
-with infinities. NaN needs a floating dtype, so an integer emission
-array for `dglm_filter` remains fully-observed-only. The particle
-filters are outside this contract because their emissions are opaque
-callback inputs; encode a missing datum in your own observation
-potential by returning zero log mass for it, and note that a NaN
-reaching the potential fails loudly through the degeneracy gate rather
-than silently.
+The multivariate Gaussian family goes further: a partially NaN row
+marks exactly its NaN components missing, and the filter updates on
+the observed subvector alone — exact algebra through a masking
+construction, not an approximation — with the increment equal to the
+observed subvector's predictive density. The univariate DLM and DGLM
+have no partial case (a row is one component), and NaN needs a
+floating dtype, so an integer emission array for `dglm_filter`
+remains fully-observed-only. Only infinities are never meaningful,
+and they are rejected eagerly.
+
+The particle filters place the same capability in your hands,
+because the observation density is yours: the filter passes
+`emissions[t]` to your potential unmodified, NaN components
+included, and the correct weight for a partial row is the density of
+the observed components only — the marginal your model implies,
+which only you can supply. Two patterns cover most models. When
+emission components are conditionally independent given the state,
+mask and sum:
+
+```python
+def log_observation_masked(emission, state):
+    per_component = -0.5 * ((emission - state) / 0.7) ** 2
+    return jnp.sum(jnp.where(jnp.isnan(emission), 0.0, per_component))
+```
+
+When the observation noise is correlated, mask-and-sum is wrong —
+the observed subvector's marginal is not a sum of per-component
+terms. For multivariate Gaussian noise, apply the same masking
+algebra the exact filters use: zero the masked residual components,
+replace the noise covariance's masked rows and columns with an
+identity block (whose Cholesky diagonal contributes nothing to the
+log determinant), and count only observed components in the
+constant:
+
+```python
+def log_observation_correlated(emission, state):
+    mask = jnp.isnan(emission)
+    residual = jnp.where(mask, 0.0, emission - observation_matrix @ state)
+    pair = mask[:, None] | mask[None, :]
+    masked_cov = jnp.where(pair, 0.0, noise_covariance) + jnp.diag(
+        mask.astype(residual.dtype)
+    )
+    factor = jnp.linalg.cholesky(masked_cov)
+    white = jax.scipy.linalg.solve_triangular(factor, residual, lower=True)
+    observed = emission.shape[0] - jnp.sum(mask)
+    return -0.5 * (
+        observed * jnp.log(2.0 * jnp.pi)
+        + 2.0 * jnp.sum(jnp.log(jnp.diagonal(factor)))
+        + white @ white
+    )
+```
+
+A potential that ignores NaN lets it poison the weights, and the run
+fails loudly through the degeneracy gate; the
+`DegenerateWeightsError` message points back to these recipes when
+the emissions contain NaN.
 
 With `inputs=...`, every supplied callback accepts `(state, input_t)`.
 `inputs[t]` reaches the observation at `t` and the transition into `t`;
