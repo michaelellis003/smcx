@@ -6,7 +6,7 @@
 import importlib
 from collections.abc import Mapping, Sequence
 from operator import getitem
-from typing import Any, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, TypeAlias, cast
 
 import jax
 import jax.numpy as jnp
@@ -15,12 +15,20 @@ import numpy as np
 from jax.tree_util import keystr
 from jaxtyping import Array
 
+from smcx._utils import _positive_integer
 from smcx.containers import ParticleFilterPosterior, TemperedPosterior
 from smcx.diagnostics import pareto_k_diagnostic
 from smcx.resampling import systematic
 from smcx.types import PRNGKeyT
 
 _Posterior = ParticleFilterPosterior | TemperedPosterior
+
+if TYPE_CHECKING:
+    _OptionalCount: TypeAlias = int | None
+else:
+    # Runtime checking must admit malformed values so the shared count
+    # validator owns the documented ValueError contract.
+    _OptionalCount: TypeAlias = Any
 
 
 class _GroupPlan(NamedTuple):
@@ -230,7 +238,7 @@ def to_arviz(
     posteriors: _Posterior | Sequence[_Posterior],
     *,
     key: PRNGKeyT,
-    num_draws: int | None = None,
+    num_draws: _OptionalCount = None,
     var_names: Mapping[str, str] | None = None,
     dims: Mapping[str, Sequence[str]] | None = None,
     emissions: object | None = None,
@@ -299,9 +307,11 @@ def to_arviz(
         values = [run.particles for run in tempered_runs]
         particle_shape = (num_particles,)
         timed = False
-    draws = num_particles if num_draws is None else num_draws
-    if draws <= 0:
-        raise ValueError("num_draws must be positive")
+    draws = (
+        num_particles
+        if num_draws is None
+        else _positive_integer(num_draws, name="num_draws")
+    )
 
     u_values = None
     if unconstrained is not None:

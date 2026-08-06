@@ -24,10 +24,12 @@ from smcx.diagnostics import (
     diagnose,
     log_bayes_factor,
     log_ml_increments,
+    log_ml_variance,
     param_posterior_predictive_sample,
     pareto_k_diagnostic,
     particle_diversity,
     posterior_predictive_sample,
+    reconstruct_trajectories,
     replicated_log_ml,
     tail_ess,
     weighted_mean,
@@ -2499,3 +2501,32 @@ def test_tail_edges_share_the_weighted_quantile_convention():
         rtol=5e-7,
         atol=0.0,
     )
+
+
+class TestAncestorRangeBoundary:
+    """Out-of-range genealogy indices raise (2026-08-06 review, P2-4)."""
+
+    @staticmethod
+    def _posterior():
+        return bootstrap_filter(
+            jr.key(0),
+            lambda key, n: jr.normal(key, (n, 1)),
+            lambda key, state: state + jr.normal(key, state.shape),
+            lambda emission, state: -0.5 * jnp.sum((emission - state) ** 2),
+            jnp.zeros((3, 1)),
+            4,
+        )
+
+    @pytest.mark.parametrize("bad_value", [-1, 4, 9])
+    def test_diagnostics_reject_out_of_range_ancestors(self, bad_value):
+        posterior = self._posterior()
+        bad = posterior._replace(
+            ancestors=jnp.full_like(posterior.ancestors, bad_value)
+        )
+        for diagnostic in (
+            reconstruct_trajectories,
+            particle_diversity,
+            log_ml_variance,
+        ):
+            with pytest.raises(ValueError, match="ancestors"):
+                diagnostic(bad)

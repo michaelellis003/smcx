@@ -520,3 +520,32 @@ def test_runner_rejects_misaligned_inputs(inputs, message):
             jnp.zeros((3, 1)),
             inputs=inputs,
         )
+
+
+class TestScalarCarry:
+    """Scalar and dict carries are valid PyTrees (2026-08-06, P2-6)."""
+
+    NUM = 4
+
+    def _record(self):
+        return smcx.ParticleFilterRecord(
+            particles=jnp.zeros((self.NUM, 1)),
+            log_weights=jnp.full((self.NUM,), -jnp.log(float(self.NUM))),
+            ancestors=jnp.arange(self.NUM, dtype=jnp.int32),
+            log_evidence_increment=jnp.zeros(()),
+        )
+
+    @pytest.mark.parametrize("carry", [0, 0.0, {"x": 0}])
+    def test_python_scalar_carries_run(self, carry):
+        def initialize(time_index, emission, key):
+            del time_index, emission, key
+            return carry, self._record()
+
+        def step(state, time_index, emission, key):
+            del time_index, emission, key
+            return state, self._record()
+
+        posterior = smcx.run_particle_filter(
+            jr.key(0), initialize, step, jnp.zeros((3, 1))
+        )
+        assert posterior.filtered_log_weights.shape == (3, self.NUM)

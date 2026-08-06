@@ -956,3 +956,27 @@ def test_rejects_out_of_range_custom_outer_resampler():
             num_pmmh_steps=0,
             resampling_fn=invalid_resampler,
         )
+
+
+def test_cumulative_evidence_overflow_raises_loudly():
+    """Finite increments overflowing the running total raise (P2-5)."""
+    param_init, log_prior, inner_init, inner_trans, _, emissions = (
+        _small_model()
+    )
+
+    def huge_logobs(y, state, theta):
+        del theta
+        return jnp.asarray(1e308) - 0.5 * (y[0] - state[0]) ** 2
+
+    with pytest.raises(smcx.DegenerateWeightsError, match="cumulative"):
+        smcx.smc2(
+            jr.key(0),
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            huge_logobs,
+            emissions,
+            num_theta=4,
+            num_x=8,
+        )

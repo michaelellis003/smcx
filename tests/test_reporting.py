@@ -368,3 +368,10 @@ def test_unconstrained_draws_follow_the_posterior_resampling_indices():
     bad_u = -_filter().filtered_particles[:, :-1]
     with pytest.raises(ValueError, match="particle axes"):
         to_arviz(_filter(), key=jr.key(0), unconstrained=bad_u)
+
+
+@pytest.mark.parametrize("bad_draws", [1.5, True, 0, -2])
+def test_num_draws_boundary_matches_the_shared_count_contract(bad_draws):
+    """Non-integer draw counts are rejected (2026-08-06 review, P2-7)."""
+    with pytest.raises(ValueError, match="num_draws"):
+        to_arviz(_filter(), key=jr.key(0), num_draws=bad_draws)

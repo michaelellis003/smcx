@@ -20,20 +20,38 @@ seeded fixtures retain their draws. Numerical correctness fixes are not a
 promise of cross-version random-stream identity.
 """
 
+from typing import TYPE_CHECKING, Any, SupportsIndex, TypeAlias
+
 import jax
 import jax.numpy as jnp
 from jax.core import Tracer
 from jaxtyping import Array, Float, Int32
 
 from smcx._numerics import _validate_minimum_float_precision
+from smcx._utils import _positive_integer
 from smcx.types import PRNGKeyT
 
 # Avoids a zero denominator in the exponential-spacing construction.
 _TINY = 1e-30
 
+if TYPE_CHECKING:
+    _WeightVector: TypeAlias = Float[Array, " num_particles"]
+    _CountArgument: TypeAlias = SupportsIndex
+else:
+    # Runtime checking must admit malformed values so this module's
+    # validator owns the documented ValueError contract.
+    _WeightVector: TypeAlias = Any
+    _CountArgument: TypeAlias = Any
 
-def _validate_inputs(weights: Array, num_samples: int) -> None:
+
+def _validate_inputs(
+    weights: _WeightVector, num_samples: _CountArgument
+) -> None:
     """Validate the public resampling contract where values are concrete."""
+    if not isinstance(weights, (jax.Array, Tracer)):
+        raise ValueError(
+            f"weights must be a JAX array; got {type(weights).__name__}"
+        )
     if weights.ndim != 1:
         raise ValueError(
             f"weights must have shape (N,); got shape {weights.shape}"
@@ -45,8 +63,7 @@ def _validate_inputs(weights: Array, num_samples: int) -> None:
             f"weights must have a floating dtype; got {weights.dtype}"
         )
     _validate_minimum_float_precision(weights, name="weights")
-    if num_samples < 1:
-        raise ValueError(f"num_samples must be >= 1; got {num_samples}")
+    _positive_integer(num_samples, name="num_samples")
     if isinstance(weights, Tracer):
         return
     all_finite = jnp.all(jnp.isfinite(weights))
@@ -135,8 +152,8 @@ def _searchsorted_clipped(
 
 def systematic(
     key: PRNGKeyT,
-    weights: Float[Array, " num_particles"],
-    num_samples: int,
+    weights: _WeightVector,
+    num_samples: _CountArgument,
 ) -> Int32[Array, " num_samples"]:
     """Systematic resampling: one shared uniform, evenly spaced grid.
 
@@ -163,8 +180,8 @@ def systematic(
 
 def stratified(
     key: PRNGKeyT,
-    weights: Float[Array, " num_particles"],
-    num_samples: int,
+    weights: _WeightVector,
+    num_samples: _CountArgument,
 ) -> Int32[Array, " num_samples"]:
     """Stratified resampling: one uniform per stratum.
 
@@ -191,8 +208,8 @@ def stratified(
 
 def multinomial(
     key: PRNGKeyT,
-    weights: Float[Array, " num_particles"],
-    num_samples: int,
+    weights: _WeightVector,
+    num_samples: _CountArgument,
 ) -> Int32[Array, " num_samples"]:
     """Multinomial (iid) resampling via sorted uniforms.
 
@@ -232,8 +249,8 @@ def multinomial(
 
 def residual(
     key: PRNGKeyT,
-    weights: Float[Array, " num_particles"],
-    num_samples: int,
+    weights: _WeightVector,
+    num_samples: _CountArgument,
 ) -> Int32[Array, " num_samples"]:
     """Residual resampling (deterministic floor + multinomial remainder).
 

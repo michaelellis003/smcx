@@ -336,7 +336,24 @@ def temper(
                 "tempering stage"
             )
         if schedule_fn is not None:
-            phi_new = float(schedule_fn(phi, log_w, loglik))
+            raw_phi = schedule_fn(phi, log_w, loglik)
+            # temper owns malformed callback output: conversion
+            # failures and Boolean aliases raise the documented
+            # ValueError instead of leaking TypeError (2026-08-06
+            # review, P2-8).
+            if isinstance(raw_phi, bool):
+                raise ValueError(
+                    "schedule_fn must return a scalar temperature, "
+                    f"not a boolean, at phi={phi}"
+                )
+            try:
+                phi_new = float(cast(Any, raw_phi))
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    "schedule_fn must return a finite scalar "
+                    f"temperature in (phi, 1]; got {raw_phi!r} at "
+                    f"phi={phi}"
+                ) from error
             if not math.isfinite(phi_new) or not phi < phi_new <= 1.0:
                 raise ValueError(
                     "schedule_fn must return a finite temperature in "

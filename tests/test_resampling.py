@@ -209,7 +209,7 @@ class TestContract:
                 2,
                 "weights must have a floating dtype",
             ),
-            (jnp.ones((2,)), 0, "num_samples must be >= 1"),
+            (jnp.ones((2,)), 0, "num_samples must be a positive integer"),
         ],
     )
     def test_rejects_malformed_structural_inputs(
@@ -506,3 +506,24 @@ class TestOffspringMoments:
             np.abs(observed - expected_covariance),
             5 * estimator_se + 1e-6,
         )
+
+
+class TestCountAndTypeBoundaries:
+    """Count and array-type validation gaps (2026-08-06 review, P2-7)."""
+
+    WEIGHTS = jnp.asarray([0.5, 0.5])
+
+    @pytest.mark.parametrize(
+        "resampler", [systematic, stratified, multinomial, residual]
+    )
+    @pytest.mark.parametrize("bad_count", [2.5, True, 0, -1])
+    def test_non_integer_counts_are_rejected(self, resampler, bad_count):
+        with pytest.raises(ValueError, match="num_samples"):
+            resampler(jr.key(0), self.WEIGHTS, bad_count)
+
+    @pytest.mark.parametrize(
+        "resampler", [systematic, stratified, multinomial, residual]
+    )
+    def test_non_array_weights_are_rejected(self, resampler):
+        with pytest.raises(ValueError, match="JAX array"):
+            resampler(jr.key(0), [0.5, 0.5], 2)
