@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, SupportsIndex, TypeAlias
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax, tree, vmap
+from jax.scipy.special import logsumexp
 from jaxtyping import Array, Bool, Float, Int32, PyTree, Shaped
 
 from smcx._numerics import _validate_minimum_float_precision
@@ -63,17 +64,18 @@ def _draw(
     return _gather_particles(particles, indices), indices, jnp.all(valid)
 
 
-def _draw_previous(
+def _backward_logits(
     next_states: _DrawCloud,
     particles: ParticleCloud,
     log_weights: Float[Array, " num_particles"],
-    keys: Array,
     log_transition: _LogTransitionArgument,
     params: Any,
     input_t: ModelInput | None,
     *,
     validate: bool = False,
-) -> tuple[_DrawCloud, Int32[Array, " num_draws"], Bool[Array, ""]]:
+) -> Float[Array, "num_draws num_particles"]:
+    """Evaluate the backward transition matrix plus filtering weights."""
+
     def _as_transition_array(*args: Any) -> Array:
         output = log_transition(*args)
         try:
@@ -96,7 +98,30 @@ def _draw_previous(
         _validate_minimum_float_precision(
             transition, name="log_transition output"
         )
-    return _draw(transition + log_weights[None, :], particles, keys)
+    return transition + log_weights[None, :]
+
+
+def _draw_previous(
+    next_states: _DrawCloud,
+    particles: ParticleCloud,
+    log_weights: Float[Array, " num_particles"],
+    keys: Array,
+    log_transition: _LogTransitionArgument,
+    params: Any,
+    input_t: ModelInput | None,
+    *,
+    validate: bool = False,
+) -> tuple[_DrawCloud, Int32[Array, " num_draws"], Bool[Array, ""]]:
+    logits = _backward_logits(
+        next_states,
+        particles,
+        log_weights,
+        log_transition,
+        params,
+        input_t,
+        validate=validate,
+    )
+    return _draw(logits, particles, keys)
 
 
 def _finish(
@@ -272,3 +297,148 @@ def backward_simulation(
         valid,
         log_weights.dtype,
     )
+
+
+def smoothing_weights(
+    posterior: _PosteriorArgument,
+    log_transition: _LogTransitionArgument,
+    params: Any,
+    *,
+    inputs: InputSequence | None = None,
+) -> Float[Array, "ntime num_particles"]:
+    r"""Reweight stored filtering clouds toward the smoothing marginals.
+
+    The deterministic backward companion of `backward_simulation`
+    (Doucet, Godsill, and Andrieu 2000): starting from the terminal
+    filtering weights, each earlier cloud is reweighted through the
+    backward kernel,
+
+    $$
+    s_t^{(i)} \propto w_t^{(i)} \sum_j s_{t+1}^{(j)}
+    \frac{f\bigl(x_{t+1}^{(j)} \mid x_t^{(i)}\bigr)}
+    {\sum_k w_t^{(k)} f\bigl(x_{t+1}^{(j)} \mid x_t^{(k)}\bigr)},
+    $$
+
+    so row ``t`` of the result and filtering cloud ``t`` together form
+    a weighted-cloud representation of $p(x_t \mid y_{1:T})$. Runtime
+    is $O(T N^2)$ transition evaluations, and the computation is
+    deterministic — no key. Weighted summaries consume the result by
+    replacing the record's weights:
+    ``posterior._replace(filtered_log_weights=smoothing_weights(...))``
+    feeds `weighted_mean` and its siblings unchanged.
+
+    Args:
+        posterior: Fixed-parameter filter result with full history —
+            the nominal ``ParticleFilterPosterior`` or any caller-owned
+            record satisfying `smcx.containers.ParticleFilterResult`
+            whose stored log-weight rows are the normalized filtering
+            weights of their stored clouds.
+        log_transition: Per-pair transition log-density
+            ``(state, prev_state, params, input_t) -> scalar``,
+            vmapped internally over both clouds — the
+            `backward_simulation` contract, validated on its first
+            batch at every sequence length.
+        params: Model parameter PyTree passed to every evaluation.
+        inputs: Optional exogenous inputs, shape ``(ntime,)`` or
+            ``(ntime, input_dim)``; ``inputs[t]`` reaches the
+            transition into step ``t``.
+
+    Returns:
+        Normalized log smoothing weights, shape
+        ``(ntime, num_particles)``. Row ``ntime - 1`` equals the
+        stored terminal filtering row.
+
+    Raises:
+        DegenerateWeightsError: A backward row is unnormalizable
+            (NaN or positive-infinite transition output, or no finite
+            mass). Raised eagerly; under a caller's ``jax.jit`` the
+            result is NaN-filled instead (the `backward_simulation`
+            semantics).
+        ValueError: The posterior lacks full history, the callback is
+            not callable, or its first batch violates the shape or
+            precision contract.
+    """
+    if isinstance(posterior, LiuWestPosterior):
+        raise ValueError(
+            "smoothing_weights cannot ignore LiuWestPosterior.filtered_params"
+        )
+    if not isinstance(posterior, ParticleFilterResult):
+        raise ValueError(
+            "posterior must be a ParticleFilterResult: a record with "
+            "marginal_loglik, filtered_particles, filtered_log_weights, "
+            "ancestors, ess, and log_evidence_increments fields"
+        )
+    if not callable(log_transition):
+        raise ValueError("log_transition must be callable")
+    ntime, _ = _validate_particle_result_axes(
+        posterior, "smoothing_weights", particles=True, full_history=True
+    )
+    log_weights = posterior.filtered_log_weights
+    particle_history = posterior.filtered_particles
+    _validate_minimum_float_precision(
+        log_weights, name="posterior.filtered_log_weights"
+    )
+    inputs = None if inputs is None else _canonicalize_inputs(inputs, ntime)
+    terminal = log_weights[-1]
+    if ntime == 1:
+        _raise_if_degenerate(jnp.zeros((), dtype=log_weights.dtype))
+        return terminal[None]
+
+    def _reweight(
+        logits: Array, log_next: Array
+    ) -> tuple[Array, Bool[Array, ""]]:
+        invalid = jnp.any(jnp.isnan(logits) | jnp.isposinf(logits))
+        denominators = logsumexp(logits, axis=-1, keepdims=True)
+        combined = logsumexp(
+            logits + (log_next - denominators[:, 0])[:, None], axis=0
+        )
+        row = combined - logsumexp(combined)
+        row_valid = jnp.any(jnp.isfinite(row)) & ~invalid
+        return row, row_valid
+
+    peeled_cloud = tree.map(lambda leaf: leaf[-2], particle_history)
+    next_cloud = tree.map(lambda leaf: leaf[-1], particle_history)
+    peeled_logits = _backward_logits(
+        next_cloud,
+        peeled_cloud,
+        log_weights[-2],
+        log_transition,
+        params,
+        None if inputs is None else inputs[-1],
+        validate=True,
+    )
+    peeled_row, valid = _reweight(peeled_logits, terminal)
+
+    earlier_next = tree.map(lambda leaf: leaf[1:-1], particle_history)
+    earlier_clouds = tree.map(lambda leaf: leaf[:-2], particle_history)
+    earlier_inputs = None if inputs is None else inputs[1:-1]
+
+    def _step(carry, step_inputs):
+        log_next, all_valid = carry
+        cloud_t, next_states, log_weights_t, input_t = step_inputs
+        logits = _backward_logits(
+            next_states,
+            cloud_t,
+            log_weights_t,
+            log_transition,
+            params,
+            input_t,
+        )
+        row, row_valid = _reweight(logits, log_next)
+        return (row, all_valid & row_valid), row
+
+    (_, valid), earlier_rows = lax.scan(
+        _step,
+        (peeled_row, valid),
+        (earlier_clouds, earlier_next, log_weights[:-2], earlier_inputs),
+        reverse=True,
+    )
+    stacked = jnp.concatenate((
+        earlier_rows,
+        peeled_row[None],
+        terminal[None],
+    ))
+    stacked = jnp.where(valid, stacked, jnp.full_like(stacked, jnp.nan))
+    checked = jnp.where(valid, jnp.zeros((), dtype=log_weights.dtype), -jnp.inf)
+    _raise_if_degenerate(checked)
+    return stacked
