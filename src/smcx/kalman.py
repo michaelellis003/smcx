@@ -2039,8 +2039,8 @@ def sqrt_kalman_filter(
         inputs,
     )
     with debug_nans(False), debug_infs(False):
-        initial_factor = _sampling_covariance_factor(
-            _symmetrize(initial_covariance)
+        initial_factor = _lower_triangular_root(
+            _sampling_covariance_factor(_symmetrize(initial_covariance))
         )
         transition_factors = lax.map(
             _sampling_covariance_factor, transition_covariances
@@ -2953,6 +2953,29 @@ def _sampling_covariance_factor(
         lambda _: cholesky,
         lambda _: _spectral_covariance_factor(covariance),
         operand=None,
+    )
+
+
+def _lower_triangular_root(
+    root: Float[Array, "state_dim state_dim"],
+) -> Float[Array, "state_dim state_dim"]:
+    """Rotate a covariance root into lower-triangular form.
+
+    An already lower-triangular root — the Cholesky fast path — passes
+    through unchanged, keeping that path bitwise stable. The dense
+    spectral fallback is rotated through one QR, which preserves the
+    Gram product, so a semidefinite prior still yields a factor the
+    paired square-root smoother's triangularity boundary accepts
+    (2026-08-06 review, P1-4).
+    """
+    is_lower = (jnp.count_nonzero(jnp.triu(root, k=1)) == 0) & jnp.all(
+        jnp.diagonal(root) >= 0.0
+    )
+    return lax.cond(
+        is_lower,
+        lambda value: value,
+        lambda value: _sign_normalized_r(value.T).T,
+        root,
     )
 
 
@@ -4823,9 +4846,10 @@ def sqrt_rts_smoother(
     Raises:
         ValueError: The posterior is not a `SqrtGaussianFilterPosterior`
             (including the covariance-form record), a stored factor is
-            not lower-triangular, the evolution specification is
-            incomplete or doubled, or a shape, dtype, or domain check
-            fails.
+            not lower-triangular, a positive-time predicted factor is
+            exactly singular (the backward gain solves against them),
+            the evolution specification is incomplete or doubled, or a
+            shape, dtype, or domain check fails.
     """
     if isinstance(filtered_posterior, GaussianFilterPosterior):
         raise ValueError(
@@ -4882,6 +4906,19 @@ def sqrt_rts_smoother(
             smoothed_means=filtered_posterior.filtered_means,
             smoothed_factors=filtered_posterior.filtered_factors,
         )
+    predicted_factors = filtered_posterior.predicted_factors
+    if not isinstance(predicted_factors, Tracer):
+        diagonals = np.diagonal(
+            np.asarray(predicted_factors)[1:], axis1=-2, axis2=-1
+        )
+        if not np.all(np.abs(diagonals) > 0.0):
+            raise ValueError(
+                "sqrt_rts_smoother requires invertible positive-time "
+                "predicted factors: the backward gain solves against "
+                "them, so a zero diagonal entry means the filter's "
+                "prediction was exactly singular there (for example a "
+                "zero prior with zero transition noise)"
+            )
     with debug_nans(False), debug_infs(False):
         transition_factors = lax.map(
             _sampling_covariance_factor, transition_covariances
