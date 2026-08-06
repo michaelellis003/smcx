@@ -229,3 +229,45 @@ def test_loose_arrays_require_the_transition_covariance():
     filtered = smcx.sqrt_kalman_filter(MODEL, Y)
     with pytest.raises(ValueError, match="transition_covariance"):
         smcx.sqrt_rts_smoother(filtered, A)
+
+
+def test_semidefinite_prior_record_is_accepted_by_the_smoother():
+    """A rank-deficient prior's factor stays triangular through pairing.
+
+    The Cholesky fallback used to store a dense spectral root as the
+    first predicted factor, so the filter's own paired smoother
+    rejected its output (2026-08-06 review, P1-4).
+    """
+    rank_one = jnp.asarray([[1.0, 1.0], [1.0, 1.0]])
+    filtered = smcx.sqrt_kalman_filter(MU0, rank_one, A, Q, H, R, Y)
+    first = np.asarray(filtered.predicted_factors[0])
+    np.testing.assert_array_equal(first, np.tril(first))
+    np.testing.assert_allclose(
+        first @ first.T,
+        np.asarray(rank_one),
+        atol=_rtol(filtered.predicted_factors),
+    )
+    smoothed = smcx.sqrt_rts_smoother(filtered, A, Q)
+    assert np.all(np.isfinite(np.asarray(smoothed.smoothed_means)))
+    assert np.all(np.isfinite(np.asarray(smoothed.smoothed_factors)))
+
+
+def test_rank_collapsed_predictions_are_rejected_loudly():
+    """Exactly singular positive-time predictions raise, never NaN.
+
+    The backward gain solves against the stored predicted factors, so
+    a zero diagonal there used to divide through and return silent
+    NaN factors (2026-08-06 review, P1-5).
+    """
+    zero = jnp.zeros((1, 1))
+    filtered = smcx.sqrt_kalman_filter(
+        jnp.zeros(1),
+        zero,
+        jnp.eye(1),
+        zero,
+        jnp.eye(1),
+        jnp.eye(1),
+        jnp.zeros((3, 1)),
+    )
+    with pytest.raises(ValueError, match="invertible"):
+        smcx.sqrt_rts_smoother(filtered, jnp.eye(1), zero)
