@@ -23,6 +23,7 @@ evidence moves by the predicted constant within floating-point
 resolution at the constant's own scale.
 """
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
@@ -30,8 +31,15 @@ import pytest
 
 import smcx
 
-OFFSET = -1e17
-SPREAD = 64.0  # exactly representable next to 1e17 (4 ulp)
+# The float32 leg needs a smaller level: 1e17 leaves float32 no room
+# for the 64-unit spread (its unit in the last place there is ~8.6e9),
+# while 64 is eight units in the last place next to 1e8. Both levels
+# absorb an O(1) log weight in their dtype, which is the failure the
+# fix removes.
+X64 = bool(jax.config.read("jax_enable_x64"))
+OFFSET = -1e17 if X64 else -1e8
+SPREAD = 64.0  # exactly representable next to either level
+EVIDENCE_RTOL = 1e-12 if X64 else 1e-6
 SENTINEL = 999.0
 NUM_PARTICLES = 64
 EMISSIONS = jnp.asarray([[0.2], [SENTINEL], [0.7], [SENTINEL]])
@@ -68,11 +76,12 @@ def _weight_fields_identical(base, shifted):
 
 def _evidence_shifted(base, shifted, total_shift):
     # The scalar moves by the constant; the resolution is the
-    # constant's own (|total_shift| * 1e-12 is a few units in the last
-    # place at 1e17), which is the sharpest claim a shifted sum allows.
+    # constant's own (a few units in the last place at its scale in
+    # the active dtype), which is the sharpest claim a shifted sum
+    # allows.
     assert float(shifted.marginal_loglik) == pytest.approx(
         float(base.marginal_loglik) + total_shift,
-        abs=abs(total_shift) * 1e-12,
+        abs=abs(total_shift) * EVIDENCE_RTOL,
     )
 
 
