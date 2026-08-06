@@ -46,7 +46,7 @@ else:
 
 def _validate_inputs(
     weights: _WeightVector, num_samples: _CountArgument
-) -> None:
+) -> int:
     """Validate the public resampling contract where values are concrete."""
     if not isinstance(weights, (jax.Array, Tracer)):
         raise ValueError(
@@ -63,20 +63,21 @@ def _validate_inputs(
             f"weights must have a floating dtype; got {weights.dtype}"
         )
     _validate_minimum_float_precision(weights, name="weights")
-    _positive_integer(num_samples, name="num_samples")
+    count = _positive_integer(num_samples, name="num_samples")
     if isinstance(weights, Tracer):
-        return
+        return count
     all_finite = jnp.all(jnp.isfinite(weights))
     # Closed-over JAX arrays remain concrete at function entry but their
     # first value operation is traced under jit/vmap.
     if isinstance(all_finite, Tracer):
-        return
+        return count
     if not bool(all_finite):
         raise ValueError("weights must contain only finite values")
     if bool(jnp.any(weights < 0)):
         raise ValueError("weights must be nonnegative")
     if not bool(jnp.any(weights > 0)):
         raise ValueError("weights must have positive total mass")
+    return count
 
 
 def _below_one(dtype: jnp.dtype) -> Array:
@@ -171,7 +172,7 @@ def systematic(
         ValueError: The weights or sample count are invalid. Data-dependent
             weight checks run while their values remain concrete.
     """
-    _validate_inputs(weights, num_samples)
+    num_samples = _validate_inputs(weights, num_samples)
     u0 = jax.random.uniform(key)
     grid = (u0 + jnp.arange(num_samples)) / num_samples
     queries = jnp.minimum(grid, _below_one(weights.dtype))
@@ -199,7 +200,7 @@ def stratified(
         ValueError: The weights or sample count are invalid. Data-dependent
             weight checks run while their values remain concrete.
     """
-    _validate_inputs(weights, num_samples)
+    num_samples = _validate_inputs(weights, num_samples)
     v = jax.random.uniform(key, (num_samples,))
     grid = (jnp.arange(num_samples) + v) / num_samples
     queries = jnp.minimum(grid, _below_one(weights.dtype))
@@ -234,7 +235,7 @@ def multinomial(
         ValueError: The weights or sample count are invalid. Data-dependent
             weight checks run while their values remain concrete.
     """
-    _validate_inputs(weights, num_samples)
+    num_samples = _validate_inputs(weights, num_samples)
     e = -jnp.log1p(-jax.random.uniform(key, (num_samples + 1,)))
     # ``maximum.accumulate`` has a pathological jax-mps 0.10.9 lowering.
     # The explicit associative prefix has the same semantics and stays O(N)
@@ -278,7 +279,7 @@ def residual(
         resampling schemes for particle filtering.
         https://doi.org/10.1109/ISPA.2005.195385
     """
-    _validate_inputs(weights, num_samples)
+    num_samples = _validate_inputs(weights, num_samples)
     m = num_samples
     scaled_weights = _scale_by_max(weights)
     total = jnp.sum(scaled_weights)
