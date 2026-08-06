@@ -53,28 +53,36 @@ def test_path_shapes():
 
 
 def test_marginal_moments_match_the_closed_form_within_se():
-    """Per-horizon path marginals reproduce the #381 closed forms."""
+    """Per-horizon path marginals reproduce the #381 closed forms.
+
+    Five derived standard errors with non-vacuity ceilings (D6/D7);
+    the Gaussian variance SE is ``var * sqrt(2 / n)``.
+    """
     states = np.asarray(PATHS.state_paths, dtype=np.float64)
     emissions = np.asarray(PATHS.emission_paths, dtype=np.float64)
     for k in range(NUM_STEPS):
         state_mean = np.asarray(CLOSED.state_means[k], dtype=np.float64)
         state_cov = np.asarray(CLOSED.state_covariances[k], dtype=np.float64)
+        scale = np.sqrt(np.diag(state_cov))
         se_mean = np.sqrt(np.diag(state_cov) / NUM_DRAWS)
+        assert np.all(se_mean < 0.2 * scale)  # non-vacuity ceiling
         np.testing.assert_array_less(
-            np.abs(states[:, k].mean(axis=0) - state_mean), 6.0 * se_mean
+            np.abs(states[:, k].mean(axis=0) - state_mean), 5.0 * se_mean
         )
         sample_cov = np.cov(states[:, k].T)
         se_var = np.diag(state_cov) * np.sqrt(2.0 / NUM_DRAWS)
+        assert np.all(se_var < 0.2 * np.diag(state_cov))  # non-vacuity
         np.testing.assert_array_less(
-            np.abs(np.diag(sample_cov) - np.diag(state_cov)), 6.0 * se_var
+            np.abs(np.diag(sample_cov) - np.diag(state_cov)), 5.0 * se_var
         )
         obs_mean = np.asarray(CLOSED.observation_means[k], dtype=np.float64)
         obs_cov = np.asarray(
             CLOSED.observation_covariances[k], dtype=np.float64
         )
+        se_obs = np.sqrt(np.diag(obs_cov) / NUM_DRAWS)
+        assert np.all(se_obs < 0.2 * np.sqrt(np.diag(obs_cov)))
         np.testing.assert_array_less(
-            np.abs(emissions[:, k].mean(axis=0) - obs_mean),
-            6.0 * np.sqrt(np.diag(obs_cov) / NUM_DRAWS),
+            np.abs(emissions[:, k].mean(axis=0) - obs_mean), 5.0 * se_obs
         )
 
 
@@ -89,8 +97,12 @@ def test_cross_horizon_covariance_matches_the_closed_form():
     )
     r1 = np.diag(np.asarray(CLOSED.state_covariances[0], dtype=np.float64))
     r2 = np.diag(np.asarray(CLOSED.state_covariances[1], dtype=np.float64))
+    # The cross-moment estimator's variance is bounded by the product
+    # of the marginal variances over n (Cauchy-Schwarz), so this SE is
+    # conservative; the gate is still five of them (D6/D7).
     se = np.sqrt(np.outer(r2, r1) / NUM_DRAWS)
-    np.testing.assert_array_less(np.abs(empirical.T - expected), 8.0 * se)
+    assert np.all(se < 0.2 * np.sqrt(np.outer(r2, r1)))  # non-vacuity
+    np.testing.assert_array_less(np.abs(empirical.T - expected), 5.0 * se)
 
 
 def test_record_path_matches_array_path_bitwise():

@@ -75,10 +75,14 @@ def test_lgssm_smoothed_moments_match_rts_within_bands():
     ]
     ess = 1.0 / (weights**2).sum(axis=1)
     se = np.sqrt(exact_vars / ess)
-    np.testing.assert_array_less(np.abs(means - exact_means), 8.0 * se)
-    np.testing.assert_array_less(
-        np.abs(variances - exact_vars), 8.0 * exact_vars
-    )
+    # Five derived standard errors with non-vacuity ceilings (D6/D7):
+    # the weighted-mean SE is sqrt(var / ESS); the weighted-variance
+    # SE uses the Gaussian sampling variance var * sqrt(2 / ESS).
+    assert np.all(se < 0.2 * np.sqrt(exact_vars))  # non-vacuity
+    np.testing.assert_array_less(np.abs(means - exact_means), 5.0 * se)
+    se_var = exact_vars * np.sqrt(2.0 / ess)
+    assert np.all(se_var < 0.5 * exact_vars)  # non-vacuity ceiling
+    np.testing.assert_array_less(np.abs(variances - exact_vars), 5.0 * se_var)
 
 
 def test_agrees_with_backward_simulation_moments():
@@ -99,8 +103,12 @@ def test_agrees_with_backward_simulation_moments():
     ]
     draw_means = draw_values.mean(axis=0)
     draw_se = draw_values.std(axis=0, ddof=1) / np.sqrt(draw_values.shape[0])
+    # Conditional on the shared particle cloud the draws' Monte Carlo
+    # error is the only randomness, so five draw standard errors gate
+    # the agreement (D6/D7).
+    assert np.all(draw_se < 0.2 * draw_values.std(axis=0, ddof=1))
     np.testing.assert_array_less(
-        np.abs(weighted_means - draw_means), 8.0 * draw_se + 1e-8
+        np.abs(weighted_means - draw_means), 5.0 * draw_se + 1e-8
     )
 
 

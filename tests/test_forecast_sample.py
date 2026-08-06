@@ -83,23 +83,24 @@ def test_linear_gaussian_reduction_within_se():
     emissions = np.asarray(PATHS.emission_paths, dtype=np.float64)
     for k in range(NUM_STEPS):
         state_var = float(closed.state_covariances[k, 0, 0])
-        # Monte Carlo error from the draws plus the particle frontier.
-        band = 8.0 * np.sqrt(state_var / NUM_DRAWS) + 8.0 * np.sqrt(
-            state_var / NUM_PARTICLES
-        )
+        # The two Monte Carlo sources (path draws and the particle
+        # frontier) are independent, so their variances add; the gate
+        # is five combined standard errors (D6/D7).
+        se = np.sqrt(state_var / NUM_DRAWS + state_var / NUM_PARTICLES)
+        assert se < 0.2 * np.sqrt(state_var)  # non-vacuity ceiling
         assert (
-            abs(states[:, k, 0].mean() - float(closed.state_means[k, 0])) < band
+            abs(states[:, k, 0].mean() - float(closed.state_means[k, 0]))
+            < 5.0 * se
         )
         obs_var = float(closed.observation_covariances[k, 0, 0])
-        band = 8.0 * np.sqrt(obs_var / NUM_DRAWS) + 8.0 * np.sqrt(
-            obs_var / NUM_PARTICLES
-        )
+        se = np.sqrt(obs_var / NUM_DRAWS + obs_var / NUM_PARTICLES)
+        assert se < 0.2 * np.sqrt(obs_var)  # non-vacuity ceiling
         assert (
             abs(
                 emissions[:, k, 0].mean()
                 - float(closed.observation_means[k, 0])
             )
-            < band
+            < 5.0 * se
         )
 
 
@@ -118,7 +119,8 @@ def test_first_horizon_agrees_with_posterior_predictive_sample():
         reference.var(ddof=1) / reference.shape[0]
         + first.var(ddof=1) / first.shape[0]
     )
-    assert abs(first.mean() - reference.mean()) < 6.0 * pooled_se
+    assert pooled_se < 0.2 * np.sqrt(reference.var(ddof=1))  # non-vacuity
+    assert abs(first.mean() - reference.mean()) < 5.0 * pooled_se
 
 
 def test_input_aware_callbacks_consume_future_inputs():

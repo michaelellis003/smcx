@@ -56,10 +56,12 @@ def test_emission_marginals_match_the_student_t_closed_form():
         scale2 = float(CLOSED.observation_scales[k])
         t_var = scale2 * dof[k] / (dof[k] - 2.0)
         se_mean = np.sqrt(t_var / NUM_DRAWS)
-        assert abs(emissions[:, k].mean() - location) < 6.0 * se_mean
+        assert se_mean < 0.2 * np.sqrt(t_var)  # non-vacuity ceiling
+        assert abs(emissions[:, k].mean() - location) < 5.0 * se_mean
         excess = 6.0 / (dof[k] - 4.0)
         se_var = t_var * np.sqrt((2.0 + excess) / NUM_DRAWS)
-        assert abs(emissions[:, k].var(ddof=1) - t_var) < 8.0 * se_var
+        assert se_var < 0.2 * t_var  # non-vacuity ceiling
+        assert abs(emissions[:, k].var(ddof=1) - t_var) < 5.0 * se_var
 
 
 def test_state_marginals_match_the_scaled_t_moments():
@@ -81,7 +83,8 @@ def test_state_marginals_match_the_scaled_t_moments():
         sample_var = states[:, k].var(axis=0, ddof=1)
         excess = 6.0 / (dof - 4.0)
         se_var = target * np.sqrt((2.0 + excess) / NUM_DRAWS)
-        np.testing.assert_array_less(np.abs(sample_var - target), 8.0 * se_var)
+        assert np.all(se_var < 0.2 * target)  # non-vacuity ceiling
+        np.testing.assert_array_less(np.abs(sample_var - target), 5.0 * se_var)
 
 
 def test_shared_variance_couples_the_horizons():
@@ -131,7 +134,8 @@ def test_variance_discount_decays_the_first_horizon_dof():
     )
     excess = 6.0 / (dof - 4.0)
     se_var = t_var * np.sqrt((2.0 + excess) / NUM_DRAWS)
-    assert abs(sample_var - t_var) < 8.0 * se_var
+    assert se_var < 0.2 * t_var  # non-vacuity ceiling
+    assert abs(sample_var - t_var) < 5.0 * se_var
 
 
 def test_supply_exactly_one_evolution_specification():
@@ -195,7 +199,8 @@ def test_discount_path_marginals_match_the_closed_form():
         location = float(closed.observation_means[k])
         t_var = float(closed.observation_scales[k]) * dof[k] / (dof[k] - 2.0)
         se_mean = np.sqrt(t_var / NUM_DRAWS)
-        assert abs(emissions[:, k].mean() - location) < 6.0 * se_mean
+        assert se_mean < 0.2 * np.sqrt(t_var)  # non-vacuity ceiling
+        assert abs(emissions[:, k].mean() - location) < 5.0 * se_mean
 
 
 def test_bad_transition_matrix_shape_is_rejected():
