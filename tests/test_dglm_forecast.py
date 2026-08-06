@@ -322,3 +322,28 @@ def test_dispersion_discount_above_one_is_rejected():
             transition_covariance=W,
             dispersion_discount=1.5,
         )
+
+
+def test_deterministic_frontier_raises_the_named_domain_error():
+    """Zero predictor variance raises like the filter, not NaN (P2-3)."""
+    posterior = smcx.dglm_filter(
+        jnp.zeros(1),
+        jnp.eye(1),
+        jnp.eye(1),
+        jnp.ones(1),
+        jnp.asarray([1.0, 2.0, 1.0]),
+        family=smcx.poisson(),
+        transition_covariance=0.1 * jnp.eye(1),
+    )
+    frozen = posterior._replace(
+        filtered_covariances=posterior.filtered_covariances.at[-1].set(0.0)
+    )
+    with pytest.raises(ValueError, match="nonpositive forecast variance"):
+        smcx.dglm_forecast(
+            frozen,
+            jnp.eye(1),
+            jnp.ones(1),
+            family=smcx.poisson(),
+            num_steps=2,
+            transition_covariance=jnp.zeros((1, 1)),
+        )

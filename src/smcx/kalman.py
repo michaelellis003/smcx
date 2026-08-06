@@ -3314,6 +3314,32 @@ def _resolve_forecast_model_arguments(
                 f"separate {name}; supply model arrays through the "
                 "record only"
             )
+    # A record with a leading time axis stores the FILTERED HISTORY's
+    # operators; a forecast needs the future operators for each
+    # horizon, which no historical record can supply (2026-08-06
+    # review, P2-2). Only a static record may be reused.
+    timed = [
+        name
+        for name, value, static_rank in (
+            ("transition_matrix", model.transition_matrix, 2),
+            ("transition_covariance", model.transition_covariance, 2),
+            ("observation_matrix", model.observation_matrix, 2),
+            ("observation_covariance", model.observation_covariance, 2),
+            ("transition_bias", model.transition_bias, 1),
+            ("observation_bias", model.observation_bias, 1),
+            ("transition_input_matrix", model.transition_input_matrix, 2),
+            ("observation_input_matrix", model.observation_input_matrix, 2),
+        )
+        if value is not None and jnp.ndim(value) > static_rank
+    ]
+    if timed:
+        raise ValueError(
+            f"{caller} cannot reuse a time-varying LinearGaussianModel "
+            f"(time-varying: {', '.join(timed)}): the record stores the "
+            "filtered history's operators, and a forecast needs each "
+            "horizon's future operators - pass them as loose arrays "
+            "with leading length num_steps"
+        )
     return (
         model.transition_matrix,
         model.transition_covariance,
@@ -3490,11 +3516,15 @@ def kalman_forecast(
 
     The model pieces may arrive individually, or once as the
     `smcx.model.LinearGaussianModel` used by the filter:
-    ``kalman_forecast(posterior, model, num_steps=...)``. The record's
-    initial moments are unused here — the frontier comes from the
-    posterior. Supplying both the record and a separate model array
-    raises ``ValueError``. As with the smoothers, the record cannot
-    verify that the resupplied pieces match the filter run.
+    ``kalman_forecast(posterior, model, num_steps=...)``. Only a
+    static record may be reused: a time-varying record stores the
+    filtered history's operators, and a forecast needs each horizon's
+    future operators, so it is rejected with a named error — pass the
+    future arrays with leading length ``num_steps`` instead. The
+    record's initial moments are unused here — the frontier comes
+    from the posterior. Supplying both the record and a separate model
+    array raises ``ValueError``. As with the smoothers, the record
+    cannot verify that the resupplied pieces match the filter run.
 
     Args:
         filtered_posterior: Forward-pass linear-Gaussian moments.
