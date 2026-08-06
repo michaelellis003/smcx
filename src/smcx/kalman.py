@@ -61,6 +61,7 @@ from smcx.containers import (
     GaussianForecast,
     GaussianForecastPaths,
     GaussianSmootherPosterior,
+    Innovations,
     SqrtGaussianFilterPosterior,
     SqrtGaussianSmootherPosterior,
 )
@@ -87,10 +88,14 @@ if TYPE_CHECKING:
     _SqrtRecordArgument: TypeAlias = (
         SqrtGaussianFilterPosterior | SqrtGaussianSmootherPosterior
     )
+    _GaussianRecordArgument: TypeAlias = (
+        GaussianFilterPosterior | SqrtGaussianFilterPosterior
+    )
 else:
     _CountArgument: TypeAlias = Any
     _SqrtPosteriorArgument: TypeAlias = Any
     _SqrtRecordArgument: TypeAlias = Any
+    _GaussianRecordArgument: TypeAlias = Any
 
 
 class _FilterState(NamedTuple):
@@ -5022,3 +5027,198 @@ def as_covariance(
         "(SqrtGaussianFilterPosterior or SqrtGaussianSmootherPosterior); "
         f"got {type(posterior).__name__}"
     )
+
+
+def innovations(
+    posterior: _GaussianRecordArgument,
+    observation_matrix: Shaped[Array, "*observation_matrix_shape"]
+    | LinearGaussianModel,
+    observation_covariance: Shaped[Array, "*observation_covariance_shape"]
+    | None = None,
+    emissions: GaussianEmissionSequence | None = None,
+    *,
+    observation_bias: Shaped[Array, "*observation_bias_shape"] | None = None,
+    observation_input_matrix: Shaped[Array, "*observation_input_matrix_shape"]
+    | None = None,
+    inputs: GaussianInputSequence | None = None,
+) -> Innovations:
+    r"""Compute standardized one-step forecast errors from a filter run.
+
+    The classical model check: under a correct model the whitened
+    innovations $S_t^{-1/2}\bigl(y_t - H_t a_t - d_t\bigr)$ are iid
+    standard normal, where $a_t$ is the stored predicted mean and
+    $S_t$ the innovation covariance, so their sample moments,
+    autocorrelations, and portmanteau statistics localize
+    misspecification in time (Harvey 1989, section 5.4; the
+    ``residuals.dlmFiltered`` construction of R's dlm). The pieces
+    reassemble the filter's evidence exactly:
+    ``log_evidence_increments[t]`` equals the Gaussian log density
+    built from row ``t``'s observed entries and scales.
+
+    Consumes the stored predicted moments of a
+    `GaussianFilterPosterior` or `SqrtGaussianFilterPosterior` plus
+    the resupplied observation pieces — individually or through the
+    `smcx.model.LinearGaussianModel` used by the filter (then the
+    emissions arrive third, and no loose observation piece may be
+    set). The record cannot verify the resupply, as with the
+    smoothers. Masked emission components (NaN, #433) yield NaN in
+    both output fields at exactly their positions; observed
+    components are whitened within the observed subvector.
+
+    Args:
+        posterior: Forward-pass record with stored predicted moments.
+        observation_matrix: Static ``(observation_dim, state_dim)``
+            matrix or time-varying array with leading length
+            ``ntime``, or the model record.
+        observation_covariance: Static or time-varying positive
+            definite observation-noise covariance.
+        emissions: The observations the filter consumed, shaped
+            ``(ntime, observation_dim)``.
+        observation_bias: Optional static or timed emission offset.
+        observation_input_matrix: Optional input-to-emission matrix.
+        inputs: Optional exogenous inputs, as in `kalman_filter`.
+
+    Returns:
+        `Innovations` with whitened errors and factor diagonals.
+
+    Raises:
+        ValueError: The record type, a shape, a dtype, or a domain
+            check fails, or model pieces arrive both in a record and
+            loosely.
+    """
+    if isinstance(observation_matrix, LinearGaussianModel):
+        model = observation_matrix
+        for name, value in (
+            ("observation_bias", observation_bias),
+            ("observation_input_matrix", observation_input_matrix),
+        ):
+            if value is not None:
+                raise ValueError(
+                    "innovations received a LinearGaussianModel and a "
+                    f"separate {name}; supply model arrays through the "
+                    "record only"
+                )
+        if observation_covariance is not None and emissions is not None:
+            raise ValueError(
+                "innovations received emissions both positionally and by "
+                "keyword; pass them once"
+            )
+        emissions = (
+            emissions
+            if observation_covariance is None
+            else observation_covariance
+        )
+        observation_matrix = model.observation_matrix
+        observation_covariance = model.observation_covariance
+        observation_bias = model.observation_bias
+        observation_input_matrix = model.observation_input_matrix
+    elif observation_covariance is None or emissions is None:
+        raise ValueError(
+            "innovations requires observation_matrix, "
+            "observation_covariance, and emissions unless a "
+            "LinearGaussianModel is passed first"
+        )
+    if isinstance(posterior, SqrtGaussianFilterPosterior):
+        predicted_means = posterior.predicted_means
+        predicted_covariances = _factor_gram(posterior.predicted_factors)
+    elif isinstance(posterior, GaussianFilterPosterior):
+        predicted_means = posterior.predicted_means
+        predicted_covariances = posterior.predicted_covariances
+    else:
+        raise ValueError(
+            "posterior must be a GaussianFilterPosterior or "
+            "SqrtGaussianFilterPosterior"
+        )
+    emissions = _canonicalize_emissions(emissions)
+    _validate_emission_rows(emissions, allow_partial=True)
+    num_timesteps, observation_dim = emissions.shape
+    if predicted_means.shape[0] != num_timesteps:
+        raise ValueError(
+            "emissions must have one row per stored step; got "
+            f"{num_timesteps} rows for {predicted_means.shape[0]} steps"
+        )
+    state_dim = predicted_means.shape[1]
+    dtype = predicted_means.dtype
+    _check_float_array(emissions, "emissions", dtype)
+    _check_float_array(observation_matrix, "observation_matrix", dtype)
+    _check_float_array(observation_covariance, "observation_covariance", dtype)
+    observation_matrices = _time_matrix(
+        observation_matrix,
+        num_timesteps,
+        observation_dim,
+        state_dim,
+        "observation_matrix",
+    )
+    observation_covariances = _time_matrix(
+        observation_covariance,
+        num_timesteps,
+        observation_dim,
+        observation_dim,
+        "observation_covariance",
+    )
+    observation_biases = _time_vector(
+        observation_bias,
+        num_timesteps,
+        observation_dim,
+        dtype,
+        "observation_bias",
+    )
+    if inputs is None:
+        if observation_input_matrix is not None:
+            raise ValueError("input matrices require inputs")
+    else:
+        inputs = _canonicalize_inputs(inputs, num_timesteps)
+        _check_float_array(inputs, "inputs", dtype)
+        if observation_input_matrix is not None:
+            observation_controls = _time_matrix(
+                observation_input_matrix,
+                num_timesteps,
+                observation_dim,
+                inputs.shape[1],
+                "observation_input_matrix",
+            )
+            observation_biases = observation_biases + jnp.einsum(
+                "tdu,tu->td", observation_controls, inputs
+            )
+    _check_covariance(
+        observation_covariance,
+        "observation_covariance",
+        positive_definite=True,
+    )
+
+    def _one_step(mean, covariance, operator, noise, bias, emission):
+        mask, any_missing, _, safe_emission, noise_eff = (
+            _masked_observation_pieces(emission, noise)
+        )
+        operator_eff = jnp.where(
+            any_missing,
+            jnp.where(mask[:, None], jnp.zeros_like(operator), operator),
+            operator,
+        )
+        residual = jnp.where(
+            mask,
+            jnp.zeros_like(emission),
+            safe_emission - (operator @ mean + bias),
+        )
+        innovation_covariance = _symmetrize(
+            operator_eff @ covariance @ operator_eff.T + noise_eff
+        )
+        innovation_cholesky = jnp.linalg.cholesky(
+            innovation_covariance, symmetrize_input=False
+        )
+        whitened = solve_triangular(innovation_cholesky, residual, lower=True)
+        not_a_number = jnp.asarray(jnp.nan, dtype=whitened.dtype)
+        return (
+            jnp.where(mask, not_a_number, whitened),
+            jnp.where(mask, not_a_number, jnp.diagonal(innovation_cholesky)),
+        )
+
+    standardized, scales = vmap(_one_step)(
+        predicted_means,
+        predicted_covariances,
+        observation_matrices,
+        observation_covariances,
+        observation_biases,
+        emissions,
+    )
+    return Innovations(standardized=standardized, scales=scales)

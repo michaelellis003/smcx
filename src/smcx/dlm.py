@@ -47,6 +47,7 @@ from smcx.containers import (
     DLMFilterPosterior,
     DLMForecast,
     DLMForecastPaths,
+    DLMInnovations,
     DLMSmootherPosterior,
 )
 from smcx.kalman import (
@@ -980,4 +981,192 @@ def dlm_forecast_sample(
     return DLMForecastPaths(
         state_paths=jnp.swapaxes(state_paths, 0, 1),
         emission_paths=jnp.swapaxes(emission_paths, 0, 1),
+    )
+
+
+def dlm_innovations(
+    filtered_posterior: DLMFilterPosterior,
+    initial_mean: Shaped[Array, "*initial_mean_shape"],
+    initial_scale_free_covariance: Shaped[Array, "*initial_cov_shape"],
+    transition_matrix: Shaped[Array, "*transition_shape"],
+    observation_vector: Shaped[Array, "*observation_shape"],
+    emissions: GaussianEmissionSequence,
+    *,
+    scale_free_transition_covariance: (
+        Shaped[Array, "*evolution_shape"] | None
+    ) = None,
+    discount: Scalar | None = None,
+    prior_shape: Scalar = 1.0,
+    prior_scale: Scalar = 1.0,
+    variance_discount: Scalar = 1.0,
+) -> DLMInnovations:
+    r"""Compute standardized Student-t forecast errors from a DLM run.
+
+    Entry $t$ is the one-step forecast error scaled by the Student-t
+    forecast scale $\sqrt{S_{t-1}\,\tilde q_t}$ under the step's
+    prior conjugate pair, so under a correct model entry $t$ follows
+    a Student-t with the prior degrees of freedom — the univariate
+    analogue of `innovations`, with the same evidence identity:
+    ``log_evidence_increments[t]`` equals the Student-t log density
+    of ``standardized[t]`` at ``dofs[t]`` minus ``log(scales[t])``.
+
+    The record stores post-update quantities only, so the prior side
+    is replayed from the resupplied model pieces — including the
+    initial pair, which the first datum conditions directly. The
+    record cannot verify the resupply. Missing data (NaN) carry NaN
+    in every output field.
+
+    Args:
+        filtered_posterior: Output of `smcx.dlm_filter`.
+        initial_mean: The prior mean the filter was given.
+        initial_scale_free_covariance: The prior scale-free
+            covariance the filter was given.
+        transition_matrix: Static state evolution matrix $G$.
+        observation_vector: Observation vector $F$, shape
+            ``(state_dim,)``.
+        emissions: The observations the filter consumed.
+        scale_free_transition_covariance: Static or timed evolution
+            covariance; supply exactly one of this and ``discount``.
+        discount: State discount $\delta \in (0, 1]$ used by the
+            filter.
+        prior_shape: The filter's Inverse-Gamma prior degrees of
+            freedom.
+        prior_scale: The filter's Inverse-Gamma prior point estimate.
+        variance_discount: Variance discount $\delta_V \in (0, 1]$
+            used by the filter.
+
+    Returns:
+        `DLMInnovations` with scaled errors, scales, and degrees of
+        freedom.
+
+    Raises:
+        ValueError: A shape, dtype, count, or domain check fails, or
+            the evolution specification is not exactly one of
+            covariance and discount.
+    """
+    if (scale_free_transition_covariance is None) == (discount is None):
+        raise ValueError(
+            "supply exactly one of scale_free_transition_covariance "
+            "and discount"
+        )
+    num_timesteps, state_dim, dtype, canonical = _validate_dlm_filter_posterior(
+        filtered_posterior
+    )
+    del canonical
+    emissions = _canonicalize_emissions(emissions)
+    if emissions.ndim != 2 or emissions.shape[1] != 1:
+        raise ValueError(
+            "dlm_innovations is univariate: emissions must have shape "
+            f"(ntime,) or (ntime, 1); got {emissions.shape}"
+        )
+    if emissions.shape[0] != num_timesteps:
+        raise ValueError(
+            "emissions must have one row per stored step; got "
+            f"{emissions.shape[0]} rows for {num_timesteps} steps"
+        )
+    _check_float_array(emissions, "emissions")
+    for name, value, expected in (
+        ("initial_mean", initial_mean, (state_dim,)),
+        (
+            "initial_scale_free_covariance",
+            initial_scale_free_covariance,
+            (state_dim, state_dim),
+        ),
+        ("transition_matrix", transition_matrix, (state_dim, state_dim)),
+        ("observation_vector", observation_vector, (state_dim,)),
+    ):
+        _check_float_array(value, name, dtype)
+        if value.shape != expected:
+            raise ValueError(
+                f"{name} must have shape {expected}; got {value.shape}"
+            )
+    use_discount = discount is not None
+    if use_discount:
+        discount_value = _validate_positive_scalar(discount, "discount")
+        if not isinstance(discount_value, core.Tracer) and (
+            float(discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+        ):
+            raise ValueError(
+                f"discount must be in (0, 1]; got {discount_value}"
+            )
+        inverse_discount = 1.0 / jnp.asarray(discount_value, dtype=dtype)
+        timed_evolution = jnp.zeros(
+            (num_timesteps - 1, state_dim, state_dim), dtype=dtype
+        )
+    else:
+        value = scale_free_transition_covariance
+        assert value is not None  # XOR-checked above
+        _check_float_array(value, "scale_free_transition_covariance", dtype)
+        timed_evolution = _time_matrix(
+            value,
+            num_timesteps - 1,
+            state_dim,
+            state_dim,
+            "scale_free_transition_covariance",
+        )
+        inverse_discount = jnp.asarray(1.0, dtype=dtype)
+    variance_discount_value = _validate_positive_scalar(
+        variance_discount, "variance_discount"
+    )
+    if not isinstance(variance_discount_value, core.Tracer) and (
+        float(variance_discount_value) > 1.0  # ty: ignore[invalid-argument-type]
+    ):
+        raise ValueError(
+            f"variance_discount must be in (0, 1]; got "
+            f"{variance_discount_value}"
+        )
+    variance_discount_array = jnp.asarray(variance_discount_value, dtype=dtype)
+    shape_0 = _validate_positive_scalar(prior_shape, "prior_shape")
+    scale_0 = _validate_positive_scalar(prior_scale, "prior_scale")
+
+    prior_means = jnp.concatenate((
+        jnp.asarray(initial_mean, dtype=dtype)[None],
+        jnp.einsum(
+            "ij,tj->ti",
+            transition_matrix,
+            filtered_posterior.filtered_means[:-1],
+        ),
+    ))
+    propagated = jnp.einsum(
+        "ij,tjk,lk->til",
+        transition_matrix,
+        filtered_posterior.filtered_scale_free_covariances[:-1],
+        transition_matrix,
+    )
+    if use_discount:
+        later_covariances = propagated * inverse_discount
+    else:
+        later_covariances = propagated + timed_evolution
+    prior_covariances = jnp.concatenate((
+        jnp.asarray(initial_scale_free_covariance, dtype=dtype)[None],
+        later_covariances,
+    ))
+    prior_shapes = jnp.concatenate((
+        jnp.asarray(shape_0, dtype=dtype)[None],
+        variance_discount_array * filtered_posterior.scale_shapes[:-1],
+    ))
+    prior_scales = jnp.concatenate((
+        jnp.asarray(scale_0, dtype=dtype)[None],
+        filtered_posterior.scale_estimates[:-1],
+    ))
+
+    forecast_means = prior_means @ observation_vector
+    scale_free_variances = (
+        jnp.einsum(
+            "d,tde,e->t",
+            observation_vector,
+            prior_covariances,
+            observation_vector,
+        )
+        + 1.0
+    )
+    scales = jnp.sqrt(prior_scales * scale_free_variances)
+    residuals = emissions[:, 0] - forecast_means
+    standardized = residuals / scales
+    not_a_number = jnp.asarray(jnp.nan, dtype=dtype)
+    missing = jnp.isnan(emissions[:, 0])
+    return DLMInnovations(
+        standardized=jnp.where(missing, not_a_number, standardized),
+        scales=jnp.where(missing, not_a_number, scales),
+        dofs=jnp.where(missing, not_a_number, prior_shapes),
     )

@@ -126,6 +126,31 @@ produce a finite Cholesky factor with a strictly positive diagonal. These
 checks run at eager entry; outer JAX transformations can lower endpoint
 arithmetic differently.
 
+## Check the model with its innovations
+
+The standardized one-step forecast errors are the classical model
+check: under a correct model they are iid standard normal, so their
+mean, variance, and autocorrelations should sit inside sampling
+bands of roughly $2/\sqrt{T}$:
+
+```python
+import math
+
+checks = smcx.innovations(exact, model, observations)
+values = np.asarray(checks.standardized[:, 0])
+lag_one = float(np.corrcoef(values[:-1], values[1:])[0, 1])
+print("innovation mean:", round(float(values.mean()), 3))
+print("innovation variance:", round(float(values.var(ddof=1)), 3))
+print("lag-1 autocorrelation:", round(lag_one, 3))
+```
+
+For this run the mean is 0.032, the variance 0.837, and the lag-one
+autocorrelation −0.022 — all inside the band of about 0.2 at
+$T = 100$, as they should be for the true model. A misspecified
+transition shows up here as autocorrelated innovations, and a wrong
+noise scale as variance away from one. `dlm_innovations` is the
+Student-t analogue for `dlm_filter` runs.
+
 ## Run a particle filter
 
 The bootstrap filter proposes from the transition and weights by the
