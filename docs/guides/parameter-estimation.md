@@ -135,9 +135,98 @@ gradient answer on both parameters, the same maximum approached from
 different directions. Automating that cross-method agreement is the
 cheapest correctness check available for your own fits.
 
+## Fully Bayesian: the two-block Gibbs sampler
+
+Maximum likelihood and EM return point estimates. The conjugate
+route to full posteriors over both variances is a two-block Gibbs
+sampler — dlm's `dlmGibbsDIG`, and the standard construction
+(Frühwirth-Schnatter 1994): draw the state trajectory by FFBS given
+the variances, then draw each variance from its inverse-gamma full
+conditional given the trajectory. With inverse-gamma priors
+$\sigma^2 \sim \mathrm{IG}(a, b)$ the full conditionals are
+
+$$
+\sigma_q^2 \mid x \sim \mathrm{IG}\Bigl(a + \tfrac{T-1}{2},\;
+b + \tfrac{1}{2}\sum_{t=2}^{T}(x_t - x_{t-1})^2\Bigr),
+\qquad
+\sigma_r^2 \mid x, y \sim \mathrm{IG}\Bigl(a + \tfrac{T}{2},\;
+b + \tfrac{1}{2}\sum_{t=1}^{T}(y_t - x_t)^2\Bigr),
+$$
+
+and `posterior_sample` is the FFBS block. One step of the chain is
+one filter pass, one trajectory draw, and two gamma draws — wrap it
+in `jax.jit` (the eager boundary checks skip themselves under
+tracing, which is their documented contract) and the whole chain
+runs in about a second:
+
+```python
+import numpy as np
+
+A_PRIOR, B_PRIOR = 2.0, 0.1
+T = observations.shape[0]
+y = observations[:, 0]
+
+
+@jax.jit
+def gibbs_step(key, q_var, r_var):
+    k_path, k_q, k_r = jr.split(key, 3)
+    model = build(q_var, r_var)
+    filtered = smcx.kalman_filter(model, observations)
+    path = smcx.posterior_sample(k_path, filtered, model, num_draws=1)[0, :, 0]
+    innovations_sq = jnp.sum((path[1:] - path[:-1]) ** 2)
+    residual_sq = jnp.sum((y - path) ** 2)
+    q_draw = 1.0 / (
+        jr.gamma(k_q, A_PRIOR + 0.5 * (T - 1))
+        / (B_PRIOR + 0.5 * innovations_sq)
+    )
+    r_draw = 1.0 / (
+        jr.gamma(k_r, A_PRIOR + 0.5 * T) / (B_PRIOR + 0.5 * residual_sq)
+    )
+    return q_draw, r_draw
+
+
+key = jr.key(29)
+q_var_draw, r_var_draw = jnp.asarray(0.25), jnp.asarray(0.25)
+q_draws, r_draws = [], []
+for iteration in range(600):
+    key, subkey = jr.split(key)
+    q_var_draw, r_var_draw = gibbs_step(subkey, q_var_draw, r_var_draw)
+    if iteration >= 100:
+        q_draws.append(float(q_var_draw))
+        r_draws.append(float(r_var_draw))
+
+q_sd_draws = np.sqrt(np.asarray(q_draws))
+r_sd_draws = np.sqrt(np.asarray(r_draws))
+print(
+    "q_sd posterior:",
+    round(q_sd_draws.mean(), 3),
+    np.round(np.percentile(q_sd_draws, [5, 95]), 3),
+)
+print(
+    "r_sd posterior:",
+    round(r_sd_draws.mean(), 3),
+    np.round(np.percentile(r_sd_draws, [5, 95]), 3),
+)
+history = q_sd_draws  # keeps the shared fence namespace's final name
+```
+
+This prints a posterior mean of 0.297 with 90 percent interval
+(0.247, 0.366) for $\sigma_q$ and 0.652 with (0.593, 0.712) for
+$\sigma_r$: both intervals bracket the simulating truth of 0.3 and
+0.7, and both contain the ML estimates from above — the three
+routes agree, and only this one prices the uncertainty. The chain is
+exact but serial; each key is split once per iteration so the run
+is reproducible from `jr.key(29)`. Mixing degrades as either
+variance approaches zero (the trajectory and the variance then pin
+each other down), which is when the interweaving and
+non-centered-parameterization literature becomes relevant.
+
 ## Which to use
 
-EM needs no learning rate and every iteration provably improves, but
+The Gibbs sampler gives full posteriors at the cost of a chain;
+when a point estimate suffices, the choice between the first two
+routes is about tuning. EM needs no learning rate and every
+iteration provably improves, but
 its steps shrink near the optimum: after the sixty sweeps above the
 estimates are still moving in the third decimal, and high-precision
 convergence takes hundreds more. Gradient methods reach the same optimum in
