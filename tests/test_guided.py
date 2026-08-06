@@ -293,6 +293,11 @@ class TestGuidedProposalReferences:
                 ])
             values = np.asarray(rows)
             estimator_se = values.std(axis=0, ddof=1) / np.sqrt(values.shape[0])
+            # Non-vacuity ceiling (D7): a high-variance fixture must
+            # not widen the gate into meaninglessness.
+            assert np.all(
+                estimator_se < 0.2 * np.maximum(np.abs(exact_targets), 0.25)
+            )
             # 2e-5 is the explicit f32/Metal arithmetic budget.
             np.testing.assert_array_less(
                 np.abs(values.mean(axis=0) - exact_targets),

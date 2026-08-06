@@ -51,6 +51,11 @@ def _group(result, name):
 
 
 def test_fixed_key_gives_frozen_filter_draws():
+    # Paired oracles (D6): the draw path is systematic resampling of
+    # the stored cloud - tests/test_resampling.py::TestContract and
+    # its Douc variance gates cover the resampler, and
+    # test_independent_runs_map_to_chain_and_draw_dimensions below
+    # pins the chain/draw mapping.
     result = to_arviz(_filter(), key=jr.key(0), num_draws=3)
     np.testing.assert_array_equal(
         _group(result, "posterior")["theta"].values[0, :, :, 0],

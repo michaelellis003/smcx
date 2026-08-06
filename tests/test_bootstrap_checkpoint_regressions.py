@@ -39,7 +39,12 @@ def test_bootstrap_filter_preserves_frozen_fixed_key_output():
     """Checkpoint additions must not change the legacy one-shot output.
 
     Re-frozen 2026-08-06 for the deliberate potential-centering fix;
-    the values moved at unit-in-the-last-place level only.
+    the values moved at unit-in-the-last-place level only. Paired
+    oracles (D6): tests/test_bootstrap.py::TestBootstrapVsKalman
+    covers this path against the exact Kalman filter, and
+    tests/test_bootstrap_checkpoints.py
+    ::test_one_shot_equals_init_then_repeated_step pins the streaming
+    equivalence.
     """
     posterior = smcx.bootstrap_filter(
         jr.key(314159),
