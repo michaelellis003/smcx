@@ -86,6 +86,7 @@ nav:
   - Guides:
       - ArviZ reporting: guides/arviz.md
       - Custom models: guides/custom-models.md
+      - Structural models: guides/structural-models.md
       - Parameter estimation: guides/parameter-estimation.md
       - Rao-Blackwellized PF: guides/rao-blackwellized-pf.md
       - Reproducibility: guides/reproducibility.md
