@@ -207,14 +207,12 @@ def test_rejected_regime_runs_and_tracks_the_f64_reference():
     assert np.all(np.isfinite(np.asarray(sqrt.filtered_means)))
     gram = _gram(sqrt.filtered_factors)
     min_eig_sqrt = min(np.linalg.eigvalsh(step).min() for step in gram)
+    # PSD by construction up to eigensolver roundoff. The covariance
+    # form's minimum eigenvalue in this regime varies BY RUNNER (the
+    # f32 LAPACK variance class of #300), so no cross-form eigenvalue
+    # comparison is asserted here — the covariance-side failure is
+    # pinned by the smoother-boundary rejection test in slice 2.
     assert min_eig_sqrt > -1e-8
-
-    covariance_form = smcx.kalman_filter(*args32)
-    min_eig_cov = min(
-        np.linalg.eigvalsh(step).min()
-        for step in np.asarray(covariance_form.filtered_covariances)
-    )
-    assert min_eig_cov < min_eig_sqrt
 
     if jax.config.read("jax_enable_x64"):
         args64 = _ill_conditioned_fixture(jnp.float64)
