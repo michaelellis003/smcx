@@ -32,6 +32,7 @@ from smcx.types import (
     ParticleCloud,
     PRNGKeyT,
 )
+from smcx.weights import _center_log_batch
 
 _DrawCloud: TypeAlias = PyTree[Shaped[Array, "num_draws ..."]]
 if TYPE_CHECKING:
@@ -98,7 +99,16 @@ def _backward_logits(
         _validate_minimum_float_precision(
             transition, name="log_transition output"
         )
-    return transition + log_weights[None, :]
+    # Center each draw's transition row before it meets the normalized
+    # filtering weights (2026-08-06 review, P1): the backward law is
+    # invariant to a per-row shift, and a large common transition
+    # offset would otherwise absorb the weights' relative information.
+    # Resolving the promotion first keeps a weakly-typed callback
+    # output from strengthening through the centering reduction.
+    centered, _ = _center_log_batch(
+        transition.astype(jnp.result_type(log_weights, transition))
+    )
+    return centered + log_weights[None, :]
 
 
 def _draw_previous(

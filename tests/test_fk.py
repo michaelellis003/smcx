@@ -7,6 +7,10 @@ The characterization values were captured from ``bootstrap_filter``
 at v1.16.0 (commit 8aa3ac8, before the loop was extracted into
 ``smcx.fk``) and pin the rewiring bitwise on CPU: any change to the
 key schedule, weight rule, or evidence accumulation fails here.
+Re-frozen 2026-08-06 for the deliberate potential-centering fix
+(offset-invariant weight combination); the new values differ from
+the v1.16.0 capture at unit-in-the-last-place level only, and the
+key schedule and every resampling decision are unchanged.
 """
 
 import jax
@@ -81,8 +85,8 @@ class TestFixedKeyCharacterization:
             [
                 7.358808663574204,
                 7.186536808200305,
-                6.253748789587073,
-                5.702218383013827,
+                6.253748789587071,
+                5.702218383013829,
                 5.6649161548844,
             ],
         )
@@ -90,10 +94,10 @@ class TestFixedKeyCharacterization:
             np.asarray(posterior.log_evidence_increments, dtype=np.float64),
             [
                 -0.26557714548728906,
-                -0.19085703698798406,
-                -0.2578773563344199,
-                -0.1549142876501599,
-                -0.1958651755189813,
+                -0.1908570369879842,
+                -0.2578773563344198,
+                -0.15491428765015977,
+                -0.1958651755189814,
             ],
         )
         np.testing.assert_array_equal(
@@ -102,11 +106,11 @@ class TestFixedKeyCharacterization:
                 -2.371662394403776,
                 -2.1139233459107087,
                 -2.4337907438084647,
-                -1.366212813460103,
-                -1.4336862444081755,
+                -1.3662128134601033,
+                -1.4336862444081753,
                 -4.000778825077267,
-                -1.9131331691718498,
-                -3.249605525842992,
+                -1.9131331691718496,
+                -3.2496055258429917,
             ],
         )
 
@@ -127,15 +131,15 @@ class TestFixedKeyCharacterization:
         # Characterization is deliberately bitwise: exact equality.
         np.testing.assert_array_equal(
             np.asarray(posterior.marginal_loglik, dtype=np.float64),
-            -1.3814293076617907,
+            -1.381429307661791,
         )
         np.testing.assert_array_equal(
             np.asarray(posterior.ess, dtype=np.float64),
             [
                 5.467540219699177,
-                5.118317361827714,
+                5.118317361827715,
                 7.277171788942068,
-                7.1869928944572665,
+                7.186992894457259,
                 7.472179594273397,
             ],
         )
@@ -263,20 +267,20 @@ class TestTwistAndCompositeCharacterization:
             np.asarray(posterior.ess, dtype=np.float64),
             [
                 6.396713581473555,
-                5.413767405195838,
-                4.1083772585095115,
+                5.41376740519584,
+                4.108377258509512,
                 7.554944040058368,
-                6.495867893564241,
+                6.495867893564239,
             ],
         )
         np.testing.assert_array_equal(
             np.asarray(posterior.log_evidence_increments, dtype=np.float64),
             [
                 -0.5857624411535574,
-                -0.3119479763077553,
-                -0.33298988525153717,
-                -0.3143980307753711,
-                -0.1943877350006029,
+                -0.3119479763077554,
+                -0.3329898852515369,
+                -0.3143980307753713,
+                -0.19438773500060294,
             ],
         )
         np.testing.assert_array_equal(
@@ -284,7 +288,7 @@ class TestTwistAndCompositeCharacterization:
             [
                 -2.094168130848879,
                 -1.8044431602557178,
-                -1.6525589410444594,
+                -1.6525589410444592,
                 -3.8327280922543805,
                 -3.395475561798124,
                 -1.7005531971111998,
@@ -308,28 +312,28 @@ class TestTwistAndCompositeCharacterization:
 
         np.testing.assert_array_equal(
             np.asarray(posterior.marginal_loglik, dtype=np.float64),
-            -0.7156180161338206,
+            -0.7156180161338204,
         )
         np.testing.assert_array_equal(
             np.asarray(posterior.log_evidence_increments, dtype=np.float64),
             [
                 -0.2837211288005148,
-                0.06362456791643978,
-                -0.17111978682049145,
-                0.07081450868941652,
-                -0.39521617711867063,
+                0.06362456791643989,
+                -0.17111978682049123,
+                0.07081450868941624,
+                -0.3952161771186705,
             ],
         )
         np.testing.assert_array_equal(
             np.asarray(posterior.filtered_log_weights, dtype=np.float64)[-1],
             [
-                -2.33427073096525,
-                -3.0271064963558034,
+                -2.3342707309652493,
+                -3.0271064963558043,
                 -3.149824119353661,
-                -1.3051532796418333,
-                -11.259551063951383,
+                -1.3051532796418335,
+                -11.259551063951381,
                 -1.0724108278470375,
-                -2.6230329472833596,
+                -2.6230329472833587,
                 -2.072308969364232,
             ],
         )

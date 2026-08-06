@@ -331,7 +331,10 @@ def guided_fk(
             ("model.log_proposal", log_q),
         ):
             _validate_log_density_batch(values, num_particles, name=name)
-        return log_obs + log_f - log_q
+        # Difference first: when the proposal equals the transition the
+        # two cancel exactly at any magnitude, where the left-to-right
+        # order would absorb the observation term (2026-08-06 review).
+        return log_obs + (log_f - log_q)
 
     return base._replace(
         m=m,

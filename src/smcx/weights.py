@@ -96,6 +96,38 @@ def _log_normalize_axis_parts(
     )
 
 
+def _center_log_batch(values: Array, *, axis: int = -1) -> tuple[Array, Array]:
+    """Center a log batch on its per-slice peak before any combination.
+
+    A log potential is defined only up to an additive constant, but a
+    constant larger than the combining weights' floating-point
+    resolution absorbs their relative information when the two are
+    added. Subtracting the peak first keeps the combination exact:
+    under a constant batch the centered values are exactly zero. The
+    returned shift restores any absolute normalizer as one scalar
+    addition. A slice with no finite peak (all ``-inf``, or containing
+    ``NaN``/``+inf``) is returned unchanged with a zero shift so
+    degeneracy gates observe the raw values.
+
+    Args:
+        values: Log-domain batch with at least one entry along
+            ``axis``.
+        axis: Axis holding one batch per remaining index.
+
+    Returns:
+        A tuple ``(centered, shift)`` where ``centered`` is
+        ``values - shift`` broadcast along ``axis`` and ``shift`` has
+        the keep-dimensions shape of the per-slice peak.
+    """
+    # The reduction strengthens a weakly-typed batch, so callers that
+    # combine the centered values with carried weights must resolve
+    # the promotion first (values.astype(jnp.result_type(...))) or the
+    # original weak-type combination rules change under x64.
+    peak = jnp.max(values, axis=axis, keepdims=True)
+    shift = jax.lax.stop_gradient(jnp.where(jnp.isfinite(peak), peak, 0.0))
+    return values - shift, shift
+
+
 def _log_normalize_axis(
     log_weights: Array,
     *,

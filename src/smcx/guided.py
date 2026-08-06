@@ -108,7 +108,11 @@ def _guided_fk(
                 _validate_log_density_batch(
                     cast(Array, values), num_particles, name=name
                 )
-            return log_obs + log_f - log_q
+            # Difference first: when the proposal equals the transition
+            # the two cancel exactly at any magnitude, where the
+            # left-to-right order would absorb the observation term
+            # (2026-08-06 review, P1).
+            return log_obs + (log_f - log_q)
 
         return FeynmanKac(
             m0=m0,

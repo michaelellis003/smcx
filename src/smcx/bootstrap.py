@@ -83,8 +83,8 @@ from smcx.types import (
     TransitionSampler,
     TransitionSamplerWithInput,
 )
+from smcx.weights import _center_log_batch, log_normalize
 from smcx.weights import ess as compute_ess
-from smcx.weights import log_normalize
 
 if TYPE_CHECKING:
     _CountArgument: TypeAlias = SupportsIndex
@@ -296,12 +296,24 @@ def _bootstrap_particle_step(
         name="log_observation_fn",
     )
 
+    # Center the potential before it meets the carried normalized
+    # weights: a large common offset would otherwise absorb their
+    # relative information (2026-08-06 review, P1). The scalar shift
+    # rejoins the normalizer, so the evidence increment is unchanged.
+    # Resolving the promotion first keeps a weakly-typed callback
+    # output from strengthening through the centering reduction.
+    log_obs_array = cast(Array, log_obs)
+    log_obs_array = log_obs_array.astype(
+        jnp.result_type(state.log_weights, log_obs_array)
+    )
+    centered_obs, log_obs_shift = _center_log_batch(log_obs_array)
     log_w_unnorm = jnp.where(
         do_resample,
-        log_obs,
-        state.log_weights + log_obs,
+        centered_obs,
+        state.log_weights + centered_obs,
     )
-    log_w_norm, log_sum = log_normalize(log_w_unnorm)
+    log_w_norm, centered_sum = log_normalize(log_w_unnorm)
+    log_sum = centered_sum + jnp.squeeze(log_obs_shift, axis=-1)
     log_ev_inc = jnp.where(
         do_resample,
         log_sum - jnp.asarray(math.log(num_particles)),

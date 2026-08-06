@@ -49,6 +49,7 @@ from jax import jit, vmap
 from jaxtyping import Array, Bool, Float
 
 from smcx._covariance import _weighted_covariance_factor
+from smcx._numerics import _neumaier_add
 from smcx._static_mutation import (
     _resolve_static_mutation,
     _run_custom_mutation_sweep,
@@ -77,8 +78,8 @@ from smcx.types import (
     TemperingMutationStepFn,
     TemperingScheduleFn,
 )
+from smcx.weights import _center_log_batch, log_normalize
 from smcx.weights import ess as compute_ess
-from smcx.weights import log_normalize
 
 if TYPE_CHECKING:
     _CountArgument: TypeAlias = SupportsIndex
@@ -270,7 +271,11 @@ def temper(
             ll = jnp.asarray(batch_lik(prop))
             _validate_log_density_batch(lp, n, name="log_prior_fn")
             _validate_log_density_batch(ll, n, name="log_likelihood_fn")
-            log_alpha = (lp + phi_arr * ll) - (logprior + phi_arr * loglik)
+            # Difference per term first: a large common log-likelihood
+            # level cancels exactly before the temperature scales it,
+            # where the summed form would quantize the acceptance
+            # ratio to the level's own resolution (2026-08-06 review).
+            log_alpha = (lp - logprior) + phi_arr * (ll - loglik)
             u = jr.uniform(ku, (n,))
             log_u = jnp.log(jnp.maximum(u, jnp.finfo(u.dtype).tiny))
             accept = log_u < log_alpha
@@ -312,7 +317,7 @@ def temper(
             )
 
     def ess_at(phi_new: float, phi: float) -> float:
-        return float(compute_ess(log_w + (phi_new - phi) * loglik))
+        return float(compute_ess(log_w + (phi_new - phi) * centered_loglik))
 
     phi = 0.0
     temps: list[float] = []
@@ -323,11 +328,21 @@ def temper(
     comp = jnp.zeros(())
 
     for _ in range(max_stages):
+        # Center the log likelihood before any temperature scales it
+        # (2026-08-06 review, P1): the products below would otherwise
+        # quantize the likelihood spread to the resolution of a large
+        # common level, absorbing the carried weights and corrupting
+        # the schedule. The scalar shift rejoins the evidence, scaled
+        # by each stage's delta, after the shared correction.
+        centered_loglik, loglik_peak = _center_log_batch(
+            loglik.astype(jnp.result_type(log_w, loglik))
+        )
+        loglik_shift = jnp.squeeze(loglik_peak, axis=-1)
         # --- adaptive schedule: bisect ESS(phi') = target ----------
         # Match ess_at's promotion by constructing the zero increment with
         # loglik's dtype before adding it to log_w.
         probe_delta = min(1e-6, 1.0 - phi)
-        _, probe_log_sum = log_normalize(log_w + probe_delta * loglik)
+        _, probe_log_sum = log_normalize(log_w + probe_delta * centered_loglik)
         _raise_if_degenerate(probe_log_sum)
         e_full = ess_at(1.0, phi)
         if math.isnan(e_full) and math.isnan(ess_at(phi + 1e-6, phi)):
@@ -436,7 +451,7 @@ def temper(
                 log_evidence=total,
                 log_evidence_correction=comp,
             ),
-            delta * loglik,
+            delta * centered_loglik,
             kr,
             km,
             resampling_fn=resampling_fn,
@@ -456,12 +471,17 @@ def temper(
         log_w = stage_state.log_weights
         total = stage_state.log_evidence
         comp = stage_state.log_evidence_correction
+        # Restore the centered likelihood's contribution to this
+        # stage's normalizer; with a zero shift both updates are
+        # bitwise no-ops.
+        shift_term = delta * loglik_shift
+        total, comp = _neumaier_add(total, comp, shift_term)
         stage_ess = float(stage_info.selection_ess)
 
         temps.append(phi_new)
         ess_trace.append(stage_ess)
         acc_trace.append(stage_info.acceptance_rate)
-        increment_trace.append(stage_info.log_evidence_increment)
+        increment_trace.append(stage_info.log_evidence_increment + shift_term)
         phi = phi_new
         if phi >= 1.0:
             break
