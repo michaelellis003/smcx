@@ -416,6 +416,49 @@ class SqrtGaussianSmootherPosterior(NamedTuple):
     smoothed_factors: Float[Array, "ntime state_dim state_dim"]
 
 
+class Innovations(NamedTuple):
+    r"""Standardized one-step forecast errors of a Gaussian filter run.
+
+    Under a correct model the observed entries of ``standardized`` are
+    iid standard normal: each row is whitened by the Cholesky factor
+    of its innovation covariance, so entries are independent within a
+    row as well as across time. ``scales`` holds that factor's
+    diagonal — the conditional one-step forecast standard deviations,
+    equal to the marginal ones when the innovation covariance is
+    diagonal. Masked (NaN) emission components carry NaN in both
+    fields at exactly their positions.
+
+    Attributes:
+        standardized: Whitened innovations, shape
+            ``(ntime, observation_dim)``.
+        scales: Innovation-factor diagonals, shape
+            ``(ntime, observation_dim)``.
+    """
+
+    standardized: Float[Array, "ntime observation_dim"]
+    scales: Float[Array, "ntime observation_dim"]
+
+
+class DLMInnovations(NamedTuple):
+    r"""Standardized one-step forecast errors of a DLM run.
+
+    Entry ``t`` is the forecast error scaled by the Student-t forecast
+    scale under the step's prior conjugate pair, so under a correct
+    model entry ``t`` follows a Student-t distribution with
+    ``dofs[t]`` degrees of freedom (not a normal — its variance is
+    ``dofs / (dofs - 2)``). Missing data carry NaN.
+
+    Attributes:
+        standardized: Scaled forecast errors, shape ``(ntime,)``.
+        scales: Student-t forecast scales, shape ``(ntime,)``.
+        dofs: Per-step degrees of freedom, shape ``(ntime,)``.
+    """
+
+    standardized: Float[Array, " ntime"]
+    scales: Float[Array, " ntime"]
+    dofs: Float[Array, " ntime"]
+
+
 class GaussianForecast(NamedTuple):
     r"""Linear-Gaussian k-step forecast distributions.
 
