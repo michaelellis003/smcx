@@ -118,7 +118,7 @@ from smcx.resampling import (
 from smcx.runner import run_particle_filter
 from smcx.simulate import simulate
 from smcx.smc2 import smc2
-from smcx.smoothing import backward_simulation
+from smcx.smoothing import backward_simulation, smoothing_weights
 from smcx.tempering import temper
 from smcx.types import StaticMutation
 from smcx.weights import ess, log_ess, log_normalize, normalize
@@ -224,6 +224,7 @@ __all__ = [
     "simulate",
     "smc2",
     "smoothed_cross_covariances",
+    "smoothing_weights",
     "stratified",
     "systematic",
     "tail_ess",

@@ -112,6 +112,7 @@ def test_public_api_exports_all_expected_names(package):
         "run_smc",
         "simulate",
         "smoothed_cross_covariances",
+        "smoothing_weights",
         "smc2",
         "stratified",
         "systematic",
