@@ -352,6 +352,40 @@ class DLMForecast(NamedTuple):
     scale_estimates: Float[Array, " num_steps"]
 
 
+class SqrtGaussianFilterPosterior(NamedTuple):
+    r"""Square-root Gaussian filtering output (ADR-0037).
+
+    The exact linear-Gaussian recursion carried through triangular
+    covariance factors instead of covariances: every stored factor
+    ``L`` represents the covariance $L L^\top$, positive semidefinite
+    by construction, with diagonals pinned nonnegative by the QR sign
+    convention. Deliberately NOT substitutable for
+    `GaussianFilterPosterior` — the square-root smoother consumes the
+    factors this record carries, and covariance-form consumers take
+    the explicit ``as_covariance`` conversion instead.
+
+    Attributes:
+        marginal_loglik: $\log p(y_{1:T})$, Neumaier-compensated.
+        predicted_means: Means before conditioning at each step,
+            shape ``(ntime, state_dim)``.
+        predicted_factors: Lower-triangular factors of the predicted
+            covariances, shape ``(ntime, state_dim, state_dim)``.
+        filtered_means: Means after conditioning at each step,
+            shape ``(ntime, state_dim)``.
+        filtered_factors: Lower-triangular factors of the filtered
+            covariances, shape ``(ntime, state_dim, state_dim)``.
+        log_evidence_increments: Per-step log marginal likelihood
+            increments, shape ``(ntime,)``.
+    """
+
+    marginal_loglik: Scalar
+    predicted_means: Float[Array, "ntime state_dim"]
+    predicted_factors: Float[Array, "ntime state_dim state_dim"]
+    filtered_means: Float[Array, "ntime state_dim"]
+    filtered_factors: Float[Array, "ntime state_dim state_dim"]
+    log_evidence_increments: Float[Array, " ntime"]
+
+
 class GaussianForecast(NamedTuple):
     r"""Linear-Gaussian k-step forecast distributions.
 
