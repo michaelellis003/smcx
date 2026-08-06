@@ -196,17 +196,5 @@ def test_infinite_entries_are_still_rejected():
             filter_fn(MODEL, Y_FULL.at[1, 0].set(jnp.inf))
 
 
-def test_nonlinear_filters_keep_the_all_or_nothing_contract_for_now():
-    """EKF partial rows stay rejected until the family slice lands."""
-    with pytest.raises(ValueError, match="fully observed"):
-        smcx.extended_kalman_filter(
-            MU0,
-            P0,
-            lambda state: A @ state,
-            lambda state: A,
-            Q,
-            lambda state: H @ state,
-            lambda state: H,
-            R,
-            Y_PARTIAL,
-        )
+# The nonlinear family's partial-row behavior is gated in
+# tests/test_partial_missing_nonlinear.py (the second #433 slice).

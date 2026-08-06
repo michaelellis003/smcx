@@ -422,8 +422,8 @@ def test_gaussian_filter_dispatch_matches_named_on_gaps(method_name):
 
 
 @pytest.mark.parametrize("filter_name", ["extended", "unscented"])
-def test_nonlinear_partial_rows_raise(filter_name):
-    """EKF and UKF reject partially observed rows like the linear filter."""
+def test_nonlinear_partial_rows_filter(filter_name):
+    """EKF and UKF accept partial rows like the linear filter (#433)."""
     dtype = jnp.float64 if jax.config.read("jax_enable_x64") else jnp.float32
     emissions = jnp.asarray([[0.1, jnp.nan]], dtype=dtype)
     mean0 = jnp.zeros(2, dtype=dtype)
@@ -432,29 +432,47 @@ def test_nonlinear_partial_rows_raise(filter_name):
     def state_mean(state):
         return state
 
-    with pytest.raises(ValueError, match="fully observed"):
-        if filter_name == "extended":
-            smcx.extended_kalman_filter(
-                initial_mean=mean0,
-                initial_covariance=identity,
-                transition_mean_fn=state_mean,
-                transition_jacobian_fn=lambda s: identity,
-                transition_covariance=0.1 * identity,
-                observation_mean_fn=state_mean,
-                observation_jacobian_fn=lambda s: identity,
-                observation_covariance=0.3 * identity,
-                emissions=emissions,
-            )
-        else:
-            smcx.unscented_kalman_filter(
-                initial_mean=mean0,
-                initial_covariance=identity,
-                transition_mean_fn=state_mean,
-                transition_covariance=0.1 * identity,
-                observation_mean_fn=state_mean,
-                observation_covariance=0.3 * identity,
-                emissions=emissions,
-            )
+    if filter_name == "extended":
+        posterior = smcx.extended_kalman_filter(
+            initial_mean=mean0,
+            initial_covariance=identity,
+            transition_mean_fn=state_mean,
+            transition_jacobian_fn=lambda s: identity,
+            transition_covariance=0.1 * identity,
+            observation_mean_fn=state_mean,
+            observation_jacobian_fn=lambda s: identity,
+            observation_covariance=0.3 * identity,
+            emissions=emissions,
+        )
+    else:
+        posterior = smcx.unscented_kalman_filter(
+            initial_mean=mean0,
+            initial_covariance=identity,
+            transition_mean_fn=state_mean,
+            transition_covariance=0.1 * identity,
+            observation_mean_fn=state_mean,
+            observation_covariance=0.3 * identity,
+            emissions=emissions,
+        )
+    assert bool(jnp.all(jnp.isfinite(posterior.filtered_means)))
+    # The masked update equals the observed-component-only answer: with
+    # identity operators, only component 0 updates.
+    exact = smcx.kalman_filter(
+        mean0,
+        identity,
+        identity,
+        0.1 * identity,
+        identity,
+        0.3 * identity,
+        emissions,
+    )
+    rtol = 1e-9 if dtype == jnp.float64 else 5e-4
+    np.testing.assert_allclose(
+        np.asarray(posterior.filtered_means),
+        np.asarray(exact.filtered_means),
+        rtol=rtol,
+        atol=rtol,
+    )
 
 
 def test_extended_gradient_through_gap_is_finite():
