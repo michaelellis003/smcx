@@ -221,7 +221,10 @@ jobs:
         run: uv sync
 
       - name: Run tests at the dependency floors
-        run: uv run --no-sync pytest -q
+        # Two workers, like the other serial legs (#423, #429): the
+        # leg reached its 30-minute budget as the suite grew; the
+        # recorded escalation rule is parallelize, not a fourth raise.
+        run: uv run --no-sync pytest -q -n 2
 
   release-control:
     permissions:
