@@ -1023,8 +1023,10 @@ def dlm_innovations(
             covariance the filter was given.
         transition_matrix: Static state evolution matrix $G$.
         observation_vector: Observation vector $F$, shape
-            ``(state_dim,)``.
-        emissions: The observations the filter consumed.
+            ``(state_dim,)``, or the same time-varying history with
+            shape ``(ntime, state_dim)`` the filter was given.
+        emissions: The observations the filter consumed. NaN marks a
+            missing datum; infinite entries are rejected eagerly.
         scale_free_transition_covariance: Static or timed evolution
             covariance; supply exactly one of this and ``discount``.
         discount: State discount $\delta \in (0, 1]$ used by the
@@ -1064,7 +1066,9 @@ def dlm_innovations(
             "emissions must have one row per stored step; got "
             f"{emissions.shape[0]} rows for {num_timesteps} steps"
         )
-    _check_float_array(emissions, "emissions")
+    # The same boundary as dlm_filter: NaN marks a missing datum,
+    # infinities are rejected eagerly (2026-08-06 review, P2-1).
+    _validate_emission_rows(emissions)
     for name, value, expected in (
         ("initial_mean", initial_mean, (state_dim,)),
         (
@@ -1073,13 +1077,30 @@ def dlm_innovations(
             (state_dim, state_dim),
         ),
         ("transition_matrix", transition_matrix, (state_dim, state_dim)),
-        ("observation_vector", observation_vector, (state_dim,)),
     ):
         _check_float_array(value, name, dtype)
         if value.shape != expected:
             raise ValueError(
                 f"{name} must have shape {expected}; got {value.shape}"
             )
+    _check_covariance(
+        initial_scale_free_covariance,
+        "initial_scale_free_covariance",
+        positive_definite=False,
+    )
+    _check_float_array(observation_vector, "observation_vector", dtype)
+    if observation_vector.shape == (state_dim,):
+        timed_observation = jnp.broadcast_to(
+            observation_vector, (num_timesteps, state_dim)
+        )
+    elif observation_vector.shape == (num_timesteps, state_dim):
+        timed_observation = observation_vector
+    else:
+        raise ValueError(
+            f"observation_vector must have shape ({state_dim},) or "
+            f"({num_timesteps}, {state_dim}); got "
+            f"{observation_vector.shape}"
+        )
     use_discount = discount is not None
     if use_discount:
         discount_value = _validate_positive_scalar(discount, "discount")
@@ -1150,17 +1171,20 @@ def dlm_innovations(
         filtered_posterior.scale_estimates[:-1],
     ))
 
-    forecast_means = prior_means @ observation_vector
+    forecast_means = jnp.einsum("td,td->t", prior_means, timed_observation)
     scale_free_variances = (
         jnp.einsum(
-            "d,tde,e->t",
-            observation_vector,
+            "td,tde,te->t",
+            timed_observation,
             prior_covariances,
-            observation_vector,
+            timed_observation,
         )
         + 1.0
     )
-    scales = jnp.sqrt(prior_scales * scale_free_variances)
+    # The product of square roots: forming the product first overflows
+    # for a prior scale near the dtype maximum although the Student-t
+    # scale itself is representable (2026-08-06 review, P1-7).
+    scales = jnp.sqrt(prior_scales) * jnp.sqrt(scale_free_variances)
     residuals = emissions[:, 0] - forecast_means
     standardized = residuals / scales
     not_a_number = jnp.asarray(jnp.nan, dtype=dtype)
