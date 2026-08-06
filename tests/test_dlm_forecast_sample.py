@@ -239,3 +239,87 @@ def test_variance_discount_above_one_is_rejected():
             scale_free_transition_covariance=W,
             variance_discount=1.5,
         )
+
+
+class TestDiscountedVarianceCoherence:
+    """Discounted paths must reproduce the dlm_forecast marginals.
+
+    The sampler drew the frontier state under the initial precision
+    and never rescaled inherited deviations as the beta-gamma walk
+    decayed it, so path variances undershot the closed Student-t
+    forms whenever ``variance_discount < 1`` (2026-08-06 review,
+    P1-6). Tolerances are five estimator standard errors with a
+    non-vacuity ceiling (AGENTS.md D6/D7); the SE of a sample
+    variance under a Student-t with ``dof > 4`` uses the exact
+    fourth moment ``3 * sigma**4 * (dof - 2) / (dof - 4)``.
+    """
+
+    VARIANCE_DISCOUNT = 0.5
+    STEPS = 2
+    DRAWS = 200_000
+
+    @classmethod
+    def _run(cls):
+        filtered = smcx.dlm_filter(
+            M0,
+            C0,
+            G,
+            F,
+            Y,
+            scale_free_transition_covariance=W,
+            prior_shape=60.0,
+        )
+        closed = smcx.dlm_forecast(
+            filtered,
+            G,
+            F,
+            num_steps=cls.STEPS,
+            scale_free_transition_covariance=W,
+            variance_discount=cls.VARIANCE_DISCOUNT,
+        )
+        paths = smcx.dlm_forecast_sample(
+            jr.key(11),
+            filtered,
+            G,
+            F,
+            num_steps=cls.STEPS,
+            num_draws=cls.DRAWS,
+            scale_free_transition_covariance=W,
+            variance_discount=cls.VARIANCE_DISCOUNT,
+        )
+        return closed, paths
+
+    def test_state_variances_match_within_five_se(self):
+        closed, paths = self._run()
+        dof = np.asarray(closed.scale_shapes, dtype=np.float64)
+        scale = np.asarray(closed.scale_estimates, dtype=np.float64)
+        states = np.asarray(paths.state_paths, dtype=np.float64)
+        for k in range(self.STEPS):
+            assert dof[k] > 4.0  # exact fourth moment exists
+            cov = (
+                np.asarray(
+                    closed.state_scale_free_covariances[k], dtype=np.float64
+                )
+                * scale[k]
+            )
+            t_var = np.diag(cov) * dof[k] / (dof[k] - 2.0)
+            fourth = 3.0 * t_var**2 * (dof[k] - 2.0) / (dof[k] - 4.0)
+            se_var = np.sqrt((fourth - t_var**2) / self.DRAWS)
+            assert np.all(se_var < 0.2 * t_var)  # non-vacuity ceiling
+            sample_var = states[:, k].var(axis=0)
+            np.testing.assert_array_less(
+                np.abs(sample_var - t_var), 5.0 * se_var
+            )
+
+    def test_emission_variances_match_within_five_se(self):
+        closed, paths = self._run()
+        dof = np.asarray(closed.scale_shapes, dtype=np.float64)
+        emissions = np.asarray(paths.emission_paths, dtype=np.float64)
+        for k in range(self.STEPS):
+            scale2 = float(closed.observation_scales[k])
+            t_var = scale2 * dof[k] / (dof[k] - 2.0)
+            fourth = 3.0 * t_var**2 * (dof[k] - 2.0) / (dof[k] - 4.0)
+            se_var = np.sqrt((fourth - t_var**2) / self.DRAWS)
+            assert se_var < 0.2 * t_var  # non-vacuity ceiling
+            sample_var = emissions[:, k].var()
+            assert abs(sample_var - t_var) < 5.0 * se_var

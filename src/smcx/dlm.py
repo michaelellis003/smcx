@@ -808,8 +808,11 @@ def dlm_forecast_sample(
     frozen frontier variance of `dlm_forecast` at every horizon.
     Under a ``variance_discount`` below one, each horizon applies one
     beta-gamma shock to the precision (the walk whose marginals carry
-    the discounted degrees of freedom), so the per-horizon Student-t
-    marginals again match the closed forms.
+    the discounted degrees of freedom) and rescales the inherited
+    state deviation to the walked precision, so that conditional on
+    the precision path the deviation is exactly Gaussian at the
+    current precision and the per-horizon Student-t marginals again
+    match the closed forms.
 
     Args:
         key: JAX PRNG key. Split once into a precision key, a
@@ -937,12 +940,10 @@ def dlm_forecast_sample(
     )
     root_variance = jnp.sqrt(1.0 / precision)
     terminal_noise = jr.normal(keys[1], (num_draws, state_dim), dtype=dtype)
-    states_0 = mean + root_variance[:, None] * (
-        terminal_noise @ terminal_factor.T
-    )
+    deviations_0 = root_variance[:, None] * (terminal_noise @ terminal_factor.T)
 
     def _path_step(carry, args):
-        states, precision_k, dof_k = carry
+        deviations, mean_k, precision_k, dof_k = carry
         step_key, noise_factor = args
         shock_key, state_key, emission_key = jr.split(step_key, 3)
         # One beta-gamma shock per horizon: the walk whose precision
@@ -962,20 +963,30 @@ def dlm_forecast_sample(
         next_precision = precision_k * shock / variance_discount_array
         next_dof = variance_discount_array * dof_k
         root = jnp.sqrt(1.0 / next_precision)
+        # Rescale the inherited deviation to the walked precision:
+        # conditional on the precision path the deviation is then
+        # exactly N(0, R_k / phi_k), the scale mixture whose marginals
+        # are the dlm_forecast Student-t forms. Without the rescaling
+        # the deviation mixes the frontier precision with the walked
+        # one and the declared marginals are missed (2026-08-06
+        # review, P1-6). With delta_V = 1 the ratio is exactly one.
+        rescale = jnp.sqrt(precision_k / next_precision)
         state_noise = jr.normal(state_key, (num_draws, state_dim), dtype=dtype)
-        next_states = states @ transition_matrix.T + root[:, None] * (
-            state_noise @ noise_factor.T
-        )
+        next_mean = transition_matrix @ mean_k
+        next_deviations = rescale[:, None] * (
+            deviations @ transition_matrix.T
+        ) + root[:, None] * (state_noise @ noise_factor.T)
+        next_states = next_mean + next_deviations
         emission_noise = jr.normal(emission_key, (num_draws,), dtype=dtype)
         emissions = next_states @ observation_vector + root * emission_noise
-        return (next_states, next_precision, next_dof), (
+        return (next_deviations, next_mean, next_precision, next_dof), (
             next_states,
             emissions,
         )
 
     _, (state_paths, emission_paths) = lax.scan(
         _path_step,
-        (states_0, precision, shape),
+        (deviations_0, mean, precision, shape),
         (keys[2:], noise_factors),
     )
     return DLMForecastPaths(
