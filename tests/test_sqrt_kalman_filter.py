@@ -124,10 +124,12 @@ def test_missing_row_is_the_identity_update():
     )
 
 
-def test_partial_nan_rows_share_the_uniform_rejection():
-    """Partially observed rows get the family-wide row error."""
-    with pytest.raises(ValueError, match="fully observed finite"):
-        smcx.sqrt_kalman_filter(MODEL, Y.at[1, 0].set(jnp.nan))
+def test_partial_nan_rows_filter_their_observed_components():
+    """A partially NaN row is a partial observation (#433 widening)."""
+    sqrt = smcx.sqrt_kalman_filter(MODEL, Y.at[1, 0].set(jnp.nan))
+    assert bool(jnp.all(jnp.isfinite(sqrt.filtered_means)))
+    with pytest.raises(ValueError, match="finite"):
+        smcx.sqrt_kalman_filter(MODEL, Y.at[1, 0].set(jnp.inf))
 
 
 def test_biases_and_inputs_agree_with_kalman_filter():

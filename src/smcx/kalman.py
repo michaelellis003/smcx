@@ -248,18 +248,58 @@ def _condition_or_missing(
     Float[Array, "state_dim state_dim"],
     Float[Array, ""],
 ]:
-    """Condition on one observation, or pass a missing datum through."""
-    missing, safe_observation = _sanitize_missing(observation)
-    conditioned = _condition(
-        predicted_mean,
-        predicted_covariance,
+    """Condition on the observed components, or pass a gap through.
+
+    NaN components are masked (#433): their residuals, operator rows,
+    and covariance rows and columns are zeroed with ones on the masked
+    diagonal, so each masked component is an independent unit-variance
+    zero-residual pseudo-observation whose gain columns vanish — the
+    observed-subvector update, exactly. The increment adds back half
+    log two pi per masked component so it equals the observed
+    subvector's predictive density. Fully observed and entirely NaN
+    rows take their original paths bitwise through the selects.
+    """
+    mask = jnp.isnan(observation)
+    any_missing = jnp.any(mask)
+    all_missing = jnp.all(mask)
+    safe_observation = jnp.where(mask, jnp.zeros_like(observation), observation)
+    masked_operator = jnp.where(
+        mask[:, None],
+        jnp.zeros_like(observation_matrix),
         observation_matrix,
+    )
+    operator = jnp.where(any_missing, masked_operator, observation_matrix)
+    pair_mask = mask[:, None] | mask[None, :]
+    masked_covariance = jnp.where(
+        pair_mask,
+        jnp.zeros_like(observation_covariance),
         observation_covariance,
-        safe_observation,
+    ) + jnp.diag(mask.astype(observation_covariance.dtype))
+    covariance = jnp.where(
+        any_missing, masked_covariance, observation_covariance
+    )
+    bias = jnp.where(
+        any_missing,
+        jnp.where(mask, jnp.zeros_like(observation_bias), observation_bias),
         observation_bias,
     )
+    filtered_mean, filtered_covariance, increment = _condition(
+        predicted_mean,
+        predicted_covariance,
+        operator,
+        covariance,
+        safe_observation,
+        bias,
+    )
+    correction = jnp.asarray(
+        math.log(2.0 * math.pi), dtype=increment.dtype
+    ) * jnp.sum(mask.astype(increment.dtype))
+    increment = jnp.where(any_missing, increment + 0.5 * correction, increment)
     return _select_missing(
-        missing, predicted_mean, predicted_covariance, conditioned
+        all_missing,
+        predicted_mean,
+        predicted_covariance,
+        (filtered_mean, filtered_covariance, increment),
     )
 
 
@@ -409,20 +449,31 @@ def _check_float_array(
 def _validate_emission_rows(
     emissions: Shaped[Array, "ntime observation_dim"],
     name: str = "emissions",
+    *,
+    allow_partial: bool = False,
 ) -> None:
-    """Reject concrete rows that are neither observed nor missing.
+    """Reject concrete rows outside the missing-data contract.
 
-    A row is observed when every entry is finite and missing when every
-    entry is NaN (ADR-0034). Partially NaN or infinite rows are the
-    silent-poisoning class and raise here; traced arrays skip the check
-    per the boundary policy.
+    With ``allow_partial`` (the #433 widening for the linear pair),
+    any NaN pattern marks its components missing and only infinities
+    raise. Otherwise a row is observed when every entry is finite and
+    missing when every entry is NaN (ADR-0034); partially NaN or
+    infinite rows are the silent-poisoning class and raise here.
+    Traced arrays skip the check per the boundary policy.
     """
     if isinstance(emissions, Tracer):
         return
     rows = np.asarray(emissions)
     nan = np.isnan(rows)
-    partial = nan.any(axis=-1) & ~nan.all(axis=-1)
     infinite = np.isinf(rows).any(axis=-1)
+    if allow_partial:
+        if infinite.any():
+            raise ValueError(
+                f"{name} must contain only finite values or NaN "
+                "(missing components)"
+            )
+        return
+    partial = nan.any(axis=-1) & ~nan.all(axis=-1)
     if partial.any() or infinite.any():
         raise ValueError(
             f"{name} rows must be fully observed finite values or "
@@ -1319,7 +1370,7 @@ def _prepare_linear_operators(
     for name, value in named_arrays:
         expected_dtype = None if name == "initial_mean" else dtype
         _check_float_array(value, name, expected_dtype)
-    _validate_emission_rows(emissions)
+    _validate_emission_rows(emissions, allow_partial=True)
     optional_arrays = (
         ("transition_bias", transition_bias),
         ("observation_bias", observation_bias),
@@ -1703,6 +1754,71 @@ def _sqrt_condition(
     return filtered_mean, filtered_factor, log_evidence_increment
 
 
+def _sqrt_condition_or_missing(
+    predicted_mean: Float[Array, " state_dim"],
+    predicted_factor: Float[Array, "state_dim state_dim"],
+    observation_operator: Float[Array, "observation_dim state_dim"],
+    observation_covariance: Float[Array, "observation_dim observation_dim"],
+    observation_factor: Float[Array, "observation_dim observation_dim"],
+    observation: Float[Array, " observation_dim"],
+    observation_offset: Float[Array, " observation_dim"],
+) -> tuple[
+    Float[Array, " state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, ""],
+]:
+    """Square-root conditioning with the #433 component masking.
+
+    The same masked-operator construction as the covariance form;
+    the masked observation covariance is refactored in the step
+    because a factor of the masked matrix is not derivable from the
+    stored factor of the full one.
+    """
+    mask = jnp.isnan(observation)
+    any_missing = jnp.any(mask)
+    all_missing = jnp.all(mask)
+    safe_observation = jnp.where(mask, jnp.zeros_like(observation), observation)
+    masked_operator = jnp.where(
+        mask[:, None],
+        jnp.zeros_like(observation_operator),
+        observation_operator,
+    )
+    operator = jnp.where(any_missing, masked_operator, observation_operator)
+    pair_mask = mask[:, None] | mask[None, :]
+    masked_covariance = jnp.where(
+        pair_mask,
+        jnp.zeros_like(observation_covariance),
+        observation_covariance,
+    ) + jnp.diag(mask.astype(observation_covariance.dtype))
+    masked_factor = jnp.linalg.cholesky(
+        _symmetrize(masked_covariance), symmetrize_input=False
+    )
+    factor = jnp.where(any_missing, masked_factor, observation_factor)
+    offset = jnp.where(
+        any_missing,
+        jnp.where(mask, jnp.zeros_like(observation_offset), observation_offset),
+        observation_offset,
+    )
+    filtered_mean, filtered_factor, increment = _sqrt_condition(
+        predicted_mean,
+        predicted_factor,
+        operator,
+        factor,
+        safe_observation,
+        offset,
+    )
+    correction = jnp.asarray(
+        math.log(2.0 * math.pi), dtype=increment.dtype
+    ) * jnp.sum(mask.astype(increment.dtype))
+    increment = jnp.where(any_missing, increment + 0.5 * correction, increment)
+    return _select_missing(
+        all_missing,
+        predicted_mean,
+        predicted_factor,
+        (filtered_mean, filtered_factor, increment),
+    )
+
+
 def sqrt_kalman_filter(
     initial_mean: Shaped[Array, "*initial_mean_shape"] | LinearGaussianModel,
     initial_covariance: Shaped[Array, "*initial_covariance_shape"]
@@ -1844,19 +1960,16 @@ def sqrt_kalman_filter(
     _check_sampling_factors(transition_factors)
     _check_sampling_factors(observation_factors)
 
-    missing_0, safe_emission_0 = _sanitize_missing(emissions[0])
-    filtered_mean_0, filtered_factor_0, increment_0 = _select_missing(
-        missing_0,
-        initial_mean,
-        initial_factor,
-        _sqrt_condition(
+    filtered_mean_0, filtered_factor_0, increment_0 = (
+        _sqrt_condition_or_missing(
             initial_mean,
             initial_factor,
             observation_matrices[0],
+            observation_covariances[0],
             observation_factors[0],
-            safe_emission_0,
+            emissions[0],
             observation_biases[0],
-        ),
+        )
     )
 
     def _step(carry, args):
@@ -1867,25 +1980,21 @@ def sqrt_kalman_filter(
             transition_factor,
             transition_offset,
             observation_operator,
+            observation_row_covariance,
             observation_factor,
             observation_offset,
         ) = args
         predicted_mean, predicted_factor = _sqrt_predict(
             mean, factor, transition, transition_factor, transition_offset
         )
-        missing, safe_emission = _sanitize_missing(emission)
-        filtered_mean, filtered_factor, increment = _select_missing(
-            missing,
+        filtered_mean, filtered_factor, increment = _sqrt_condition_or_missing(
             predicted_mean,
             predicted_factor,
-            _sqrt_condition(
-                predicted_mean,
-                predicted_factor,
-                observation_operator,
-                observation_factor,
-                safe_emission,
-                observation_offset,
-            ),
+            observation_operator,
+            observation_row_covariance,
+            observation_factor,
+            emission,
+            observation_offset,
         )
         evidence, new_compensation = _neumaier_add(
             loglik, compensation, increment
@@ -1916,6 +2025,7 @@ def sqrt_kalman_filter(
         transition_factors,
         transition_biases,
         observation_matrices[1:],
+        observation_covariances[1:],
         observation_factors[1:],
         observation_biases[1:],
     )

@@ -126,29 +126,44 @@ def test_all_missing_gives_pure_prediction_and_zero_marginal():
     )
 
 
+def _two_dim_kalman(emissions, dtype):
+    return smcx.kalman_filter(
+        initial_mean=jnp.zeros(2, dtype=dtype),
+        initial_covariance=jnp.eye(2, dtype=dtype),
+        transition_matrix=0.9 * jnp.eye(2, dtype=dtype),
+        transition_covariance=0.1 * jnp.eye(2, dtype=dtype),
+        observation_matrix=jnp.eye(2, dtype=dtype),
+        observation_covariance=0.3 * jnp.eye(2, dtype=dtype),
+        emissions=emissions,
+    )
+
+
 @pytest.mark.parametrize(
     "bad_row",
     [
-        [jnp.nan, 0.5],
         [jnp.inf, 0.0],
         [-jnp.inf, jnp.nan],
     ],
 )
-def test_partial_and_infinite_rows_raise(bad_row):
-    """Rows must be fully observed finite values or entirely NaN."""
+def test_infinite_rows_raise(bad_row):
+    """Infinite entries remain never-meaningful and fail eagerly."""
     dtype = jnp.float64 if jax.config.read("jax_enable_x64") else jnp.float32
     emissions = jnp.asarray([[0.1, 0.2], list(bad_row)], dtype=dtype)
-    mean0 = jnp.zeros(2, dtype=dtype)
-    with pytest.raises(ValueError, match="fully observed"):
-        smcx.kalman_filter(
-            initial_mean=mean0,
-            initial_covariance=jnp.eye(2, dtype=dtype),
-            transition_matrix=0.9 * jnp.eye(2, dtype=dtype),
-            transition_covariance=0.1 * jnp.eye(2, dtype=dtype),
-            observation_matrix=jnp.eye(2, dtype=dtype),
-            observation_covariance=0.3 * jnp.eye(2, dtype=dtype),
-            emissions=emissions,
-        )
+    with pytest.raises(ValueError, match="finite"):
+        _two_dim_kalman(emissions, dtype)
+
+
+def test_partial_rows_now_filter_the_observed_components():
+    """A partially NaN row is a partial observation, not an error.
+
+    The #433 widening: the previously rejected input filters on its
+    observed component alone.
+    """
+    dtype = jnp.float64 if jax.config.read("jax_enable_x64") else jnp.float32
+    emissions = jnp.asarray([[0.1, 0.2], [jnp.nan, 0.5]], dtype=dtype)
+    posterior = _two_dim_kalman(emissions, dtype)
+    assert bool(jnp.all(jnp.isfinite(posterior.filtered_means)))
+    assert bool(jnp.all(jnp.isfinite(posterior.log_evidence_increments)))
 
 
 def test_gradient_through_gap_is_finite_and_matches_composed():
