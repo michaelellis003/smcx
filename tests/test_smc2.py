@@ -964,9 +964,13 @@ def test_cumulative_evidence_overflow_raises_loudly():
         _small_model()
     )
 
+    # Large enough that two increments overflow the running total,
+    # small enough to stay finite per step in the active dtype.
+    big = 1e308 if jax.config.read("jax_enable_x64") else 2e38
+
     def huge_logobs(y, state, theta):
         del theta
-        return jnp.asarray(1e308) - 0.5 * (y[0] - state[0]) ** 2
+        return jnp.asarray(big) - 0.5 * (y[0] - state[0]) ** 2
 
     with pytest.raises(smcx.DegenerateWeightsError, match="cumulative"):
         smcx.smc2(
