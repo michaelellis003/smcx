@@ -1634,10 +1634,13 @@ def kalman_filter(
             missing: the update is skipped, the stored filtered moments
             equal the predicted moments, and
             ``log_evidence_increments`` carries an exact zero there, so
-            the datum contributes nothing to ``marginal_loglik``.
-            Partially NaN or infinite rows are rejected eagerly;
-            missingness is resolved by a traced select, so ``jit``,
-            ``vmap``, and ``grad`` compose unchanged (ADR-0034).
+            the datum contributes nothing to ``marginal_loglik``. A
+            partially NaN row marks exactly its NaN components missing
+            and updates on the observed subvector alone, its increment
+            equal to the observed subvector's predictive density
+            (#433). Infinite entries are rejected eagerly; missingness
+            is resolved by traced selects, so ``jit``, ``vmap``, and
+            ``grad`` compose unchanged (ADR-0034).
         transition_bias: Optional static or length ``ntime - 1`` affine
             transition term.
         observation_bias: Optional static or length ``ntime`` affine
@@ -1666,9 +1669,9 @@ def kalman_filter(
         definite. Value checks run eagerly and are skipped for traced
         arrays. Nonzero subnormal covariance entries are rejected;
         positive-definite covariances must also yield a finite,
-        positive-diagonal factor on the active backend. Missing
-        observations are entirely-NaN rows, as documented for
-        ``emissions`` above.
+        positive-diagonal factor on the active backend. Missing and
+        partially missing observations follow the ``emissions``
+        contract above.
     """
     (
         initial_mean,
@@ -1962,7 +1965,8 @@ def sqrt_kalman_filter(
         emissions: Observations shaped ``(ntime, observation_dim)``.
             An all-NaN row marks the datum missing (ADR-0034): the
             update is the identity on the factor, and the increment is
-            exactly zero.
+            exactly zero. A partially NaN row updates on its observed
+            components alone (#433), exactly as in ``kalman_filter``.
         transition_bias: Optional static or timed state offset.
         observation_bias: Optional static or timed emission offset.
         transition_input_matrix: Optional input-to-state matrix.
@@ -2222,8 +2226,9 @@ def extended_kalman_filter(
         positive-diagonal factor on the active backend. Missing
         observations are entirely-NaN emission rows: the update is
         skipped, the prediction is stored, and the datum contributes
-        an exact zero to ``log_evidence_increments`` (ADR-0034);
-        partially NaN or infinite rows are rejected eagerly.
+        an exact zero to ``log_evidence_increments`` (ADR-0034). A
+        partially NaN row updates on its observed components alone
+        (#433); infinite entries are rejected eagerly.
 
     References:
         Schmidt, S. F. (1966). Application of State-Space Methods to
@@ -2462,8 +2467,9 @@ def unscented_kalman_filter(
         positive-diagonal factor on the active backend.
         Missing observations are entirely-NaN emission rows: the update
         is skipped, the prediction is stored, and the datum contributes
-        an exact zero to ``log_evidence_increments`` (ADR-0034);
-        partially NaN or infinite rows are rejected eagerly.
+        an exact zero to ``log_evidence_increments`` (ADR-0034). A
+        partially NaN row updates on its observed components alone
+        (#433); infinite entries are rejected eagerly.
         Smaller ``alpha`` values may
         improve local quadrature but are more cancellation-prone in float32.
 

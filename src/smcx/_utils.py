@@ -17,6 +17,7 @@ from typing import Any, NamedTuple, TypeAlias, cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import lax, tree, vmap
 from jax.core import Tracer
 from jax.tree_util import PyTreeDef, keystr
@@ -796,12 +797,15 @@ def _raise_invalid_ancestors(
         )
 
 
-def _raise_if_degenerate(log_value) -> None:
+def _raise_if_degenerate(log_value, emissions=None) -> None:
     """Raise `smcx.DegenerateWeightsError` on a nonfinite checked value.
 
     This eager shell check rejects a nonfinite log normalizer or evidence
     state. Under a user ``jax.jit`` the value is a tracer, so the check is
-    skipped and the nonfinite value propagates instead.
+    skipped and the nonfinite value propagates instead. When the run's
+    emissions are supplied and contain NaN, the message points at the
+    missing-observations recipe: a callback that ignores NaN components
+    poisons the weights, and that is the usual cause (#433).
     """
     from jax.core import Tracer
 
@@ -811,7 +815,20 @@ def _raise_if_degenerate(log_value) -> None:
         return
     value = float(log_value)
     if not math.isfinite(value):
+        hint = ""
+        if emissions is not None and not isinstance(emissions, Tracer):
+            values = np.asarray(emissions)
+            if (
+                np.issubdtype(values.dtype, np.floating)
+                and np.isnan(values).any()
+            ):
+                hint = (
+                    "; the emissions contain NaN — particle-filter "
+                    "callbacks must handle missing components themselves "
+                    "(see the custom-models guide's missing-observations "
+                    "recipes)"
+                )
         raise DegenerateWeightsError(
             "particle weights or evidence cannot be normalized "
-            f"(checked log value {value})"
+            f"(checked log value {value}){hint}"
         )

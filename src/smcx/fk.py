@@ -415,7 +415,7 @@ def run_smc(
         )
 
     _raise_invalid_ancestors(invalid, num_particles)
-    _raise_if_degenerate(final_log_evidence)
+    _raise_if_degenerate(final_log_evidence, tree.leaves(fk.contexts)[0])
 
     return ParticleFilterPosterior(
         marginal_loglik=final_log_evidence,
