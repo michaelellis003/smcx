@@ -397,10 +397,10 @@ class TestDLMInnovationsReviewGaps:
         """
         from scipy import stats
 
-        args = [
+        m0, c0, g, f, y = (
             jnp.asarray(value, dtype=jnp.float32)
             for value in (self.M0, self.C0, self.G, self.F, self.Y1)
-        ]
+        )
         kwargs = {
             "scale_free_transition_covariance": jnp.asarray(
                 self.W, dtype=jnp.float32
@@ -408,9 +408,9 @@ class TestDLMInnovationsReviewGaps:
             "prior_shape": 5.0,
             "prior_scale": 2e38,
         }
-        posterior = smcx.dlm_filter(*args[:4], args[4], **kwargs)
+        posterior = smcx.dlm_filter(m0, c0, g, f, y, **kwargs)
         assert np.isfinite(float(posterior.marginal_loglik))
-        result = smcx.dlm_innovations(posterior, *args[:4], args[4], **kwargs)
+        result = smcx.dlm_innovations(posterior, m0, c0, g, f, y, **kwargs)
         scales = np.asarray(result.scales, dtype=np.float64)
         assert np.all(np.isfinite(scales))
         rebuilt = stats.t.logpdf(
