@@ -457,11 +457,32 @@ class TestDLMInnovationsReviewGaps:
             np.asarray(result.standardized, dtype=np.float64),
             df=np.asarray(result.dofs, dtype=np.float64),
         ) - np.log(np.asarray(result.scales, dtype=np.float64))
+        rtol = 1e-9 if result.standardized.dtype == jnp.float64 else 1e-4
         np.testing.assert_allclose(
             rebuilt,
             np.asarray(posterior.log_evidence_increments),
-            rtol=1e-9,
+            rtol=rtol,
         )
+
+    def test_bad_observation_vector_shape_is_rejected(self):
+        posterior = smcx.dlm_filter(
+            self.M0,
+            self.C0,
+            self.G,
+            self.F,
+            self.Y1,
+            scale_free_transition_covariance=self.W,
+        )
+        with pytest.raises(ValueError, match="observation_vector"):
+            smcx.dlm_innovations(
+                posterior,
+                self.M0,
+                self.C0,
+                self.G,
+                jnp.ones((3, 2)),
+                self.Y1,
+                scale_free_transition_covariance=self.W,
+            )
 
     def test_infinite_emissions_are_rejected(self):
         posterior = smcx.dlm_filter(
