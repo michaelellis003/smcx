@@ -386,6 +386,36 @@ class SqrtGaussianFilterPosterior(NamedTuple):
     log_evidence_increments: Float[Array, " ntime"]
 
 
+class SqrtGaussianSmootherPosterior(NamedTuple):
+    r"""Square-root Gaussian filtering and smoothing output (ADR-0037).
+
+    The retained `SqrtGaussianFilterPosterior` fields plus the
+    backward pass's smoothed means and lower-triangular factors, every
+    factor positive semidefinite by construction.
+
+    Attributes:
+        marginal_loglik: $\log p(y_{1:T})$, Neumaier-compensated.
+        predicted_means: Means before conditioning at each step.
+        predicted_factors: Factors of the predicted covariances.
+        filtered_means: Means after conditioning at each step.
+        filtered_factors: Factors of the filtered covariances.
+        log_evidence_increments: Per-step increments.
+        smoothed_means: Backward-pass means, shape
+            ``(ntime, state_dim)``.
+        smoothed_factors: Lower-triangular factors of the smoothed
+            covariances, shape ``(ntime, state_dim, state_dim)``.
+    """
+
+    marginal_loglik: Scalar
+    predicted_means: Float[Array, "ntime state_dim"]
+    predicted_factors: Float[Array, "ntime state_dim state_dim"]
+    filtered_means: Float[Array, "ntime state_dim"]
+    filtered_factors: Float[Array, "ntime state_dim state_dim"]
+    log_evidence_increments: Float[Array, " ntime"]
+    smoothed_means: Float[Array, "ntime state_dim"]
+    smoothed_factors: Float[Array, "ntime state_dim state_dim"]
+
+
 class GaussianForecast(NamedTuple):
     r"""Linear-Gaussian k-step forecast distributions.
 

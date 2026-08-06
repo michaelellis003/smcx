@@ -61,6 +61,7 @@ from smcx.containers import (
     GaussianForecastPaths,
     GaussianSmootherPosterior,
     SqrtGaussianFilterPosterior,
+    SqrtGaussianSmootherPosterior,
 )
 from smcx.model import LinearGaussianModel
 from smcx.types import (
@@ -81,8 +82,10 @@ from smcx.types import (
 
 if TYPE_CHECKING:
     _CountArgument: TypeAlias = SupportsIndex
+    _SqrtPosteriorArgument: TypeAlias = SqrtGaussianFilterPosterior
 else:
     _CountArgument: TypeAlias = Any
+    _SqrtPosteriorArgument: TypeAlias = Any
 
 
 class _FilterState(NamedTuple):
@@ -4499,4 +4502,229 @@ def gaussian_smoother(
         *filtered_posterior,
         smoothed_means,
         smoothed_covariances,
+    )
+
+
+def _validate_sqrt_filter_posterior(
+    posterior: SqrtGaussianFilterPosterior,
+) -> tuple[int, int, jnp.dtype]:
+    """Validate the factor-form record's shapes, dtype, and triangles."""
+    means = posterior.filtered_means
+    if means.ndim != 2 or means.shape[0] == 0 or means.shape[1] == 0:
+        raise ValueError("filtered_means must have shape (T, d) with T, d > 0")
+    num_timesteps, state_dim = means.shape
+    dtype = means.dtype
+    _check_float_array(means, "filtered_means")
+    named = (
+        (
+            "predicted_means",
+            posterior.predicted_means,
+            (num_timesteps, state_dim),
+        ),
+        (
+            "predicted_factors",
+            posterior.predicted_factors,
+            (num_timesteps, state_dim, state_dim),
+        ),
+        (
+            "filtered_factors",
+            posterior.filtered_factors,
+            (num_timesteps, state_dim, state_dim),
+        ),
+        (
+            "log_evidence_increments",
+            posterior.log_evidence_increments,
+            (num_timesteps,),
+        ),
+    )
+    for name, value, shape in named:
+        _check_float_array(value, name, dtype)
+        if value.shape != shape:
+            raise ValueError(f"{name} shape {value.shape} != {shape}")
+    marginal = jnp.asarray(posterior.marginal_loglik)
+    if marginal.ndim != 0:
+        raise ValueError("marginal_loglik must be scalar")
+    _check_float_array(marginal, "marginal_loglik", dtype)
+    for name in ("predicted_factors", "filtered_factors"):
+        value = getattr(posterior, name)
+        if not isinstance(value, Tracer):
+            concrete = np.asarray(value)
+            if not np.all(np.isfinite(concrete)):
+                raise ValueError(f"{name} must contain only finite values")
+            if not np.allclose(concrete, np.tril(concrete)):
+                raise ValueError(
+                    f"{name} must be lower-triangular covariance factors"
+                )
+    return num_timesteps, state_dim, dtype
+
+
+def sqrt_rts_smoother(
+    filtered_posterior: _SqrtPosteriorArgument,
+    transition_matrix: Shaped[Array, "*transition_matrix_shape"]
+    | LinearGaussianModel,
+    transition_covariance: Shaped[Array, "*transition_covariance_shape"]
+    | None = None,
+) -> SqrtGaussianSmootherPosterior:
+    r"""Run the RTS backward pass in square-root form.
+
+    Consumes only `sqrt_kalman_filter` output: the backward gain is
+    formed by triangular solves against the STORED predicted factors,
+    and each smoothed factor comes from one QR over the stacked
+    Joseph-form blocks, so positive semidefiniteness holds by
+    construction at every backward step — the regime where the
+    covariance smoother's documented cond-squared amplification loses
+    it in float32. A covariance-form `GaussianFilterPosterior` is
+    rejected by design: run `sqrt_kalman_filter` first (the pairing
+    is the contract, ADR-0037).
+
+    Unlike `rts_smoother`, the transition covariance must be supplied
+    (through the model record or as an array): the square-root pass
+    consumes its factor directly rather than reconstructing process
+    noise from stored moments, which is precisely how it avoids the
+    subtractive cancellation.
+
+    Args:
+        filtered_posterior: Output of `sqrt_kalman_filter`.
+        transition_matrix: Static ``(state_dim, state_dim)`` matrix or
+            time-varying array with leading length ``ntime - 1``, or
+            the `smcx.model.LinearGaussianModel` used by the filter
+            (its transition matrix and covariance are both read).
+        transition_covariance: Static or time-varying transition-noise
+            covariance; required when ``transition_matrix`` is a loose
+            array, and must be left unset with a record.
+
+    Returns:
+        The retained factor-form filter fields plus smoothed means and
+        smoothed lower-triangular factors.
+
+    Raises:
+        ValueError: The posterior is not a `SqrtGaussianFilterPosterior`
+            (including the covariance-form record), a stored factor is
+            not lower-triangular, the evolution specification is
+            incomplete or doubled, or a shape, dtype, or domain check
+            fails.
+    """
+    if isinstance(filtered_posterior, GaussianFilterPosterior):
+        raise ValueError(
+            "sqrt_rts_smoother consumes the factor-form record only; "
+            "this is a covariance-form GaussianFilterPosterior - run "
+            "sqrt_kalman_filter first, or use rts_smoother"
+        )
+    if not isinstance(filtered_posterior, SqrtGaussianFilterPosterior):
+        raise ValueError(
+            "filtered_posterior must be the SqrtGaussianFilterPosterior "
+            "returned by sqrt_kalman_filter"
+        )
+    if isinstance(transition_matrix, LinearGaussianModel):
+        if transition_covariance is not None:
+            raise ValueError(
+                "sqrt_rts_smoother received a LinearGaussianModel and a "
+                "separate transition_covariance; supply model arrays "
+                "through the record only"
+            )
+        transition_covariance = transition_matrix.transition_covariance
+        transition_matrix = transition_matrix.transition_matrix
+    elif transition_covariance is None:
+        raise ValueError(
+            "sqrt_rts_smoother requires transition_covariance with loose "
+            "arrays; the square-root pass consumes its factor directly"
+        )
+    num_timesteps, state_dim, dtype = _validate_sqrt_filter_posterior(
+        filtered_posterior
+    )
+    _check_float_array(transition_matrix, "transition_matrix", dtype)
+    _check_float_array(transition_covariance, "transition_covariance", dtype)
+    transition_matrices = _time_matrix(
+        transition_matrix,
+        num_timesteps - 1,
+        state_dim,
+        state_dim,
+        "transition_matrix",
+    )
+    transition_covariances = _time_matrix(
+        transition_covariance,
+        num_timesteps - 1,
+        state_dim,
+        state_dim,
+        "transition_covariance",
+    )
+    _check_covariance(
+        transition_covariance,
+        "transition_covariance",
+        positive_definite=False,
+    )
+    if num_timesteps == 1:
+        return SqrtGaussianSmootherPosterior(
+            *filtered_posterior,
+            smoothed_means=filtered_posterior.filtered_means,
+            smoothed_factors=filtered_posterior.filtered_factors,
+        )
+    with debug_nans(False), debug_infs(False):
+        transition_factors = lax.map(
+            _sampling_covariance_factor, transition_covariances
+        )
+    _check_sampling_factors(transition_factors)
+
+    identity = jnp.eye(state_dim, dtype=dtype)
+
+    def _backward(carry, args):
+        smoothed_mean_next, smoothed_factor_next = carry
+        (
+            filtered_mean,
+            filtered_factor,
+            predicted_mean_next,
+            predicted_factor_next,
+            transition,
+            transition_factor,
+        ) = args
+        cross = filtered_factor @ (transition @ filtered_factor).T
+        half_solved = solve_triangular(
+            predicted_factor_next, cross.T, lower=True
+        )
+        gain = solve_triangular(
+            predicted_factor_next.T, half_solved, lower=False
+        ).T
+        smoothed_mean = filtered_mean + gain @ (
+            smoothed_mean_next - predicted_mean_next
+        )
+        residual_operator = identity - gain @ transition
+        stacked = jnp.vstack((
+            (residual_operator @ filtered_factor).T,
+            (gain @ transition_factor).T,
+            (gain @ smoothed_factor_next).T,
+        ))
+        smoothed_factor = _sign_normalized_r(stacked).T
+        return (smoothed_mean, smoothed_factor), (
+            smoothed_mean,
+            smoothed_factor,
+        )
+
+    _, (earlier_means, earlier_factors) = lax.scan(
+        _backward,
+        (
+            filtered_posterior.filtered_means[-1],
+            filtered_posterior.filtered_factors[-1],
+        ),
+        (
+            filtered_posterior.filtered_means[:-1],
+            filtered_posterior.filtered_factors[:-1],
+            filtered_posterior.predicted_means[1:],
+            filtered_posterior.predicted_factors[1:],
+            transition_matrices,
+            transition_factors,
+        ),
+        reverse=True,
+    )
+    smoothed_means = jnp.concatenate((
+        earlier_means,
+        filtered_posterior.filtered_means[-1:],
+    ))
+    smoothed_factors = jnp.concatenate((
+        earlier_factors,
+        filtered_posterior.filtered_factors[-1:],
+    ))
+    return SqrtGaussianSmootherPosterior(
+        *filtered_posterior,
+        smoothed_means=smoothed_means,
+        smoothed_factors=smoothed_factors,
     )
