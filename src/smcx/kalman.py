@@ -303,6 +303,35 @@ def _condition_or_missing(
     )
 
 
+def _masked_observation_pieces(
+    observation: Float[Array, " observation_dim"],
+    covariance: Float[Array, "observation_dim observation_dim"],
+) -> tuple[Array, Array, Array, Array, Array]:
+    """Return the #433 mask, flags, safe emission, and masked covariance."""
+    mask = jnp.isnan(observation)
+    any_missing = jnp.any(mask)
+    all_missing = jnp.all(mask)
+    safe_observation = jnp.where(mask, jnp.zeros_like(observation), observation)
+    pair_mask = mask[:, None] | mask[None, :]
+    masked_covariance = jnp.where(
+        pair_mask, jnp.zeros_like(covariance), covariance
+    ) + jnp.diag(mask.astype(covariance.dtype))
+    covariance_eff = jnp.where(any_missing, masked_covariance, covariance)
+    return mask, any_missing, all_missing, safe_observation, covariance_eff
+
+
+def _masked_increment(
+    increment: Float[Array, ""],
+    mask: Array,
+    any_missing: Array,
+) -> Float[Array, ""]:
+    """Add half log two pi per masked component (#433)."""
+    correction = jnp.asarray(
+        math.log(2.0 * math.pi), dtype=increment.dtype
+    ) * jnp.sum(mask.astype(increment.dtype))
+    return jnp.where(any_missing, increment + 0.5 * correction, increment)
+
+
 def _condition_from_residual(
     predicted_mean: Float[Array, " state_dim"],
     predicted_covariance: Float[Array, "state_dim state_dim"],
@@ -674,7 +703,7 @@ def _prepare_nonlinear_filter(
         ("observation_covariance", observation_covariance),
         ("emissions", emissions),
     )
-    _validate_emission_rows(emissions)
+    _validate_emission_rows(emissions, allow_partial=True)
     for name, value in named_arrays:
         expected_dtype = None if name == "initial_mean" else dtype
         _check_float_array(value, name, expected_dtype)
@@ -995,6 +1024,18 @@ def _unscented_condition(
         "observation_mean_fn output",
         predicted_mean.dtype,
     )
+    mask, any_missing, _, observation, observation_covariance = (
+        _masked_observation_pieces(observation, observation_covariance)
+    )
+    observation_points = jnp.where(
+        any_missing,
+        jnp.where(
+            mask[None, :],
+            jnp.zeros_like(observation_points),
+            observation_points,
+        ),
+        observation_points,
+    )
     observation_mean, transformed_covariance = _unscented_moments(
         observation_points,
         rule,
@@ -1033,8 +1074,10 @@ def _unscented_condition(
         residual,
         lower=True,
     )
-    log_evidence_increment = _gaussian_log_evidence(
-        innovation_cholesky, whitened_residual
+    log_evidence_increment = _masked_increment(
+        _gaussian_log_evidence(innovation_cholesky, whitened_residual),
+        mask,
+        any_missing,
     )
     return filtered_mean, filtered_covariance, log_evidence_increment
 
@@ -1074,7 +1117,7 @@ def _unscented_filter_step(
     predicted_covariance = _symmetrize(
         transformed_covariance + args.transition_covariance
     )
-    missing, safe_emission = _sanitize_missing(args.emission)
+    missing = jnp.all(jnp.isnan(args.emission))
     filtered_mean, filtered_covariance, increment = _select_missing(
         missing,
         predicted_mean,
@@ -1084,7 +1127,7 @@ def _unscented_filter_step(
             predicted_covariance,
             observation_mean_fn,
             args.observation_covariance,
-            safe_emission,
+            args.emission,
             rule,
             input_t,
         ),
@@ -1108,6 +1151,52 @@ def _unscented_filter_step(
         increment,
     )
     return next_state, output
+
+
+def _condition_linearized_or_missing(
+    predicted_mean: Float[Array, " state_dim"],
+    predicted_covariance: Float[Array, "state_dim state_dim"],
+    observation_jacobian: Float[Array, "observation_dim state_dim"],
+    observation_covariance: Float[Array, "observation_dim observation_dim"],
+    observation: Float[Array, " observation_dim"],
+    observation_mean: Float[Array, " observation_dim"],
+) -> tuple[
+    Float[Array, " state_dim"],
+    Float[Array, "state_dim state_dim"],
+    Float[Array, ""],
+]:
+    """Linearized conditioning with the #433 component masking."""
+    mask, any_missing, all_missing, safe_observation, covariance_eff = (
+        _masked_observation_pieces(observation, observation_covariance)
+    )
+    residual = jnp.where(
+        mask,
+        jnp.zeros_like(observation),
+        safe_observation - observation_mean,
+    )
+    jacobian_eff = jnp.where(
+        any_missing,
+        jnp.where(
+            mask[:, None],
+            jnp.zeros_like(observation_jacobian),
+            observation_jacobian,
+        ),
+        observation_jacobian,
+    )
+    filtered_mean, filtered_covariance, increment = _condition_from_residual(
+        predicted_mean,
+        predicted_covariance,
+        jacobian_eff,
+        covariance_eff,
+        residual,
+    )
+    increment = _masked_increment(increment, mask, any_missing)
+    return _select_missing(
+        all_missing,
+        predicted_mean,
+        predicted_covariance,
+        (filtered_mean, filtered_covariance, increment),
+    )
 
 
 def _extended_filter_step(
@@ -1199,18 +1288,15 @@ def _extended_filter_step(
         "observation_jacobian_fn output",
         dtype,
     )
-    missing, safe_emission = _sanitize_missing(args.emission)
-    filtered_mean, filtered_covariance, increment = _select_missing(
-        missing,
-        transition_mean,
-        predicted_covariance,
-        _condition_from_residual(
+    filtered_mean, filtered_covariance, increment = (
+        _condition_linearized_or_missing(
             transition_mean,
             predicted_covariance,
             observation_jacobian,
             args.observation_covariance,
-            safe_emission - observation_mean,
-        ),
+            args.emission,
+            observation_mean,
+        )
     )
     evidence, compensation = _neumaier_add(
         state.marginal_loglik,
@@ -2200,18 +2286,15 @@ def extended_kalman_filter(
         "observation_jacobian_fn output",
         dtype,
     )
-    missing_0, safe_emission_0 = _sanitize_missing(emissions[0])
-    filtered_mean_0, filtered_covariance_0, increment_0 = _select_missing(
-        missing_0,
-        initial_mean,
-        initial_covariance,
-        _condition_from_residual(
+    filtered_mean_0, filtered_covariance_0, increment_0 = (
+        _condition_linearized_or_missing(
             initial_mean,
             initial_covariance,
             observation_jacobian_0,
             observation_covariances[0],
-            safe_emission_0 - observation_mean_0,
-        ),
+            emissions[0],
+            observation_mean_0,
+        )
     )
     state_0 = _FilterState(
         filtered_mean_0,
@@ -2414,7 +2497,7 @@ def unscented_kalman_filter(
         inputs_arr = _canonicalize_inputs(inputs, setup.num_timesteps)
         _check_float_array(inputs_arr, "inputs", setup.dtype)
         input_0 = inputs_arr[0]
-    missing_0, safe_emission_0 = _sanitize_missing(emissions[0])
+    missing_0 = jnp.all(jnp.isnan(emissions[0]))
     filtered_mean_0, filtered_covariance_0, increment_0 = _select_missing(
         missing_0,
         initial_mean,
@@ -2424,7 +2507,7 @@ def unscented_kalman_filter(
             initial_covariance,
             observation_mean_fn,
             setup.observation_covariances[0],
-            safe_emission_0,
+            emissions[0],
             rule,
             input_0,
         ),
@@ -3990,6 +4073,18 @@ def _quadrature_condition(
         "observation_mean_fn output",
         predicted_mean.dtype,
     )
+    mask, any_missing, _, observation, observation_covariance = (
+        _masked_observation_pieces(observation, observation_covariance)
+    )
+    observation_points = jnp.where(
+        any_missing,
+        jnp.where(
+            mask[None, :],
+            jnp.zeros_like(observation_points),
+            observation_points,
+        ),
+        observation_points,
+    )
     observation_mean, transformed_covariance = _quadrature_moments(
         observation_points,
         rule,
@@ -4028,8 +4123,10 @@ def _quadrature_condition(
         residual,
         lower=True,
     )
-    log_evidence_increment = _gaussian_log_evidence(
-        innovation_cholesky, whitened_residual
+    log_evidence_increment = _masked_increment(
+        _gaussian_log_evidence(innovation_cholesky, whitened_residual),
+        mask,
+        any_missing,
     )
     return filtered_mean, filtered_covariance, log_evidence_increment
 
@@ -4071,7 +4168,7 @@ def _quadrature_filter_step(
     predicted_covariance = _symmetrize(
         transformed_covariance + args.transition_covariance
     )
-    missing, safe_emission = _sanitize_missing(args.emission)
+    missing = jnp.all(jnp.isnan(args.emission))
     filtered_mean, filtered_covariance, increment = _select_missing(
         missing,
         predicted_mean,
@@ -4081,7 +4178,7 @@ def _quadrature_filter_step(
             predicted_covariance,
             observation_mean_fn,
             args.observation_covariance,
-            safe_emission,
+            args.emission,
             rule,
             input_t,
         ),
@@ -4219,7 +4316,7 @@ def _gauss_hermite_kalman_filter(
         inputs_arr = _canonicalize_inputs(inputs, setup.num_timesteps)
         _check_float_array(inputs_arr, "inputs", setup.dtype)
         input_0 = inputs_arr[0]
-    missing_0, safe_emission_0 = _sanitize_missing(emissions[0])
+    missing_0 = jnp.all(jnp.isnan(emissions[0]))
     filtered_mean_0, filtered_covariance_0, increment_0 = _select_missing(
         missing_0,
         initial_mean,
@@ -4229,7 +4326,7 @@ def _gauss_hermite_kalman_filter(
             initial_covariance,
             observation_mean_fn,
             setup.observation_covariances[0],
-            safe_emission_0,
+            emissions[0],
             rule,
             input_0,
         ),
