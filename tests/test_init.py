@@ -54,6 +54,7 @@ def test_public_api_exports_all_expected_names(package):
         "SqrtGaussianSmootherPosterior",
         "TemperedPosterior",
         "__version__",
+        "as_covariance",
         "auxiliary_fk",
         "backward_simulation",
         "bernoulli",

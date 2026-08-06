@@ -87,6 +87,7 @@ from smcx.fk import CallbackNames, FeynmanKac, run_smc
 from smcx.guided import guided_filter
 from smcx.ibis import ibis
 from smcx.kalman import (
+    as_covariance,
     cubature,
     extended_kalman_filter,
     gauss_hermite,
@@ -169,6 +170,7 @@ __all__ = [
     "StaticMutation",
     "TemperedPosterior",
     "__version__",
+    "as_covariance",
     "auxiliary_filter",
     "auxiliary_fk",
     "backward_simulation",

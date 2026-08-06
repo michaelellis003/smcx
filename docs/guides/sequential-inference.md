@@ -114,6 +114,18 @@ consumes them. Use the filter alone for online estimation and
 forecasting. Add the smoother when the record is complete and the
 question is what the states were.
 
+For ill-conditioned models in float32 — strong condition numbers with
+small process noise — the covariance-form pass can reject a run at
+its boundary because roundoff loses positive semidefiniteness. The
+opt-in square-root pair `sqrt_kalman_filter` and `sqrt_rts_smoother`
+carries triangular covariance factors propagated by QR instead, so
+semidefiniteness holds by construction at a 10--20 percent per-step
+cost; `as_covariance` converts the factor-form result back for any
+covariance-form consumer, and the conversion call marks where the
+square-root guarantee ends. The factorization choice (QR rather than
+the SVD form R's dlm package uses) is a recorded decision with
+measurements, in `docs/design/2026-08-06-square-root-form-choice.md`.
+
 Smoothed marginals still describe each time separately; independent draws
 from them do not form coherent state paths. For a linear-Gaussian model,
 `posterior_sample` instead draws the exact joint trajectory posterior by

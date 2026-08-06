@@ -39,6 +39,7 @@ from typing import (
     SupportsIndex,
     TypeAlias,
     cast,
+    overload,
 )
 
 import jax.numpy as jnp
@@ -83,9 +84,13 @@ from smcx.types import (
 if TYPE_CHECKING:
     _CountArgument: TypeAlias = SupportsIndex
     _SqrtPosteriorArgument: TypeAlias = SqrtGaussianFilterPosterior
+    _SqrtRecordArgument: TypeAlias = (
+        SqrtGaussianFilterPosterior | SqrtGaussianSmootherPosterior
+    )
 else:
     _CountArgument: TypeAlias = Any
     _SqrtPosteriorArgument: TypeAlias = Any
+    _SqrtRecordArgument: TypeAlias = Any
 
 
 class _FilterState(NamedTuple):
@@ -4727,4 +4732,80 @@ def sqrt_rts_smoother(
         *filtered_posterior,
         smoothed_means=smoothed_means,
         smoothed_factors=smoothed_factors,
+    )
+
+
+def _factor_gram(
+    factors: Float[Array, "ntime state_dim state_dim"],
+) -> Float[Array, "ntime state_dim state_dim"]:
+    """Reconstruct covariances from triangular factors, exactly symmetric."""
+    return _symmetrize(jnp.einsum("tij,tkj->tik", factors, factors))
+
+
+if TYPE_CHECKING:
+
+    @overload
+    def as_covariance(
+        posterior: SqrtGaussianFilterPosterior,
+    ) -> GaussianFilterPosterior: ...
+
+    @overload
+    def as_covariance(
+        posterior: SqrtGaussianSmootherPosterior,
+    ) -> GaussianSmootherPosterior: ...
+
+
+def as_covariance(
+    posterior: _SqrtRecordArgument,
+) -> GaussianFilterPosterior | GaussianSmootherPosterior:
+    r"""Convert a square-root record to its covariance-form sibling.
+
+    The explicit adapter of ADR-0037: every stored factor ``L``
+    becomes the covariance $L L^\top$ (positive semidefinite by
+    construction), and the result is the ordinary
+    `GaussianFilterPosterior` or `GaussianSmootherPosterior` that
+    every covariance-form consumer — `rts_smoother`,
+    `posterior_sample`, `kalman_forecast`,
+    `smoothed_cross_covariances`, `as_covariance`-free diagnostics —
+    accepts unchanged. The conversion is deliberately explicit rather
+    than implicit: the call marks exactly where the square-root
+    guarantee ends and covariance-form numerics resume. The precedent
+    is R's dlm, whose SVD-form filter returns factors and ships
+    ``dlmSvd2var`` for the same purpose.
+
+    Args:
+        posterior: A `SqrtGaussianFilterPosterior` or
+            `SqrtGaussianSmootherPosterior`.
+
+    Returns:
+        The covariance-form record with identical means and evidence
+        fields and reconstructed covariances.
+
+    Raises:
+        ValueError: The input is not a square-root record.
+    """
+    if isinstance(posterior, SqrtGaussianSmootherPosterior):
+        return GaussianSmootherPosterior(
+            marginal_loglik=posterior.marginal_loglik,
+            predicted_means=posterior.predicted_means,
+            predicted_covariances=_factor_gram(posterior.predicted_factors),
+            filtered_means=posterior.filtered_means,
+            filtered_covariances=_factor_gram(posterior.filtered_factors),
+            log_evidence_increments=posterior.log_evidence_increments,
+            smoothed_means=posterior.smoothed_means,
+            smoothed_covariances=_factor_gram(posterior.smoothed_factors),
+        )
+    if isinstance(posterior, SqrtGaussianFilterPosterior):
+        return GaussianFilterPosterior(
+            marginal_loglik=posterior.marginal_loglik,
+            predicted_means=posterior.predicted_means,
+            predicted_covariances=_factor_gram(posterior.predicted_factors),
+            filtered_means=posterior.filtered_means,
+            filtered_covariances=_factor_gram(posterior.filtered_factors),
+            log_evidence_increments=posterior.log_evidence_increments,
+        )
+    raise ValueError(
+        "as_covariance converts square-root records only "
+        "(SqrtGaussianFilterPosterior or SqrtGaussianSmootherPosterior); "
+        f"got {type(posterior).__name__}"
     )
