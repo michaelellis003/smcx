@@ -1057,3 +1057,29 @@ def test_stage_increments_sum_to_the_marginal():
     assert posterior.log_evidence_increments.shape == (
         posterior.temperatures.shape[0],
     )
+
+
+class TestScheduleCallbackBoundary:
+    """temper owns malformed schedule outputs (2026-08-06, P2-8)."""
+
+    @staticmethod
+    def _run(schedule_fn):
+        return smcx.temper(
+            jr.key(0),
+            lambda key, n: jr.normal(key, (n, 1)),
+            lambda state: -0.5 * jnp.sum(state**2),
+            lambda state: -0.5 * jnp.sum((state - 1.0) ** 2),
+            32,
+            num_mcmc_steps=1,
+            schedule_fn=schedule_fn,
+        )
+
+    @pytest.mark.parametrize(
+        "bad_output",
+        [None, np.array([0.5, 1.0]), "half", True],
+    )
+    def test_malformed_schedule_outputs_raise_the_documented_error(
+        self, bad_output
+    ):
+        with pytest.raises(ValueError, match="schedule_fn"):
+            self._run(lambda phi, log_w, loglik: bad_output)

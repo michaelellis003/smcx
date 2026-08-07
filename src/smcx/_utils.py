@@ -80,8 +80,11 @@ def _filter_scan(step: Any, carry: Any, xs: Any) -> tuple[Any, Any]:
             mps=mps_scan,
             default=full_scan,
         )
+    # A Python-scalar leaf (a valid PyTree carry) has no .devices();
+    # asarray places it on the default device, which is exactly the
+    # platform this dispatch asks about (2026-08-06 review, P2-6).
     if (  # pragma: no cover - exercised by the physical Metal gate
-        next(iter(leaves[0].devices())).platform == "mps"
+        next(iter(jnp.asarray(leaves[0]).devices())).platform == "mps"
     ):
         return mps_scan(carry, xs)
     return full_scan(carry, xs)

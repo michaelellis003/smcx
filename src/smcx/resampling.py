@@ -20,20 +20,38 @@ seeded fixtures retain their draws. Numerical correctness fixes are not a
 promise of cross-version random-stream identity.
 """
 
+from typing import TYPE_CHECKING, Any, SupportsIndex, TypeAlias
+
 import jax
 import jax.numpy as jnp
 from jax.core import Tracer
 from jaxtyping import Array, Float, Int32
 
 from smcx._numerics import _validate_minimum_float_precision
+from smcx._utils import _positive_integer
 from smcx.types import PRNGKeyT
 
 # Avoids a zero denominator in the exponential-spacing construction.
 _TINY = 1e-30
 
+if TYPE_CHECKING:
+    _WeightVector: TypeAlias = Float[Array, " num_particles"]
+    _CountArgument: TypeAlias = SupportsIndex
+else:
+    # Runtime checking must admit malformed values so this module's
+    # validator owns the documented ValueError contract.
+    _WeightVector: TypeAlias = Any
+    _CountArgument: TypeAlias = Any
 
-def _validate_inputs(weights: Array, num_samples: int) -> None:
+
+def _validate_inputs(
+    weights: _WeightVector, num_samples: _CountArgument
+) -> int:
     """Validate the public resampling contract where values are concrete."""
+    if not isinstance(weights, (jax.Array, Tracer)):
+        raise ValueError(
+            f"weights must be a JAX array; got {type(weights).__name__}"
+        )
     if weights.ndim != 1:
         raise ValueError(
             f"weights must have shape (N,); got shape {weights.shape}"
@@ -45,21 +63,21 @@ def _validate_inputs(weights: Array, num_samples: int) -> None:
             f"weights must have a floating dtype; got {weights.dtype}"
         )
     _validate_minimum_float_precision(weights, name="weights")
-    if num_samples < 1:
-        raise ValueError(f"num_samples must be >= 1; got {num_samples}")
+    count = _positive_integer(num_samples, name="num_samples")
     if isinstance(weights, Tracer):
-        return
+        return count
     all_finite = jnp.all(jnp.isfinite(weights))
     # Closed-over JAX arrays remain concrete at function entry but their
     # first value operation is traced under jit/vmap.
     if isinstance(all_finite, Tracer):
-        return
+        return count
     if not bool(all_finite):
         raise ValueError("weights must contain only finite values")
     if bool(jnp.any(weights < 0)):
         raise ValueError("weights must be nonnegative")
     if not bool(jnp.any(weights > 0)):
         raise ValueError("weights must have positive total mass")
+    return count
 
 
 def _below_one(dtype: jnp.dtype) -> Array:
@@ -135,8 +153,8 @@ def _searchsorted_clipped(
 
 def systematic(
     key: PRNGKeyT,
-    weights: Float[Array, " num_particles"],
-    num_samples: int,
+    weights: _WeightVector,
+    num_samples: _CountArgument,
 ) -> Int32[Array, " num_samples"]:
     """Systematic resampling: one shared uniform, evenly spaced grid.
 
@@ -154,7 +172,7 @@ def systematic(
         ValueError: The weights or sample count are invalid. Data-dependent
             weight checks run while their values remain concrete.
     """
-    _validate_inputs(weights, num_samples)
+    num_samples = _validate_inputs(weights, num_samples)
     u0 = jax.random.uniform(key)
     grid = (u0 + jnp.arange(num_samples)) / num_samples
     queries = jnp.minimum(grid, _below_one(weights.dtype))
@@ -163,8 +181,8 @@ def systematic(
 
 def stratified(
     key: PRNGKeyT,
-    weights: Float[Array, " num_particles"],
-    num_samples: int,
+    weights: _WeightVector,
+    num_samples: _CountArgument,
 ) -> Int32[Array, " num_samples"]:
     """Stratified resampling: one uniform per stratum.
 
@@ -182,7 +200,7 @@ def stratified(
         ValueError: The weights or sample count are invalid. Data-dependent
             weight checks run while their values remain concrete.
     """
-    _validate_inputs(weights, num_samples)
+    num_samples = _validate_inputs(weights, num_samples)
     v = jax.random.uniform(key, (num_samples,))
     grid = (jnp.arange(num_samples) + v) / num_samples
     queries = jnp.minimum(grid, _below_one(weights.dtype))
@@ -191,8 +209,8 @@ def stratified(
 
 def multinomial(
     key: PRNGKeyT,
-    weights: Float[Array, " num_particles"],
-    num_samples: int,
+    weights: _WeightVector,
+    num_samples: _CountArgument,
 ) -> Int32[Array, " num_samples"]:
     """Multinomial (iid) resampling via sorted uniforms.
 
@@ -217,7 +235,7 @@ def multinomial(
         ValueError: The weights or sample count are invalid. Data-dependent
             weight checks run while their values remain concrete.
     """
-    _validate_inputs(weights, num_samples)
+    num_samples = _validate_inputs(weights, num_samples)
     e = -jnp.log1p(-jax.random.uniform(key, (num_samples + 1,)))
     # ``maximum.accumulate`` has a pathological jax-mps 0.10.9 lowering.
     # The explicit associative prefix has the same semantics and stays O(N)
@@ -232,8 +250,8 @@ def multinomial(
 
 def residual(
     key: PRNGKeyT,
-    weights: Float[Array, " num_particles"],
-    num_samples: int,
+    weights: _WeightVector,
+    num_samples: _CountArgument,
 ) -> Int32[Array, " num_samples"]:
     """Residual resampling (deterministic floor + multinomial remainder).
 
@@ -261,7 +279,7 @@ def residual(
         resampling schemes for particle filtering.
         https://doi.org/10.1109/ISPA.2005.195385
     """
-    _validate_inputs(weights, num_samples)
+    num_samples = _validate_inputs(weights, num_samples)
     m = num_samples
     scaled_weights = _scale_by_max(weights)
     total = jnp.sum(scaled_weights)

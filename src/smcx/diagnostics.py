@@ -65,6 +65,7 @@ from typing import TYPE_CHECKING, Any, SupportsFloat, TypeAlias, cast
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 from jax import lax, tree, vmap
 from jax.core import Tracer
 from jaxtyping import Array, Bool, Float, Int, Shaped, UInt
@@ -365,6 +366,18 @@ def _validate_particle_result_axes(
                 "particle axes to match posterior.filtered_log_weights "
                 f"{axes}; got {ancestry.shape}"
             )
+        # Out-of-range indices would gather silently and corrupt every
+        # genealogy diagnostic (2026-08-06 review, P2-4).
+        if not isinstance(ancestry, Tracer):
+            concrete = np.asarray(ancestry)
+            if concrete.size and (
+                concrete.min() < 0 or concrete.max() >= axes[1]
+            ):
+                raise ValueError(
+                    f"{diagnostic} requires posterior.ancestors values "
+                    f"in [0, {axes[1]}); got range "
+                    f"[{concrete.min()}, {concrete.max()}]"
+                )
     if ess:
         ess_steps = _validate_float_trace(
             posterior.ess, "posterior.ess", diagnostic

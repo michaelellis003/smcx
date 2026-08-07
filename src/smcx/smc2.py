@@ -494,6 +494,16 @@ def smc2(
         inc_value = inc.resolve()
         marginal_loglik = _add_log_expansion(marginal_loglik, inc)
         log_z = _add_log_expansion(log_z, log_ell)
+        # Two finite increments can still overflow the running total;
+        # the checked-evidence contract covers the cumulative value
+        # too (2026-08-06 review, P2-5).
+        cumulative = float(marginal_loglik.resolve())
+        if not math.isfinite(cumulative):
+            raise DegenerateWeightsError(
+                f"the cumulative evidence overflows at step {t} "
+                f"(running marginal log likelihood {cumulative} from "
+                f"finite increments)"
+            )
 
         rate = jnp.zeros(())
         if threshold > 0.0 and float(compute_ess(log_omega)) < threshold:
