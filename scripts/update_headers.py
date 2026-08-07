@@ -66,11 +66,15 @@ for basename, comment in file_types:
             lines.insert(lineno, copyright_line)
             changed = True
         lineno += 1
-        while lines[lineno].startswith(comment.format("Copyright")):
+        # A file may end inside the copyright block (for example a
+        # single copyright line with no SPDX identifier yet).
+        while lineno < len(lines) and lines[lineno].startswith(
+            comment.format("Copyright")
+        ):
             lineno += 1
 
         # Ensure next line is an SPDX short identifier.
-        if not lines[lineno].startswith(
+        if lineno >= len(lines) or not lines[lineno].startswith(
             comment.format("SPDX-License-Identifier")
         ):
             lines.insert(lineno, spdx_line)
