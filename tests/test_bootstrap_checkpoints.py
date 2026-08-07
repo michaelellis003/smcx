@@ -78,8 +78,12 @@ def test_one_shot_equals_init_then_repeated_step():
         records.append(_record(checkpoint, info))
     actual = jax.tree.map(lambda *xs: jnp.stack(xs), *records)
     jax.tree.map(np.testing.assert_array_equal, actual, expected[1:])
+    # The checkpoint keeps the Neumaier pair unresolved; the one-shot
+    # marginal is the resolved sum, so compare the same quantity.
     np.testing.assert_array_equal(
-        checkpoint.state.log_marginal_likelihood, expected.marginal_loglik
+        checkpoint.state.log_marginal_likelihood
+        + checkpoint.log_evidence_compensation,
+        expected.marginal_loglik,
     )
     _, forced = _advance(jr.key(8), _checkpoint(), resampling_threshold=1.0)
     assert forced.resampled

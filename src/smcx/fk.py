@@ -57,8 +57,8 @@ from smcx.types import (
     ResamplingFn,
     StateTree,
 )
+from smcx.weights import _center_log_batch, log_normalize
 from smcx.weights import ess as compute_ess
-from smcx.weights import log_normalize
 
 
 class CallbackNames(NamedTuple):
@@ -149,16 +149,25 @@ def _fk_step(
     resample_key, mutation_key = jr.split(step_key)
     log_eta_fn = fk.log_eta
     if log_eta_fn is None:
+        centered_aux = None
         decision_weights = state.log_weights
         decision_ess = current_ess
-        log_aux = None
         log_first_sum = None
     else:
         log_aux = vmap(lambda z: log_eta_fn(z, context_t))(state.particles)
         _validate_log_density_batch(
             log_aux, num_particles, name=fk.names.log_eta
         )
-        log_first_stage = state.log_weights + log_aux
+        # Center the twist before it meets the carried normalized
+        # weights (2026-08-06 review, P1): a large common offset would
+        # otherwise absorb their relative information. The twist's
+        # constant cancels from the two-stage evidence identity, so
+        # the centered first-stage normalizer is used directly below.
+        # Resolving the promotion first keeps a weakly-typed callback
+        # output from strengthening through the centering reduction.
+        log_aux = log_aux.astype(jnp.result_type(state.log_weights, log_aux))
+        centered_aux, _ = _center_log_batch(log_aux)
+        log_first_stage = state.log_weights + centered_aux
         decision_weights, log_first_sum = log_normalize(log_first_stage)
         decision_ess = jnp.asarray(compute_ess(decision_weights))
     do_resample, ancestors, invalid_resampling = _conditional_resample(
@@ -190,13 +199,26 @@ def _fk_step(
         log_g = fk.log_g_batch(parents, propagated, context_t)
 
     log_n = jnp.asarray(math.log(num_particles))
-    resampled_weights = log_g if log_aux is None else log_g - log_aux[ancestors]
+    # The potential is centered like the twist above; its shift rejoins
+    # the stage normalizer, so the increment algebra is unchanged while
+    # the weight combination becomes exact under a constant offset.
+    log_g_array = jnp.asarray(log_g)
+    log_g_array = log_g_array.astype(
+        jnp.result_type(state.log_weights, log_g_array)
+    )
+    centered_g, log_g_shift = _center_log_batch(log_g_array)
+    resampled_weights = (
+        centered_g
+        if centered_aux is None
+        else centered_g - centered_aux[ancestors]
+    )
     log_w_unnorm = jnp.where(
         do_resample,
         resampled_weights,
-        state.log_weights + log_g,
+        state.log_weights + centered_g,
     )
-    log_w_norm, log_sum = log_normalize(log_w_unnorm)
+    log_w_norm, centered_sum = log_normalize(log_w_unnorm)
+    log_sum = centered_sum + jnp.squeeze(log_g_shift, axis=-1)
     if log_first_sum is None:
         log_ev_inc = jnp.where(do_resample, log_sum - log_n, log_sum)
         normalizers_finite = jnp.isfinite(log_sum)

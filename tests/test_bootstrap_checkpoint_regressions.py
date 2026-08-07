@@ -36,7 +36,11 @@ def _assert_tree_equal(actual, expected):
     reason="frozen CPU/x64 arithmetic contract",
 )
 def test_bootstrap_filter_preserves_frozen_fixed_key_output():
-    """Checkpoint additions must not change the legacy one-shot output."""
+    """Checkpoint additions must not change the legacy one-shot output.
+
+    Re-frozen 2026-08-06 for the deliberate potential-centering fix;
+    the values moved at unit-in-the-last-place level only.
+    """
     posterior = smcx.bootstrap_filter(
         jr.key(314159),
         _initial,
@@ -46,20 +50,20 @@ def test_bootstrap_filter_preserves_frozen_fixed_key_output():
         2,
     )
     expected = smcx.ParticleFilterPosterior(
-        marginal_loglik=jnp.array(-0.3544712190193707),
+        marginal_loglik=jnp.array(-0.3544712190193706),
         filtered_particles=jnp.array([
             [[0.2972758051680527], [-0.9316924856656459]],
             [[-0.26226881164133187], [-1.0838353146267612]],
         ]),
         filtered_log_weights=jnp.array([
             [-0.4250064795171949, -1.0606391294376925],
-            [-0.35289219279946654, -1.2128552713619596],
+            [-0.35289219279946665, -1.2128552713619594],
         ]),
         ancestors=jnp.array([[0, 1], [0, 1]], dtype=jnp.int32),
-        ess=jnp.array([1.8271925747186781, 1.7178103810647194]),
+        ess=jnp.array([1.8271925747186781, 1.7178103810647196]),
         log_evidence_increments=jnp.array([
             -0.2728719921782969,
-            -0.08159922684107379,
+            -0.08159922684107371,
         ]),
     )
     _assert_tree_equal(posterior, expected)

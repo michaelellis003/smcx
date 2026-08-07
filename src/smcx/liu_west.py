@@ -94,8 +94,8 @@ from smcx.types import (
     ResamplingCriterion,
     ResamplingFn,
 )
+from smcx.weights import _center_log_batch, log_normalize, normalize
 from smcx.weights import ess as compute_ess
-from smcx.weights import log_normalize, normalize
 
 if TYPE_CHECKING:
     _CountArgument: TypeAlias = SupportsIndex
@@ -441,7 +441,7 @@ def _liu_west_step(
         ancestors = identity
         invalid_resampling = jnp.asarray(False)
         new_params = params
-        log_aux = jnp.zeros_like(log_weights)
+        centered_aux = jnp.zeros_like(log_weights)
         log_first_sum = jnp.zeros(())
     else:
         weights = normalize(log_weights)
@@ -453,7 +453,18 @@ def _liu_west_step(
         _validate_log_density_batch(
             log_aux, num_particles, name="log_auxiliary_fn"
         )
-        log_first_norm, log_first_sum = log_normalize(log_weights + log_aux)
+        # Center the auxiliary twist before it meets the carried
+        # normalized weights (2026-08-06 review, P1): a large common
+        # offset would otherwise absorb their relative information.
+        # The twist's constant cancels from the two-stage evidence
+        # identity, so the centered normalizer is used directly.
+        # Resolving the promotion first keeps a weakly-typed callback
+        # output from strengthening through the centering reduction.
+        log_aux = log_aux.astype(jnp.result_type(log_weights, log_aux))
+        centered_aux, _ = _center_log_batch(log_aux)
+        log_first_norm, log_first_sum = log_normalize(
+            log_weights + centered_aux
+        )
         first_ess = jnp.asarray(compute_ess(log_first_norm))
         do_resample, ancestors, invalid_resampling = _conditional_resample(
             resample_key,
@@ -525,12 +536,18 @@ def _liu_west_step(
     _validate_log_density_batch(
         log_obs, num_particles, name="log_observation_fn"
     )
+    # The potential is centered like the twist above; its shift rejoins
+    # the stage normalizer, so the increment algebra is unchanged while
+    # the weight combination becomes exact under a constant offset.
+    log_obs = log_obs.astype(jnp.result_type(log_weights, log_obs))
+    centered_obs, log_obs_shift = _center_log_batch(log_obs)
     log_w_unnorm = jnp.where(
         do_resample,
-        log_obs - log_aux[ancestors],
-        log_weights + log_obs,
+        centered_obs - centered_aux[ancestors],
+        log_weights + centered_obs,
     )
-    log_w_norm, log_sum = log_normalize(log_w_unnorm)
+    log_w_norm, centered_sum = log_normalize(log_w_unnorm)
+    log_sum = centered_sum + jnp.squeeze(log_obs_shift, axis=-1)
     log_ev_inc = jnp.where(
         do_resample,
         log_first_sum + log_sum - log_num_particles,

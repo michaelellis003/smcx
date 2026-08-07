@@ -24,8 +24,8 @@ from smcx.types import (
     ResamplingCriterion,
     ResamplingFn,
 )
+from smcx.weights import _center_log_batch, log_normalize
 from smcx.weights import ess as compute_ess
-from smcx.weights import log_normalize
 
 
 class _StaticSMCState(NamedTuple):
@@ -75,7 +75,18 @@ def _static_smc_correction(
     log_evidence_correction: Float[Array, ""],
 ) -> _StaticSMCCorrection:
     """Correct normalized weights and update compensated evidence."""
-    corrected, increment = log_normalize(log_weights + log_increment)
+    # Center the increment before it meets the carried normalized
+    # weights (2026-08-06 review, P1): a large common offset would
+    # otherwise absorb their relative information. The scalar shift
+    # rejoins the stage normalizer. Resolving the promotion first
+    # keeps a weakly-typed increment from strengthening through the
+    # centering reduction.
+    log_increment = log_increment.astype(
+        jnp.result_type(log_weights, log_increment)
+    )
+    centered, shift = _center_log_batch(log_increment)
+    corrected, centered_sum = log_normalize(log_weights + centered)
+    increment = centered_sum + jnp.squeeze(shift, axis=-1)
     log_evidence, log_evidence_correction = _neumaier_add(
         log_evidence,
         log_evidence_correction,
