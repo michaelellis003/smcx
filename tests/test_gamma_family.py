@@ -170,7 +170,8 @@ def test_forecast_sample_mixture_mean():
     mixture_mean = np.exp(predictor_mean + predictor_var / 2.0)
     draws = np.asarray(paths.emission_paths, dtype=np.float64)[:, 0]
     se = draws.std(ddof=1) / np.sqrt(draws.shape[0])
-    assert abs(draws.mean() - mixture_mean) < 8.0 * se
+    assert se < 0.2 * mixture_mean  # non-vacuity ceiling (D6/D7)
+    assert abs(draws.mean() - mixture_mean) < 5.0 * se
 
 
 def test_emission_validation_rejects_nonpositive_values():

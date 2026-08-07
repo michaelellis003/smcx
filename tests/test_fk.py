@@ -67,7 +67,13 @@ def _every_second(log_weights, current_ess, time_index):
     reason="frozen CPU/x64 arithmetic contract",
 )
 class TestFixedKeyCharacterization:
-    """The FK rewiring reproduces v1.16.0 outputs bitwise on CPU/x64."""
+    """The FK rewiring reproduces v1.16.0 outputs bitwise on CPU/x64.
+
+    Paired oracles (D6): tests/test_bootstrap.py::TestBootstrapVsKalman
+    ::test_evidence_and_filtering_moments and
+    ::test_controlled_lgssm_matches_kalman_oracle cover the same
+    bootstrap path against the exact Kalman filter.
+    """
 
     def test_plain_filter_matches_pre_rewiring_values(self):
         initial, transition, log_obs = _scalar_model()
@@ -251,7 +257,14 @@ def _guided_model():
     reason="frozen CPU/x64 arithmetic contract",
 )
 class TestTwistAndCompositeCharacterization:
-    """Auxiliary and guided reproduce v1.16.0 outputs bitwise on CPU/x64."""
+    """Auxiliary and guided reproduce v1.16.0 outputs bitwise on CPU/x64.
+
+    Paired oracles (D6): tests/test_auxiliary.py::TestAuxiliaryVsKalman
+    ::test_evidence_and_filtering_moments for the twist path, and
+    tests/test_guided.py::TestGuidedReducesToBootstrap plus
+    ::TestGuidedProposalReferences::test_general_proposals_match_exact_target
+    for the composite-potential path.
+    """
 
     def test_auxiliary_matches_pre_rewiring_values(self):
         initial, transition, log_obs, log_aux = _aux_model()

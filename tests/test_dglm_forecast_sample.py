@@ -76,13 +76,15 @@ def test_state_marginals_match_the_closed_form_within_se():
         mean = np.asarray(CLOSED.state_means[k], dtype=np.float64)
         cov = np.asarray(CLOSED.state_covariances[k], dtype=np.float64)
         se_mean = np.sqrt(np.diag(cov) / NUM_DRAWS)
+        assert np.all(se_mean < 0.2 * np.sqrt(np.diag(cov)))  # non-vacuity
         np.testing.assert_array_less(
-            np.abs(states[:, k].mean(axis=0) - mean), 6.0 * se_mean
+            np.abs(states[:, k].mean(axis=0) - mean), 5.0 * se_mean
         )
         se_var = np.diag(cov) * np.sqrt(2.0 / NUM_DRAWS)
+        assert np.all(se_var < 0.2 * np.diag(cov))  # non-vacuity ceiling
         np.testing.assert_array_less(
             np.abs(states[:, k].var(axis=0, ddof=1) - np.diag(cov)),
-            6.0 * se_var,
+            5.0 * se_var,
         )
 
 
@@ -97,7 +99,8 @@ def test_poisson_emission_means_match_the_lognormal_mixture():
             2.0 * predictor_mean + predictor_var
         )
         se = np.sqrt(mixture_var / NUM_DRAWS)
-        assert abs(emissions[:, k].mean() - mixture_mean) < 6.0 * se
+        assert se < 0.2 * mixture_mean  # non-vacuity ceiling
+        assert abs(emissions[:, k].mean() - mixture_mean) < 5.0 * se
 
 
 def test_dispersion_discount_inflates_the_predictor_variance():
@@ -142,7 +145,8 @@ def test_dispersion_discount_inflates_the_predictor_variance():
             2.0 * predictor_mean + predictor_var
         )
         se = np.sqrt(mixture_var / NUM_DRAWS)
-        assert abs(emissions[:, k].mean() - mixture_mean) < 6.0 * se
+        assert se < 0.2 * mixture_mean  # non-vacuity ceiling
+        assert abs(emissions[:, k].mean() - mixture_mean) < 5.0 * se
 
 
 def test_discount_path_state_marginals_match_the_closed_form():
@@ -168,8 +172,9 @@ def test_discount_path_state_marginals_match_the_closed_form():
         mean = np.asarray(closed.state_means[k], dtype=np.float64)
         cov = np.asarray(closed.state_covariances[k], dtype=np.float64)
         se_mean = np.sqrt(np.diag(cov) / NUM_DRAWS)
+        assert np.all(se_mean < 0.2 * np.sqrt(np.diag(cov)))  # non-vacuity
         np.testing.assert_array_less(
-            np.abs(states[:, k].mean(axis=0) - mean), 6.0 * se_mean
+            np.abs(states[:, k].mean(axis=0) - mean), 5.0 * se_mean
         )
 
 

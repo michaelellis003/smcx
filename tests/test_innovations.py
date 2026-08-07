@@ -116,10 +116,14 @@ def test_standardized_innovations_are_iid_standard_normal():
     result = smcx.innovations(posterior, MODEL, observations)
     values = np.asarray(result.standardized, dtype=np.float64).reshape(-1)
     count = values.shape[0]
-    assert abs(values.mean()) < 6.0 / np.sqrt(count)
-    assert abs(values.var(ddof=1) - 1.0) < 6.0 * np.sqrt(2.0 / count)
+    # Five derived standard errors with a non-vacuity ceiling (D6/D7):
+    # mean SE 1/sqrt(n), Gaussian variance SE sqrt(2/n), lag-one
+    # autocorrelation SE 1/sqrt(n).
+    assert 1.0 / np.sqrt(count) < 0.05  # non-vacuity ceiling
+    assert abs(values.mean()) < 5.0 / np.sqrt(count)
+    assert abs(values.var(ddof=1) - 1.0) < 5.0 * np.sqrt(2.0 / count)
     lag_one = np.corrcoef(values[:-1], values[1:])[0, 1]
-    assert abs(lag_one) < 6.0 / np.sqrt(count)
+    assert abs(lag_one) < 5.0 / np.sqrt(count)
 
 
 def test_masked_components_are_nan_and_observed_ones_standard():

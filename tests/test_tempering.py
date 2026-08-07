@@ -515,6 +515,9 @@ class TestEvidence:
             POST_VAR + POST_MEAN**2,
         ))
         estimator_se = values.std(axis=0, ddof=1) / math.sqrt(values.shape[0])
+        # Non-vacuity ceiling (D7): a high-variance fixture must not
+        # widen the gate into meaninglessness.
+        assert np.all(estimator_se < 0.2 * np.maximum(np.abs(expected), 0.25))
         # 2e-5 is the explicit f32/Metal arithmetic budget.
         np.testing.assert_array_less(
             np.abs(values.mean(axis=0) - expected),
@@ -807,6 +810,11 @@ class TestMechanics:
         reason="frozen CPU/f64 arithmetic contract",
     )
     def test_rwm_sweep_preserves_frozen_fixed_key_output(self):
+        # Paired oracles (D6): TestEvidence
+        # ::test_evidence_and_posterior_moments_r12 gates the same
+        # path against the closed-form Gaussian evidence, and
+        # test_stage_increments_sum_to_the_marginal pins the
+        # evidence identity.
         init, log_prior, log_lik = _small_tempering_model()
         posterior = smcx.temper(
             jr.key(314159),

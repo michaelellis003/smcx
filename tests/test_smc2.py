@@ -644,6 +644,10 @@ class TestFixedKeyRegression:
         reason="frozen CPU/x64 arithmetic contract",
     )
     def test_preserves_frozen_fixed_key_output(self):
+        # Paired oracle (D6): TestEvidenceOracle
+        # ::test_marginal_is_unbiased_for_the_quadrature_reference
+        # gates the same path against an exact quadrature-over-theta
+        # Kalman marginal.
         (
             param_init,
             log_prior,
@@ -984,3 +988,75 @@ def test_cumulative_evidence_overflow_raises_loudly():
             num_theta=4,
             num_x=8,
         )
+
+
+class TestEvidenceOracle:
+    """SMC2 evidence against an exact quadrature reference (D6)."""
+
+    def test_marginal_is_unbiased_for_the_quadrature_reference(self):
+        """Replicated evidence ratios center on one within five SE.
+
+        For the linear-Gaussian inner model the exact marginal is the
+        integral over theta of the Kalman marginal against the uniform
+        theta-sampling law, computed here by dense trapezoidal
+        quadrature. The likelihood estimator is unbiased, so the
+        ratios exp(logZ_hat - logZ_exact) have unit mean; the gate is
+        five of the replicated ratios' standard errors with a
+        non-vacuity ceiling (D6/D7).
+        """
+        (
+            param_init,
+            log_prior,
+            inner_init,
+            inner_trans,
+            inner_logobs,
+            emissions,
+        ) = _small_model()
+        del param_init, log_prior
+
+        thetas = np.linspace(0.7, 0.9, 201)
+        log_marginals = []
+        for theta in thetas:
+            posterior = smcx.kalman_filter(
+                jnp.asarray([theta]),
+                jnp.asarray([[0.09]]),
+                jnp.asarray([[theta]]),
+                jnp.asarray([[0.04]]),
+                jnp.asarray([[1.0]]),
+                jnp.asarray([[0.4]]),
+                emissions,
+            )
+            log_marginals.append(float(posterior.marginal_loglik))
+        log_marginal_array = np.asarray(log_marginals)
+        # Trapezoid weights against the uniform(0.7, 0.9) density.
+        weights = np.full(thetas.size, 1.0 / (thetas.size - 1))
+        weights[0] *= 0.5
+        weights[-1] *= 0.5
+        peak = float(np.max(log_marginal_array))
+        log_z_exact = peak + np.log(
+            np.sum(weights * np.exp(log_marginal_array - peak))
+        )
+
+        ratios = []
+        for seed in range(16):
+            run = smcx.smc2(
+                jr.key(seed),
+                lambda key, n: (
+                    0.7 + 0.2 * jr.uniform(key, (n, 1), dtype=jnp.float64)
+                ),
+                lambda theta: jnp.zeros(()),
+                inner_init,
+                inner_trans,
+                inner_logobs,
+                emissions,
+                num_theta=64,
+                num_x=128,
+                store_history=False,
+            )
+            ratios.append(
+                float(np.exp(float(run.marginal_loglik) - log_z_exact))
+            )
+        ratios = np.asarray(ratios)
+        se = ratios.std(ddof=1) / np.sqrt(ratios.size)
+        assert se < 0.2  # non-vacuity ceiling
+        assert abs(ratios.mean() - 1.0) < 5.0 * se

@@ -371,6 +371,7 @@ class TestLiuWestCovarianceKernel:
         # For Gaussian noise, SE(sample second moment) =
         # sqrt(2 / N) * variance. Five SE is the stochastic-test gate.
         estimator_se = np.sqrt(2.0 / cloud.shape[0]) * expected
+        assert np.all(estimator_se < 0.2 * expected)  # non-vacuity (D7)
         np.testing.assert_array_less(
             np.abs(second_moment - expected),
             5 * estimator_se,
@@ -454,7 +455,10 @@ class TestLiuWestConjugateReference:
         emissions = jnp.asarray(CONJUGATE_OBSERVATIONS)[:, None]
         rows = []
         # Each row is an independent full filter. Thus the estimator SE of
-        # the across-run mean is sample_sd / sqrt(R), with R=12.
+        # the across-run mean is sample_sd / sqrt(R), with R=12. The
+        # particle count satisfies the D7 non-vacuity ceiling below:
+        # at 5000 particles the evidence-ratio SE was 0.23, wide
+        # enough for a zero ratio to pass the five-SE gate.
         for seed in range(12):
             post = liu_west_filter(
                 key=jr.key(seed),
@@ -464,7 +468,7 @@ class TestLiuWestConjugateReference:
                 log_auxiliary_fn=aux_fn,
                 param_initial_sampler=param_init_fn,
                 emissions=emissions,
-                num_particles=5_000,
+                num_particles=20_000,
                 shrinkage=0.95,
             )
             weights = np.exp(
@@ -484,6 +488,9 @@ class TestLiuWestConjugateReference:
             CONJUGATE_EXACT_VARIANCE + CONJUGATE_EXACT_MEAN**2,
         ])
         estimator_se = values.std(axis=0, ddof=1) / math.sqrt(values.shape[0])
+        # Non-vacuity ceiling (D7): a high-variance fixture must not
+        # widen the gate into meaninglessness.
+        assert np.all(estimator_se < 0.2 * np.maximum(np.abs(expected), 0.25))
         # 2e-5 is the explicit f32/Metal arithmetic budget.
         np.testing.assert_array_less(
             np.abs(values.mean(axis=0) - expected),
