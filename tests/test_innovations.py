@@ -377,3 +377,149 @@ def test_gaussian_boundary_matrix():
             Y,
             observation_input_matrix=jnp.asarray([[0.2], [-0.3]]),
         )
+
+
+class TestDLMInnovationsReviewGaps:
+    """Boundary gaps from the 2026-08-06 pre-release review (P1-7, P2-1)."""
+
+    G = jnp.asarray([[1.0, 1.0], [0.0, 1.0]])
+    F = jnp.asarray([1.0, 0.0])
+    W = jnp.asarray([[0.05, 0.01], [0.01, 0.1]])
+    M0 = jnp.asarray([0.2, -0.1])
+    C0 = jnp.asarray([[1.0, 0.1], [0.1, 0.5]])
+    Y1 = jnp.asarray([0.4, 0.9, 1.1, 1.6, 2.2])
+
+    def test_large_prior_scale_keeps_the_identity(self):
+        """The scale as a product of square roots survives 2e38.
+
+        Forming the product before the root overflowed float32 and
+        broke the evidence identity.
+        """
+        from scipy import stats
+
+        m0, c0, g, f, y = (
+            jnp.asarray(value, dtype=jnp.float32)
+            for value in (self.M0, self.C0, self.G, self.F, self.Y1)
+        )
+        kwargs = {
+            "scale_free_transition_covariance": jnp.asarray(
+                self.W, dtype=jnp.float32
+            ),
+            "prior_shape": 5.0,
+            "prior_scale": 2e38,
+        }
+        posterior = smcx.dlm_filter(m0, c0, g, f, y, **kwargs)
+        assert np.isfinite(float(posterior.marginal_loglik))
+        result = smcx.dlm_innovations(posterior, m0, c0, g, f, y, **kwargs)
+        scales = np.asarray(result.scales, dtype=np.float64)
+        assert np.all(np.isfinite(scales))
+        rebuilt = stats.t.logpdf(
+            np.asarray(result.standardized, dtype=np.float64),
+            df=np.asarray(result.dofs, dtype=np.float64),
+        ) - np.log(scales)
+        np.testing.assert_allclose(
+            rebuilt,
+            np.asarray(posterior.log_evidence_increments, dtype=np.float64),
+            rtol=1e-4,
+        )
+
+    def test_timed_observation_vectors_replay(self):
+        """A run filtered with a timed F history replays exactly."""
+        from scipy import stats
+
+        timed_f = jnp.asarray([
+            [1.0, 0.0],
+            [1.0, 0.5],
+            [0.5, 1.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ])
+        posterior = smcx.dlm_filter(
+            self.M0,
+            self.C0,
+            self.G,
+            timed_f,
+            self.Y1,
+            scale_free_transition_covariance=self.W,
+            prior_shape=5.0,
+        )
+        result = smcx.dlm_innovations(
+            posterior,
+            self.M0,
+            self.C0,
+            self.G,
+            timed_f,
+            self.Y1,
+            scale_free_transition_covariance=self.W,
+            prior_shape=5.0,
+        )
+        rebuilt = stats.t.logpdf(
+            np.asarray(result.standardized, dtype=np.float64),
+            df=np.asarray(result.dofs, dtype=np.float64),
+        ) - np.log(np.asarray(result.scales, dtype=np.float64))
+        rtol = 1e-9 if result.standardized.dtype == jnp.float64 else 1e-4
+        np.testing.assert_allclose(
+            rebuilt,
+            np.asarray(posterior.log_evidence_increments),
+            rtol=rtol,
+        )
+
+    def test_bad_observation_vector_shape_is_rejected(self):
+        posterior = smcx.dlm_filter(
+            self.M0,
+            self.C0,
+            self.G,
+            self.F,
+            self.Y1,
+            scale_free_transition_covariance=self.W,
+        )
+        with pytest.raises(ValueError, match="observation_vector"):
+            smcx.dlm_innovations(
+                posterior,
+                self.M0,
+                self.C0,
+                self.G,
+                jnp.ones((3, 2)),
+                self.Y1,
+                scale_free_transition_covariance=self.W,
+            )
+
+    def test_infinite_emissions_are_rejected(self):
+        posterior = smcx.dlm_filter(
+            self.M0,
+            self.C0,
+            self.G,
+            self.F,
+            self.Y1,
+            scale_free_transition_covariance=self.W,
+        )
+        with pytest.raises(ValueError, match="finite"):
+            smcx.dlm_innovations(
+                posterior,
+                self.M0,
+                self.C0,
+                self.G,
+                self.F,
+                self.Y1.at[1].set(jnp.inf),
+                scale_free_transition_covariance=self.W,
+            )
+
+    def test_initial_covariance_domain_is_checked(self):
+        posterior = smcx.dlm_filter(
+            self.M0,
+            self.C0,
+            self.G,
+            self.F,
+            self.Y1,
+            scale_free_transition_covariance=self.W,
+        )
+        with pytest.raises(ValueError, match="initial_scale_free_covariance"):
+            smcx.dlm_innovations(
+                posterior,
+                self.M0,
+                -self.C0,
+                self.G,
+                self.F,
+                self.Y1,
+                scale_free_transition_covariance=self.W,
+            )
