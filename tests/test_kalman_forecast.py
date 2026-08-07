@@ -5,6 +5,7 @@
 
 import jax
 import jax.numpy as jnp
+import jax.random as jr
 import numpy as np
 import pytest
 
@@ -216,4 +217,24 @@ def test_future_inputs_length_must_match_num_steps():
             transition_input_matrix=G_TRANS,
             observation_input_matrix=G_OBS,
             future_inputs=jnp.asarray([[0.5], [-1.0]]),
+        )
+
+
+def test_time_varying_record_is_rejected_with_the_future_operator_hint():
+    """A timed record cannot supply future operators (P2-2)."""
+    num_timesteps = 4
+    model = smcx.LinearGaussianModel(
+        initial_mean=jnp.zeros(1),
+        initial_covariance=jnp.eye(1),
+        transition_matrix=jnp.eye(1),
+        transition_covariance=0.1 * jnp.eye(1),
+        observation_matrix=jnp.ones((num_timesteps, 1, 1)),
+        observation_covariance=jnp.eye(1),
+    )
+    posterior = smcx.kalman_filter(model, jnp.zeros((num_timesteps, 1)))
+    with pytest.raises(ValueError, match="time-varying"):
+        smcx.kalman_forecast(posterior, model, num_steps=2)
+    with pytest.raises(ValueError, match="time-varying"):
+        smcx.kalman_forecast_sample(
+            jr.key(0), posterior, model, num_steps=2, num_draws=3
         )

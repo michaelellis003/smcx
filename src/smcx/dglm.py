@@ -1139,9 +1139,11 @@ def dglm_forecast(
 
     Raises:
         ValueError: The posterior or a model piece has an invalid
-            shape, dtype, count, or domain, or the evolution
+            shape, dtype, count, or domain, the evolution
             specification is not exactly one of covariance and
-            discount.
+            discount, or the linear predictor has nonpositive
+            forecast variance at some horizon (the conjugate moment
+            match divides by it).
 
     Note:
         No data enter a forecast: the conjugate pairs are matched
@@ -1260,6 +1262,20 @@ def dglm_forecast(
         alphas,
         betas,
     ) = outputs
+    if not isinstance(predictor_variances, core.Tracer):
+        concrete_variances = np.asarray(predictor_variances)
+        if not np.all(concrete_variances > 0.0):
+            # The filter names this domain at its own boundary; the
+            # forecast used to return NaN conjugate parameters instead
+            # (2026-08-06 review, P2-3).
+            raise ValueError(
+                "the linear predictor has nonpositive forecast "
+                "variance at some horizon (observation_vector @ "
+                "state_covariance @ observation_vector <= 0); the "
+                "conjugate moment match divides by this variance. "
+                "Give the predictor direction positive covariance "
+                "through the frontier or the evolution noise"
+            )
     return DGLMForecast(
         state_means=state_means,
         state_covariances=state_covariances,
