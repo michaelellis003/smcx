@@ -1027,14 +1027,14 @@ class TestEvidenceOracle:
                 emissions,
             )
             log_marginals.append(float(posterior.marginal_loglik))
-        log_marginals = np.asarray(log_marginals)
+        log_marginal_array = np.asarray(log_marginals)
         # Trapezoid weights against the uniform(0.7, 0.9) density.
         weights = np.full(thetas.size, 1.0 / (thetas.size - 1))
         weights[0] *= 0.5
         weights[-1] *= 0.5
-        peak = log_marginals.max()
+        peak = float(np.max(log_marginal_array))
         log_z_exact = peak + np.log(
-            np.sum(weights * np.exp(log_marginals - peak))
+            np.sum(weights * np.exp(log_marginal_array - peak))
         )
 
         ratios = []
