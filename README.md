@@ -9,6 +9,15 @@ language.
 Models defined elsewhere can be used when the caller maps their
 components to these callables or records.
 
+> [!NOTE]
+> **AI-assisted development.** smcx is developed with substantial assistance
+> from generative-AI tools, including planning, implementation, test
+> development, documentation, and review. The maintainer makes design and
+> release decisions and remains responsible for the project, but not every
+> line has been manually inspected by a human. Automated tests and numerical
+> cross-checks provide evidence, not a guarantee of correctness; independently
+> validate results important to your work.
+
 An introduction to the Kalman and SMC methods is developed in
 [the documentation](https://michaelellis003.github.io/smcx/guides/sequential-inference/).
 Below is a quick start and a map of the methods.
