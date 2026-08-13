@@ -1,5 +1,3 @@
-# smcx
-
 > [!NOTE]
 > **AI-assisted development.** smcx is developed with substantial assistance
 > from generative-AI tools, including planning, implementation, test
@@ -9,6 +7,8 @@
 > cross-checks provide evidence, not a guarantee of correctness; independently
 > validate results important to your work.
 
+
+# smcx
 
 Sequential inference for state-space models in JAX: Kalman-family
 and DLM/DGLM filters, smoothers, and SMC methods including particle
