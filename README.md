@@ -1,5 +1,15 @@
 # smcx
 
+> [!NOTE]
+> **AI-assisted development.** smcx is developed with substantial assistance
+> from generative-AI tools, including planning, implementation, test
+> development, documentation, and review. The maintainer makes design and
+> release decisions and remains responsible for the project, but not every
+> line has been manually inspected by a human. Automated tests and numerical
+> cross-checks provide evidence, not a guarantee of correctness; independently
+> validate results important to your work.
+
+
 Sequential inference for state-space models in JAX: Kalman-family
 and DLM/DGLM filters, smoothers, and SMC methods including particle
 filtering and smoothing, tempered SMC, IBIS, and SMC². Algorithms consume
@@ -16,16 +26,6 @@ Below is a quick start and a map of the methods.
 ```bash
 pip install smcx
 ```
-
-> [!NOTE]
-> **AI-assisted development.** smcx is developed with substantial assistance
-> from generative-AI tools, including planning, implementation, test
-> development, documentation, and review. The maintainer makes design and
-> release decisions and remains responsible for the project, but not every
-> line has been manually inspected by a human. Automated tests and numerical
-> cross-checks provide evidence, not a guarantee of correctness; independently
-> validate results important to your work.
-
 
 ## Quick start
 
