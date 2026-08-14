@@ -74,7 +74,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.1",
-    "ty>=0.0.65",
+    "ty>=0.0.69",
     "diff-cover>=10.4.2",
     "pytest-xdist>=3.8.0",
 ]
